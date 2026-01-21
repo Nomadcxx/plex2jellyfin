@@ -70,6 +70,60 @@ func (m *Matcher) Parse(ctx context.Context, filename string) (*Result, error) {
 	return m.parseWithModel(ctx, filename, m.config.Model)
 }
 
+// ParseWithRetry sends a filename to Ollama with one retry attempt on malformed JSON responses.
+// Uses nudge prompt to guide the AI to correct JSON formatting on retry.
+func (m *Matcher) ParseWithRetry(ctx context.Context, filename string) (*Result, error) {
+	result, err := m.parseWithModel(ctx, filename, m.config.Model)
+	if err == nil {
+		return result, nil
+	}
+
+	if !isJSONError(err) {
+		return nil, err
+	}
+
+	partialResult, extracted := ExtractPartialResult(err.Error())
+	if extracted {
+		if os.Getenv("DEBUG_AI") == "1" {
+			fmt.Printf("[AI] Recovered partial result from malformed JSON\n")
+		}
+		return partialResult, nil
+	}
+
+	nudgePrompt := GetNudgePrompt()
+	retryResult, retryErr := m.parseWithModel(ctx, filename+" "+nudgePrompt, m.config.Model)
+	if retryErr == nil {
+		if os.Getenv("DEBUG_AI") == "1" {
+			fmt.Printf("[AI] Retry with nudge prompt succeeded\n")
+		}
+		return retryResult, nil
+	}
+
+	partialResult, extracted = ExtractPartialResult(retryErr.Error())
+	if extracted {
+		if os.Getenv("DEBUG_AI") == "1" {
+			fmt.Printf("[AI] Recovered partial result from retry attempt\n")
+		}
+		return partialResult, nil
+	}
+
+	return nil, fmt.Errorf("original error: %w, retry error: %v", err, retryErr)
+}
+
+// isJSONError checks if an error is related to JSON parsing
+func isJSONError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "invalid character") ||
+		strings.Contains(errStr, "unexpected end") ||
+		strings.Contains(errStr, "failed to parse") ||
+		strings.Contains(errStr, "unmarshal") ||
+		strings.Contains(errStr, "JSON") ||
+		strings.Contains(errStr, "valid JSON")
+}
+
 // ParseWithCloud sends a filename to Ollama cloud model and returns parsed metadata
 func (m *Matcher) ParseWithCloud(ctx context.Context, filename string) (*Result, error) {
 	if m.config.CloudModel == "" {
