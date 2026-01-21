@@ -125,6 +125,15 @@ func (s *FileScanner) ScanWithOptions(ctx context.Context, opts ScanOptions) (*S
 
 	// Scan TV libraries
 	for _, lib := range opts.TVLibraries {
+		// Send initial progress for this library
+		if opts.OnProgress != nil {
+			opts.OnProgress(ScanProgress{
+				FilesScanned:   result.FilesScanned,
+				CurrentPath:    lib,
+				LibrariesDone:  libsDone,
+				LibrariesTotal: totalLibs,
+			})
+		}
 		if err := s.scanPathWithProgress(ctx, lib, "episode", result, progressFn); err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("TV library %s: %w", lib, err))
 		}
@@ -133,6 +142,15 @@ func (s *FileScanner) ScanWithOptions(ctx context.Context, opts ScanOptions) (*S
 
 	// Scan movie libraries
 	for _, lib := range opts.MovieLibraries {
+		// Send initial progress for this library
+		if opts.OnProgress != nil {
+			opts.OnProgress(ScanProgress{
+				FilesScanned:   result.FilesScanned,
+				CurrentPath:    lib,
+				LibrariesDone:  libsDone,
+				LibrariesTotal: totalLibs,
+			})
+		}
 		if err := s.scanPathWithProgress(ctx, lib, "movie", result, progressFn); err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("Movie library %s: %w", lib, err))
 		}
