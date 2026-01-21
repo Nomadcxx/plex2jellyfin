@@ -69,12 +69,22 @@ func (e *Executor) ExecutePlans(ctx context.Context) (*ExecutionResult, error) {
 
 		result.PlansExecuted++
 
+		// For delete actions, get file size BEFORE deleting
+		var fileSizeToReclaim int64
+		if plan.Action == "delete" {
+			file, err := e.db.GetMediaFileByID(plan.SourceFileID)
+			if err == nil && file != nil {
+				fileSizeToReclaim = file.Size
+			}
+		}
+
 		var execErr error
 		switch plan.Action {
 		case "delete":
 			execErr = e.executeDelete(ctx, plan)
 			if execErr == nil {
 				result.FilesDeleted++
+				result.SpaceReclaimed += fileSizeToReclaim
 			}
 		case "move":
 			execErr = e.executeMove(ctx, plan)
@@ -98,14 +108,6 @@ func (e *Executor) ExecutePlans(ctx context.Context) (*ExecutionResult, error) {
 		} else {
 			result.PlansSucceeded++
 			e.markPlanCompleted(plan.ID)
-
-			// For delete actions, track space reclaimed
-			if plan.Action == "delete" {
-				file, err := e.db.GetMediaFileByID(plan.SourceFileID)
-				if err == nil && file != nil {
-					result.SpaceReclaimed += file.Size
-				}
-			}
 		}
 	}
 

@@ -332,13 +332,13 @@ func (p *Planner) GetPlanByID(planID int64) (*ConsolidationPlan, error) {
 func (p *Planner) GetPlanSummary() (*PlanSummary, error) {
 	summary := &PlanSummary{}
 
-	// Count plans by action
+	// Count plans by action (use COALESCE to handle NULL when no rows match)
 	query := `
 		SELECT
 			COUNT(*) as total,
-			SUM(CASE WHEN action = 'delete' THEN 1 ELSE 0 END) as deletes,
-			SUM(CASE WHEN action = 'move' THEN 1 ELSE 0 END) as moves,
-			SUM(CASE WHEN action = 'rename' THEN 1 ELSE 0 END) as renames
+			COALESCE(SUM(CASE WHEN action = 'delete' THEN 1 ELSE 0 END), 0) as deletes,
+			COALESCE(SUM(CASE WHEN action = 'move' THEN 1 ELSE 0 END), 0) as moves,
+			COALESCE(SUM(CASE WHEN action = 'rename' THEN 1 ELSE 0 END), 0) as renames
 		FROM consolidation_plans
 		WHERE status = 'pending'
 	`
