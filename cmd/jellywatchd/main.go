@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -138,6 +139,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "Radarr integration enabled", logging.F("url", cfg.Radarr.URL))
 	}
 
+	// Get config directory for activity logging
+	configDir := filepath.Join(os.Getenv("HOME"), ".config", "jellywatch")
+	if cfgFile != "" {
+		configDir = filepath.Dir(cfgFile)
+	}
+
 	handler := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
 		TVLibraries:   cfg.Libraries.TV,
 		MovieLibs:     cfg.Libraries.Movies,
@@ -152,7 +159,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		FileMode:      fileMode,
 		DirMode:       dirMode,
 		SonarrClient:  sonarrClient,
+		ConfigDir:     configDir,
 	})
+
+	// Prune old activity logs (keep 7 days)
+	if err := handler.PruneActivityLogs(7); err != nil {
+		logger.Warn("daemon", "Failed to prune old activity logs", logging.F("error", err.Error()))
+	}
 
 	healthServer := daemon.NewServer(handler, healthAddr, logger)
 

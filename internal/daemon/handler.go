@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/activity"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
@@ -17,17 +19,18 @@ import (
 )
 
 type MediaHandler struct {
-	organizer     *organizer.Organizer
-	notifyManager *notify.Manager
-	tvLibraries   []string
-	movieLibs     []string
-	debounceTime  time.Duration
-	pending       map[string]*time.Timer
-	mu            sync.Mutex
-	dryRun        bool
-	stats         *Stats
-	logger        *logging.Logger
-	sonarrClient  *sonarr.Client
+	organizer      *organizer.Organizer
+	notifyManager  *notify.Manager
+	tvLibraries    []string
+	movieLibs      []string
+	debounceTime   time.Duration
+	pending        map[string]*time.Timer
+	mu             sync.Mutex
+	dryRun         bool
+	stats          *Stats
+	logger         *logging.Logger
+	sonarrClient   *sonarr.Client
+	activityLogger *activity.Logger
 }
 
 type Stats struct {
@@ -104,6 +107,7 @@ type MediaHandlerConfig struct {
 	FileMode      os.FileMode
 	DirMode       os.FileMode
 	SonarrClient  *sonarr.Client
+	ConfigDir     string
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
@@ -115,6 +119,17 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = logging.Nop()
+	}
+
+	var activityLogger *activity.Logger
+	if cfg.ConfigDir != "" {
+		var err error
+		activityLogger, err = activity.NewLogger(cfg.ConfigDir)
+		if err != nil {
+			cfg.Logger.Warn("handler", "Failed to create activity logger", logging.F("error", err.Error()))
+		} else {
+			cfg.Logger.Info("handler", "Activity logger initialized", logging.F("log_dir", activityLogger.GetLogDir()))
+		}
 	}
 
 	allLibs := append(cfg.TVLibraries, cfg.MovieLibs...)
@@ -132,16 +147,17 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 	org := organizer.NewOrganizer(allLibs, orgOpts...)
 
 	return &MediaHandler{
-		organizer:     org,
-		notifyManager: cfg.NotifyManager,
-		tvLibraries:   cfg.TVLibraries,
-		movieLibs:     cfg.MovieLibs,
-		debounceTime:  cfg.DebounceTime,
-		pending:       make(map[string]*time.Timer),
-		dryRun:        cfg.DryRun,
-		stats:         NewStats(),
-		logger:        cfg.Logger,
-		sonarrClient:  cfg.SonarrClient,
+		organizer:      org,
+		notifyManager:  cfg.NotifyManager,
+		tvLibraries:    cfg.TVLibraries,
+		movieLibs:      cfg.MovieLibs,
+		debounceTime:   cfg.DebounceTime,
+		pending:        make(map[string]*time.Timer),
+		dryRun:         cfg.DryRun,
+		stats:          NewStats(),
+		logger:         cfg.Logger,
+		sonarrClient:   cfg.SonarrClient,
+		activityLogger: activityLogger,
 	}
 }
 
@@ -169,7 +185,59 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 	return nil
 }
 
+func (h *MediaHandler) logEntry(
+	result *organizer.OrganizationResult,
+	mediaType notify.MediaType,
+	parsedTitle string,
+	parsedYear *int,
+	parseMethod activity.ParseMethod,
+	aiConfidence float64,
+	duration time.Duration,
+	sonarrNotified bool,
+	radarrNotified bool,
+) {
+	if h.activityLogger == nil {
+		return
+	}
+
+	var aiConf *float64
+	if aiConfidence > 0 {
+		aiConf = &aiConfidence
+	}
+
+	var target string
+	if result.TargetPath != "" {
+		target = result.TargetPath
+	}
+
+	entry := activity.Entry{
+		Action:         "organize",
+		Source:         result.SourcePath,
+		Target:         target,
+		MediaType:      mediaType.String(),
+		ParseMethod:    parseMethod,
+		ParsedTitle:    parsedTitle,
+		ParsedYear:     parsedYear,
+		AIConfidence:   aiConf,
+		Success:        result.Success,
+		Bytes:          result.BytesCopied,
+		DurationMs:     duration.Milliseconds(),
+		SonarrNotified: sonarrNotified,
+		RadarrNotified: radarrNotified,
+	}
+
+	if !result.Success && result.Error != nil {
+		entry.Error = result.Error.Error()
+	}
+
+	if err := h.activityLogger.Log(entry); err != nil {
+		h.logger.Warn("handler", "Failed to log activity", logging.F("error", err.Error()))
+	}
+}
+
 func (h *MediaHandler) processFile(path string) {
+	startTime := time.Now()
+
 	h.mu.Lock()
 	delete(h.pending, path)
 	h.mu.Unlock()
@@ -187,6 +255,11 @@ func (h *MediaHandler) processFile(path string) {
 	var targetLib string
 	var mediaType notify.MediaType
 
+	var parsedTitle string
+	var parsedYear *int
+	parseMethod := activity.MethodRegex
+	aiConfidence := 0.0
+
 	isObfuscated := naming.IsObfuscatedFilename(filename)
 	if isObfuscated {
 		h.logger.Info("handler", "Detected obfuscated filename, using folder name", logging.F("filename", filename))
@@ -201,6 +274,16 @@ func (h *MediaHandler) processFile(path string) {
 		}
 		mediaType = notify.MediaTypeTVEpisode
 
+		if tvInfo, err := naming.ParseTVShowName(path); err == nil {
+			parsedTitle = tvInfo.Title
+			if tvInfo.Year != "" {
+				year := 0
+				if _, err := fmt.Sscanf(tvInfo.Year, "%d", &year); err == nil {
+					parsedYear = &year
+				}
+			}
+		}
+
 		// Use auto-selection (queries Sonarr + filesystem)
 		result, err = h.organizer.OrganizeTVEpisodeAuto(path, func(p string) (int64, error) {
 			info, err := os.Stat(p)
@@ -212,8 +295,6 @@ func (h *MediaHandler) processFile(path string) {
 
 		// Extract target library from result for health check logging
 		if result != nil && result.TargetPath != "" {
-			// TargetPath format: /mnt/STORAGE1/TVSHOWS/Show Name (Year)/Season 01/episode.mkv
-			// Extract library: /mnt/STORAGE1/TVSHOWS
 			targetLib = filepath.Dir(filepath.Dir(filepath.Dir(result.TargetPath)))
 		}
 	} else {
@@ -224,6 +305,16 @@ func (h *MediaHandler) processFile(path string) {
 		targetLib = h.movieLibs[0]
 		mediaType = notify.MediaTypeMovie
 
+		if movieInfo, err := naming.ParseMovieName(path); err == nil {
+			parsedTitle = movieInfo.Title
+			if movieInfo.Year != "" {
+				year := 0
+				if _, err := fmt.Sscanf(movieInfo.Year, "%d", &year); err == nil {
+					parsedYear = &year
+				}
+			}
+		}
+
 		if !h.checkTargetHealth(targetLib) {
 			h.logger.Warn("handler", "Target library unhealthy, skipping", logging.F("filename", filename), logging.F("target", targetLib))
 			return
@@ -232,9 +323,16 @@ func (h *MediaHandler) processFile(path string) {
 		result, err = h.organizer.OrganizeMovie(path, targetLib)
 	}
 
+	duration := time.Since(startTime)
+
+	// Track notification results
+	sonarrNotified := false
+	radarrNotified := false
+
 	if err != nil {
 		h.logger.Error("handler", "Organization failed", err, logging.F("filename", filename))
 		h.stats.RecordError()
+		h.logEntry(result, mediaType, parsedTitle, parsedYear, parseMethod, aiConfidence, duration, sonarrNotified, radarrNotified)
 		return
 	}
 
@@ -251,18 +349,22 @@ func (h *MediaHandler) processFile(path string) {
 			h.stats.RecordTV(result.BytesCopied)
 		}
 
-		h.sendNotifications(result, mediaType)
+		// Send notifications and track results
+		sonarrNotified, radarrNotified = h.sendNotificationsWithTracking(result, mediaType)
 	} else if result.Skipped {
 		h.logger.Info("handler", "Skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
 	} else {
 		h.logger.Error("handler", "Organization failed", result.Error, logging.F("filename", filename))
 		h.stats.RecordError()
 	}
+
+	// Log activity entry after notifications
+	h.logEntry(result, mediaType, parsedTitle, parsedYear, parseMethod, aiConfidence, duration, sonarrNotified, radarrNotified)
 }
 
-func (h *MediaHandler) sendNotifications(result *organizer.OrganizationResult, mediaType notify.MediaType) {
+func (h *MediaHandler) sendNotificationsWithTracking(result *organizer.OrganizationResult, mediaType notify.MediaType) (sonarrNotified, radarrNotified bool) {
 	if h.notifyManager == nil {
-		return
+		return false, false
 	}
 
 	event := notify.OrganizationEvent{
@@ -275,6 +377,16 @@ func (h *MediaHandler) sendNotifications(result *organizer.OrganizationResult, m
 	}
 
 	h.notifyManager.Notify(event)
+
+	// Track which notifiers would have been called based on media type
+	// Sonarr handles TV episodes, Radarr handles movies
+	if mediaType == notify.MediaTypeTVEpisode {
+		sonarrNotified = true
+	} else if mediaType == notify.MediaTypeMovie {
+		radarrNotified = true
+	}
+
+	return sonarrNotified, radarrNotified
 }
 
 func (h *MediaHandler) checkTargetHealth(targetLib string) bool {
@@ -312,4 +424,15 @@ func (h *MediaHandler) Shutdown() {
 	if h.notifyManager != nil {
 		h.notifyManager.Close()
 	}
+
+	if h.activityLogger != nil {
+		h.activityLogger.Close()
+	}
+}
+
+func (h *MediaHandler) PruneActivityLogs(days int) error {
+	if h.activityLogger == nil {
+		return nil
+	}
+	return h.activityLogger.PruneOld(days)
 }

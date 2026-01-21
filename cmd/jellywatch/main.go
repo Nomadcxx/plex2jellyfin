@@ -67,6 +67,7 @@ Features:
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newDatabaseCmd())
+	rootCmd.AddCommand(newMonitorCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
