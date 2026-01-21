@@ -116,15 +116,30 @@ type LoggingConfig struct {
 	MaxBackups int    `mapstructure:"max_backups"`
 }
 
+type CircuitBreakerConfig struct {
+	FailureThreshold     int `mapstructure:"failure_threshold"`
+	FailureWindowSeconds int `mapstructure:"failure_window_seconds"`
+	CooldownSeconds      int `mapstructure:"cooldown_seconds"`
+}
+
+type KeepaliveConfig struct {
+	Enabled            bool `mapstructure:"enabled"`
+	IntervalSeconds    int  `mapstructure:"interval_seconds"`
+	IdleTimeoutSeconds int  `mapstructure:"idle_timeout_seconds"`
+}
+
 // AIConfig contains AI title matching configuration
 type AIConfig struct {
-	Enabled             bool    `mapstructure:"enabled"`
-	OllamaEndpoint      string  `mapstructure:"ollama_endpoint"`
-	Model               string  `mapstructure:"model"`
-	ConfidenceThreshold float64 `mapstructure:"confidence_threshold"`
-	TimeoutSeconds      int     `mapstructure:"timeout_seconds"`
-	CacheEnabled        bool    `mapstructure:"cache_enabled"`
-	CloudModel          string  `mapstructure:"cloud_model"`
+	Enabled             bool                 `mapstructure:"enabled"`
+	OllamaEndpoint      string               `mapstructure:"ollama_endpoint"`
+	Model               string               `mapstructure:"model"`
+	ConfidenceThreshold float64              `mapstructure:"confidence_threshold"`
+	TimeoutSeconds      int                  `mapstructure:"timeout_seconds"`
+	CacheEnabled        bool                 `mapstructure:"cache_enabled"`
+	CloudModel          string               `mapstructure:"cloud_model"`
+	AutoResolveRisky    bool                 `mapstructure:"auto_resolve_risky"`
+	CircuitBreaker      CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	Keepalive           KeepaliveConfig      `mapstructure:"keepalive"`
 }
 
 // WatchConfig contains directories to watch
@@ -208,6 +223,16 @@ func DefaultConfig() *Config {
 			TimeoutSeconds:      5,
 			CacheEnabled:        true,
 			CloudModel:          "nemotron-3-nano:30b-cloud",
+			CircuitBreaker: CircuitBreakerConfig{
+				FailureThreshold:     5,
+				FailureWindowSeconds: 120,
+				CooldownSeconds:      30,
+			},
+			Keepalive: KeepaliveConfig{
+				Enabled:            true,
+				IntervalSeconds:    300,
+				IdleTimeoutSeconds: 1800,
+			},
 		},
 		Logging: LoggingConfig{
 			Level:      "info",
@@ -444,11 +469,24 @@ func GetDatabasePath() string {
 	return filepath.Join(homeDir, ".config", "jellywatch", "media.db")
 }
 
-// GetConfigDir returns the jellywatch config directory
-func GetConfigDir() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "."
+// DefaultAIConfig returns default AI configuration
+func DefaultAIConfig() AIConfig {
+	return AIConfig{
+		Enabled:             false,
+		OllamaEndpoint:      "http://localhost:11434",
+		Model:               "qwen2.5vl:7b",
+		ConfidenceThreshold: 0.8,
+		TimeoutSeconds:      5,
+		CacheEnabled:        true,
+		CircuitBreaker: CircuitBreakerConfig{
+			FailureThreshold:     5,
+			FailureWindowSeconds: 120,
+			CooldownSeconds:      30,
+		},
+		Keepalive: KeepaliveConfig{
+			Enabled:            true,
+			IntervalSeconds:    300,
+			IdleTimeoutSeconds: 1800,
+		},
 	}
-	return filepath.Join(homeDir, ".config", "jellywatch")
 }

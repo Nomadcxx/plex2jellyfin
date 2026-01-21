@@ -29,3 +29,17 @@ func TestPermissionsParseShortMode(t *testing.T) {
 		t.Fatalf("unexpected dir mode: %v %v", dm, err)
 	}
 }
+
+func TestAIConfig_CircuitBreakerDefaults(t *testing.T) {
+	cfg := DefaultAIConfig()
+
+	if cfg.CircuitBreaker.FailureThreshold != 5 {
+		t.Errorf("expected failure threshold 5, got %d", cfg.CircuitBreaker.FailureThreshold)
+	}
+	if cfg.CircuitBreaker.FailureWindowSeconds != 120 {
+		t.Errorf("expected failure window 120s, got %d", cfg.CircuitBreaker.FailureWindowSeconds)
+	}
+	if cfg.CircuitBreaker.CooldownSeconds != 30 {
+		t.Errorf("expected cooldown 30s, got %d", cfg.CircuitBreaker.CooldownSeconds)
+	}
+}
