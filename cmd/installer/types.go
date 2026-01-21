@@ -8,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Installation steps (grouped flow)
@@ -23,7 +22,9 @@ const (
 	stepSystemPermissions
 	stepSystemService
 	stepConfirm
+	stepUninstallConfirm // Confirm uninstall and choose to delete config/db
 	stepInstalling
+	stepScanning // Library scan with progress
 	stepComplete
 )
 
@@ -83,6 +84,7 @@ type errorInfo struct {
 type model struct {
 	step             installStep
 	tasks            []installTask
+	postScanTasks    []installTask // Tasks to run after scanning (systemd setup, start service)
 	currentTaskIndex int
 	width            int
 	height           int
@@ -93,7 +95,6 @@ type model struct {
 	selectedOption   int
 	debugMode        bool
 	logFile          *os.File
-	program          *tea.Program
 
 	// Animations
 	beams  *BeamsTextEffect
@@ -156,10 +157,40 @@ type model struct {
 	forceWizard        bool
 	daemonWasRunning   bool
 	keepDatabase       bool
+	keepConfig         bool
 
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Scan progress
+	scanProgress   ScanProgress
+	scanResult     *ScanResult
+	scanStats      *ScanStats
+	scanCancel     context.CancelFunc
+}
+
+// ScanProgress tracks library scanning progress
+type ScanProgress struct {
+	FilesScanned   int
+	CurrentPath    string
+	LibrariesDone  int
+	LibrariesTotal int
+}
+
+// ScanResult holds the final scan results
+type ScanResult struct {
+	FilesScanned int
+	FilesAdded   int
+	Duration     time.Duration
+	Errors       []error
+}
+
+// ScanStats holds database statistics after scan
+type ScanStats struct {
+	TVShows         int
+	Movies          int
+	DuplicateGroups int
 }
 
 // Messages
@@ -195,6 +226,21 @@ type aiPromptTestMsg struct {
 }
 
 type tickMsg time.Time
+
+// Scan messages
+type scanStartMsg struct {
+	cancel context.CancelFunc
+}
+
+type scanProgressMsg struct {
+	progress ScanProgress
+}
+
+type scanCompleteMsg struct {
+	result *ScanResult
+	stats  *ScanStats
+	err    error
+}
 
 // Scan frequency options
 var scanFrequencyOptions = []string{

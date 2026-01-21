@@ -12,6 +12,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// globalProgram is used to send messages from goroutines
+var globalProgram *tea.Program
+
 func newModel(debugMode bool, logFile *os.File) model {
 	s := spinner.New()
 	s.Style = lipgloss.NewStyle().Foreground(Secondary)
@@ -91,10 +94,10 @@ func main() {
 		}
 	}
 
-	// Create log file
-	logFile, err := os.Create("/tmp/jellywatch-installer.log")
+	// Create log file with unique name to avoid permission issues
+	logFile, err := os.CreateTemp("", "jellywatch-installer-*.log")
 	if err != nil {
-		fmt.Printf("Warning: Could not create log file: %v\n", err)
+		// Silently continue without log file - don't print warning on exit
 		logFile = nil
 	}
 	if logFile != nil {
@@ -106,7 +109,7 @@ func main() {
 
 	m := newModel(debugMode, logFile)
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	m.program = p
+	globalProgram = p
 
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)

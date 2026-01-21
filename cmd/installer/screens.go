@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -49,6 +50,40 @@ func (m model) renderWelcome() string {
 	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("Requires root privileges (sudo)"))
+
+	return b.String()
+}
+
+func (m model) renderUninstallConfirm() string {
+	var b strings.Builder
+
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Uninstall JellyWatch"))
+	b.WriteString("\n\n")
+
+	b.WriteString("This will remove:\n")
+	b.WriteString("  • JellyWatch binaries from /usr/local/bin\n")
+	b.WriteString("  • Systemd service (jellywatchd)\n\n")
+
+	// Three options for config/database handling
+	prefixes := []string{"  ", "  ", "  "}
+	prefixes[m.selectedOption] = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+
+	b.WriteString("Configuration and database:\n\n")
+
+	b.WriteString(prefixes[0] + "Keep configuration and database\n")
+	b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render("Preserve everything for future reinstall") + "\n\n")
+
+	b.WriteString(prefixes[1] + "Keep configuration, delete database\n")
+	b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render("Keep settings but rebuild media.db on next install") + "\n\n")
+
+	b.WriteString(prefixes[2] + "Delete configuration and database\n")
+	b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render("Remove all JellyWatch data permanently") + "\n\n")
+
+	if m.existingDBDetected {
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
+			fmt.Sprintf("Database: %s", m.existingDBPath)))
+		b.WriteString("\n")
+	}
 
 	return b.String()
 }
@@ -146,8 +181,12 @@ func (m model) renderSonarr() string {
 
 		if m.sonarrTesting {
 			b.WriteString("  " + m.spinner.View() + " Testing connection...\n")
-		} else if m.sonarrTested {
-			b.WriteString(fmt.Sprintf("  %s Connected - %s\n", checkMark.String(), m.sonarrVersion))
+		} else if m.sonarrVersion != "" {
+			if m.sonarrTested {
+				b.WriteString(fmt.Sprintf("  %s Connected - %s\n", checkMark.String(), m.sonarrVersion))
+			} else {
+				b.WriteString(fmt.Sprintf("  %s Failed - %s\n", failMark.String(), m.sonarrVersion))
+			}
 		}
 	}
 
@@ -197,8 +236,12 @@ func (m model) renderRadarr() string {
 
 		if m.radarrTesting {
 			b.WriteString("  " + m.spinner.View() + " Testing connection...\n")
-		} else if m.radarrTested {
-			b.WriteString(fmt.Sprintf("  %s Connected - %s\n", checkMark.String(), m.radarrVersion))
+		} else if m.radarrVersion != "" {
+			if m.radarrTested {
+				b.WriteString(fmt.Sprintf("  %s Connected - %s\n", checkMark.String(), m.radarrVersion))
+			} else {
+				b.WriteString(fmt.Sprintf("  %s Failed - %s\n", failMark.String(), m.radarrVersion))
+			}
 		}
 	}
 
@@ -217,7 +260,7 @@ func (m model) renderAI() string {
 	if m.aiEnabled {
 		enabledStr = "Yes"
 	}
-	b.WriteString(fmt.Sprintf("  Enable: %s\n\n", enabledStr))
+	b.WriteString(fmt.Sprintf("  Enable: %s  [E] to toggle\n\n", enabledStr))
 
 	if !m.aiEnabled {
 		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  AI features disabled"))
@@ -252,15 +295,14 @@ func (m model) renderAI() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ● Connected"))
 		b.WriteString(fmt.Sprintf(" - %d models available\n\n", len(m.aiModels)))
 
-		b.WriteString("  Model: ")
+		b.WriteString("  Model:  [↑/↓] to select\n")
 		for i, model := range m.aiModels {
-			prefix := "  "
+			prefix := "    "
 			if i == m.aiModelIndex {
-				prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+				prefix = lipgloss.NewStyle().Foreground(Primary).Render("  ▸ ")
 			}
-			b.WriteString(fmt.Sprintf("\n    %s%s", prefix, model))
+			b.WriteString(fmt.Sprintf("%s%s\n", prefix, model))
 		}
-		b.WriteString("\n")
 
 		if m.aiTestResult != "" {
 			b.WriteString(fmt.Sprintf("\n  Last test: %s\n", m.aiTestResult))
@@ -275,7 +317,7 @@ func (m model) renderAI() string {
 		}
 	}
 
-	b.WriteString("\n\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("[R] Retry detection  [T] Test  [P] Prompt test  [S] Skip"))
+	b.WriteString("\n\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("[E] Toggle  [↑/↓] Select model  [T] Test  [P] Prompt  [R] Retry  [S] Skip"))
 
 	return b.String()
 }
@@ -445,6 +487,68 @@ func (m model) renderInstalling() string {
 	return b.String()
 }
 
+func (m model) renderScanning() string {
+	var b strings.Builder
+
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Scanning Libraries"))
+	b.WriteString("\n\n")
+
+	// Calculate percentage from files or libraries
+	percent := 0.0
+	if m.scanProgress.LibrariesTotal > 0 {
+		percent = float64(m.scanProgress.LibrariesDone) / float64(m.scanProgress.LibrariesTotal) * 100
+	}
+
+	// Progress bar (50 chars wide)
+	barWidth := 50
+	filled := int((percent / 100.0) * float64(barWidth))
+	if filled > barWidth {
+		filled = barWidth
+	}
+
+	// Build the progress bar with colors
+	barFilled := lipgloss.NewStyle().Foreground(Secondary).Render(strings.Repeat("█", filled))
+	barEmpty := lipgloss.NewStyle().Foreground(FgMuted).Render(strings.Repeat("░", barWidth-filled))
+	progressBar := fmt.Sprintf("[%s%s]", barFilled, barEmpty)
+
+	b.WriteString(progressBar)
+	b.WriteString(fmt.Sprintf(" %.1f%%\n\n", percent))
+
+	// Library progress
+	if m.scanProgress.LibrariesTotal > 0 {
+		b.WriteString(fmt.Sprintf("  Libraries: %d/%d\n",
+			m.scanProgress.LibrariesDone,
+			m.scanProgress.LibrariesTotal))
+	}
+
+	// Files scanned counter with spinner
+	b.WriteString(fmt.Sprintf("  %s Files scanned: %s\n",
+		m.spinner.View(),
+		lipgloss.NewStyle().Foreground(Secondary).Bold(true).Render(fmt.Sprintf("%d", m.scanProgress.FilesScanned))))
+
+	// Current file being scanned
+	if m.scanProgress.CurrentPath != "" {
+		// Truncate long paths intelligently
+		displayPath := m.scanProgress.CurrentPath
+		maxLen := 65
+
+		if len(displayPath) > maxLen {
+			// Show ...end of path
+			displayPath = "..." + displayPath[len(displayPath)-(maxLen-3):]
+		}
+
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Italic(true).Render(
+			fmt.Sprintf("  %s", displayPath)))
+	}
+
+	b.WriteString("\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
+		"Building media database from your libraries..."))
+
+	return b.String()
+}
+
 func (m model) renderComplete() string {
 	hasCriticalFailure := false
 	for _, task := range m.tasks {
@@ -460,34 +564,94 @@ func (m model) renderComplete() string {
 	}
 
 	if m.uninstallMode {
-		return `Uninstall complete.
-JellyWatch has been removed.
+		var msg strings.Builder
+		msg.WriteString("Uninstall complete.\nJellyWatch has been removed.\n\n")
 
-` + lipgloss.NewStyle().Foreground(FgMuted).Render("Config preserved: ~/.config/jellywatch/") + `
-(Delete manually if no longer needed)
-
-Press Enter to exit`
+		if m.keepConfig && m.keepDatabase {
+			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config and database preserved: ~/.config/jellywatch/"))
+			msg.WriteString("\n(Delete manually if no longer needed)")
+		} else if m.keepConfig && !m.keepDatabase {
+			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config preserved: ~/.config/jellywatch/config.toml"))
+			msg.WriteString("\n")
+			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Database deleted."))
+			msg.WriteString("\n\n")
+			msg.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("To rebuild the database after reinstalling:"))
+			msg.WriteString("\n")
+			msg.WriteString("  jellywatch scan\n")
+			msg.WriteString("\n")
+			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Or with Sonarr/Radarr sync:"))
+			msg.WriteString("\n")
+			msg.WriteString("  jellywatch scan --sonarr --radarr\n")
+		} else {
+			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config and database deleted."))
+		}
+		msg.WriteString("\n\nPress Enter to exit")
+		return msg.String()
 	}
 
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("✓ Installation Complete"))
 	b.WriteString("\n\n")
-	b.WriteString("JellyWatch is ready. The daemon is running and watching your\nconfigured directories.\n\n")
+
+	// Show scan results if we scanned
+	if m.scanResult != nil {
+		// Scan summary box
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Library Scan Results"))
+		b.WriteString("\n")
+		b.WriteString(strings.Repeat("─", 40))
+		b.WriteString("\n")
+
+		b.WriteString(fmt.Sprintf("  Files scanned:  %s\n",
+			lipgloss.NewStyle().Foreground(Secondary).Bold(true).Render(fmt.Sprintf("%d", m.scanResult.FilesScanned))))
+		b.WriteString(fmt.Sprintf("  Files indexed:  %s\n",
+			lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render(fmt.Sprintf("%d", m.scanResult.FilesAdded))))
+		b.WriteString(fmt.Sprintf("  Scan time:      %s\n",
+			lipgloss.NewStyle().Foreground(FgMuted).Render(m.scanResult.Duration.Round(100*time.Millisecond).String())))
+
+		if m.scanStats != nil {
+			b.WriteString("\n")
+			b.WriteString(fmt.Sprintf("  TV Episodes:    %s\n",
+				lipgloss.NewStyle().Foreground(Secondary).Render(fmt.Sprintf("%d", m.scanStats.TVShows))))
+			b.WriteString(fmt.Sprintf("  Movies:         %s\n",
+				lipgloss.NewStyle().Foreground(Secondary).Render(fmt.Sprintf("%d", m.scanStats.Movies))))
+
+			if m.scanStats.DuplicateGroups > 0 {
+				b.WriteString(fmt.Sprintf("  Duplicates:     %s\n",
+					lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render(fmt.Sprintf("%d groups found", m.scanStats.DuplicateGroups))))
+			} else {
+				b.WriteString(fmt.Sprintf("  Duplicates:     %s\n",
+					lipgloss.NewStyle().Foreground(SuccessColor).Render("None detected")))
+			}
+		}
+
+		b.WriteString(strings.Repeat("─", 40))
+		b.WriteString("\n\n")
+
+		if len(m.scanResult.Errors) > 0 {
+			b.WriteString(lipgloss.NewStyle().Foreground(WarningColor).Render(
+				fmt.Sprintf("⚠ %d scan errors (check logs for details)\n\n", len(m.scanResult.Errors))))
+		}
+	} else {
+		b.WriteString("JellyWatch is ready. The daemon is running and watching your\nconfigured directories.\n\n")
+	}
 
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Quick Start"))
 	b.WriteString("\n")
-	b.WriteString("  jellywatch add <path>         Add media to library\n")
-	b.WriteString("  jellywatch clean              Interactive cleanup\n")
-	b.WriteString("  jellywatch library status     Library statistics\n")
-	b.WriteString("  jellywatch library scan       Rescan libraries\n")
-	b.WriteString("  systemctl status jellywatchd  Check daemon\n\n")
 
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config:   ~/.config/jellywatch/config.toml"))
+	cmdStyle := lipgloss.NewStyle().Foreground(Secondary)
+	descStyle := lipgloss.NewStyle().Foreground(FgMuted)
+
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch scan"), descStyle.Render("Rescan libraries")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch duplicates"), descStyle.Render("View duplicates")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch consolidate"), descStyle.Render("Consolidate duplicates")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n\n", cmdStyle.Render("systemctl status jellywatchd"), descStyle.Render("Check daemon")))
+
+	pathStyle := lipgloss.NewStyle().Foreground(FgMuted).Italic(true)
+	b.WriteString(fmt.Sprintf("Config:   %s\n", pathStyle.Render("~/.config/jellywatch/config.toml")))
+	b.WriteString(fmt.Sprintf("Database: %s\n", pathStyle.Render("~/.config/jellywatch/media.db")))
+	b.WriteString(fmt.Sprintf("Logs:     %s\n", pathStyle.Render("journalctl -u jellywatchd -f")))
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Database: ~/.config/jellywatch/media.db"))
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Logs:     journalctl -u jellywatchd -f"))
-	b.WriteString("\n\nPress Enter to exit")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Press Enter to exit"))
 
 	return b.String()
 }

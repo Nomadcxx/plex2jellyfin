@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/scanner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -20,6 +23,24 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 			{name: "Disable service", description: "Disabling systemd service", execute: disableService, status: statusPending},
 			{name: "Remove binaries", description: "Removing binaries", execute: removeBinaries, optional: true, status: statusPending},
 		}
+		// Handle config/database removal based on user choice
+		if !m.keepConfig {
+			// Delete everything (config + database)
+			m.tasks = append(m.tasks, installTask{
+				name:        "Remove config",
+				description: "Removing configuration and database",
+				execute:     removeConfig,
+				status:      statusPending,
+			})
+		} else if !m.keepDatabase {
+			// Keep config but delete database only
+			m.tasks = append(m.tasks, installTask{
+				name:        "Remove database",
+				description: "Removing database (keeping config)",
+				execute:     removeDatabase,
+				status:      statusPending,
+			})
+		}
 	} else {
 		m.tasks = []installTask{
 			{name: "Check privileges", description: "Checking root access", execute: checkPrivileges, status: statusPending},
@@ -27,6 +48,10 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 			{name: "Build binaries", description: "Building jellywatch and jellywatchd", execute: buildBinaries, status: statusPending},
 			{name: "Install binaries", description: "Installing to /usr/local/bin", execute: installBinaries, status: statusPending},
 			{name: "Write config", description: "Writing configuration file", execute: writeConfig, status: statusPending},
+			// Scan happens here as a separate step (stepScanning) before systemd setup
+		}
+		// Add systemd tasks only - scan triggers separately before these
+		m.postScanTasks = []installTask{
 			{name: "Setup systemd", description: "Installing systemd service", execute: setupSystemd, status: statusPending},
 			{name: "Start service", description: "Starting jellywatchd", execute: startService, optional: true, status: statusPending},
 		}
@@ -173,9 +198,14 @@ model = "%s"
 		return err
 	}
 
+	// Set ownership using actual user and configured group
 	actualUser := getActualUser()
 	if actualUser != "root" && actualUser != "" {
-		exec.Command("chown", "-R", actualUser+":"+actualUser, jellywatchDir).Run()
+		group := actualUser
+		if m.permGroup != "" {
+			group = m.permGroup
+		}
+		exec.Command("chown", "-R", actualUser+":"+group, jellywatchDir).Run()
 	}
 
 	return nil
@@ -258,6 +288,42 @@ func removeBinaries(m *model) error {
 	return nil
 }
 
+func removeConfig(m *model) error {
+	configDir, err := getConfigDir()
+	if err != nil {
+		return err
+	}
+
+	jellywatchDir := filepath.Join(configDir, "jellywatch")
+
+	// Remove the entire jellywatch config directory
+	if err := os.RemoveAll(jellywatchDir); err != nil {
+		return fmt.Errorf("failed to remove config directory: %v", err)
+	}
+
+	return nil
+}
+
+func removeDatabase(m *model) error {
+	configDir, err := getConfigDir()
+	if err != nil {
+		return err
+	}
+
+	dbPath := filepath.Join(configDir, "jellywatch", "media.db")
+
+	// Remove only the database file
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove database: %v", err)
+	}
+
+	// Also remove WAL and SHM files if they exist (SQLite journal files)
+	os.Remove(dbPath + "-wal")
+	os.Remove(dbPath + "-shm")
+
+	return nil
+}
+
 func formatPathList(paths []string) string {
 	if len(paths) == 0 {
 		return ""
@@ -283,5 +349,101 @@ func scanFrequencyToString(freq int) string {
 		return "24h"
 	default:
 		return "5m"
+	}
+}
+
+// runInitialScan runs the library scan with progress updates
+func (m model) runInitialScan() tea.Cmd {
+	// Capture values before returning the command (closures capture by reference)
+	tvLibs := splitPaths(m.tvLibraryPaths)
+	movieLibs := splitPaths(m.movieLibraryPaths)
+	permGroup := m.permGroup // Configured group for file ownership
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Send cancel function to model via global program
+		if globalProgram != nil {
+			globalProgram.Send(scanStartMsg{cancel: cancel})
+		}
+
+		// Get database path respecting SUDO_USER
+		configDir, err := getConfigDir()
+		if err != nil {
+			return scanCompleteMsg{err: fmt.Errorf("failed to get config dir: %w", err)}
+		}
+		dbPath := filepath.Join(configDir, "jellywatch", "media.db")
+
+		db, err := database.OpenPath(dbPath)
+		if err != nil {
+			return scanCompleteMsg{err: fmt.Errorf("failed to open database: %w", err)}
+		}
+		defer db.Close()
+
+		fileScanner := scanner.NewFileScanner(db)
+
+		// Run scan with progress callback
+		result, err := fileScanner.ScanWithOptions(ctx, scanner.ScanOptions{
+			TVLibraries:    tvLibs,
+			MovieLibraries: movieLibs,
+			OnProgress: func(p scanner.ScanProgress) {
+				if globalProgram != nil {
+					globalProgram.Send(scanProgressMsg{
+						progress: ScanProgress{
+							FilesScanned:   p.FilesScanned,
+							CurrentPath:    p.CurrentPath,
+							LibrariesDone:  p.LibrariesDone,
+							LibrariesTotal: p.LibrariesTotal,
+						},
+					})
+				}
+			},
+		})
+
+		if err != nil {
+			return scanCompleteMsg{err: err}
+		}
+
+		// Get stats from database
+		var stats *ScanStats
+		tvCount, _ := db.CountMediaFilesByType("episode")
+		movieCount, _ := db.CountMediaFilesByType("movie")
+
+		// Count duplicates
+		movieDupes, _ := db.FindDuplicateMovies()
+		episodeDupes, _ := db.FindDuplicateEpisodes()
+		dupeCount := len(movieDupes) + len(episodeDupes)
+
+		stats = &ScanStats{
+			TVShows:         tvCount,
+			Movies:          movieCount,
+			DuplicateGroups: dupeCount,
+		}
+
+		// Fix ownership of config directory and database
+		// Use the actual user (not root) and the configured group from permissions
+		actualUser := getActualUser()
+		if actualUser != "root" && actualUser != "" {
+			jellywatchDir := filepath.Dir(dbPath)
+			
+			// Use configured group if set, otherwise fall back to user's primary group
+			group := actualUser
+			if permGroup != "" {
+				group = permGroup
+			}
+			
+			ownership := actualUser + ":" + group
+			exec.Command("chown", "-R", ownership, jellywatchDir).Run()
+		}
+
+		return scanCompleteMsg{
+			result: &ScanResult{
+				FilesScanned: result.FilesScanned,
+				FilesAdded:   result.FilesAdded,
+				Duration:     result.Duration,
+				Errors:       result.Errors,
+			},
+			stats: stats,
+		}
 	}
 }

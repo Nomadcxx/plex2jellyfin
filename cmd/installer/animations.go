@@ -571,7 +571,7 @@ func (b *BeamsTextEffect) updateCharacterAnimations() {
 	}
 }
 
-// Render returns the current frame as colored text
+// Render returns the current frame as colored text with background
 func (b *BeamsTextEffect) Render() string {
 	canvas := make([][]rune, b.height)
 	colors := make([][]string, b.height)
@@ -595,6 +595,9 @@ func (b *BeamsTextEffect) Render() string {
 		}
 	}
 
+	// Base style with background to prevent terminal bleed-through
+	bgStyle := lipgloss.NewStyle().Background(lipgloss.Color("#1a1a1a"))
+
 	var lines []string
 	for y := 0; y < b.height; y++ {
 		var line strings.Builder
@@ -603,10 +606,12 @@ func (b *BeamsTextEffect) Render() string {
 			if char != ' ' && colors[y][x] != "" {
 				styled := lipgloss.NewStyle().
 					Foreground(lipgloss.Color(colors[y][x])).
+					Background(lipgloss.Color("#1a1a1a")).
 					Render(string(char))
 				line.WriteString(styled)
 			} else {
-				line.WriteRune(char)
+				// Apply background to spaces too
+				line.WriteString(bgStyle.Render(" "))
 			}
 		}
 		lines = append(lines, line.String())

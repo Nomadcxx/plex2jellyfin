@@ -16,7 +16,10 @@ func (m model) View() string {
 	if m.width < 80 || m.height < 24 {
 		return lipgloss.NewStyle().
 			Foreground(ErrorColor).
+			Background(BgBase).
 			Bold(true).
+			Width(m.width).
+			Height(m.height).
 			Render(fmt.Sprintf(
 				"Terminal too small!\n\nMinimum: 80x24\nCurrent: %dx%d\n\nPlease resize.",
 				m.width, m.height,
@@ -38,6 +41,7 @@ func (m model) View() string {
 				Width(m.width).
 				Align(lipgloss.Center).
 				Foreground(Primary).
+				Background(BgBase).
 				Bold(true).
 				Render(line)
 			content.WriteString(centered)
@@ -50,6 +54,7 @@ func (m model) View() string {
 		tickerText := m.ticker.Render(m.width - 4)
 		tickerStyled := lipgloss.NewStyle().
 			Foreground(FgMuted).
+			Background(BgBase).
 			Italic(true).
 			Width(m.width).
 			Align(lipgloss.Center).
@@ -76,8 +81,12 @@ func (m model) View() string {
 		mainContent = m.renderService()
 	case stepConfirm:
 		mainContent = m.renderConfirm()
+	case stepUninstallConfirm:
+		mainContent = m.renderUninstallConfirm()
 	case stepInstalling:
 		mainContent = m.renderInstalling()
+	case stepScanning:
+		mainContent = m.renderScanning()
 	case stepComplete:
 		mainContent = m.renderComplete()
 	}
@@ -87,6 +96,7 @@ func (m model) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Secondary).
 		Foreground(FgPrimary).
+		Background(BgBase).
 		Width(m.width - 4)
 	content.WriteString(mainStyle.Render(mainContent))
 	content.WriteString("\n")
@@ -95,17 +105,20 @@ func (m model) View() string {
 	if helpText != "" {
 		helpStyle := lipgloss.NewStyle().
 			Foreground(FgMuted).
+			Background(BgBase).
 			Italic(true).
 			Width(m.width).
 			Align(lipgloss.Center)
 		content.WriteString("\n" + helpStyle.Render(helpText))
 	}
 
+	// Wrap everything in full-screen background with centering
 	bgStyle := lipgloss.NewStyle().
 		Background(BgBase).
 		Foreground(FgPrimary).
 		Width(m.width).
-		Height(m.height)
+		Height(m.height).
+		Align(lipgloss.Center, lipgloss.Top)
 
 	return bgStyle.Render(content.String())
 }
@@ -130,8 +143,12 @@ func (m model) getHelpText() string {
 		return "Tab: Next option  •  ↑/↓: Change value  •  Enter: Continue  •  Esc: Back"
 	case stepConfirm:
 		return "Enter: Install  •  Esc: Back"
+	case stepUninstallConfirm:
+		return "↑/↓: Navigate  •  Enter: Uninstall  •  Esc: Back"
 	case stepInstalling:
 		return "Please wait..."
+	case stepScanning:
+		return "Scanning libraries..."
 	case stepComplete:
 		return "Enter: Exit"
 	}

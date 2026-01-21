@@ -15,8 +15,10 @@ func (m *model) initPathsInputs() {
 		ti.Width = 50
 		ti.CharLimit = 500
 		ti.SetValue(m.watchFolders[i].Paths)
-		ti.PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-		ti.TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+		ti.PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+		ti.TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+		ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+		ti.Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 		m.inputs = append(m.inputs, ti)
 	}
 
@@ -25,8 +27,10 @@ func (m *model) initPathsInputs() {
 	tiTV.Width = 50
 	tiTV.CharLimit = 500
 	tiTV.SetValue(m.tvLibraryPaths)
-	tiTV.PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	tiTV.TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	tiTV.PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	tiTV.TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	tiTV.PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	tiTV.Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 	m.inputs = append(m.inputs, tiTV)
 
 	tiMovies := textinput.New()
@@ -34,8 +38,10 @@ func (m *model) initPathsInputs() {
 	tiMovies.Width = 50
 	tiMovies.CharLimit = 500
 	tiMovies.SetValue(m.movieLibraryPaths)
-	tiMovies.PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	tiMovies.TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	tiMovies.PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	tiMovies.TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	tiMovies.PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	tiMovies.Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 	m.inputs = append(m.inputs, tiMovies)
 }
 
@@ -62,8 +68,10 @@ func (m *model) initSonarrInputs() {
 	m.inputs[0].Width = 40
 	m.inputs[0].CharLimit = 200
 	m.inputs[0].SetValue(m.sonarrURL)
-	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[0].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[0].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 
 	m.inputs[1] = textinput.New()
 	m.inputs[1].Placeholder = "API Key"
@@ -72,8 +80,10 @@ func (m *model) initSonarrInputs() {
 	m.inputs[1].SetValue(m.sonarrAPIKey)
 	m.inputs[1].EchoMode = textinput.EchoPassword
 	m.inputs[1].EchoCharacter = '•'
-	m.inputs[1].PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	m.inputs[1].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	m.inputs[1].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[1].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[1].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[1].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 }
 
 func (m *model) saveSonarrInputs() {
@@ -91,8 +101,10 @@ func (m *model) initRadarrInputs() {
 	m.inputs[0].Width = 40
 	m.inputs[0].CharLimit = 200
 	m.inputs[0].SetValue(m.radarrURL)
-	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[0].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[0].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 
 	m.inputs[1] = textinput.New()
 	m.inputs[1].Placeholder = "API Key"
@@ -101,8 +113,10 @@ func (m *model) initRadarrInputs() {
 	m.inputs[1].SetValue(m.radarrAPIKey)
 	m.inputs[1].EchoMode = textinput.EchoPassword
 	m.inputs[1].EchoCharacter = '•'
-	m.inputs[1].PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	m.inputs[1].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	m.inputs[1].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[1].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[1].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[1].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 }
 
 func (m *model) saveRadarrInputs() {
@@ -120,8 +134,10 @@ func (m *model) initAIInputs() {
 	m.inputs[0].Width = 40
 	m.inputs[0].CharLimit = 200
 	m.inputs[0].SetValue(m.aiOllamaURL)
-	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[0].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[0].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 }
 
 func (m *model) saveAIInputs() {
@@ -137,36 +153,44 @@ func (m *model) initPermissionsInputs() {
 	m.inputs = make([]textinput.Model, 4)
 
 	m.inputs[0] = textinput.New()
-	m.inputs[0].Placeholder = "jellyfin"
+	m.inputs[0].Placeholder = "(empty = preserve)"
 	m.inputs[0].Width = 20
 	m.inputs[0].CharLimit = 50
 	m.inputs[0].SetValue(m.permUser)
-	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[0].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[0].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 
 	m.inputs[1] = textinput.New()
-	m.inputs[1].Placeholder = "jellyfin"
+	m.inputs[1].Placeholder = "media"
 	m.inputs[1].Width = 20
 	m.inputs[1].CharLimit = 50
 	m.inputs[1].SetValue(m.permGroup)
-	m.inputs[1].PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	m.inputs[1].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	m.inputs[1].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[1].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[1].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[1].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 
 	m.inputs[2] = textinput.New()
 	m.inputs[2].Placeholder = "0644"
 	m.inputs[2].Width = 10
 	m.inputs[2].CharLimit = 4
 	m.inputs[2].SetValue(m.permFileMode)
-	m.inputs[2].PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	m.inputs[2].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	m.inputs[2].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[2].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[2].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[2].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 
 	m.inputs[3] = textinput.New()
 	m.inputs[3].Placeholder = "0755"
 	m.inputs[3].Width = 10
 	m.inputs[3].CharLimit = 4
 	m.inputs[3].SetValue(m.permDirMode)
-	m.inputs[3].PromptStyle = lipgloss.NewStyle().Foreground(Secondary)
-	m.inputs[3].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary)
+	m.inputs[3].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[3].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[3].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[3].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 }
 
 func (m *model) savePermissionsInputs() {

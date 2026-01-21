@@ -13,8 +13,14 @@ import (
 
 func (m model) testSonarr() (tea.Model, tea.Cmd) {
 	m.sonarrTesting = true
-	m.sonarrTested = false
-	return m, testSonarrCmd(m.sonarrURL, m.sonarrAPIKey)
+	// Get current values from inputs (not the saved model fields)
+	url := m.sonarrURL
+	apiKey := m.sonarrAPIKey
+	if len(m.inputs) >= 2 {
+		url = m.inputs[0].Value()
+		apiKey = m.inputs[1].Value()
+	}
+	return m, testSonarrCmd(url, apiKey)
 }
 
 func testSonarrCmd(url, apiKey string) tea.Cmd {
@@ -48,8 +54,14 @@ func testSonarrCmd(url, apiKey string) tea.Cmd {
 
 func (m model) testRadarr() (tea.Model, tea.Cmd) {
 	m.radarrTesting = true
-	m.radarrTested = false
-	return m, testRadarrCmd(m.radarrURL, m.radarrAPIKey)
+	// Get current values from inputs (not the saved model fields)
+	url := m.radarrURL
+	apiKey := m.radarrAPIKey
+	if len(m.inputs) >= 2 {
+		url = m.inputs[0].Value()
+		apiKey = m.inputs[1].Value()
+	}
+	return m, testRadarrCmd(url, apiKey)
 }
 
 func testRadarrCmd(url, apiKey string) tea.Cmd {
@@ -164,15 +176,20 @@ func testOllamaPromptCmd(url, modelName string) tea.Cmd {
 		start := time.Now()
 		client := &http.Client{Timeout: 60 * time.Second}
 
-		prompt := `Parse this filename and return JSON with title, year, type (movie or tv), and confidence (0-1):
-The.Matrix.1999.2160p.UHD.BluRay.x265-GROUP
-Return ONLY valid JSON, no explanation.`
+		prompt := "Parse this filename and return JSON with title, year, type (movie or tv), and confidence (0-1):\nThe.Matrix.1999.2160p.UHD.BluRay.x265-GROUP\nReturn ONLY valid JSON, no explanation."
 
-		reqBody := fmt.Sprintf(`{"model":"%s","prompt":"%s","stream":false}`, modelName, prompt)
+		// Use proper JSON marshaling to handle escaping
+		reqData := map[string]interface{}{
+			"model":  modelName,
+			"prompt": prompt,
+			"stream": false,
+		}
+		reqBody, _ := json.Marshal(reqData)
+
 		resp, err := client.Post(
 			fmt.Sprintf("%s/api/generate", url),
 			"application/json",
-			strings.NewReader(reqBody),
+			strings.NewReader(string(reqBody)),
 		)
 
 		duration := time.Since(start)
@@ -186,7 +203,9 @@ Return ONLY valid JSON, no explanation.`
 		var result struct {
 			Response string `json:"response"`
 		}
-		json.Unmarshal(body, &result)
+		if err := json.Unmarshal(body, &result); err != nil {
+			return aiPromptTestMsg{success: false, result: "Failed to parse API response", duration: duration}
+		}
 
 		valid, summary := validateTestResponse(result.Response)
 		return aiPromptTestMsg{
@@ -200,38 +219,84 @@ Return ONLY valid JSON, no explanation.`
 
 func validateTestResponse(response string) (bool, string) {
 	cleaned := strings.TrimSpace(response)
+
+	// Handle markdown code blocks
 	if strings.HasPrefix(cleaned, "```") {
 		lines := strings.Split(cleaned, "\n")
 		if len(lines) > 2 {
+			// Remove first line (```json) and last line (```)
 			cleaned = strings.Join(lines[1:len(lines)-1], "\n")
 		}
 	}
 
-	var result struct {
-		Title      string  `json:"title"`
-		Year       *int    `json:"year"`
-		Type       string  `json:"type"`
-		Confidence float64 `json:"confidence"`
+	// Try to extract JSON from response - some models output thinking/reasoning first
+	// Look for JSON object pattern
+	jsonStart := strings.Index(cleaned, "{")
+	jsonEnd := strings.LastIndex(cleaned, "}")
+	if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
+		cleaned = cleaned[jsonStart : jsonEnd+1]
 	}
 
-	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
+	// Clean up any remaining whitespace
+	cleaned = strings.TrimSpace(cleaned)
+
+	// Use interface{} for year to handle both int and string
+	var rawResult map[string]interface{}
+	if err := json.Unmarshal([]byte(cleaned), &rawResult); err != nil {
 		return false, "Invalid JSON response"
 	}
 
-	if result.Title == "" {
+	// Extract title (try both cases)
+	title := ""
+	if t, ok := rawResult["title"].(string); ok {
+		title = t
+	} else if t, ok := rawResult["Title"].(string); ok {
+		title = t
+	}
+
+	if title == "" {
 		return false, "No title extracted"
 	}
-	if result.Type != "movie" && result.Type != "tv" {
+
+	// Extract year (handle int, float64 from JSON, or string)
+	var year int
+	if y, ok := rawResult["year"].(float64); ok {
+		year = int(y)
+	} else if y, ok := rawResult["Year"].(float64); ok {
+		year = int(y)
+	} else if y, ok := rawResult["year"].(string); ok {
+		fmt.Sscanf(y, "%d", &year)
+	} else if y, ok := rawResult["Year"].(string); ok {
+		fmt.Sscanf(y, "%d", &year)
+	}
+
+	// Extract type
+	mediaType := ""
+	if t, ok := rawResult["type"].(string); ok {
+		mediaType = strings.ToLower(t)
+	} else if t, ok := rawResult["Type"].(string); ok {
+		mediaType = strings.ToLower(t)
+	}
+
+	if mediaType != "movie" && mediaType != "tv" {
 		return false, "Invalid type field"
 	}
 
+	// Extract confidence
+	var confidence float64
+	if c, ok := rawResult["confidence"].(float64); ok {
+		confidence = c
+	} else if c, ok := rawResult["Confidence"].(float64); ok {
+		confidence = c
+	}
+
 	yearStr := ""
-	if result.Year != nil {
-		yearStr = fmt.Sprintf(" (%d)", *result.Year)
+	if year > 0 {
+		yearStr = fmt.Sprintf(" (%d)", year)
 	}
 
 	return true, fmt.Sprintf("%s%s - %.0f%% confidence",
-		result.Title, yearStr, result.Confidence*100)
+		title, yearStr, confidence*100)
 }
 
 func (m model) handleAPITestResult(msg apiTestResultMsg) (tea.Model, tea.Cmd) {
@@ -239,11 +304,19 @@ func (m model) handleAPITestResult(msg apiTestResultMsg) (tea.Model, tea.Cmd) {
 	case "sonarr":
 		m.sonarrTesting = false
 		m.sonarrTested = msg.success
-		m.sonarrVersion = msg.version
+		if msg.success {
+			m.sonarrVersion = msg.version
+		} else if msg.err != nil {
+			m.sonarrVersion = msg.err.Error()
+		}
 	case "radarr":
 		m.radarrTesting = false
 		m.radarrTested = msg.success
-		m.radarrVersion = msg.version
+		if msg.success {
+			m.radarrVersion = msg.version
+		} else if msg.err != nil {
+			m.radarrVersion = msg.err.Error()
+		}
 	case "ollama":
 		m.aiTesting = false
 		if msg.success {
@@ -304,6 +377,12 @@ func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd) {
 
 	m.currentTaskIndex++
 	if m.currentTaskIndex >= len(m.tasks) {
+		// If install mode (not uninstall) and we have libraries, scan BEFORE systemd setup
+		if !m.uninstallMode && !m.updateMode && (m.tvLibraryPaths != "" || m.movieLibraryPaths != "") && len(m.postScanTasks) > 0 {
+			m.step = stepScanning
+			return m, tea.Batch(m.spinner.Tick, m.runInitialScan())
+		}
+		// No scan needed or uninstall - go to complete
 		m.step = stepComplete
 		return m, nil
 	}

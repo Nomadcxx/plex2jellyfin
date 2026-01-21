@@ -31,7 +31,66 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd()
 
 	case tea.KeyMsg:
-		return m.handleKeyPress(msg)
+		key := msg.String()
+
+		// Universal control keys that should NEVER be passed to text inputs
+		universalControlKeys := map[string]bool{
+			"tab": true, "shift+tab": true, "enter": true, "esc": true,
+			"ctrl+c": true,
+		}
+
+		// Step-specific control keys
+		stepControlKeys := map[string]bool{}
+		switch m.step {
+		case stepWelcome, stepUninstallConfirm:
+			stepControlKeys = map[string]bool{
+				"up": true, "down": true, "k": true, "j": true, "q": true,
+				"w": true, "W": true,
+			}
+		case stepPaths:
+			stepControlKeys = map[string]bool{
+				"+": true, "-": true,
+			}
+		case stepIntegrationsSonarr, stepIntegrationsRadarr:
+			stepControlKeys = map[string]bool{
+				"up": true, "down": true, "k": true, "j": true,
+				"t": true, "T": true, "s": true, "S": true,
+			}
+		case stepIntegrationsAI:
+			stepControlKeys = map[string]bool{
+				"up": true, "down": true, "k": true, "j": true,
+				"t": true, "T": true, "s": true, "S": true,
+				"p": true, "P": true, "r": true, "R": true,
+				"e": true, "E": true, " ": true,
+			}
+		case stepSystemService:
+			stepControlKeys = map[string]bool{
+				"up": true, "down": true, "k": true, "j": true,
+			}
+		case stepConfirm, stepComplete:
+			stepControlKeys = map[string]bool{
+				"q": true,
+			}
+		}
+
+		// First, let step handlers process the key
+		newModel, cmd := m.handleKeyPress(msg)
+
+		// If not a control key for this step, pass to text input
+		isControlKey := universalControlKeys[key] || stepControlKeys[key]
+		if !isControlKey {
+			mdl := newModel.(model)
+			if len(mdl.inputs) > 0 && mdl.focusedInput < len(mdl.inputs) {
+				if mdl.step == stepPaths || mdl.step == stepIntegrationsSonarr ||
+					mdl.step == stepIntegrationsRadarr || mdl.step == stepIntegrationsAI ||
+					mdl.step == stepSystemPermissions {
+					var inputCmd tea.Cmd
+					mdl.inputs[mdl.focusedInput], inputCmd = mdl.inputs[mdl.focusedInput].Update(msg)
+					return mdl, inputCmd
+				}
+			}
+		}
+		return newModel, cmd
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -49,6 +108,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case aiPromptTestMsg:
 		return m.handleAIPromptTest(msg)
+
+	case scanStartMsg:
+		m.scanCancel = msg.cancel
+		return m, m.spinner.Tick
+
+	case scanProgressMsg:
+		m.scanProgress = msg.progress
+		// Keep spinner ticking during scan
+		return m, m.spinner.Tick
+
+	case scanCompleteMsg:
+		if msg.err != nil {
+			m.errors = append(m.errors, msg.err.Error())
+		}
+		m.scanResult = msg.result
+		m.scanStats = msg.stats
+		m.scanCancel = nil
+
+		// After scan, run post-scan tasks (systemd setup, start service)
+		if len(m.postScanTasks) > 0 {
+			m.tasks = m.postScanTasks
+			m.postScanTasks = nil
+			m.currentTaskIndex = 0
+			m.tasks[0].status = statusRunning
+			m.step = stepInstalling
+			return m, executeTaskCmd(0, &m)
+		}
+
+		m.step = stepComplete
+		return m, nil
 	}
 
 	if len(m.inputs) > 0 && m.focusedInput < len(m.inputs) {
@@ -96,6 +185,8 @@ func (m model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleServiceKeys(key)
 	case stepConfirm:
 		return m.handleConfirmKeys(key)
+	case stepUninstallConfirm:
+		return m.handleUninstallConfirmKeys(key)
 	case stepComplete:
 		return m.handleCompleteKeys(key)
 	}
@@ -206,29 +297,30 @@ func (m model) handleRadarrKeys(key string) (tea.Model, tea.Cmd) {
 
 func (m model) handleAIKeys(key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "tab":
-		return m.nextInput()
-	case "shift+tab":
-		return m.prevInput()
+	case "tab", "shift+tab":
+		// No tab navigation needed - up/down handles everything
+		return m, nil
+	case "e", "E", " ":
+		// Toggle AI enable with 'e' or space
+		m.aiEnabled = !m.aiEnabled
+		if m.aiEnabled {
+			return m.detectOllama()
+		}
 	case "up", "k":
-		if m.focusedInput == 0 {
-			m.aiEnabled = !m.aiEnabled
-			if m.aiEnabled {
-				return m.detectOllama()
+		// Navigate model list up (when AI enabled and models available)
+		if m.aiEnabled && m.aiState == aiStateReady && len(m.aiModels) > 0 {
+			if m.aiModelIndex > 0 {
+				m.aiModelIndex--
+				m.aiModel = m.aiModels[m.aiModelIndex]
 			}
-		} else if m.aiState == aiStateReady && m.aiModelIndex > 0 {
-			m.aiModelIndex--
-			m.aiModel = m.aiModels[m.aiModelIndex]
 		}
 	case "down", "j":
-		if m.focusedInput == 0 {
-			m.aiEnabled = !m.aiEnabled
-			if m.aiEnabled {
-				return m.detectOllama()
+		// Navigate model list down (when AI enabled and models available)
+		if m.aiEnabled && m.aiState == aiStateReady && len(m.aiModels) > 0 {
+			if m.aiModelIndex < len(m.aiModels)-1 {
+				m.aiModelIndex++
+				m.aiModel = m.aiModels[m.aiModelIndex]
 			}
-		} else if m.aiState == aiStateReady && m.aiModelIndex < len(m.aiModels)-1 {
-			m.aiModelIndex++
-			m.aiModel = m.aiModels[m.aiModelIndex]
 		}
 	case "t", "T":
 		if m.aiEnabled && m.aiState == aiStateReady {
@@ -314,6 +406,40 @@ func (m model) handleConfirmKeys(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) handleUninstallConfirmKeys(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		if m.selectedOption > 0 {
+			m.selectedOption--
+		}
+	case "down", "j":
+		if m.selectedOption < 2 {
+			m.selectedOption++
+		}
+	case "enter":
+		// selectedOption: 0 = keep all, 1 = keep config/delete db, 2 = delete all
+		switch m.selectedOption {
+		case 0:
+			m.keepDatabase = true
+			m.keepConfig = true
+		case 1:
+			m.keepDatabase = false
+			m.keepConfig = true
+		case 2:
+			m.keepDatabase = false
+			m.keepConfig = false
+		}
+		return m.startInstallation()
+	case "esc":
+		// Go back to welcome
+		m.uninstallMode = false
+		m.step = stepWelcome
+		m.selectedOption = 0
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m model) handleCompleteKeys(key string) (tea.Model, tea.Cmd) {
 	if key == "enter" || key == "q" {
 		return m, tea.Quit
@@ -389,9 +515,11 @@ func (m model) proceedFromWelcome() (tea.Model, tea.Cmd) {
 			// Fresh install
 			return m.nextStep()
 		case 2:
-			// Uninstall
+			// Uninstall - go to confirmation screen
 			m.uninstallMode = true
-			return m.startInstallation()
+			m.step = stepUninstallConfirm
+			m.selectedOption = 0 // Default to "keep config"
+			return m, nil
 		}
 	} else {
 		// Options: 0=Install, 1=Uninstall
@@ -400,9 +528,11 @@ func (m model) proceedFromWelcome() (tea.Model, tea.Cmd) {
 			// Fresh install
 			return m.nextStep()
 		case 1:
-			// Uninstall
+			// Uninstall - go to confirmation screen
 			m.uninstallMode = true
-			return m.startInstallation()
+			m.step = stepUninstallConfirm
+			m.selectedOption = 0 // Default to "keep config"
+			return m, nil
 		}
 	}
 	return m.nextStep()
