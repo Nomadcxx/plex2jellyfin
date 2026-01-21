@@ -96,7 +96,7 @@ type model struct {
 	program          *tea.Program
 
 	// Animations
-	beams  *BeamsEffect
+	beams  *BeamsTextEffect
 	ticker *TypewriterTicker
 
 	// Text inputs

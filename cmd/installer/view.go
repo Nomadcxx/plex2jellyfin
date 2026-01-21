@@ -25,22 +25,24 @@ func (m model) View() string {
 
 	var content strings.Builder
 
+	// Render the animated ASCII header using BeamsTextEffect
 	if m.beams != nil {
 		beamsOutput := m.beams.Render()
 		content.WriteString(beamsOutput)
 		content.WriteString("\n")
-	}
-
-	headerLines := strings.Split(asciiHeader, "\n")
-	for _, line := range headerLines {
-		centered := lipgloss.NewStyle().
-			Width(m.width).
-			Align(lipgloss.Center).
-			Foreground(Primary).
-			Bold(true).
-			Render(line)
-		content.WriteString(centered)
-		content.WriteString("\n")
+	} else {
+		// Fallback: render static header if beams not initialized
+		headerLines := strings.Split(asciiHeader, "\n")
+		for _, line := range headerLines {
+			centered := lipgloss.NewStyle().
+				Width(m.width).
+				Align(lipgloss.Center).
+				Foreground(Primary).
+				Bold(true).
+				Render(line)
+			content.WriteString(centered)
+			content.WriteString("\n")
+		}
 	}
 	content.WriteString("\n")
 

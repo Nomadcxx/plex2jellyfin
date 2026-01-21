@@ -2,149 +2,577 @@
 package main
 
 import (
+	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-// BeamsEffect implements beams that travel across rows and columns
-type BeamsEffect struct {
-	width   int
-	height  int
-	palette []string
-	frame   int
+// BeamsTextEffect implements beams that travel across text, illuminating characters
+type BeamsTextEffect struct {
+	width  int
+	height int
+	text   string
 
-	rowSymbols    []rune
-	columnSymbols []rune
-	delay         int
-	speedRange    [2]int
+	// Configuration
+	beamRowSymbols       []rune
+	beamColumnSymbols    []rune
+	beamDelay            int
+	beamRowSpeedRange    [2]int
+	beamColumnSpeedRange [2]int
+	beamGradientStops    []string
+	beamGradientSteps    int
+	beamGradientFrames   int
+	finalGradientStops   []string
+	finalGradientSteps   int
+	finalGradientFrames  int
+	finalWipeSpeed       int
 
-	activeBeams   []Beam
-	pendingBeams  []Beam
-	nextBeamDelay int
+	// Character data
+	chars []BeamsCharacter
+
+	// Beam groups
+	rowGroups    []BeamsGroup
+	columnGroups []BeamsGroup
+
+	// Final wipe diagonal groups
+	diagonalGroups [][]int
+
+	// Animation state
+	phase          string
+	frameCount     int
+	beamDelayCount int
+	currentDiag    int
+	holdCounter    int
+
+	rng *rand.Rand
 }
 
-// Beam represents a single beam traveling across the screen
-type Beam struct {
-	X         int
-	Y         int
-	Direction string // "row" or "column"
-	Length    int
-	Speed     float64
-	Position  float64
-	Symbol    rune
-	Color     string
+// BeamsCharacter represents a single character in the beams animation
+type BeamsCharacter struct {
+	original rune
+	x        int
+	y        int
+
+	// Animation state
+	visible          bool
+	currentSymbol    rune
+	currentColor     string
+	sceneActive      string
+	sceneFrame       int
+	beamGradient     []string
+	fadeGradient     []string
+	brightenGradient []string
 }
 
-// NewBeamsEffect creates a new beams effect
-func NewBeamsEffect(width, height int) *BeamsEffect {
-	// Monochrome palette
-	palette := []string{"#ffffff", "#cccccc", "#999999", "#666666"}
+// BeamsGroup represents a group of characters for beam animation
+type BeamsGroup struct {
+	charIndices        []int
+	direction          string
+	speed              float64
+	nextCharCounter    float64
+	currentCharIndex   int
+	symbols            []rune
+	beamGradientStops  []string
+	beamGradientSteps  int
+	beamGradientFrames int
+	beamLength         int
+}
 
-	b := &BeamsEffect{
-		width:         width,
-		height:        height,
-		palette:       palette,
-		frame:         0,
-		rowSymbols:    []rune{'▂', '▁', '_'},
-		columnSymbols: []rune{'▌', '▍', '▎', '▏'},
-		delay:         10,
-		speedRange:    [2]int{10, 40},
-		activeBeams:   []Beam{},
-		pendingBeams:  []Beam{},
-		nextBeamDelay: 0,
+// NewBeamsTextEffect creates a new beams text effect with monochrome palette
+func NewBeamsTextEffect(width, height int, text string) *BeamsTextEffect {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	// Monochrome gradient: dim gray -> white -> bright white
+	beamGradient := []string{"#666666", "#999999", "#cccccc", "#ffffff"}
+	finalGradient := []string{"#999999", "#cccccc", "#ffffff"}
+
+	b := &BeamsTextEffect{
+		width:                width,
+		height:               height,
+		text:                 text,
+		beamRowSymbols:       []rune{'▂', '▁', '_'},
+		beamColumnSymbols:    []rune{'▌', '▍', '▎', '▏'},
+		beamDelay:            2,
+		beamRowSpeedRange:    [2]int{8, 32},
+		beamColumnSpeedRange: [2]int{6, 12},
+		beamGradientStops:    beamGradient,
+		beamGradientSteps:    5,
+		beamGradientFrames:   1,
+		finalGradientStops:   finalGradient,
+		finalGradientSteps:   8,
+		finalGradientFrames:  1,
+		finalWipeSpeed:       3,
+		phase:                "beams",
+		frameCount:           0,
+		beamDelayCount:       0,
+		currentDiag:          0,
+		holdCounter:          0,
+		rng:                  rng,
 	}
+
 	b.init()
 	return b
 }
 
-func (b *BeamsEffect) init() {
-	b.pendingBeams = make([]Beam, 0, (b.height+b.width)*2)
+// init initializes characters and beam groups
+func (b *BeamsTextEffect) init() {
+	lines := strings.Split(b.text, "\n")
 
-	// Add row beams
-	for y := 0; y < b.height; y++ {
-		beam := Beam{
-			X:         0,
-			Y:         y,
-			Direction: "row",
-			Length:    3 + rand.Intn(5),
-			Speed:     float64(rand.Intn(b.speedRange[1]-b.speedRange[0])+b.speedRange[0]) * 0.1,
-			Position:  -float64(b.width),
-			Symbol:    b.rowSymbols[rand.Intn(len(b.rowSymbols))],
-			Color:     b.palette[rand.Intn(len(b.palette))],
+	// Calculate centered position
+	startY := (b.height - len(lines)) / 2
+	if startY < 0 {
+		startY = 0
+	}
+
+	maxWidth := 0
+	for _, line := range lines {
+		if len([]rune(line)) > maxWidth {
+			maxWidth = len([]rune(line))
 		}
-		b.pendingBeams = append(b.pendingBeams, beam)
 	}
 
-	// Add column beams
-	for x := 0; x < b.width; x++ {
-		beam := Beam{
-			X:         x,
-			Y:         0,
-			Direction: "column",
-			Length:    3 + rand.Intn(5),
-			Speed:     float64(rand.Intn(b.speedRange[1]-b.speedRange[0])+b.speedRange[0]) * 0.1,
-			Position:  -float64(b.height),
-			Symbol:    b.columnSymbols[rand.Intn(len(b.columnSymbols))],
-			Color:     b.palette[rand.Intn(len(b.palette))],
-		}
-		b.pendingBeams = append(b.pendingBeams, beam)
+	blockStartX := (b.width - maxWidth) / 2
+	if blockStartX < 0 {
+		blockStartX = 0
 	}
 
-	rand.Shuffle(len(b.pendingBeams), func(i, j int) {
-		b.pendingBeams[i], b.pendingBeams[j] = b.pendingBeams[j], b.pendingBeams[i]
-	})
-}
-
-func (b *BeamsEffect) Resize(width, height int) {
-	b.width = width
-	b.height = height
-	b.init()
-}
-
-func (b *BeamsEffect) Update() {
-	b.frame++
-
-	if b.nextBeamDelay > 0 {
-		b.nextBeamDelay--
-	}
-
-	if b.nextBeamDelay == 0 && len(b.pendingBeams) > 0 {
-		groupSize := rand.Intn(5) + 1
-		for i := 0; i < groupSize && len(b.pendingBeams) > 0; i++ {
-			beam := b.pendingBeams[0]
-			b.activeBeams = append(b.activeBeams, beam)
-			b.pendingBeams = b.pendingBeams[1:]
-		}
-		b.nextBeamDelay = b.delay
-	}
-
-	for i := range b.activeBeams {
-		b.activeBeams[i].Position += b.activeBeams[i].Speed
-	}
-
-	filtered := b.activeBeams[:0]
-	for _, beam := range b.activeBeams {
-		if beam.Direction == "row" {
-			if beam.Position > -float64(beam.Length) && beam.Position < float64(b.width) {
-				filtered = append(filtered, beam)
+	// Create characters from text
+	for lineIdx, line := range lines {
+		runes := []rune(line)
+		for charIdx, char := range runes {
+			if char == ' ' || char == '\t' {
+				continue
 			}
+
+			x := blockStartX + charIdx
+			y := startY + lineIdx
+
+			if x >= b.width || y >= b.height {
+				continue
+			}
+
+			beamGradient := b.createGradient(b.beamGradientStops, b.beamGradientSteps)
+			fadeGradient := b.createFadeGradient(beamGradient[len(beamGradient)-1], 5)
+			brightenGradient := b.createGradient(b.finalGradientStops, b.finalGradientSteps)
+
+			b.chars = append(b.chars, BeamsCharacter{
+				original:         char,
+				x:                x,
+				y:                y,
+				visible:          false,
+				currentSymbol:    char,
+				currentColor:     "",
+				sceneActive:      "",
+				sceneFrame:       0,
+				beamGradient:     beamGradient,
+				fadeGradient:     fadeGradient,
+				brightenGradient: brightenGradient,
+			})
+		}
+	}
+
+	b.createRowGroups()
+	b.createColumnGroups()
+	b.shuffleGroups()
+	b.createDiagonalGroups()
+}
+
+// createRowGroups creates beam groups for each row
+func (b *BeamsTextEffect) createRowGroups() {
+	rowMap := make(map[int][]int)
+	for i, char := range b.chars {
+		rowMap[char.y] = append(rowMap[char.y], i)
+	}
+
+	for _, indices := range rowMap {
+		sort.Slice(indices, func(i, j int) bool {
+			return b.chars[indices[i]].x < b.chars[indices[j]].x
+		})
+
+		if b.rng.Float64() < 0.5 {
+			for i := 0; i < len(indices)/2; i++ {
+				j := len(indices) - 1 - i
+				indices[i], indices[j] = indices[j], indices[i]
+			}
+		}
+
+		speed := float64(b.rng.Intn(b.beamRowSpeedRange[1]-b.beamRowSpeedRange[0])+b.beamRowSpeedRange[0]) * 0.1
+
+		b.rowGroups = append(b.rowGroups, BeamsGroup{
+			charIndices:        indices,
+			direction:          "row",
+			speed:              speed,
+			nextCharCounter:    0,
+			currentCharIndex:   0,
+			symbols:            b.beamRowSymbols,
+			beamGradientStops:  b.beamGradientStops,
+			beamGradientSteps:  b.beamGradientSteps,
+			beamGradientFrames: b.beamGradientFrames,
+			beamLength:         len(b.beamRowSymbols),
+		})
+	}
+}
+
+// createColumnGroups creates beam groups for each column
+func (b *BeamsTextEffect) createColumnGroups() {
+	colMap := make(map[int][]int)
+	for i, char := range b.chars {
+		colMap[char.x] = append(colMap[char.x], i)
+	}
+
+	for _, indices := range colMap {
+		sort.Slice(indices, func(i, j int) bool {
+			return b.chars[indices[i]].y < b.chars[indices[j]].y
+		})
+
+		if b.rng.Float64() < 0.5 {
+			for i := 0; i < len(indices)/2; i++ {
+				j := len(indices) - 1 - i
+				indices[i], indices[j] = indices[j], indices[i]
+			}
+		}
+
+		speed := float64(b.rng.Intn(b.beamColumnSpeedRange[1]-b.beamColumnSpeedRange[0])+b.beamColumnSpeedRange[0]) * 0.1
+
+		b.columnGroups = append(b.columnGroups, BeamsGroup{
+			charIndices:        indices,
+			direction:          "column",
+			speed:              speed,
+			nextCharCounter:    0,
+			currentCharIndex:   0,
+			symbols:            b.beamColumnSymbols,
+			beamGradientStops:  b.beamGradientStops,
+			beamGradientSteps:  b.beamGradientSteps,
+			beamGradientFrames: b.beamGradientFrames,
+			beamLength:         len(b.beamColumnSymbols),
+		})
+	}
+}
+
+// shuffleGroups shuffles row and column groups
+func (b *BeamsTextEffect) shuffleGroups() {
+	allGroups := append(b.rowGroups, b.columnGroups...)
+
+	for i := len(allGroups) - 1; i > 0; i-- {
+		j := b.rng.Intn(i + 1)
+		allGroups[i], allGroups[j] = allGroups[j], allGroups[i]
+	}
+
+	b.rowGroups = b.rowGroups[:0]
+	b.columnGroups = b.columnGroups[:0]
+
+	for _, group := range allGroups {
+		if group.direction == "row" {
+			b.rowGroups = append(b.rowGroups, group)
 		} else {
-			if beam.Position > -float64(beam.Length) && beam.Position < float64(b.height) {
-				filtered = append(filtered, beam)
-			}
+			b.columnGroups = append(b.columnGroups, group)
 		}
-	}
-	b.activeBeams = filtered
-
-	if len(b.activeBeams) == 0 && len(b.pendingBeams) == 0 {
-		b.init()
 	}
 }
 
-func (b *BeamsEffect) Render() string {
+// createDiagonalGroups creates diagonal groups for final wipe
+func (b *BeamsTextEffect) createDiagonalGroups() {
+	diagMap := make(map[int][]int)
+	for i, char := range b.chars {
+		diag := char.x + char.y
+		diagMap[diag] = append(diagMap[diag], i)
+	}
+
+	keys := make([]int, 0, len(diagMap))
+	for k := range diagMap {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+
+	for _, k := range keys {
+		b.diagonalGroups = append(b.diagonalGroups, diagMap[k])
+	}
+}
+
+// createGradient creates a color gradient
+func (b *BeamsTextEffect) createGradient(stops []string, steps int) []string {
+	if len(stops) == 0 {
+		return []string{"#ffffff"}
+	}
+	if len(stops) == 1 {
+		return []string{stops[0]}
+	}
+
+	var gradient []string
+	stepsPerSegment := steps / (len(stops) - 1)
+
+	for i := 0; i < len(stops)-1; i++ {
+		c1 := parseBeamsHexColor(stops[i])
+		c2 := parseBeamsHexColor(stops[i+1])
+
+		for j := 0; j < stepsPerSegment; j++ {
+			t := float64(j) / float64(stepsPerSegment)
+			r := uint8(float64(c1[0])*(1-t) + float64(c2[0])*t)
+			g := uint8(float64(c1[1])*(1-t) + float64(c2[1])*t)
+			bb := uint8(float64(c1[2])*(1-t) + float64(c2[2])*t)
+			gradient = append(gradient, formatBeamsHexColor([3]uint8{r, g, bb}))
+		}
+	}
+
+	gradient = append(gradient, stops[len(stops)-1])
+	return gradient
+}
+
+// createFadeGradient creates a fade to dark gradient
+func (b *BeamsTextEffect) createFadeGradient(startColor string, steps int) []string {
+	rgb := parseBeamsHexColor(startColor)
+	targetRGB := [3]uint8{
+		uint8(float64(rgb[0]) * 0.3),
+		uint8(float64(rgb[1]) * 0.3),
+		uint8(float64(rgb[2]) * 0.3),
+	}
+
+	var gradient []string
+	for i := 0; i <= steps; i++ {
+		t := float64(i) / float64(steps)
+		r := uint8(float64(rgb[0])*(1-t) + float64(targetRGB[0])*t)
+		g := uint8(float64(rgb[1])*(1-t) + float64(targetRGB[1])*t)
+		bb := uint8(float64(rgb[2])*(1-t) + float64(targetRGB[2])*t)
+		gradient = append(gradient, formatBeamsHexColor([3]uint8{r, g, bb}))
+	}
+
+	return gradient
+}
+
+// Update advances the animation by one frame
+func (b *BeamsTextEffect) Update() {
+	b.frameCount++
+
+	if b.phase == "beams" {
+		b.updateBeamsPhase()
+	} else if b.phase == "final_wipe" {
+		b.updateFinalWipePhase()
+	} else if b.phase == "hold" {
+		b.updateHoldPhase()
+	}
+
+	b.updateCharacterAnimations()
+}
+
+// updateBeamsPhase handles beam movement
+func (b *BeamsTextEffect) updateBeamsPhase() {
+	if b.beamDelayCount > 0 {
+		b.beamDelayCount--
+		return
+	}
+
+	groupsToActivate := b.rng.Intn(5) + 1
+	activated := false
+
+	for i := 0; i < groupsToActivate; i++ {
+		for j := range b.rowGroups {
+			if b.rowGroups[j].currentCharIndex == 0 && b.rowGroups[j].nextCharCounter == 0 {
+				b.rowGroups[j].nextCharCounter = 0.01
+				activated = true
+				break
+			}
+		}
+
+		for j := range b.columnGroups {
+			if b.columnGroups[j].currentCharIndex == 0 && b.columnGroups[j].nextCharCounter == 0 {
+				b.columnGroups[j].nextCharCounter = 0.01
+				activated = true
+				break
+			}
+		}
+	}
+
+	if activated {
+		b.beamDelayCount = b.beamDelay
+	}
+
+	allGroupsComplete := true
+
+	for i := range b.rowGroups {
+		if b.updateGroup(&b.rowGroups[i]) {
+			allGroupsComplete = false
+		}
+	}
+
+	for i := range b.columnGroups {
+		if b.updateGroup(&b.columnGroups[i]) {
+			allGroupsComplete = false
+		}
+	}
+
+	if allGroupsComplete {
+		b.phase = "final_wipe"
+	}
+}
+
+// updateGroup updates a beam group
+func (b *BeamsTextEffect) updateGroup(group *BeamsGroup) bool {
+	if group.nextCharCounter == 0 {
+		return false
+	}
+
+	if group.currentCharIndex >= len(group.charIndices) {
+		return false
+	}
+
+	group.nextCharCounter += group.speed
+
+	charsToActivate := int(group.nextCharCounter)
+	group.nextCharCounter -= float64(charsToActivate)
+
+	for i := 0; i < charsToActivate && group.currentCharIndex < len(group.charIndices); i++ {
+		charIdx := group.charIndices[group.currentCharIndex]
+		char := &b.chars[charIdx]
+
+		if group.direction == "row" {
+			char.sceneActive = "beam_row"
+		} else {
+			char.sceneActive = "beam_column"
+		}
+		char.sceneFrame = 0
+		char.visible = true
+
+		symbolIndex := 0
+		char.currentSymbol = group.symbols[symbolIndex]
+
+		for j := 1; j < group.beamLength && group.currentCharIndex-j >= 0; j++ {
+			trailCharIdx := group.charIndices[group.currentCharIndex-j]
+			trailChar := &b.chars[trailCharIdx]
+
+			if trailChar.sceneActive == "beam_row" || trailChar.sceneActive == "beam_column" {
+				symbolIdx := j
+				if symbolIdx >= len(group.symbols) {
+					symbolIdx = len(group.symbols) - 1
+				}
+				trailChar.currentSymbol = group.symbols[symbolIdx]
+			}
+		}
+
+		group.currentCharIndex++
+	}
+
+	return true
+}
+
+// updateFinalWipePhase handles final diagonal wipe
+func (b *BeamsTextEffect) updateFinalWipePhase() {
+	for i := 0; i < b.finalWipeSpeed && b.currentDiag < len(b.diagonalGroups); i++ {
+		for _, charIdx := range b.diagonalGroups[b.currentDiag] {
+			char := &b.chars[charIdx]
+			char.sceneActive = "brighten"
+			char.sceneFrame = 0
+			char.visible = true
+			char.currentSymbol = char.original
+		}
+		b.currentDiag++
+	}
+
+	if b.currentDiag >= len(b.diagonalGroups) {
+		allComplete := true
+		for i := range b.chars {
+			char := &b.chars[i]
+			if char.sceneActive == "brighten" {
+				gradientLen := len(char.brightenGradient)
+				framesPerStep := b.finalGradientFrames
+				totalFrames := gradientLen * framesPerStep
+				if char.sceneFrame < totalFrames {
+					allComplete = false
+					break
+				}
+			}
+		}
+
+		if allComplete {
+			b.phase = "hold"
+			b.holdCounter = 0
+		}
+	}
+}
+
+// updateHoldPhase handles the hold period before reset
+func (b *BeamsTextEffect) updateHoldPhase() {
+	b.holdCounter++
+
+	// Hold for 6 seconds at ~20fps = 120 frames
+	if b.holdCounter >= 120 {
+		b.Reset()
+	}
+}
+
+// updateCharacterAnimations updates character scenes
+func (b *BeamsTextEffect) updateCharacterAnimations() {
+	for i := range b.chars {
+		char := &b.chars[i]
+
+		if !char.visible {
+			continue
+		}
+
+		switch char.sceneActive {
+		case "beam_row", "beam_column":
+			gradientLen := len(char.beamGradient)
+			if gradientLen == 0 {
+				break
+			}
+
+			framesPerStep := b.beamGradientFrames
+			totalFrames := gradientLen * framesPerStep
+
+			if char.sceneFrame < totalFrames {
+				step := char.sceneFrame / framesPerStep
+				if step >= gradientLen {
+					step = gradientLen - 1
+				}
+				char.currentColor = char.beamGradient[step]
+				char.sceneFrame++
+			} else {
+				char.sceneActive = "fade"
+				char.sceneFrame = 0
+			}
+
+		case "fade":
+			fadeLen := len(char.fadeGradient)
+			if fadeLen == 0 {
+				char.sceneActive = ""
+				char.currentSymbol = char.original
+				break
+			}
+
+			if char.sceneFrame < fadeLen {
+				char.currentColor = char.fadeGradient[char.sceneFrame]
+				char.sceneFrame++
+			} else {
+				char.sceneActive = ""
+				char.currentSymbol = char.original
+			}
+
+		case "brighten":
+			gradientLen := len(char.brightenGradient)
+			if gradientLen == 0 {
+				break
+			}
+
+			framesPerStep := b.finalGradientFrames
+			totalFrames := gradientLen * framesPerStep
+
+			if char.sceneFrame < totalFrames {
+				step := char.sceneFrame / framesPerStep
+				if step >= gradientLen {
+					step = gradientLen - 1
+				}
+				char.currentColor = char.brightenGradient[step]
+				char.sceneFrame++
+			}
+		}
+	}
+}
+
+// Render returns the current frame as colored text
+func (b *BeamsTextEffect) Render() string {
 	canvas := make([][]rune, b.height)
 	colors := make([][]string, b.height)
 	for i := range canvas {
@@ -156,25 +584,14 @@ func (b *BeamsEffect) Render() string {
 		}
 	}
 
-	for _, beam := range b.activeBeams {
-		if beam.Direction == "row" {
-			startX := int(beam.Position)
-			for i := 0; i < beam.Length; i++ {
-				x := startX + i
-				if x >= 0 && x < b.width && beam.Y >= 0 && beam.Y < b.height {
-					canvas[beam.Y][x] = beam.Symbol
-					colors[beam.Y][x] = beam.Color
-				}
-			}
-		} else {
-			startY := int(beam.Position)
-			for i := 0; i < beam.Length; i++ {
-				y := startY + i
-				if y >= 0 && y < b.height && beam.X >= 0 && beam.X < b.width {
-					canvas[y][beam.X] = beam.Symbol
-					colors[y][beam.X] = beam.Color
-				}
-			}
+	for _, char := range b.chars {
+		if !char.visible {
+			continue
+		}
+
+		if char.y >= 0 && char.y < b.height && char.x >= 0 && char.x < b.width {
+			canvas[char.y][char.x] = char.currentSymbol
+			colors[char.y][char.x] = char.currentColor
 		}
 	}
 
@@ -196,6 +613,60 @@ func (b *BeamsEffect) Render() string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// Reset restarts the animation
+func (b *BeamsTextEffect) Reset() {
+	b.phase = "beams"
+	b.frameCount = 0
+	b.beamDelayCount = 0
+	b.currentDiag = 0
+	b.holdCounter = 0
+
+	for i := range b.chars {
+		b.chars[i].visible = false
+		b.chars[i].sceneActive = ""
+		b.chars[i].sceneFrame = 0
+		b.chars[i].currentSymbol = b.chars[i].original
+		b.chars[i].currentColor = ""
+	}
+
+	for i := range b.rowGroups {
+		b.rowGroups[i].nextCharCounter = 0
+		b.rowGroups[i].currentCharIndex = 0
+	}
+	for i := range b.columnGroups {
+		b.columnGroups[i].nextCharCounter = 0
+		b.columnGroups[i].currentCharIndex = 0
+	}
+}
+
+// Resize reinitializes with new dimensions
+func (b *BeamsTextEffect) Resize(width, height int) {
+	b.width = width
+	b.height = height
+	b.chars = b.chars[:0]
+	b.rowGroups = b.rowGroups[:0]
+	b.columnGroups = b.columnGroups[:0]
+	b.diagonalGroups = b.diagonalGroups[:0]
+	b.init()
+}
+
+// parseBeamsHexColor converts hex to RGB
+func parseBeamsHexColor(hex string) [3]uint8 {
+	hex = strings.TrimPrefix(hex, "#")
+	if len(hex) != 6 {
+		return [3]uint8{255, 255, 255}
+	}
+
+	var r, g, bb uint8
+	fmt.Sscanf(hex, "%02x%02x%02x", &r, &g, &bb)
+	return [3]uint8{r, g, bb}
+}
+
+// formatBeamsHexColor converts RGB to hex
+func formatBeamsHexColor(rgb [3]uint8) string {
+	return fmt.Sprintf("#%02x%02x%02x", rgb[0], rgb[1], rgb[2])
 }
 
 // TypewriterTicker types out roasts one character at a time
