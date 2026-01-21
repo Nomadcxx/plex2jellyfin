@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 // SQL migration scripts
 var migrations = []migration{
@@ -322,6 +322,55 @@ var migrations = []migration{
 
 			// Update schema version
 			`INSERT INTO schema_version (version) VALUES (5)`,
+		},
+	},
+	{
+		version: 6,
+		up: []string{
+			// AI improvements table - stores user feedback for AI model enhancement
+			`CREATE TABLE ai_improvements (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+				-- Request identification
+				request_id TEXT NOT NULL UNIQUE,
+				filename TEXT NOT NULL,
+
+				-- User-provided correct answer
+				user_title TEXT NOT NULL,
+				user_type TEXT NOT NULL CHECK(user_type IN ('movie', 'tv')),
+				user_year INTEGER,
+
+				-- Original AI result (for comparison)
+				ai_title TEXT,
+				ai_type TEXT CHECK(ai_type IN ('movie', 'tv')),
+				ai_year INTEGER,
+				ai_confidence REAL,
+
+				-- Processing status
+				status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
+				attempts INTEGER DEFAULT 0,
+
+				-- Error tracking
+				error_message TEXT,
+
+				-- Metadata
+				model TEXT,
+				original_request TEXT,
+
+				-- Timestamps
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				completed_at DATETIME
+			)`,
+
+			// AI improvements indexes
+			`CREATE INDEX idx_ai_improvements_status ON ai_improvements(status)`,
+			`CREATE INDEX idx_ai_improvements_model ON ai_improvements(model)`,
+			`CREATE INDEX idx_ai_improvements_created ON ai_improvements(created_at DESC)`,
+			`CREATE INDEX idx_ai_improvements_confidence ON ai_improvements(ai_confidence)`,
+
+			// Update schema version
+			`INSERT INTO schema_version (version) VALUES (6)`,
 		},
 	},
 }
