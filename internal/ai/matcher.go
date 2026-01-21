@@ -18,6 +18,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Nomadcxx/jellywatch/internal/config"
 )
 
 // Result represents the AI's parsed output
@@ -34,21 +36,30 @@ type Result struct {
 
 // Matcher handles AI-based title matching
 type Matcher struct {
-	config       Config
+	config       config.AIConfig
 	client       *http.Client
 	systemPrompt string
 }
 
 // NewMatcher creates a new AI matcher
-func NewMatcher(cfg Config) (*Matcher, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid AI config: %w", err)
+func NewMatcher(cfg config.AIConfig) (*Matcher, error) {
+	if cfg.Enabled && cfg.Model == "" {
+		return nil, fmt.Errorf("AI enabled but no model specified")
+	}
+	if cfg.Enabled && cfg.OllamaEndpoint == "" {
+		return nil, fmt.Errorf("AI enabled but no Ollama endpoint specified")
+	}
+	if cfg.ConfidenceThreshold < 0 || cfg.ConfidenceThreshold > 1 {
+		return nil, fmt.Errorf("confidence threshold must be between 0 and 1")
+	}
+	if cfg.TimeoutSeconds < 1 {
+		return nil, fmt.Errorf("timeout must be at least 1 second")
 	}
 
 	return &Matcher{
 		config: cfg,
 		client: &http.Client{
-			Timeout: cfg.Timeout,
+			Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second,
 		},
 		systemPrompt: getSystemPrompt(),
 	}, nil
@@ -84,7 +95,7 @@ func (m *Matcher) parseWithModel(ctx context.Context, filename, model string) (*
 	}
 
 	// Create HTTP request with context
-	reqCtx, cancel := context.WithTimeout(ctx, m.config.Timeout)
+	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(m.config.TimeoutSeconds)*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, "POST", m.config.OllamaEndpoint+"/api/generate", bytes.NewReader(reqJSON))
@@ -160,7 +171,7 @@ func (m *Matcher) IsAvailable(ctx context.Context) bool {
 }
 
 // GetConfig returns the matcher's configuration
-func (m *Matcher) GetConfig() Config {
+func (m *Matcher) GetConfig() config.AIConfig {
 	return m.config
 }
 
