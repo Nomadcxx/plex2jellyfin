@@ -48,7 +48,7 @@ func init() {
 		`\bv\d+\b`,
 		`\[.*?\]`,
 		`\b(8bit|10bit|12bit)\b`,
-		`-[A-Za-z0-9]+$`,
+		// Note: release group suffix (-SPARKS, -postbot) handled separately in stripReleaseMarkers
 		`\b[A-Z]{2,5}\d*$`,
 	}
 
@@ -191,11 +191,27 @@ func FormatTVEpisodeFilename(title, year string, season, episode int, ext string
 	return fmt.Sprintf("%s S%02dE%02d.%s", title, season, episode, ext)
 }
 
+// releaseGroupSuffix matches release group tags at end of filename like "-SPARKS", "-postbot", "-SM737"
+var releaseGroupSuffix = regexp.MustCompile(`(?i)-[A-Za-z0-9]+$`)
+
 func stripReleaseMarkers(s string) string {
+	// First, strip trailing release group suffix BEFORE replacing hyphens
+	// This catches patterns like "-SPARKS", "-postbot", "-SM737", etc.
+	// Keep stripping until no more match (handles chained groups like "-SPARKS-postbot")
+	for {
+		newS := releaseGroupSuffix.ReplaceAllString(s, "")
+		if newS == s {
+			break
+		}
+		s = newS
+	}
+
+	// Now replace separators with spaces
 	s = strings.ReplaceAll(s, ".", " ")
 	s = strings.ReplaceAll(s, "_", " ")
 	s = strings.ReplaceAll(s, "-", " ")
 
+	// Apply other release patterns
 	for _, re := range releasePatterns {
 		s = re.ReplaceAllString(s, " ")
 	}
