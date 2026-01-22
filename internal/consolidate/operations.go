@@ -267,8 +267,6 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTP"[exp])
 }
 
-// StorePlan stores a consolidation plan into the database
-// Creates individual MOVE plans for each operation in the plan
 func (c *Consolidator) StorePlan(plan *Plan) error {
 	for _, op := range plan.Operations {
 		reason := fmt.Sprintf("Consolidate conflict: %s", plan.Title)
@@ -284,11 +282,11 @@ func (c *Consolidator) StorePlan(plan *Plan) error {
 
 		query := `
 			INSERT INTO consolidation_plans (
-				action, source_file_id, source_path, target_path, reason, reason_details
-			) VALUES (?, ?, ?, ?, ?, ?)
+				action, source_file_id, source_path, target_path, reason, reason_details, conflict_id
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
 		`
 
-		_, err = c.db.DB().Exec(query, "move", sourceFileID, op.SourcePath, op.DestinationPath, reason, details)
+		_, err = c.db.DB().Exec(query, "move", sourceFileID, op.SourcePath, op.DestinationPath, reason, details, plan.ConflictID)
 		if err != nil {
 			return fmt.Errorf("failed to insert consolidation plan: %w", err)
 		}

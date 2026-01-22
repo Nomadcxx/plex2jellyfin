@@ -12,7 +12,6 @@ import (
 )
 
 func TestIntegrationConsolidator(t *testing.T) {
-	// Create temporary directory for test database
 	tempDir, err := ioutil.TempDir("", "jellywatch_consolidate_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -26,19 +25,16 @@ func TestIntegrationConsolidator(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create test config
 	cfg := &config.Config{
 		Options: config.OptionsConfig{
-			DryRun:          true, // Use dry-run to avoid actual file operations
+			DryRun:          true,
 			VerifyChecksums: false,
 			DeleteSource:    false,
 		},
 	}
 
-	// Create consolidator
 	cons := consolidate.NewConsolidator(db, cfg)
 
-	// Test that GetUnresolvedConflicts works
 	conflicts, err := db.GetUnresolvedConflicts()
 	if err != nil {
 		t.Fatalf("Failed to get unresolved conflicts: %v", err)
@@ -48,18 +44,15 @@ func TestIntegrationConsolidator(t *testing.T) {
 		t.Errorf("Expected 0 conflicts initially, got %d", len(conflicts))
 	}
 
-	// Test that GenerateAllPlans works (it will call DetectConflicts internally)
 	plans, err := cons.GenerateAllPlans()
 	if err != nil {
 		t.Fatalf("Failed to generate plans: %v", err)
 	}
 
-	// With an empty database, there should be no conflicts or plans
 	if len(plans) != 0 {
 		t.Errorf("Expected 0 plans with empty database, got %d", len(plans))
 	}
 
-	// Verify that stats are tracked correctly
 	stats := cons.GetStats()
 	if stats.ConflictsFound != 0 {
 		t.Errorf("Expected 0 conflicts found, got %d", stats.ConflictsFound)
@@ -68,13 +61,11 @@ func TestIntegrationConsolidator(t *testing.T) {
 		t.Errorf("Expected 0 plans generated, got %d", stats.PlansGenerated)
 	}
 
-	// Test DryRun method
 	err = cons.DryRun()
 	if err != nil {
 		t.Fatalf("DryRun failed: %v", err)
 	}
 
-	// Test ExecuteAll method in dry-run mode
 	err = cons.ExecuteAll(true)
 	if err != nil {
 		t.Fatalf("ExecuteAll(dryRun=true) failed: %v", err)
@@ -82,4 +73,44 @@ func TestIntegrationConsolidator(t *testing.T) {
 
 	t.Logf("Integration test passed. Basic consolidator operations work correctly.")
 	t.Logf("Note: Full conflict detection requires multiple series entries, which is prevented by UNIQUE constraint.")
+}
+
+func TestConflictResolutionAfterMove(t *testing.T) {
+	tempDir, err := ioutil.TempDir("", "jellywatch_conflict_resolution_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	year := 2024
+	_, err = db.DB().Exec(`
+		INSERT INTO conflicts (media_type, title, title_normalized, year, locations, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "movie", "Test Movie", "test_movie", year, `["/path1/test_movie.mkv","/path2/test_movie.mkv"]`, "2024-01-01 00:00:00")
+	if err != nil {
+		t.Fatalf("Failed to create conflict: %v", err)
+	}
+
+	var conflictID int64
+	err = db.DB().QueryRow("SELECT id FROM conflicts WHERE title_normalized = ?", "test_movie").Scan(&conflictID)
+	if err != nil {
+		t.Fatalf("Failed to get conflict ID: %v", err)
+	}
+
+	conflicts, err := db.GetUnresolvedConflicts()
+	if err != nil {
+		t.Fatalf("Failed to get unresolved conflicts: %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("Expected 1 unresolved conflict, got %d", len(conflicts))
+	}
+
+	t.Logf("Test setup complete. Integration with executeMove needed for full end-to-end test.")
 }

@@ -216,10 +216,14 @@ func (e *Executor) executeMove(ctx context.Context, plan *ConsolidationPlan) err
 		return fmt.Errorf("failed to insert new database entry: %w", err)
 	}
 
-	// Cleanup empty parent directory
+	if plan.ConflictID > 0 {
+		if err := e.db.ResolveConflict(plan.ConflictID, plan.TargetPath); err != nil {
+			return fmt.Errorf("failed to mark conflict as resolved: %w", err)
+		}
+	}
+
 	parentDir := filepath.Dir(plan.SourcePath)
 	if err := CleanupEmptyDir(parentDir); err != nil {
-		// Log warning but don't fail the move
 		fmt.Printf("Warning: Failed to cleanup empty directory %s: %v\n", parentDir, err)
 	}
 

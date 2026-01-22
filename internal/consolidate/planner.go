@@ -2,6 +2,7 @@ package consolidate
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
@@ -41,6 +42,7 @@ type ConsolidationPlan struct {
 	ReasonDetails string
 	ExecutedAt    string
 	ErrorMessage  string
+	ConflictID    int64
 }
 
 // GeneratePlans creates consolidation plans from database duplicate detection
@@ -242,7 +244,7 @@ func (p *Planner) clearPendingPlans() error {
 func (p *Planner) GetPendingPlans() ([]*ConsolidationPlan, error) {
 	query := `
 		SELECT id, created_at, status, action, source_file_id, source_path,
-		       target_path, reason, reason_details, executed_at, error_message
+		       target_path, reason, reason_details, executed_at, error_message, conflict_id
 		FROM consolidation_plans
 		WHERE status = 'pending'
 		ORDER BY action DESC, id ASC
@@ -258,6 +260,7 @@ func (p *Planner) GetPendingPlans() ([]*ConsolidationPlan, error) {
 	for rows.Next() {
 		var plan ConsolidationPlan
 		var executedAt, errorMsg *string
+		var conflictID sql.NullInt64
 
 		err := rows.Scan(
 			&plan.ID,
@@ -271,6 +274,7 @@ func (p *Planner) GetPendingPlans() ([]*ConsolidationPlan, error) {
 			&plan.ReasonDetails,
 			&executedAt,
 			&errorMsg,
+			&conflictID,
 		)
 		if err != nil {
 			return nil, err
@@ -281,6 +285,9 @@ func (p *Planner) GetPendingPlans() ([]*ConsolidationPlan, error) {
 		}
 		if errorMsg != nil {
 			plan.ErrorMessage = *errorMsg
+		}
+		if conflictID.Valid {
+			plan.ConflictID = conflictID.Int64
 		}
 
 		plans = append(plans, &plan)
@@ -293,13 +300,14 @@ func (p *Planner) GetPendingPlans() ([]*ConsolidationPlan, error) {
 func (p *Planner) GetPlanByID(planID int64) (*ConsolidationPlan, error) {
 	query := `
 		SELECT id, created_at, status, action, source_file_id, source_path,
-		       target_path, reason, reason_details, executed_at, error_message
+		       target_path, reason, reason_details, executed_at, error_message, conflict_id
 		FROM consolidation_plans
 		WHERE id = ?
 	`
 
 	var plan ConsolidationPlan
 	var executedAt, errorMsg *string
+	var conflictID sql.NullInt64
 
 	err := p.db.DB().QueryRow(query, planID).Scan(
 		&plan.ID,
@@ -313,6 +321,7 @@ func (p *Planner) GetPlanByID(planID int64) (*ConsolidationPlan, error) {
 		&plan.ReasonDetails,
 		&executedAt,
 		&errorMsg,
+		&conflictID,
 	)
 	if err != nil {
 		return nil, err
@@ -323,6 +332,9 @@ func (p *Planner) GetPlanByID(planID int64) (*ConsolidationPlan, error) {
 	}
 	if errorMsg != nil {
 		plan.ErrorMessage = *errorMsg
+	}
+	if conflictID.Valid {
+		plan.ConflictID = conflictID.Int64
 	}
 
 	return &plan, nil

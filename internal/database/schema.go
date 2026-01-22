@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 7
+const currentSchemaVersion = 8
 
 // SQL migration scripts
 var migrations = []migration{
@@ -414,6 +414,13 @@ var migrations = []migration{
 			`CREATE INDEX idx_consolidation_created ON consolidation_plans(created_at DESC)`,
 
 			`INSERT INTO schema_version (version) VALUES (7)`,
+		},
+	},
+	{
+		version: 8,
+		up: []string{
+			`ALTER TABLE consolidation_plans ADD COLUMN conflict_id INTEGER REFERENCES conflicts(id)`,
+			`INSERT INTO schema_version (version) VALUES (8)`,
 		},
 	},
 }

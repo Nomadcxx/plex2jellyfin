@@ -422,3 +422,49 @@ func TestMigration7NullableSourceFileID(t *testing.T) {
 		t.Errorf("Expected 1 consolidation plan, got %d", count)
 	}
 }
+
+func TestMigration8AddConflictID(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	db, err := OpenPath(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	query := `
+		INSERT INTO consolidation_plans
+		(action, source_path, target_path, reason, conflict_id)
+		VALUES (?, ?, ?, ?, ?)
+	`
+	_, err = db.db.Exec(query, "move", "/src/file.mkv", "/dst/file.mkv", "test", 123)
+
+	if err != nil {
+		t.Errorf("Expected no error inserting plan with conflict_id, got: %v", err)
+	}
+
+	var count int
+	err = db.db.QueryRow("SELECT COUNT(*) FROM consolidation_plans WHERE source_path = ?", "/src/file.mkv").Scan(&count)
+	if err != nil {
+		t.Errorf("Failed to query consolidation_plans: %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("Expected 1 consolidation plan, got %d", count)
+	}
+
+	var conflictID int64
+	err = db.db.QueryRow("SELECT conflict_id FROM consolidation_plans WHERE source_path = ?", "/src/file.mkv").Scan(&conflictID)
+	if err != nil {
+		t.Errorf("Failed to query conflict_id: %v", err)
+	}
+
+	if conflictID != 123 {
+		t.Errorf("Expected conflict_id = 123, got %d", conflictID)
+	}
+}
