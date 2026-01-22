@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 6
+const currentSchemaVersion = 7
 
 // SQL migration scripts
 var migrations = []migration{
@@ -371,6 +371,49 @@ var migrations = []migration{
 
 			// Update schema version
 			`INSERT INTO schema_version (version) VALUES (6)`,
+		},
+	},
+	{
+		version: 7,
+		up: []string{
+			`CREATE TABLE consolidation_plans_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+				-- Status tracking
+				status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'executing', 'completed', 'failed', 'skipped')),
+
+				-- Action details
+				action TEXT NOT NULL CHECK(action IN ('delete', 'move', 'rename')),
+				source_file_id INTEGER,
+				source_path TEXT NOT NULL,
+				target_path TEXT,
+
+				-- Reasoning
+				reason TEXT NOT NULL,
+				reason_details TEXT,
+
+				-- Execution tracking
+				executed_at DATETIME,
+				error_message TEXT,
+
+				FOREIGN KEY (source_file_id) REFERENCES media_files(id) ON DELETE CASCADE
+			)`,
+
+			`INSERT INTO consolidation_plans_new 
+			 (id, created_at, status, action, source_file_id, source_path, target_path, reason, reason_details, executed_at, error_message)
+			 SELECT id, created_at, status, action, source_file_id, source_path, target_path, reason, reason_details, executed_at, error_message 
+			 FROM consolidation_plans`,
+
+			`DROP TABLE consolidation_plans`,
+
+			`ALTER TABLE consolidation_plans_new RENAME TO consolidation_plans`,
+
+			`CREATE INDEX idx_consolidation_status ON consolidation_plans(status)`,
+			`CREATE INDEX idx_consolidation_action ON consolidation_plans(action)`,
+			`CREATE INDEX idx_consolidation_created ON consolidation_plans(created_at DESC)`,
+
+			`INSERT INTO schema_version (version) VALUES (7)`,
 		},
 	},
 }

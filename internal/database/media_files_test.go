@@ -385,3 +385,40 @@ func TestConsolidationStats(t *testing.T) {
 		t.Errorf("expected space reclaimable 1000000000, got %d", stats.SpaceReclaimable)
 	}
 }
+
+func TestMigration7NullableSourceFileID(t *testing.T) {
+	// Create temporary database
+	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	db, err := OpenPath(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	query := `
+		INSERT INTO consolidation_plans 
+		(action, source_path, target_path, reason) 
+		VALUES (?, ?, ?, ?)
+	`
+	_, err = db.db.Exec(query, "move", "/src/file.mkv", "/dst/file.mkv", "test")
+
+	if err != nil {
+		t.Errorf("Expected no error inserting plan without source_file_id, got: %v", err)
+	}
+
+	var count int
+	err = db.db.QueryRow("SELECT COUNT(*) FROM consolidation_plans WHERE source_path = ?", "/src/file.mkv").Scan(&count)
+	if err != nil {
+		t.Errorf("Failed to query consolidation_plans: %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("Expected 1 consolidation plan, got %d", count)
+	}
+}
