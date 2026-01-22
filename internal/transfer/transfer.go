@@ -159,6 +159,21 @@ const (
 	BackendNative
 )
 
+func (b Backend) String() string {
+	switch b {
+	case BackendAuto:
+		return "auto"
+	case BackendPV:
+		return "pv"
+	case BackendRsync:
+		return "rsync"
+	case BackendNative:
+		return "native"
+	default:
+		return "unknown"
+	}
+}
+
 func New(backend Backend) (Transferer, error) {
 	switch backend {
 	case BackendPV:
