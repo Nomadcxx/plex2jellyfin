@@ -11,6 +11,10 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/database"
 )
 
+const (
+	MinConsolidationFileSize = 100 * 1024 * 1024 // 100MB minimum
+)
+
 // Consolidator handles consolidation operations
 type Consolidator struct {
 	db    *database.MediaDB
@@ -158,6 +162,11 @@ func (c *Consolidator) getFilesToMove(sourcePath, targetPath string, conflict *d
 
 		if info.IsDir() {
 			return nil // Skip directories
+		}
+
+		// SIZE FILTER: Skip files under 100MB
+		if info.Size() < MinConsolidationFileSize {
+			return nil
 		}
 
 		// Check if it's a media file

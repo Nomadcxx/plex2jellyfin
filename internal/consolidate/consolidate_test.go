@@ -106,6 +106,44 @@ func TestConsolidatorChooseTargetPath(t *testing.T) {
 	}
 }
 
+func TestSizeFilter(t *testing.T) {
+	// Create temp file under 100MB
+	tmpDir := t.TempDir()
+	smallFile := filepath.Join(tmpDir, "small.mkv")
+	os.WriteFile(smallFile, make([]byte, 50*1024*1024), 0644) // 50MB
+
+	// Create conflict with small file
+	conflict := &database.Conflict{
+		Locations: []string{tmpDir},
+	}
+
+	consolidator := &Consolidator{}
+
+	// getFilesToMove should skip small files
+	ops, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(ops) > 0 {
+		t.Error("Expected no operations for files under 100MB")
+	}
+
+	// Create temp file over 100MB
+	largeFile := filepath.Join(tmpDir, "large.mkv")
+	os.WriteFile(largeFile, make([]byte, 150*1024*1024), 0644) // 150MB
+
+	// getFilesToMove should process large files
+	ops, err = consolidator.getFilesToMove(tmpDir, "/target", conflict)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(ops) == 0 {
+		t.Error("Expected operations for files over 100MB")
+	}
+}
+
 func TestIsMediaFile(t *testing.T) {
 	tests := []struct {
 		ext      string
