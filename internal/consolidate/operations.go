@@ -124,7 +124,6 @@ func (c *Consolidator) GenerateAllPlans() ([]*Plan, error) {
 	return plans, nil
 }
 
-// DryRun executes a dry run of all consolidation plans
 func (c *Consolidator) DryRun() error {
 	plans, err := c.GenerateAllPlans()
 	if err != nil {
@@ -138,44 +137,50 @@ func (c *Consolidator) DryRun() error {
 
 	var totalFiles int
 	var totalBytes int64
+	var skippedConflicts int
+
+	fmt.Println("\n=== Consolidation Preview ===")
 
 	for _, plan := range plans {
 		totalFiles += plan.TotalFiles
 		totalBytes += plan.TotalBytes
 
-		yearStr := "unknown"
-		if plan.Year != nil {
-			yearStr = fmt.Sprintf("%d", *plan.Year)
-		}
-		fmt.Printf("\n=== Plan for %s (%s) ===\n", plan.Title, yearStr)
-		fmt.Printf("Conflict ID: %d\n", plan.ConflictID)
-		fmt.Printf("Media Type: %s\n", plan.MediaType)
-		fmt.Printf("Target Path: %s\n", plan.TargetPath)
-		fmt.Printf("Source Paths: %v\n", plan.SourcePaths)
-		fmt.Printf("Files to move: %d (%s)\n", plan.TotalFiles, formatBytes(plan.TotalBytes))
-
 		if !plan.CanProceed {
-			fmt.Printf("⚠️  Cannot proceed: %v\n", plan.Reasons)
+			skippedConflicts++
+			fmt.Printf("%s (%s): Skipped - %v\n",
+				plan.Title,
+				func() string {
+					if plan.Year != nil {
+						return fmt.Sprintf("%d", *plan.Year)
+					}
+					return "unknown"
+				}(),
+				plan.Reasons)
+			continue
 		}
 
-		// Show first 5 files to move
-		for i, op := range plan.Operations {
-			if i >= 5 {
-				fmt.Printf("  ... and %d more files\n", len(plan.Operations)-i)
-				break
+		yearStr := func() string {
+			if plan.Year != nil {
+				return fmt.Sprintf("%d", *plan.Year)
 			}
-			fmt.Printf("  %s -> %s (%s)\n",
-				filepath.Base(op.SourcePath),
-				filepath.Base(op.DestinationPath),
-				formatBytes(op.Size))
-		}
+			return "unknown"
+		}()
+
+		fmt.Printf("%s (%s): %d files → %s/\n",
+			plan.Title,
+			yearStr,
+			plan.TotalFiles,
+			plan.TargetPath)
 	}
 
-	fmt.Printf("\n=== SUMMARY ===\n")
-	fmt.Printf("Conflicts found: %d\n", c.stats.ConflictsFound)
-	fmt.Printf("Plans generated: %d\n", len(plans))
-	fmt.Printf("Total files to move: %d\n", totalFiles)
-	fmt.Printf("Total bytes to move: %s\n", formatBytes(totalBytes))
+	if len(plans) > 0 && totalFiles > 0 {
+		fmt.Printf("\nTotal: %d files across %d conflicts\n", totalFiles, len(plans)-skippedConflicts)
+		fmt.Printf("Estimated data: %s\n", formatBytes(totalBytes))
+	}
+
+	if skippedConflicts > 0 {
+		fmt.Printf("Skipped %d conflicts (no files >100MB to move)\n", skippedConflicts)
+	}
 
 	return nil
 }
