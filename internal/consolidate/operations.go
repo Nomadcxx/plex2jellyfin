@@ -236,8 +236,8 @@ func (c *Consolidator) GetStats() Stats {
 	return c.stats
 }
 
-// cleanupEmptyDir removes a directory only if it's empty
-func cleanupEmptyDir(dir string) error {
+// CleanupEmptyDir removes a directory only if it's empty
+func CleanupEmptyDir(dir string) error {
 	// Check if directory is empty
 	entries, err := os.ReadDir(dir)
 	if err != nil {

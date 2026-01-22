@@ -275,7 +275,7 @@ func TestCleanupEmptyDir(t *testing.T) {
 	os.MkdirAll(emptyDir, 0755)
 
 	// Should delete empty directory
-	err := cleanupEmptyDir(emptyDir)
+	err := CleanupEmptyDir(emptyDir)
 	if err != nil {
 		t.Errorf("Expected no error cleaning empty dir: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestCleanupNotEmptyDir(t *testing.T) {
 	os.WriteFile(filepath.Join(notEmptyDir, "file.mkv"), []byte("data"), 0644)
 
 	// Should NOT delete non-empty directory
-	err := cleanupEmptyDir(notEmptyDir)
+	err := CleanupEmptyDir(notEmptyDir)
 	if err != nil {
 		t.Errorf("Expected no error for non-empty dir: %v", err)
 	}

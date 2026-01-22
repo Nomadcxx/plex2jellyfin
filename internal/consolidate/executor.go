@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
@@ -20,15 +21,15 @@ type Executor struct {
 
 // ExecutionResult contains statistics from plan execution
 type ExecutionResult struct {
-	PlansExecuted   int
-	PlansSucceeded  int
-	PlansFailed     int
-	FilesDeleted    int
-	FilesMoved      int
-	FilesRenamed    int
-	SpaceReclaimed  int64
-	Duration        time.Duration
-	Errors          []error
+	PlansExecuted  int
+	PlansSucceeded int
+	PlansFailed    int
+	FilesDeleted   int
+	FilesMoved     int
+	FilesRenamed   int
+	SpaceReclaimed int64
+	Duration       time.Duration
+	Errors         []error
 }
 
 // NewExecutor creates a new plan executor
@@ -213,6 +214,13 @@ func (e *Executor) executeMove(ctx context.Context, plan *ConsolidationPlan) err
 	file.Path = plan.TargetPath
 	if err := e.db.UpsertMediaFile(file); err != nil {
 		return fmt.Errorf("failed to insert new database entry: %w", err)
+	}
+
+	// Cleanup empty parent directory
+	parentDir := filepath.Dir(plan.SourcePath)
+	if err := CleanupEmptyDir(parentDir); err != nil {
+		// Log warning but don't fail the move
+		fmt.Printf("Warning: Failed to cleanup empty directory %s: %v\n", parentDir, err)
 	}
 
 	return nil
