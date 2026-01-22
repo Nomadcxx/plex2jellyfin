@@ -164,8 +164,8 @@ func (c *Consolidator) getFilesToMove(sourcePath, targetPath string, conflict *d
 			return nil // Skip directories
 		}
 
-		// SIZE FILTER: Skip files under 100MB
-		if info.Size() < MinConsolidationFileSize {
+		// SIZE FILTER: Skip files under or equal to 100MB
+		if info.Size() <= MinConsolidationFileSize {
 			return nil
 		}
 
