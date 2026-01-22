@@ -210,3 +210,61 @@ func TestIsMediaFile(t *testing.T) {
 		}
 	}
 }
+
+func TestStorePlanUntrackedFile(t *testing.T) {
+	// Create temporary database
+	tempDir, err := ioutil.TempDir("", "jellywatch_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test config
+	cfg := &config.Config{
+		Options: config.OptionsConfig{
+			DryRun:          false,
+			VerifyChecksums: false,
+			DeleteSource:    true,
+		},
+	}
+
+	// Create consolidator
+	consolidator := NewConsolidator(db, cfg)
+
+	// Create plan for file NOT in database
+	plan := &Plan{
+		Title:       "Test",
+		SourcePaths: []string{"/tmp/untracked.mkv"},
+		TargetPath:  "/dst/test.mkv",
+		Operations: []*Operation{{
+			SourcePath:      "/tmp/untracked.mkv",
+			DestinationPath: "/dst/test.mkv",
+			Size:            200 * 1024 * 1024, // 200MB
+		}},
+	}
+
+	err = consolidator.StorePlan(plan)
+	if err != nil {
+		t.Errorf("Expected no error storing untracked file plan: %v", err)
+	}
+
+	// Verify plan was created with NULL source_file_id
+	var sourceFileID *int64
+	query := `SELECT source_file_id FROM consolidation_plans WHERE source_path = ?`
+	err = db.DB().QueryRow(query, "/tmp/untracked.mkv").Scan(&sourceFileID)
+
+	if err != nil {
+		t.Fatalf("Failed to query consolidation plan: %v", err)
+	}
+
+	if sourceFileID != nil {
+		t.Errorf("Expected source_file_id to be NULL, got: %v", *sourceFileID)
+	}
+}
