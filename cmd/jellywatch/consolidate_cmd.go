@@ -152,12 +152,11 @@ func runExecutePlans(ctx context.Context, db *database.MediaDB, dryRun bool) err
 	}
 
 	if dryRun {
-		fmt.Println("🔍 DRY RUN - No changes will be made\n")
+		fmt.Println("🔍 DRY RUN - No changes will be made")
 	} else {
-		fmt.Println("⚠️  Executing consolidation plans...\n")
+		fmt.Println("⚠️  Executing consolidation plans...")
 	}
 
-	// Show plans
 	fmt.Printf("Found %d pending plans:\n\n", len(plans))
 
 	deleteCount := 0
@@ -238,7 +237,7 @@ func runConsolidateSummary(db *database.MediaDB) error {
 		return fmt.Errorf("failed to get plan summary: %w", err)
 	}
 
-	fmt.Println("=== CONDOR Consolidation System ===\n")
+	fmt.Println("=== CONDOR Consolidation System ===")
 
 	if summary.TotalPlans > 0 {
 		fmt.Printf("You have %d pending consolidation plans:\n", summary.TotalPlans)

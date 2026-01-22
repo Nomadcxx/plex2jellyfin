@@ -62,7 +62,7 @@ func runDuplicates(moviesOnly, tvOnly bool, showFilter string) error {
 		}
 
 		if len(movieGroups) > 0 {
-			fmt.Println("=== Duplicate Movies ===\n")
+			fmt.Println("=== Duplicate Movies ===")
 
 			for _, group := range movieGroups {
 				if len(group.Files) < 2 {
@@ -113,7 +113,7 @@ func runDuplicates(moviesOnly, tvOnly bool, showFilter string) error {
 		}
 
 		if len(episodeGroups) > 0 {
-			fmt.Println("=== Duplicate TV Episodes ===\n")
+			fmt.Println("=== Duplicate TV Episodes ===")
 
 			for _, group := range episodeGroups {
 				if len(group.Files) < 2 {
