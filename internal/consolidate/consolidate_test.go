@@ -268,3 +268,38 @@ func TestStorePlanUntrackedFile(t *testing.T) {
 		t.Errorf("Expected source_file_id to be NULL, got: %v", *sourceFileID)
 	}
 }
+
+func TestCleanupEmptyDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	emptyDir := filepath.Join(tmpDir, "empty")
+	os.MkdirAll(emptyDir, 0755)
+
+	// Should delete empty directory
+	err := cleanupEmptyDir(emptyDir)
+	if err != nil {
+		t.Errorf("Expected no error cleaning empty dir: %v", err)
+	}
+
+	// Verify deleted
+	if _, err := os.Stat(emptyDir); !os.IsNotExist(err) {
+		t.Error("Expected empty dir to be deleted")
+	}
+}
+
+func TestCleanupNotEmptyDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	notEmptyDir := filepath.Join(tmpDir, "files")
+	os.MkdirAll(notEmptyDir, 0755)
+	os.WriteFile(filepath.Join(notEmptyDir, "file.mkv"), []byte("data"), 0644)
+
+	// Should NOT delete non-empty directory
+	err := cleanupEmptyDir(notEmptyDir)
+	if err != nil {
+		t.Errorf("Expected no error for non-empty dir: %v", err)
+	}
+
+	// Verify still exists
+	if _, err := os.Stat(notEmptyDir); os.IsNotExist(err) {
+		t.Error("Expected non-empty dir to remain")
+	}
+}

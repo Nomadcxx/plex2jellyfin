@@ -236,6 +236,23 @@ func (c *Consolidator) GetStats() Stats {
 	return c.stats
 }
 
+// cleanupEmptyDir removes a directory only if it's empty
+func cleanupEmptyDir(dir string) error {
+	// Check if directory is empty
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil // Doesn't exist, not an error
+	}
+
+	if len(entries) == 0 {
+		// Empty - delete it
+		return os.Remove(dir)
+	}
+
+	// Not empty - do nothing
+	return nil
+}
+
 // formatBytes formats bytes for display
 func formatBytes(b int64) string {
 	const unit = 1024
