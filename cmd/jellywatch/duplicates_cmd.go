@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
@@ -13,6 +14,7 @@ func newDuplicatesCmd() *cobra.Command {
 		moviesOnly bool
 		tvOnly     bool
 		showFilter string
+		execute    bool
 	)
 
 	cmd := &cobra.Command{
@@ -31,12 +33,13 @@ Examples:
   jellywatch duplicates --show=Silo  # Duplicates for specific show
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDuplicates(moviesOnly, tvOnly, showFilter)
+			return runDuplicates(moviesOnly, tvOnly, showFilter, execute)
 		},
 	}
 
 	cmd.Flags().BoolVar(&moviesOnly, "movies", false, "Show only movie duplicates")
 	cmd.Flags().BoolVar(&tvOnly, "tv", false, "Show only TV episode duplicates")
+	cmd.Flags().BoolVar(&execute, "execute", false, "Execute removal of duplicate files")
 	cmd.Flags().StringVar(&showFilter, "show", "", "Filter by show name")
 
 	return cmd
