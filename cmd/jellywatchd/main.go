@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -179,6 +180,16 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unable to watch directories: %w", err)
 	}
 
+	// Perform initial scan of existing files
+	if !cfg.Options.DryRun {  // Allow scan even in dry-run mode for testing
+		logger.Info("daemon", "Performing initial scan of existing files")
+		if err := performInitialScan(handler, watchPaths, logger); err != nil {
+			logger.Warn("daemon", "Initial scan completed with errors", logging.F("error", err.Error()))
+		} else {
+			logger.Info("daemon", "Initial scan completed successfully")
+		}
+	}
+
 	logger.Info("daemon", "JellyWatchd started",
 		logging.F("watch_dirs", len(watchPaths)),
 		logging.F("tv_libs", cfg.Libraries.TV),
@@ -255,6 +266,66 @@ func newInstallCmd() *cobra.Command {
 			fmt.Println("   journalctl -u jellywatchd -f")
 		},
 	}
+}
+
+// isMediaFile checks if a path represents a media file that should be processed
+func isMediaFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	mediaExts := map[string]bool{
+		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
+		".wmv": true, ".flv": true, ".webm": true, ".m4v": true,
+		".mpg": true, ".mpeg": true, ".m2ts": true, ".ts": true,
+	}
+	return mediaExts[ext]
+}
+
+// performInitialScan walks through all watch directories and processes any existing media files
+func performInitialScan(handler *daemon.MediaHandler, watchPaths []string, logger *logging.Logger) error {
+	totalProcessed := 0
+	totalErrors := 0
+
+	for _, watchPath := range watchPaths {
+		logger.Info("daemon", "Scanning directory for existing files", logging.F("path", watchPath))
+
+		err := filepath.Walk(watchPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				logger.Warn("daemon", "Directory inaccessible during scan",
+					logging.F("path", path),
+					logging.F("error", err.Error()),
+					logging.F("suggestion", "Check permissions: chown $USER:media "+path))
+				return nil // Continue scanning other directories
+			}
+
+			if !info.IsDir() && handler.IsMediaFile(path) {
+				logger.Info("daemon", "Processing existing file", logging.F("file", filepath.Base(path)))
+
+				// Create a file event for the existing file
+				event := watcher.FileEvent{
+					Type: watcher.EventCreate, // Treat as new file
+					Path: path,
+				}
+
+				if err := handler.HandleFileEvent(event); err != nil {
+					logger.Error("daemon", "Failed to process existing file", err, logging.F("file", path))
+					totalErrors++
+				} else {
+					totalProcessed++
+				}
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			logger.Warn("daemon", "Error scanning directory", logging.F("path", watchPath), logging.F("error", err.Error()))
+		}
+	}
+
+	logger.Info("daemon", "Initial scan summary",
+		logging.F("processed", totalProcessed),
+		logging.F("errors", totalErrors))
+
+	return nil
 }
 
 func newUninstallCmd() *cobra.Command {
