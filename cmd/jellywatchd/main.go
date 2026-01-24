@@ -23,7 +23,6 @@ import (
 
 var (
 	cfgFile     string
-	dryRun      bool
 	backendName string
 	healthAddr  string
 )
@@ -38,7 +37,6 @@ It automatically organizes them according to Jellyfin naming conventions.`,
 	}
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path")
-	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "preview changes without moving files")
 	rootCmd.PersistentFlags().StringVar(&backendName, "backend", "auto", "transfer backend: auto, pv, rsync, native")
 	rootCmd.PersistentFlags().StringVar(&healthAddr, "health-addr", ":8686", "health check server address")
 
@@ -150,7 +148,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		TVLibraries:   cfg.Libraries.TV,
 		MovieLibs:     cfg.Libraries.Movies,
 		DebounceTime:  10 * time.Second,
-		DryRun:        dryRun || cfg.Options.DryRun,
+		DryRun:        false, // Daemon always processes files automatically
 		Timeout:       5 * time.Minute,
 		Backend:       transfer.ParseBackend(backendName),
 		NotifyManager: notifyMgr,
@@ -170,7 +168,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	healthServer := daemon.NewServer(handler, healthAddr, logger)
 
-	w, err := watcher.NewWatcher(handler, dryRun || cfg.Options.DryRun)
+	w, err := watcher.NewWatcher(handler, false) // Daemon always processes files automatically
 	if err != nil {
 		return fmt.Errorf("unable to create watcher: %w", err)
 	}
@@ -181,13 +179,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	// Perform initial scan of existing files
-	if !cfg.Options.DryRun {  // Skip initial scan in dry-run mode (consistent with file operations)
-		logger.Info("daemon", "Performing initial scan of existing files")
-		if err := performInitialScan(handler, watchPaths, logger); err != nil {
-			logger.Warn("daemon", "Initial scan completed with errors", logging.F("error", err.Error()))
-		} else {
-			logger.Info("daemon", "Initial scan completed successfully")
-		}
+	logger.Info("daemon", "Performing initial scan of existing files")
+	if err := performInitialScan(handler, watchPaths, logger); err != nil {
+		logger.Warn("daemon", "Initial scan completed with errors", logging.F("error", err.Error()))
+	} else {
+		logger.Info("daemon", "Initial scan completed successfully")
 	}
 
 	logger.Info("daemon", "JellyWatchd started",
@@ -197,9 +193,6 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logging.F("health_addr", healthAddr),
 		logging.F("log_file", logger.FilePath()))
 
-	if dryRun || cfg.Options.DryRun {
-		logger.Warn("daemon", "DRY RUN MODE - no files will be moved")
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
