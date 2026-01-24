@@ -181,7 +181,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	// Perform initial scan of existing files
-	if !cfg.Options.DryRun {  // Allow scan even in dry-run mode for testing
+	if !cfg.Options.DryRun {  // Skip initial scan in dry-run mode (consistent with file operations)
 		logger.Info("daemon", "Performing initial scan of existing files")
 		if err := performInitialScan(handler, watchPaths, logger); err != nil {
 			logger.Warn("daemon", "Initial scan completed with errors", logging.F("error", err.Error()))
