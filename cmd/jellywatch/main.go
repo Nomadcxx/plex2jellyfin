@@ -179,7 +179,7 @@ func organizeDirectory(org *organizer.Organizer, source, target string) error {
 			return nil
 		}
 
-		if !isMediaFile(path) {
+		if !isMediaFileCheck(filepath.Ext(path)) {
 			return nil
 		}
 
@@ -431,7 +431,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 			if !recursive && filepath.Dir(p) != path {
 				return nil
 			}
-			if isMediaFile(p) {
+			if isMediaFileCheck(filepath.Ext(p)) {
 				validate(p)
 			}
 			return nil
@@ -971,8 +971,8 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
-func isMediaFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
+func isMediaFileCheck(ext string) bool {
+	ext = strings.ToLower(ext)
 	mediaExts := map[string]bool{
 		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
 		".wmv": true, ".flv": true, ".webm": true, ".m4v": true,
