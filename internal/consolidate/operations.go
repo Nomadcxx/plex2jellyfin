@@ -111,6 +111,11 @@ func (c *Consolidator) GenerateAllPlans() ([]*Plan, error) {
 
 	var plans []*Plan
 	for _, conflict := range conflicts {
+		if conflict.MediaType != "series" {
+			c.stats.SkippedConflicts++
+			continue
+		}
+
 		plan, err := c.GeneratePlan(&conflict)
 		if err != nil {
 			fmt.Printf("Warning: Failed to generate plan for conflict %d (%s): %v\n",
