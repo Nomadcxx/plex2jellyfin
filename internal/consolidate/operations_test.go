@@ -119,3 +119,56 @@ func TestConsolidator_GenerateAllPlans_AllSeries(t *testing.T) {
 		t.Errorf("Expected 0 skipped conflicts, got %d", c.stats.SkippedConflicts)
 	}
 }
+
+func TestConsolidator_GenerateAllPlans_AllMovies(t *testing.T) {
+	tempDir := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	cfg := &config.Config{}
+	c := NewConsolidator(db, cfg)
+
+	conflicts := []struct {
+		mediaType string
+		title     string
+		year      int
+		locations []string
+	}{
+		{"movie", "Movie 1", 2018, []string{"/path1/movie1", "/path2/movie1"}},
+		{"movie", "Movie 2", 2019, []string{"/path1/movie2", "/path2/movie2"}},
+		{"movie", "Movie 3", 2020, []string{"/path1/movie3", "/path2/movie3"}},
+		{"movie", "Movie 4", 2021, []string{"/path1/movie4", "/path2/movie4"}},
+		{"movie", "Movie 5", 2022, []string{"/path1/movie5", "/path2/movie5"}},
+	}
+
+	for _, conflict := range conflicts {
+		_, err := db.DB().Exec(`
+			INSERT INTO conflicts (media_type, title, title_normalized, year, locations, created_at)
+			VALUES (?, ?, ?, ?, ?, datetime('now'))
+		`, conflict.mediaType, conflict.title, database.NormalizeTitle(conflict.title), conflict.year,
+			`["`+conflict.locations[0]+`","`+conflict.locations[1]+`"]`)
+		if err != nil {
+			t.Fatalf("Failed to insert conflict: %v", err)
+		}
+	}
+
+	plans, err := c.GenerateAllPlans()
+	if err != nil {
+		t.Fatalf("GenerateAllPlans failed: %v", err)
+	}
+
+	if len(plans) != 0 {
+		t.Errorf("Expected 0 plans (all movies), got %d", len(plans))
+	}
+
+	if c.stats.SkippedConflicts != 5 {
+		t.Errorf("Expected 5 skipped conflicts (all movies), got %d", c.stats.SkippedConflicts)
+	}
+
+	if c.stats.ConflictsFound != 5 {
+		t.Errorf("Expected 5 conflicts found, got %d", c.stats.ConflictsFound)
+	}
+}
