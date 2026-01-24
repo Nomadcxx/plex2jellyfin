@@ -166,7 +166,7 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 		return nil
 	}
 
-	if !h.isMediaFile(event.Path) {
+	if !h.IsMediaFile(event.Path) {
 		return nil
 	}
 
@@ -398,7 +398,7 @@ func (h *MediaHandler) checkTargetHealth(targetLib string) bool {
 	return true
 }
 
-func (h *MediaHandler) isMediaFile(path string) bool {
+func (h *MediaHandler) IsMediaFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	mediaExts := map[string]bool{
 		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
