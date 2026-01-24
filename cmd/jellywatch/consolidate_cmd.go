@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/consolidate"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/spf13/cobra"
@@ -81,30 +82,64 @@ func runConsolidate(generate, dryRun, execute, status bool) error {
 	return runConsolidateSummary(db)
 }
 
-func runGeneratePlans(ctx context.Context, db *database.MediaDB) error {
-	fmt.Println("🔍 Analyzing database for duplicates and issues...")
+func clearPendingPlans(db *database.MediaDB) error {
+	query := `DELETE FROM consolidation_plans WHERE status = 'pending'`
+	_, err := db.DB().Exec(query)
+	return err
+}
 
-	planner := consolidate.NewPlanner(db)
-	summary, err := planner.GeneratePlans(ctx)
+func runGeneratePlans(ctx context.Context, db *database.MediaDB) error {
+	fmt.Println("🔍 Analyzing database for consolidation opportunities...")
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	consolidator := consolidate.NewConsolidator(db, cfg)
+
+	err = clearPendingPlans(db)
+	if err != nil {
+		return fmt.Errorf("failed to clear pending plans: %w", err)
+	}
+
+	plans, err := consolidator.GenerateAllPlans()
 	if err != nil {
 		return fmt.Errorf("failed to generate plans: %w", err)
 	}
 
-	fmt.Println("\n✅ Plans generated successfully!")
-	fmt.Printf("\nPlan Summary:\n")
-	fmt.Printf("  Total plans:      %d\n", summary.TotalPlans)
-	fmt.Printf("  Delete plans:     %d\n", summary.DeletePlans)
-	fmt.Printf("  Move plans:       %d\n", summary.MovePlans)
-	fmt.Printf("  Rename plans:     %d\n", summary.RenamePlans)
-	fmt.Printf("  Duplicate groups: %d\n", summary.DuplicateGroups)
-	fmt.Printf("  Space reclaimable: %s\n", formatBytes(summary.SpaceToReclaim))
+	var planCount, failedPlanCount, moveCount, spaceToReclaim int64
+	totalConflicts := int64(len(plans))
 
-	if summary.TotalPlans > 0 {
+	for _, plan := range plans {
+		err := consolidator.StorePlan(plan)
+		if err != nil {
+			fmt.Printf("Warning: Failed to store plan for %s: %v\n", plan.Title, err)
+			failedPlanCount++
+			continue
+		}
+
+		planCount++
+		moveCount += int64(len(plan.Operations))
+		spaceToReclaim += plan.TotalBytes
+	}
+
+	fmt.Println("\n✅ Plans generated successfully!")
+	fmt.Printf("\nConsolidation Summary:\n")
+	fmt.Printf("  Conflicts analyzed:        %d\n", totalConflicts)
+	fmt.Printf("  Consolidation opportunities: %d\n", planCount)
+	fmt.Printf("  Move operations:           %d\n", moveCount)
+	fmt.Printf("  Space to reclaim:          %s\n", formatBytes(spaceToReclaim))
+	if failedPlanCount > 0 {
+		fmt.Printf("  Failed to store:          %d plans\n", failedPlanCount)
+	}
+
+	if planCount > 0 {
 		fmt.Println("\nNext steps:")
 		fmt.Println("  jellywatch consolidate --dry-run   # Preview what will happen")
 		fmt.Println("  jellywatch consolidate --execute   # Execute the plans")
 	} else {
-		fmt.Println("\n✨ No consolidation needed - your library is already optimized!")
+		fmt.Println("\n✨ No consolidation needed - your library is already organized!")
 	}
 
 	return nil
