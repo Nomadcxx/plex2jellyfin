@@ -303,3 +303,10 @@ func TestCleanupNotEmptyDir(t *testing.T) {
 		t.Error("Expected non-empty dir to remain")
 	}
 }
+
+func TestStats_SkippedConflicts_Field(t *testing.T) {
+	stats := Stats{}
+	if stats.SkippedConflicts != 0 {
+		t.Errorf("Expected SkippedConflicts to default to 0, got %d", stats.SkippedConflicts)
+	}
+}

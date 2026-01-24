@@ -24,12 +24,13 @@ type Consolidator struct {
 
 // Stats tracks consolidation statistics
 type Stats struct {
-	ConflictsFound int
-	PlansGenerated int
-	FilesMoved     int
-	BytesMoved     int64
-	StartTime      time.Time
-	EndTime        time.Time
+	ConflictsFound   int
+	SkippedConflicts int // Conflicts skipped (e.g., movies in consolidation mode)
+	PlansGenerated   int
+	FilesMoved       int
+	BytesMoved       int64
+	StartTime        time.Time
+	EndTime          time.Time
 }
 
 // NewConsolidator creates a new consolidator
