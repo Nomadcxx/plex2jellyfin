@@ -129,7 +129,7 @@ func runGeneratePlans(ctx context.Context, db *database.MediaDB) error {
 	fmt.Printf("  Conflicts analyzed:        %d\n", totalConflicts)
 	fmt.Printf("  Consolidation opportunities: %d\n", planCount)
 	fmt.Printf("  Move operations:           %d\n", moveCount)
-	fmt.Printf("  Space to reclaim:          %s\n", formatBytes(spaceToReclaim))
+	fmt.Printf("  Files to relocate:         %s\n", formatBytes(spaceToReclaim))
 	if failedPlanCount > 0 {
 		fmt.Printf("  Failed to store:          %d plans\n", failedPlanCount)
 	}
