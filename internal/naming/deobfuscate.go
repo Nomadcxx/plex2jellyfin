@@ -178,13 +178,26 @@ func ParseMovieFromPath(path string) (*MovieInfo, error) {
 	}
 }
 
-// IsTVEpisodeFromPath checks path (including parent folders) for TV episode markers.
-func IsTVEpisodeFromPath(path string) bool {
+// IsTVEpisodeFromPath returns true if path represents a TV episode.
+// The hint parameter indicates source watch folder (if known).
+func IsTVEpisodeFromPath(path string, hint SourceHint) bool {
+	// If hint says TV, trust it (user configured this folder for TV)
+	if hint == SourceTV {
+		return true
+	}
+
+	// If hint says Movie, trust it
+	if hint == SourceMovie {
+		return false
+	}
+
+	// SourceUnknown: use filename-based detection
 	filename := filepath.Base(path)
 	if IsTVEpisodeFilename(filename) {
 		return true
 	}
 
+	// Check parent folders for obfuscated files
 	if IsObfuscatedFilename(filename) {
 		dir := filepath.Dir(path)
 		for i := 0; i < 3; i++ {
@@ -205,8 +218,8 @@ func IsTVEpisodeFromPath(path string) bool {
 }
 
 // IsMovieFromPath returns true if path represents a movie (not a TV episode).
-func IsMovieFromPath(path string) bool {
-	return !IsTVEpisodeFromPath(path)
+func IsMovieFromPath(path string, hint SourceHint) bool {
+	return !IsTVEpisodeFromPath(path, hint)
 }
 
 type ParseError struct {
