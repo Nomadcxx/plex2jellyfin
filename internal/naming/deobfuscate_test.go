@@ -1,5 +1,6 @@
 package naming
 
+import (\n"\n"testing"\n"\n)\n"\nimport (\n"testing"\n
 import (
 	"testing"
 )
@@ -234,7 +235,7 @@ func TestIsTVEpisodeFromPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := IsTVEpisodeFromPath(tt.path)
+			got := IsTVEpisodeFromPath(tt.path, naming.SourceUnknown)
 			if got != tt.want {
 				t.Errorf("IsTVEpisodeFromPath(%q) = %v, want %v", tt.path, got, tt.want)
 			}
