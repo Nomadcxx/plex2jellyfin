@@ -19,18 +19,20 @@ import (
 )
 
 type MediaHandler struct {
-	organizer      *organizer.Organizer
-	notifyManager  *notify.Manager
-	tvLibraries    []string
-	movieLibs      []string
-	debounceTime   time.Duration
-	pending        map[string]*time.Timer
-	mu             sync.Mutex
-	dryRun         bool
-	stats          *Stats
-	logger         *logging.Logger
-	sonarrClient   *sonarr.Client
-	activityLogger *activity.Logger
+	organizer       *organizer.Organizer
+	notifyManager   *notify.Manager
+	tvLibraries     []string
+	movieLibs       []string
+	tvWatchPaths    []string // TV watch folders for source hint
+	movieWatchPaths []string // Movie watch folders for source hint
+	debounceTime    time.Duration
+	pending         map[string]*time.Timer
+	mu              sync.Mutex
+	dryRun          bool
+	stats           *Stats
+	logger          *logging.Logger
+	sonarrClient    *sonarr.Client
+	activityLogger  *activity.Logger
 }
 
 type Stats struct {
@@ -94,20 +96,22 @@ type StatsSnapshot struct {
 }
 
 type MediaHandlerConfig struct {
-	TVLibraries   []string
-	MovieLibs     []string
-	DebounceTime  time.Duration
-	DryRun        bool
-	Timeout       time.Duration
-	Backend       transfer.Backend
-	NotifyManager *notify.Manager
-	Logger        *logging.Logger
-	TargetUID     int
-	TargetGID     int
-	FileMode      os.FileMode
-	DirMode       os.FileMode
-	SonarrClient  *sonarr.Client
-	ConfigDir     string
+	TVLibraries     []string
+	MovieLibs       []string
+	TVWatchPaths    []string // New
+	MovieWatchPaths []string // New
+	DebounceTime    time.Duration
+	DryRun          bool
+	Timeout         time.Duration
+	Backend         transfer.Backend
+	NotifyManager   *notify.Manager
+	Logger          *logging.Logger
+	TargetUID       int
+	TargetGID       int
+	FileMode        os.FileMode
+	DirMode         os.FileMode
+	SonarrClient    *sonarr.Client
+	ConfigDir       string
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
@@ -147,17 +151,19 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 	org := organizer.NewOrganizer(allLibs, orgOpts...)
 
 	return &MediaHandler{
-		organizer:      org,
-		notifyManager:  cfg.NotifyManager,
-		tvLibraries:    cfg.TVLibraries,
-		movieLibs:      cfg.MovieLibs,
-		debounceTime:   cfg.DebounceTime,
-		pending:        make(map[string]*time.Timer),
-		dryRun:         cfg.DryRun,
-		stats:          NewStats(),
-		logger:         cfg.Logger,
-		sonarrClient:   cfg.SonarrClient,
-		activityLogger: activityLogger,
+		organizer:       org,
+		notifyManager:   cfg.NotifyManager,
+		tvLibraries:     cfg.TVLibraries,
+		movieLibs:       cfg.MovieLibs,
+		tvWatchPaths:    cfg.TVWatchPaths,
+		movieWatchPaths: cfg.MovieWatchPaths,
+		debounceTime:    cfg.DebounceTime,
+		pending:         make(map[string]*time.Timer),
+		dryRun:          cfg.DryRun,
+		stats:           NewStats(),
+		logger:          cfg.Logger,
+		sonarrClient:    cfg.SonarrClient,
+		activityLogger:  activityLogger,
 	}
 }
 
@@ -235,6 +241,25 @@ func (h *MediaHandler) logEntry(
 	}
 }
 
+// getSourceHint determines if a path is under a configured TV or Movie watch folder
+func (h *MediaHandler) getSourceHint(path string) naming.SourceHint {
+	// Check TV watch folders
+	for _, tvPath := range h.tvWatchPaths {
+		if strings.HasPrefix(path, tvPath) {
+			return naming.SourceTV
+		}
+	}
+
+	// Check Movie watch folders
+	for _, moviePath := range h.movieWatchPaths {
+		if strings.HasPrefix(path, moviePath) {
+			return naming.SourceMovie
+		}
+	}
+
+	return naming.SourceUnknown
+}
+
 func (h *MediaHandler) processFile(path string) {
 	startTime := time.Now()
 
@@ -265,7 +290,8 @@ func (h *MediaHandler) processFile(path string) {
 		h.logger.Info("handler", "Detected obfuscated filename, using folder name", logging.F("filename", filename))
 	}
 
-	isTVEpisode := naming.IsTVEpisodeFromPath(path)
+	sourceHint := h.getSourceHint(path)
+	isTVEpisode := naming.IsTVEpisodeFromPath(path, sourceHint)
 
 	if isTVEpisode {
 		if len(h.tvLibraries) == 0 {
