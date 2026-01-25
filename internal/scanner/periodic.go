@@ -3,11 +3,14 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/jellywatch/internal/watcher"
 )
 
 // PeriodicScanner runs periodic directory scans to catch missed files
@@ -157,4 +160,60 @@ func (s *PeriodicScanner) runScan() (err error) {
 		logging.F("cleaned", cleaned))
 
 	return nil
+}
+
+func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
+	for _, watchPath := range s.watchPaths {
+		s.logger.Info("scanner", "Scanning directory", logging.F("path", watchPath))
+
+		err := filepath.Walk(watchPath, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				s.logger.Warn("scanner", "Directory inaccessible during scan",
+					logging.F("path", path),
+					logging.F("error", walkErr.Error()))
+				return nil // Continue scanning other directories
+			}
+
+			if info.IsDir() {
+				return nil
+			}
+
+			if !s.handler.IsMediaFile(path) {
+				return nil
+			}
+
+			event := watcher.FileEvent{
+				Type: watcher.EventCreate,
+				Path: path,
+			}
+
+			if err := s.handler.HandleFileEvent(event); err != nil {
+				s.logger.Warn("scanner", "Failed to process file during scan",
+					logging.F("path", path),
+					logging.F("error", err.Error()))
+				errors++
+			} else {
+				processed++
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			s.logger.Warn("scanner", "Error walking directory",
+				logging.F("path", watchPath),
+				logging.F("error", err.Error()))
+		}
+	}
+
+	s.logger.Info("scanner", "Watch directory scan complete",
+		logging.F("processed", processed),
+		logging.F("errors", errors))
+
+	return processed, errors
+}
+
+func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err error) {
+	// TODO: Implement in next task
+	return 0, 0, nil
 }
