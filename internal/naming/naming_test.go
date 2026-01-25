@@ -1,6 +1,8 @@
 package naming
 
 import (
+	"fmt"
+	"path/filepath"
 	"testing"
 )
 
@@ -87,6 +89,67 @@ func TestParseTVShowName(t *testing.T) {
 			}
 			if got.Episode != tt.wantEp {
 				t.Errorf("ParseTVShowName() episode = %v, want %v", got.Episode, tt.wantEp)
+			}
+		})
+	}
+}
+
+func TestIsTVEpisodeFilename_DatePatterns(t *testing.T) {
+	tests := []struct {
+		filename string
+		want     bool
+	}{
+		// Date patterns - should be TV
+		{"The.Daily.Show.2026.01.22.Guest.Name.1080p.WEB.mkv", true},
+		{"Colbert.2026-01-22.1080p.WEB.mkv", true},
+		{"SNL.2026_01_22.Host.1080p.mkv", true},
+		{"Last.Week.Tonight.2026.01.19.1080p.mkv", true},
+
+		// Standard patterns still work
+		{"Show.S01E05.mkv", true},
+		{"Show.1x05.mkv", true},
+
+		// Movies - should not be TV
+		{"Movie.Name.2026.1080p.mkv", false},
+		{"Another.Movie.2024.BluRay.mkv", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			got := IsTVEpisodeFilename(tt.filename)
+			if got != tt.want {
+				t.Errorf("IsTVEpisodeFilename(%q) = %v, want %v", tt.filename, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsTVEpisodeFromPath_SourceHint(t *testing.T) {
+	tests := []struct {
+		path string
+		hint SourceHint
+		want bool
+	}{
+		// SourceTV forces TV classification
+		{"/downloads/movie.mkv", SourceTV, true},
+		{"/downloads/no.pattern.mkv", SourceTV, true},
+
+		// SourceMovie forces Movie classification
+		{"/downloads/Show.S01E05.mkv", SourceMovie, false},
+		{"/downloads/Daily.Show.2026.01.22.mkv", SourceMovie, false},
+
+		// SourceUnknown uses filename detection
+		{"/downloads/Show.S01E05.mkv", SourceUnknown, true},
+		{"/downloads/Daily.Show.2026.01.22.mkv", SourceUnknown, true},
+		{"/downloads/Movie.2024.mkv", SourceUnknown, false},
+	}
+
+	for _, tt := range tests {
+		name := fmt.Sprintf("%s_hint_%v", filepath.Base(tt.path), tt.hint)
+		t.Run(name, func(t *testing.T) {
+			got := IsTVEpisodeFromPath(tt.path, tt.hint)
+			if got != tt.want {
+				t.Errorf("IsTVEpisodeFromPath(%q, %v) = %v, want %v", tt.path, tt.hint, got, tt.want)
 			}
 		})
 	}
