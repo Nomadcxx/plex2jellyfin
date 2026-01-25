@@ -15,6 +15,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
+	"github.com/Nomadcxx/jellywatch/internal/scanner"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
@@ -166,7 +167,25 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Warn("daemon", "Failed to prune old activity logs", logging.F("error", err.Error()))
 	}
 
-	healthServer := daemon.NewServer(handler, healthAddr, logger)
+	// Parse scan frequency
+	scanInterval, err := time.ParseDuration(cfg.Daemon.ScanFrequency)
+	if err != nil {
+		logger.Warn("daemon", "Invalid scan_frequency, using default",
+			logging.F("configured", cfg.Daemon.ScanFrequency),
+			logging.F("default", "5m"))
+		scanInterval = 5 * time.Minute
+	}
+
+	// Create periodic scanner
+	periodicScanner := scanner.NewPeriodicScanner(scanner.ScannerConfig{
+		Interval:    scanInterval,
+		WatchPaths:  watchPaths,
+		Handler:     handler,
+		Logger:      logger,
+		ActivityDir: filepath.Join(configDir, "activity"),
+	})
+
+	healthServer := daemon.NewServer(handler, periodicScanner, healthAddr, logger)
 
 	w, err := watcher.NewWatcher(handler, false) // Daemon always processes files automatically
 	if err != nil {
@@ -193,14 +212,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logging.F("health_addr", healthAddr),
 		logging.F("log_file", logger.FilePath()))
 
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	errChan := make(chan error, 2)
+	errChan := make(chan error, 3)
 
 	go func() {
 		errChan <- w.Start()
@@ -208,6 +226,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		errChan <- healthServer.Start()
+	}()
+
+	go func() {
+		errChan <- periodicScanner.Start(ctx)
 	}()
 
 	select {
