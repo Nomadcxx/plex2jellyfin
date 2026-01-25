@@ -146,20 +146,22 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	handler := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
-		TVLibraries:   cfg.Libraries.TV,
-		MovieLibs:     cfg.Libraries.Movies,
-		DebounceTime:  10 * time.Second,
-		DryRun:        false, // Daemon always processes files automatically
-		Timeout:       5 * time.Minute,
-		Backend:       transfer.ParseBackend(backendName),
-		NotifyManager: notifyMgr,
-		Logger:        logger,
-		TargetUID:     targetUID,
-		TargetGID:     targetGID,
-		FileMode:      fileMode,
-		DirMode:       dirMode,
-		SonarrClient:  sonarrClient,
-		ConfigDir:     configDir,
+		TVLibraries:     cfg.Libraries.TV,
+		MovieLibs:       cfg.Libraries.Movies,
+		TVWatchPaths:    cfg.Watch.TV,
+		MovieWatchPaths: cfg.Watch.Movies,
+		DebounceTime:    10 * time.Second,
+		DryRun:          false, // Daemon always processes files automatically
+		Timeout:         5 * time.Minute,
+		Backend:         transfer.ParseBackend(backendName),
+		NotifyManager:   notifyMgr,
+		Logger:          logger,
+		TargetUID:       targetUID,
+		TargetGID:       targetGID,
+		FileMode:        fileMode,
+		DirMode:         dirMode,
+		SonarrClient:    sonarrClient,
+		ConfigDir:       configDir,
 	})
 
 	// Prune old activity logs (keep 7 days)
