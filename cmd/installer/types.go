@@ -164,10 +164,10 @@ type model struct {
 	cancel context.CancelFunc
 
 	// Scan progress
-	scanProgress   ScanProgress
-	scanResult     *ScanResult
-	scanStats      *ScanStats
-	scanCancel     context.CancelFunc
+	scanProgress ScanProgress
+	scanResult   *ScanResult
+	scanStats    *ScanStats
+	scanCancel   context.CancelFunc
 }
 
 // ScanProgress tracks library scanning progress
@@ -248,5 +248,5 @@ var scanFrequencyOptions = []string{
 	"Every 10 minutes",
 	"Every 30 minutes",
 	"Hourly",
-	"Daily (3:00 AM)",
+	"Every 24 hours",
 }

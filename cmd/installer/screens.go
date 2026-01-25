@@ -378,7 +378,7 @@ func (m model) renderService() string {
 	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
-		"The daemon monitors watch folders and organizes new media"))
+		"The daemon monitors watch folders and runs periodic scans to catch missed files"))
 
 	return b.String()
 }
