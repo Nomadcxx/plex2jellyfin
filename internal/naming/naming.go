@@ -21,11 +21,13 @@ type TVShowInfo struct {
 }
 
 var (
-	yearRegex       = regexp.MustCompile(`\b(19|20)\d{2}\b`)
-	yearParenRegex  = regexp.MustCompile(`\((\d{4})\)`)
-	episodeSERegex  = regexp.MustCompile(`[Ss](\d{1,2})[Ee](\d{1,2})`)
-	episodeXRegex   = regexp.MustCompile(`(\d{1,2})x(\d{1,2})`)
-	releasePatterns []*regexp.Regexp
+	yearRegex      = regexp.MustCompile(`\b(19|20)\d{2}\b`)
+	yearParenRegex = regexp.MustCompile(`\((\d{4})\)`)
+	episodeSERegex = regexp.MustCompile(`[Ss](\d{1,2})[Ee](\d{1,2})`)
+	episodeXRegex  = regexp.MustCompile(`(\d{1,2})x(\d{1,2})`)
+	// Date-based episode pattern: YYYY.MM.DD, YYYY-MM-DD, YYYY_MM_DD
+	episodeDateRegex = regexp.MustCompile(`(19|20)\d{2}[.\-_](0[1-9]|1[0-2])[.\-_](0[1-9]|[12]\d|3[01])`)
+	releasePatterns  []*regexp.Regexp
 )
 
 func init() {
@@ -59,12 +61,28 @@ func init() {
 }
 
 func IsMovieFilename(filename string) bool {
-	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
-	return !episodeSERegex.MatchString(baseName) && !episodeXRegex.MatchString(baseName)
+	return !IsTVEpisodeFilename(filename)
 }
 
 func IsTVEpisodeFilename(filename string) bool {
-	return !IsMovieFilename(filename)
+	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+
+	// Standard SxxExx pattern
+	if episodeSERegex.MatchString(baseName) {
+		return true
+	}
+
+	// NxN pattern
+	if episodeXRegex.MatchString(baseName) {
+		return true
+	}
+
+	// Date-based pattern (daily shows like The Daily Show, Colbert, SNL)
+	if episodeDateRegex.MatchString(baseName) {
+		return true
+	}
+
+	return false
 }
 
 func HasYearInParentheses(filename string) bool {
