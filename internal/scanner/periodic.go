@@ -212,8 +212,3 @@ func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
 
 	return processed, errors
 }
-
-func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err error) {
-	// TODO: Implement in next task
-	return 0, 0, nil
-}
