@@ -3,15 +3,15 @@ package scanner
 import (
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/jellywatch/internal/watcher"
 )
 
-// ScannerConfig holds configuration for the periodic scanner
+// ScannerConfig holds configuration for periodic scanner
 type ScannerConfig struct {
 	Interval    time.Duration
 	WatchPaths  []string
-	Handler     *daemon.MediaHandler
+	Handler     watcher.Handler
 	Logger      *logging.Logger
 	ActivityDir string
 }

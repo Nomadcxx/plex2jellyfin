@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/jellywatch/internal/scanner"
 )
 
 type Server struct {
 	httpServer *http.Server
 	handler    *MediaHandler
+	scanner    *scanner.PeriodicScanner
 	startTime  time.Time
 	mu         sync.RWMutex
 	healthy    bool
@@ -21,9 +23,10 @@ type Server struct {
 }
 
 type HealthResponse struct {
-	Status    string    `json:"status"`
-	Uptime    string    `json:"uptime"`
-	Timestamp time.Time `json:"timestamp"`
+	Status        string                 `json:"status"`
+	Uptime        string                 `json:"uptime"`
+	Timestamp     time.Time              `json:"timestamp"`
+	ScannerStatus *scanner.ScannerStatus `json:"scanner,omitempty"`
 }
 
 type MetricsResponse struct {
@@ -37,12 +40,13 @@ type MetricsResponse struct {
 	LastProcessed    string  `json:"last_processed,omitempty"`
 }
 
-func NewServer(handler *MediaHandler, addr string, logger *logging.Logger) *Server {
+func NewServer(handler *MediaHandler, periodicScanner *scanner.PeriodicScanner, addr string, logger *logging.Logger) *Server {
 	if logger == nil {
 		logger = logging.Nop()
 	}
 	s := &Server{
 		handler:   handler,
+		scanner:   periodicScanner,
 		startTime: time.Now(),
 		healthy:   true,
 		logger:    logger,
@@ -89,15 +93,31 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	healthy := s.healthy
 	s.mu.RUnlock()
 
-	response := HealthResponse{
-		Uptime:    time.Since(s.startTime).Round(time.Second).String(),
-		Timestamp: time.Now(),
+	// Check scanner health too
+	scannerHealthy := true
+	var scannerStatus *scanner.ScannerStatus
+	if s.scanner != nil {
+		scannerHealthy = s.scanner.IsHealthy()
+		status := s.scanner.Status()
+		scannerStatus = &status
 	}
 
-	if healthy {
+	overallHealthy := healthy && scannerHealthy
+
+	response := HealthResponse{
+		Uptime:        time.Since(s.startTime).Round(time.Second).String(),
+		Timestamp:     time.Now(),
+		ScannerStatus: scannerStatus,
+	}
+
+	if overallHealthy {
 		response.Status = "healthy"
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+	} else if healthy && !scannerHealthy {
+		response.Status = "degraded"
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK) // Degraded but still serving
 	} else {
 		response.Status = "unhealthy"
 		w.Header().Set("Content-Type", "application/json")

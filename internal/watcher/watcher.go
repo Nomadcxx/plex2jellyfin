@@ -26,6 +26,7 @@ type FileEvent struct {
 
 type Handler interface {
 	HandleFileEvent(event FileEvent) error
+	IsMediaFile(path string) bool
 }
 
 type Watcher struct {

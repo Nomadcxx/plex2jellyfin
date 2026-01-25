@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 )
@@ -18,7 +17,7 @@ type PeriodicScanner struct {
 	// Configuration
 	interval    time.Duration
 	watchPaths  []string
-	handler     *daemon.MediaHandler
+	handler     watcher.Handler
 	logger      *logging.Logger
 	activityDir string
 
