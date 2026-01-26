@@ -1,6 +1,7 @@
 package plans
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,4 +112,124 @@ func getConsolidatePlansPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "consolidate.json"), nil
+}
+
+// SaveDuplicatePlans writes the duplicate plan to JSON file
+func SaveDuplicatePlans(plan *DuplicatePlan) error {
+	if err := ensurePlansDir(); err != nil {
+		return fmt.Errorf("failed to create plans directory: %w", err)
+	}
+
+	path, err := getDuplicatePlansPath()
+	if err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal plan: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write plan file: %w", err)
+	}
+
+	return nil
+}
+
+// LoadDuplicatePlans reads the duplicate plan from JSON file
+func LoadDuplicatePlans() (*DuplicatePlan, error) {
+	path, err := getDuplicatePlansPath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // No plans file exists
+		}
+		return nil, fmt.Errorf("failed to read plan file: %w", err)
+	}
+
+	var plan DuplicatePlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse plan file: %w", err)
+	}
+
+	return &plan, nil
+}
+
+// DeleteDuplicatePlans removes the duplicate plans file
+func DeleteDuplicatePlans() error {
+	path, err := getDuplicatePlansPath()
+	if err != nil {
+		return err
+	}
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete plan file: %w", err)
+	}
+
+	return nil
+}
+
+// SaveConsolidatePlans writes the consolidate plan to JSON file
+func SaveConsolidatePlans(plan *ConsolidatePlan) error {
+	if err := ensurePlansDir(); err != nil {
+		return fmt.Errorf("failed to create plans directory: %w", err)
+	}
+
+	path, err := getConsolidatePlansPath()
+	if err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal plan: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write plan file: %w", err)
+	}
+
+	return nil
+}
+
+// LoadConsolidatePlans reads the consolidate plan from JSON file
+func LoadConsolidatePlans() (*ConsolidatePlan, error) {
+	path, err := getConsolidatePlansPath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // No plans file exists
+		}
+		return nil, fmt.Errorf("failed to read plan file: %w", err)
+	}
+
+	var plan ConsolidatePlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse plan file: %w", err)
+	}
+
+	return &plan, nil
+}
+
+// DeleteConsolidatePlans removes the consolidate plans file
+func DeleteConsolidatePlans() error {
+	path, err := getConsolidatePlansPath()
+	if err != nil {
+		return err
+	}
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete plan file: %w", err)
+	}
+
+	return nil
 }
