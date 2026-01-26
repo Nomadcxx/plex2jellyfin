@@ -51,6 +51,15 @@ Features:
   - Sonarr integration for queue management`,
 	}
 
+	// Add custom help function to show ASCII header
+	originalHelpFunc := rootCmd.HelpFunc()
+	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if cmd.Name() == "jellywatch" {
+			printHeader(version)
+		}
+		originalHelpFunc(cmd, args)
+	})
+
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/jellywatch/config.toml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVarP(&dryRun, "dry-run", "n", false, "preview changes without moving files")
