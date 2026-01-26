@@ -20,6 +20,7 @@ import (
 )
 
 var (
+	version        = "dev" // Set by build flags: -ldflags="-X main.version=1.0.0"
 	cfgFile        string
 	dryRun         bool
 	verbose        bool
@@ -965,8 +966,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("jellywatch v0.1.0")
-			fmt.Println("Robust media organizer for Jellyfin")
+			printHeader(version)
 		},
 	}
 }
