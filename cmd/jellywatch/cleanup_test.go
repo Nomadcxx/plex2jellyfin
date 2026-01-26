@@ -1,9 +1,13 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
+// TestIsVideoFile tests the isVideoFile function
 func TestIsVideoFile(t *testing.T) {
 	tests := []struct {
 		path     string
@@ -29,6 +33,7 @@ func TestIsVideoFile(t *testing.T) {
 	}
 }
 
+// TestIsLibraryRoot tests the isLibraryRoot function
 func TestIsLibraryRoot(t *testing.T) {
 	roots := []string{
 		"/mnt/STORAGE1/TVSHOWS",
@@ -43,6 +48,7 @@ func TestIsLibraryRoot(t *testing.T) {
 		{"/mnt/STORAGE2/MOVIES", true},
 		{"/mnt/STORAGE1/TVSHOWS/Show Name", false},
 		{"/mnt/STORAGE3/OTHER", false},
+		{"/home/user/file.mkv", false},
 	}
 
 	for _, tt := range tests {
@@ -55,6 +61,7 @@ func TestIsLibraryRoot(t *testing.T) {
 	}
 }
 
+// TestIsInsideLibrary tests the isInsideLibrary function
 func TestIsInsideLibrary(t *testing.T) {
 	roots := []string{
 		"/mnt/STORAGE1/TVSHOWS",
