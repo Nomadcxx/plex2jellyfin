@@ -26,7 +26,7 @@ func TestRealWorldPaths(t *testing.T) {
 		}
 
 		isObfuscated := IsObfuscatedFilename(filename)
-		isTVFromPath := IsTVEpisodeFromPath(path)
+		isTVFromPath := IsTVEpisodeFromPath(path, SourceUnknown)
 
 		fmt.Printf("Path: %s\n", path)
 		fmt.Printf("  Filename: %s\n", filename)

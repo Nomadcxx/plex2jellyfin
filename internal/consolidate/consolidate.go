@@ -235,8 +235,14 @@ func isMediaFile(ext string) bool {
 		".mp4":  true,
 		".avi":  true,
 		".mov":  true,
-		".m4v":  true,
+		".wmv":  true,
+		".flv":  true,
 		".webm": true,
+		".m4v":  true,
+		".mpg":  true,
+		".mpeg": true,
+		".m2ts": true,
+		".ts":   true,
 	}
 	return mediaExts[ext]
 }

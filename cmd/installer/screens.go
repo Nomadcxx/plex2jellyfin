@@ -644,12 +644,15 @@ func (m model) renderComplete() string {
 	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch scan"), descStyle.Render("Rescan libraries")))
 	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch duplicates"), descStyle.Render("View duplicates")))
 	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch consolidate"), descStyle.Render("Consolidate duplicates")))
-	b.WriteString(fmt.Sprintf("  %s  %s\n\n", cmdStyle.Render("systemctl status jellywatchd"), descStyle.Render("Check daemon")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("systemctl status jellywatchd"), descStyle.Render("Check daemon")))
 
+	b.WriteString("\n")
+
+	labelStyle := lipgloss.NewStyle().Foreground(FgMuted)
 	pathStyle := lipgloss.NewStyle().Foreground(FgMuted).Italic(true)
-	b.WriteString(fmt.Sprintf("Config:   %s\n", pathStyle.Render("~/.config/jellywatch/config.toml")))
-	b.WriteString(fmt.Sprintf("Database: %s\n", pathStyle.Render("~/.config/jellywatch/media.db")))
-	b.WriteString(fmt.Sprintf("Logs:     %s\n", pathStyle.Render("journalctl -u jellywatchd -f")))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Config:  "), pathStyle.Render("~/.config/jellywatch/config.toml")))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Database:"), pathStyle.Render("~/.config/jellywatch/media.db")))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Logs:    "), pathStyle.Render("journalctl -u jellywatchd -f")))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Press Enter to exit"))
 

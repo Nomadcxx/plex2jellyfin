@@ -17,7 +17,7 @@ func TestServerHealth(t *testing.T) {
 	})
 	defer handler.Shutdown()
 
-	server := NewServer(handler, ":0", nil)
+	server := NewServer(handler, nil, ":0", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -46,7 +46,7 @@ func TestServerHealthUnhealthy(t *testing.T) {
 	})
 	defer handler.Shutdown()
 
-	server := NewServer(handler, ":0", nil)
+	server := NewServer(handler, nil, ":0", nil)
 	server.SetHealthy(false)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -76,7 +76,7 @@ func TestServerReady(t *testing.T) {
 	})
 	defer handler.Shutdown()
 
-	server := NewServer(handler, ":0", nil)
+	server := NewServer(handler, nil, ":0", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	w := httptest.NewRecorder()
@@ -104,7 +104,7 @@ func TestServerMetrics(t *testing.T) {
 	handler.stats.RecordTV(1024 * 1024 * 50)
 	handler.stats.RecordError()
 
-	server := NewServer(handler, ":0", nil)
+	server := NewServer(handler, nil, ":0", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	w := httptest.NewRecorder()
