@@ -20,14 +20,14 @@ type FileInfo struct {
 
 // DuplicateGroup represents a group of duplicate files
 type DuplicateGroup struct {
-	GroupID   string    `json:"group_id"`
-	Title     string    `json:"title"`
-	Year      *int      `json:"year"`
-	MediaType string    `json:"media_type"`
-	Season    *int      `json:"season,omitempty"`
-	Episode   *int      `json:"episode,omitempty"`
-	Keep      FileInfo  `json:"keep"`
-	Delete    FileInfo  `json:"delete"`
+	GroupID   string   `json:"group_id"`
+	Title     string   `json:"title"`
+	Year      *int     `json:"year"`
+	MediaType string   `json:"media_type"`
+	Season    *int     `json:"season,omitempty"`
+	Episode   *int     `json:"episode,omitempty"`
+	Keep      FileInfo `json:"keep"`
+	Delete    FileInfo `json:"delete"`
 }
 
 // DuplicateSummary contains summary stats for duplicate plans
@@ -37,7 +37,7 @@ type DuplicateSummary struct {
 	SpaceReclaimable int64 `json:"space_reclaimable"`
 }
 
-// DuplicatePlan represents the full duplicate deletion plan
+// DuplicatePlan represents a full duplicate deletion plan
 type DuplicatePlan struct {
 	CreatedAt time.Time        `json:"created_at"`
 	Command   string           `json:"command"`
@@ -70,7 +70,7 @@ type ConsolidateSummary struct {
 	TotalBytes     int64 `json:"total_bytes"`
 }
 
-// ConsolidatePlan represents the full consolidation plan
+// ConsolidatePlan represents a full consolidation plan
 type ConsolidatePlan struct {
 	CreatedAt time.Time          `json:"created_at"`
 	Command   string             `json:"command"`
@@ -84,25 +84,8 @@ func GetPlansDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
+
 	return filepath.Join(homeDir, ".config", "jellywatch", "plans"), nil
-}
-
-// ensurePlansDir creates the plans directory if it doesn't exist
-func ensurePlansDir() error {
-	dir, err := GetPlansDir()
-	if err != nil {
-		return err
-	}
-	return os.MkdirAll(dir, 0755)
-}
-
-// getDuplicatePlansPath returns the path to duplicates.json
-func getDuplicatePlansPath() (string, error) {
-	dir, err := GetPlansDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "duplicates.json"), nil
 }
 
 // getConsolidatePlansPath returns the path to consolidate.json
@@ -111,81 +94,28 @@ func getConsolidatePlansPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return filepath.Join(dir, "consolidate.json"), nil
 }
 
-// SaveDuplicatePlans writes the duplicate plan to JSON file
-func SaveDuplicatePlans(plan *DuplicatePlan) error {
-	if err := ensurePlansDir(); err != nil {
-		return fmt.Errorf("failed to create plans directory: %w", err)
-	}
-
-	path, err := getDuplicatePlansPath()
+// getDuplicatePlansPath returns the path to duplicates.json
+func getDuplicatePlansPath() (string, error) {
+	dir, err := GetPlansDir()
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	data, err := json.MarshalIndent(plan, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal plan: %w", err)
-	}
-
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("failed to write plan file: %w", err)
-	}
-
-	return nil
+	return filepath.Join(dir, "duplicates.json"), nil
 }
 
-// LoadDuplicatePlans reads the duplicate plan from JSON file
-func LoadDuplicatePlans() (*DuplicatePlan, error) {
-	path, err := getDuplicatePlansPath()
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // No plans file exists
-		}
-		return nil, fmt.Errorf("failed to read plan file: %w", err)
-	}
-
-	var plan DuplicatePlan
-	if err := json.Unmarshal(data, &plan); err != nil {
-		return nil, fmt.Errorf("failed to parse plan file: %w", err)
-	}
-
-	return &plan, nil
-}
-
-// DeleteDuplicatePlans removes the duplicate plans file
-func DeleteDuplicatePlans() error {
-	path, err := getDuplicatePlansPath()
-	if err != nil {
-		return err
-	}
-
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to delete plan file: %w", err)
-	}
-
-	return nil
-}
-
-// SaveConsolidatePlans writes the consolidate plan to JSON file
+// SaveConsolidatePlans saves a consolidate plan to JSON file
 func SaveConsolidatePlans(plan *ConsolidatePlan) error {
-	if err := ensurePlansDir(); err != nil {
-		return fmt.Errorf("failed to create plans directory: %w", err)
-	}
-
 	path, err := getConsolidatePlansPath()
 	if err != nil {
 		return err
 	}
 
-	data, err := json.MarshalIndent(plan, "", "  ")
+	data, err := json.MarshalIndent(plan, "", " 	")
 	if err != nil {
 		return fmt.Errorf("failed to marshal plan: %w", err)
 	}
@@ -197,24 +127,21 @@ func SaveConsolidatePlans(plan *ConsolidatePlan) error {
 	return nil
 }
 
-// LoadConsolidatePlans reads the consolidate plan from JSON file
+// LoadConsolidatePlans loads a consolidate plan from JSON file
 func LoadConsolidatePlans() (*ConsolidatePlan, error) {
 	path, err := getConsolidatePlansPath()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open plans file: %w", err)
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // No plans file exists
-		}
-		return nil, fmt.Errorf("failed to read plan file: %w", err)
+		return nil, fmt.Errorf("failed to read plans file: %w", err)
 	}
 
 	var plan ConsolidatePlan
 	if err := json.Unmarshal(data, &plan); err != nil {
-		return nil, fmt.Errorf("failed to parse plan file: %w", err)
+		return nil, fmt.Errorf("failed to parse plans file: %w", err)
 	}
 
 	return &plan, nil
@@ -229,6 +156,56 @@ func DeleteConsolidatePlans() error {
 
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete plan file: %w", err)
+	}
+
+	return nil
+}
+
+// ArchiveConsolidatePlans renames consolidate.json to consolidate.json.old
+func ArchiveConsolidatePlans() error {
+	path, err := getConsolidatePlansPath()
+	if err != nil {
+		return err
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil // Nothing to archive
+	}
+
+	oldPath := path + ".old"
+
+	// Remove old archive if exists
+	os.Remove(oldPath)
+
+	// Rename current to .old
+	if err := os.Rename(path, oldPath); err != nil {
+		return fmt.Errorf("failed to archive plan file: %w", err)
+	}
+
+	return nil
+}
+
+// ArchiveDuplicatePlans renames duplicates.json to duplicates.json.old
+func ArchiveDuplicatePlans() error {
+	path, err := getDuplicatePlansPath()
+	if err != nil {
+		return err
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil // Nothing to archive
+	}
+
+	oldPath := path + ".old"
+
+	// Remove old archive if exists
+	os.Remove(oldPath)
+
+	// Rename current to .old
+	if err := os.Rename(path, oldPath); err != nil {
+		return fmt.Errorf("failed to archive plan file: %w", err)
 	}
 
 	return nil
