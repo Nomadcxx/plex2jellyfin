@@ -203,7 +203,10 @@ func runExecutePlans(ctx context.Context, db *database.MediaDB, dryRun bool) err
 		case "delete":
 			deleteCount++
 			// Get file info for size
-			file, _ := db.GetMediaFileByID(plan.SourceFileID)
+			var file *database.MediaFile
+			if plan.SourceFileID.Valid {
+				file, _ = db.GetMediaFileByID(plan.SourceFileID.Int64)
+			}
 			size := ""
 			if file != nil {
 				size = formatBytes(file.Size)

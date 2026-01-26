@@ -35,7 +35,7 @@ type ConsolidationPlan struct {
 	CreatedAt     string
 	Status        string
 	Action        string
-	SourceFileID  int64
+	SourceFileID  sql.NullInt64
 	SourcePath    string
 	TargetPath    string
 	Reason        string

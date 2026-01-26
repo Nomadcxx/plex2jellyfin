@@ -72,8 +72,8 @@ func (e *Executor) ExecutePlans(ctx context.Context) (*ExecutionResult, error) {
 
 		// For delete actions, get file size BEFORE deleting
 		var fileSizeToReclaim int64
-		if plan.Action == "delete" {
-			file, err := e.db.GetMediaFileByID(plan.SourceFileID)
+		if plan.Action == "delete" && plan.SourceFileID.Valid {
+			file, err := e.db.GetMediaFileByID(plan.SourceFileID.Int64)
 			if err == nil && file != nil {
 				fileSizeToReclaim = file.Size
 			}

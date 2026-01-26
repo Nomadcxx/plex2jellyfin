@@ -337,6 +337,36 @@ func TestGeneratePlans_NoDuplicates(t *testing.T) {
 	}
 }
 
+func TestGetPendingPlans_NullSourceFileID(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	// Insert a plan with NULL source_file_id (move operation)
+	_, err := db.DB().Exec(`
+		INSERT INTO consolidation_plans
+		(status, action, source_file_id, source_path, target_path, reason, reason_details)
+		VALUES ('pending', 'move', NULL, '/source/path', '/target/path', 'consolidation', 'moving to target')
+	`)
+	if err != nil {
+		t.Fatalf("Failed to insert test plan: %v", err)
+	}
+
+	planner := NewPlanner(db)
+	plans, err := planner.GetPendingPlans()
+	if err != nil {
+		t.Fatalf("GetPendingPlans failed with NULL source_file_id: %v", err)
+	}
+
+	if len(plans) != 1 {
+		t.Fatalf("Expected 1 plan, got %d", len(plans))
+	}
+
+	if plans[0].SourceFileID.Valid {
+		t.Error("Expected SourceFileID.Valid to be false for NULL value")
+	}
+
+}
+
 // setupTestDB creates a temporary database for testing
 func setupTestDB(t *testing.T) *database.MediaDB {
 	tempFile := filepath.Join(t.TempDir(), "test.db")
