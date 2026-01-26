@@ -23,3 +23,26 @@ func isVideoFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return videoExtensions[ext]
 }
+
+// isLibraryRoot checks if path is exactly a library root
+func isLibraryRoot(path string, libraryRoots []string) bool {
+	cleanPath := filepath.Clean(path)
+	for _, root := range libraryRoots {
+		if filepath.Clean(root) == cleanPath {
+			return true
+		}
+	}
+	return false
+}
+
+// isInsideLibrary checks if path is inside any library root
+func isInsideLibrary(path string, libraryRoots []string) bool {
+	cleanPath := filepath.Clean(path)
+	for _, root := range libraryRoots {
+		cleanRoot := filepath.Clean(root)
+		if strings.HasPrefix(cleanPath, cleanRoot) {
+			return true
+		}
+	}
+	return false
+}
