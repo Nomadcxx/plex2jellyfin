@@ -1,6 +1,12 @@
 package main
 
-import "fmt"
+import (
+	_ "embed"
+	"fmt"
+)
+
+//go:embed assets/header.txt
+var asciiHeader string
 
 // formatBytes converts bytes to human-readable format (e.g., "1.5 GB")
 func formatBytes(bytes int64) string {
@@ -14,4 +20,10 @@ func formatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// printHeader displays the ASCII header with version info
+func printHeader(version string) {
+	fmt.Println(asciiHeader)
+	fmt.Printf("Version: %s\n\n", version)
 }
