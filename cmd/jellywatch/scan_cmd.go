@@ -10,6 +10,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
+	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/sync"
 	"github.com/spf13/cobra"
@@ -163,25 +164,58 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool) error {
 		}
 		fmt.Printf("Movies: %d\n", movieCount)
 
-		// Check for conflicts
-		conflicts, err := db.GetUnresolvedConflicts()
-		if err == nil {
-			if len(conflicts) > 0 {
-				fmt.Printf("\n=== Conflicts Detected: %d ===\n", len(conflicts))
-				for _, c := range conflicts {
-					yearStr := ""
-					if c.Year != nil {
-						yearStr = fmt.Sprintf(" (%d)", *c.Year)
-					}
-					fmt.Printf("  [%s] %s%s\n", c.MediaType, c.Title, yearStr)
-					for _, loc := range c.Locations {
-						fmt.Printf("    - %s\n", loc)
-					}
+		svc := service.NewCleanupService(db)
+
+		dupAnalysis, err := svc.AnalyzeDuplicates()
+		hasDuplicates := err == nil && dupAnalysis.TotalGroups > 0
+
+		scatterAnalysis, err := svc.AnalyzeScattered()
+		hasScattered := err == nil && scatterAnalysis.TotalItems > 0
+
+		if hasDuplicates || hasScattered {
+			fmt.Println("\n=== Issues Found ===")
+		}
+
+		if hasDuplicates {
+			fmt.Printf("\n📁 DUPLICATES (same content, different quality): %d groups\n", dupAnalysis.TotalGroups)
+			fmt.Printf("   → These have inferior copies that can be DELETED to save %s\n", formatBytes(dupAnalysis.ReclaimableBytes))
+		}
+
+		if hasScattered {
+			fmt.Printf("\n🔀 SCATTERED MEDIA (same title in multiple locations): %d items\n", scatterAnalysis.TotalItems)
+			fmt.Println("   → These need files MOVED to consolidate into one folder")
+
+			for _, item := range scatterAnalysis.Items {
+				yearStr := ""
+				if item.Year != nil {
+					yearStr = fmt.Sprintf(" (%d)", *item.Year)
 				}
-				fmt.Printf("\nRun 'jellywatch consolidate --dry-run' to see consolidation plan\n")
-			} else {
-				fmt.Println("\nNo conflicts detected")
+				fmt.Printf("  [%s] %s%s\n", item.MediaType, item.Title, yearStr)
+				for _, loc := range item.Locations {
+					fmt.Printf("    - %s\n", loc)
+				}
 			}
+		}
+
+		if hasDuplicates || hasScattered {
+			fmt.Println("\n=== What's Next ===")
+
+			if hasDuplicates {
+				fmt.Println("\n1. Handle duplicates first (recommended):")
+				fmt.Println("   jellywatch fix              # Interactive wizard (handles all)")
+				fmt.Println("   jellywatch duplicates       # Review duplicates only")
+			}
+
+			if hasScattered {
+				step := "1"
+				if hasDuplicates {
+					step = "2"
+				}
+				fmt.Printf("\n%s. Then consolidate scattered media:\n", step)
+				fmt.Println("   jellywatch consolidate      # Review and organize")
+			}
+		} else {
+			fmt.Println("\n✨ No issues detected - your library is clean!")
 		}
 	}
 

@@ -78,6 +78,8 @@ Features:
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newDatabaseCmd())
 	rootCmd.AddCommand(newMonitorCmd())
+	rootCmd.AddCommand(newFixCmd())
+	rootCmd.AddCommand(newServeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

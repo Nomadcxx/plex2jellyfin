@@ -149,6 +149,52 @@ func (s *CleanupService) AnalyzeDuplicates() (*DuplicateAnalysis, error) {
 	return analysis, nil
 }
 
+// AnalyzeScattered finds media scattered across multiple locations
+func (s *CleanupService) AnalyzeScattered() (*ScatteredAnalysis, error) {
+	analysis := &ScatteredAnalysis{
+		Items: []ScatteredItem{},
+	}
+
+	_, err := s.db.DetectConflicts()
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect conflicts: %w", err)
+	}
+
+	conflicts, err := s.db.GetUnresolvedConflicts()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get conflicts: %w", err)
+	}
+
+	for _, c := range conflicts {
+		item := ScatteredItem{
+			ID:        c.ID,
+			Title:     c.Title,
+			Year:      c.Year,
+			MediaType: c.MediaType,
+			Locations: c.Locations,
+		}
+
+		// Determine target location (one with most files)
+		if len(c.Locations) > 0 {
+			item.TargetLocation = c.Locations[0] // Default to first
+			// Could enhance to pick location with most files
+		}
+
+		// Count files to move (from non-target locations)
+		for _, loc := range c.Locations {
+			if loc != item.TargetLocation {
+				// Count would need filesystem access or DB query
+				item.FilesToMove++ // Simplified: 1 per location for now
+			}
+		}
+
+		analysis.Items = append(analysis.Items, item)
+	}
+
+	analysis.TotalItems = len(analysis.Items)
+	return analysis, nil
+}
+
 // generateGroupID creates a unique ID for a duplicate group
 func generateGroupID(title string, year *int, season, episode *int) string {
 	parts := []string{strings.ToLower(title)}

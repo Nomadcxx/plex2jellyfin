@@ -7,54 +7,44 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/consolidate"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/spf13/cobra"
 )
 
 func newConsolidateCmd() *cobra.Command {
 	var (
-		generate bool
-		dryRun   bool
-		execute  bool
-		status   bool
+		dryRun  bool
+		execute bool
+		status  bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "consolidate [flags]",
-		Short: "Detect and remove duplicate files using CONDOR system",
-		Long: `Detect duplicate media files and non-compliant filenames using the CONDOR
-database-driven system.
+		Short: "Consolidate scattered media files",
+		Long: `Find and consolidate media files scattered across multiple locations.
 
-The CONDOR system analyzes your media_files database to identify:
-  - Duplicate files (same movie/episode with different quality)
-  - Non-Jellyfin-compliant filenames
-
-Workflow:
-  1. jellywatch scan                    # Populate database
-  2. jellywatch consolidate --generate  # Generate consolidation plans
-  3. jellywatch consolidate --dry-run   # Review what will happen
-  4. jellywatch consolidate --execute   # Execute the plans
+This command identifies media with the same title in different folders
+and offers to move them to a single location.
 
 Examples:
-  jellywatch consolidate --generate     # Generate plans from database
-  jellywatch consolidate --status       # Show plan summary
-  jellywatch consolidate --dry-run      # Preview pending plans
-  jellywatch consolidate --execute      # Execute pending plans
+  jellywatch consolidate              # Show what needs consolidation
+  jellywatch consolidate --dry-run    # Preview the consolidation plan
+  jellywatch consolidate --execute    # Execute consolidation
+  jellywatch consolidate --status     # Show pending plan status
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConsolidate(generate, dryRun, execute, status)
+			return runConsolidate(dryRun, execute, status)
 		},
 	}
 
-	cmd.Flags().BoolVar(&generate, "generate", false, "Generate consolidation plans from database")
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Show what would be done without making changes")
-	cmd.Flags().BoolVar(&execute, "execute", false, "Execute pending consolidation plans")
+	cmd.Flags().BoolVar(&execute, "execute", false, "Execute consolidation")
 	cmd.Flags().BoolVar(&status, "status", false, "Show plan summary")
 
 	return cmd
 }
 
-func runConsolidate(generate, dryRun, execute, status bool) error {
-	// Open database
+func runConsolidate(dryRun, execute, status bool) error {
 	db, err := database.Open()
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -63,84 +53,41 @@ func runConsolidate(generate, dryRun, execute, status bool) error {
 
 	ctx := context.Background()
 
-	// Generate plans if requested
-	if generate {
-		return runGeneratePlans(ctx, db)
-	}
-
-	// Show status if requested
 	if status {
 		return runConsolidateStatus(db)
 	}
 
-	// Execute plans (dry-run or actual)
 	if execute || dryRun {
 		return runExecutePlans(ctx, db, dryRun)
 	}
 
-	// Default: Show summary and guide user
-	return runConsolidateSummary(db)
-}
-
-func clearPendingPlans(db *database.MediaDB) error {
-	query := `DELETE FROM consolidation_plans WHERE status = 'pending'`
-	_, err := db.DB().Exec(query)
-	return err
-}
-
-func runGeneratePlans(ctx context.Context, db *database.MediaDB) error {
-	fmt.Println("🔍 Analyzing database for consolidation opportunities...")
-
-	cfg, err := config.Load()
+	svc := service.NewCleanupService(db)
+	analysis, err := svc.AnalyzeScattered()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return fmt.Errorf("failed to analyze: %w", err)
 	}
 
-	consolidator := consolidate.NewConsolidator(db, cfg)
-
-	err = clearPendingPlans(db)
-	if err != nil {
-		return fmt.Errorf("failed to clear pending plans: %w", err)
+	if analysis.TotalItems == 0 {
+		fmt.Println("✨ No scattered media found - your library is organized!")
+		return nil
 	}
 
-	plans, err := consolidator.GenerateAllPlans()
-	if err != nil {
-		return fmt.Errorf("failed to generate plans: %w", err)
-	}
+	fmt.Printf("Found %d items scattered across multiple locations:\n\n", analysis.TotalItems)
 
-	var planCount, failedPlanCount, moveCount, spaceToReclaim int64
-	totalConflicts := int64(len(plans))
-
-	for _, plan := range plans {
-		err := consolidator.StorePlan(plan)
-		if err != nil {
-			fmt.Printf("Warning: Failed to store plan for %s: %v\n", plan.Title, err)
-			failedPlanCount++
-			continue
+	for _, item := range analysis.Items {
+		yearStr := ""
+		if item.Year != nil {
+			yearStr = fmt.Sprintf(" (%d)", *item.Year)
 		}
-
-		planCount++
-		moveCount += int64(len(plan.Operations))
-		spaceToReclaim += plan.TotalBytes
+		fmt.Printf("[%s] %s%s\n", item.MediaType, item.Title, yearStr)
+		for _, loc := range item.Locations {
+			fmt.Printf("  - %s\n", loc)
+		}
 	}
 
-	fmt.Println("\n✅ Plans generated successfully!")
-	fmt.Printf("\nConsolidation Summary:\n")
-	fmt.Printf("  Conflicts analyzed:        %d\n", totalConflicts)
-	fmt.Printf("  Consolidation opportunities: %d\n", planCount)
-	fmt.Printf("  Move operations:           %d\n", moveCount)
-	fmt.Printf("  Files to relocate:         %s\n", formatBytes(spaceToReclaim))
-	if failedPlanCount > 0 {
-		fmt.Printf("  Failed to store:          %d plans\n", failedPlanCount)
-	}
-
-	if planCount > 0 {
-		fmt.Println("\nNext steps:")
-		fmt.Println("  jellywatch consolidate --dry-run   # Preview what will happen")
-		fmt.Println("  jellywatch consolidate --execute   # Execute the plans")
-	} else {
-		fmt.Println("\n✨ No consolidation needed - your library is already organized!")
-	}
+	fmt.Println("\nNext steps:")
+	fmt.Println("  jellywatch consolidate --dry-run   # Preview what will happen")
+	fmt.Println("  jellywatch consolidate --execute   # Execute consolidation")
 
 	return nil
 }
@@ -161,7 +108,7 @@ func runConsolidateStatus(db *database.MediaDB) error {
 	fmt.Printf("\nSpace to reclaim: %s\n", formatBytes(summary.SpaceToReclaim))
 
 	if summary.TotalPlans == 0 {
-		fmt.Println("\nNo pending plans. Run 'jellywatch consolidate --generate' to create new plans.")
+		fmt.Println("\nNo pending plans. Run 'jellywatch consolidate --dry-run' to generate new plans.")
 	} else {
 		fmt.Println("\nRun 'jellywatch consolidate --dry-run' to preview actions.")
 		fmt.Println("Run 'jellywatch consolidate --execute' to execute plans.")
@@ -174,15 +121,39 @@ func runExecutePlans(ctx context.Context, db *database.MediaDB, dryRun bool) err
 	planner := consolidate.NewPlanner(db)
 	executor := consolidate.NewExecutor(db, dryRun)
 
-	// Get pending plans
+	// Auto-generate plans on the fly
+	fmt.Println("🔍 Analyzing database for consolidation opportunities...")
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Clear old pending plans and regenerate
+	if _, err := db.DB().Exec(`DELETE FROM consolidation_plans WHERE status = 'pending'`); err != nil {
+		return fmt.Errorf("failed to clear old plans: %w", err)
+	}
+
+	consolidator := consolidate.NewConsolidator(db, cfg)
+	generatedPlans, err := consolidator.GenerateAllPlans()
+	if err != nil {
+		return fmt.Errorf("failed to generate plans: %w", err)
+	}
+
+	// Store plans
+	for _, plan := range generatedPlans {
+		if err := consolidator.StorePlan(plan); err != nil {
+			fmt.Printf("Warning: Failed to store plan for %s: %v\n", plan.Title, err)
+		}
+	}
+
 	plans, err := planner.GetPendingPlans()
 	if err != nil {
 		return fmt.Errorf("failed to get pending plans: %w", err)
 	}
 
 	if len(plans) == 0 {
-		fmt.Println("No pending plans to execute.")
-		fmt.Println("Run 'jellywatch consolidate --generate' to create plans.")
+		fmt.Println("✨ No consolidation needed - your library is already organized!")
 		return nil
 	}
 
@@ -202,7 +173,6 @@ func runExecutePlans(ctx context.Context, db *database.MediaDB, dryRun bool) err
 		switch plan.Action {
 		case "delete":
 			deleteCount++
-			// Get file info for size
 			var file *database.MediaFile
 			if plan.SourceFileID.Valid {
 				file, _ = db.GetMediaFileByID(plan.SourceFileID.Int64)
@@ -239,14 +209,12 @@ func runExecutePlans(ctx context.Context, db *database.MediaDB, dryRun bool) err
 		return nil
 	}
 
-	// Execute plans
 	fmt.Println("Executing plans...")
 	result, err := executor.ExecutePlans(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to execute plans: %w", err)
 	}
 
-	// Show results
 	fmt.Println("\n=== Execution Complete ===")
 	fmt.Printf("Plans executed:  %d\n", result.PlansExecuted)
 	fmt.Printf("Succeeded:       %d\n", result.PlansSucceeded)
@@ -262,36 +230,6 @@ func runExecutePlans(ctx context.Context, db *database.MediaDB, dryRun bool) err
 		for _, err := range result.Errors {
 			fmt.Printf("  - %v\n", err)
 		}
-	}
-
-	return nil
-}
-
-func runConsolidateSummary(db *database.MediaDB) error {
-	// Check for pending plans
-	planner := consolidate.NewPlanner(db)
-	summary, err := planner.GetPlanSummary()
-	if err != nil {
-		return fmt.Errorf("failed to get plan summary: %w", err)
-	}
-
-	fmt.Println("=== CONDOR Consolidation System ===")
-
-	if summary.TotalPlans > 0 {
-		fmt.Printf("You have %d pending consolidation plans:\n", summary.TotalPlans)
-		fmt.Printf("  Delete:   %d files (%s to reclaim)\n", summary.DeletePlans, formatBytes(summary.SpaceToReclaim))
-		fmt.Printf("  Move:     %d files\n", summary.MovePlans)
-		fmt.Printf("  Rename:   %d files\n", summary.RenamePlans)
-		fmt.Println("\nNext steps:")
-		fmt.Println("  jellywatch consolidate --dry-run   # Preview actions")
-		fmt.Println("  jellywatch consolidate --execute   # Execute plans")
-	} else {
-		fmt.Println("No pending consolidation plans found.")
-		fmt.Println("\nTo analyze your library and generate plans:")
-		fmt.Println("  1. jellywatch scan                    # Scan libraries into database")
-		fmt.Println("  2. jellywatch consolidate --generate  # Generate consolidation plans")
-		fmt.Println("  3. jellywatch consolidate --dry-run   # Preview plans")
-		fmt.Println("  4. jellywatch consolidate --execute   # Execute plans")
 	}
 
 	return nil

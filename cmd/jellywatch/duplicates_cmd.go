@@ -16,6 +16,7 @@ func newDuplicatesCmd() *cobra.Command {
 		tvOnly     bool
 		showFilter string
 		execute    bool
+		dryRun     bool
 	)
 
 	cmd := &cobra.Command{
@@ -37,9 +38,10 @@ Examples:
   jellywatch duplicates --tv         # Only TV episodes
   jellywatch duplicates --show=Silo  # Duplicates for specific show
   jellywatch duplicates --execute    # DELETE inferior duplicates (with confirmation)
+  jellywatch duplicates --dry-run    # Preview what would be deleted
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDuplicates(moviesOnly, tvOnly, showFilter, execute)
+			return runDuplicates(moviesOnly, tvOnly, showFilter, execute, dryRun)
 		},
 	}
 
@@ -47,11 +49,12 @@ Examples:
 	cmd.Flags().BoolVar(&tvOnly, "tv", false, "Show only TV episode duplicates")
 	cmd.Flags().StringVar(&showFilter, "show", "", "Filter by show name")
 	cmd.Flags().BoolVar(&execute, "execute", false, "DELETE inferior duplicate files (requires confirmation)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be deleted without making changes")
 
 	return cmd
 }
 
-func runDuplicates(moviesOnly, tvOnly bool, showFilter string, execute bool) error {
+func runDuplicates(moviesOnly, tvOnly bool, showFilter string, execute, dryRun bool) error {
 	// Open database
 	db, err := database.Open()
 	if err != nil {
@@ -189,6 +192,15 @@ func runDuplicates(moviesOnly, tvOnly bool, showFilter string, execute bool) err
 	fmt.Printf("Total files:      %d\n", totalFiles)
 	fmt.Printf("Files to delete:  %d\n", len(filesToDelete))
 	fmt.Printf("Space reclaimable: %s\n", formatBytes(totalReclaimable))
+
+	if dryRun {
+		fmt.Println("\n🔍 DRY RUN - No changes will be made")
+		fmt.Printf("\nWould delete %d files to reclaim %s:\n", len(filesToDelete), formatBytes(totalReclaimable))
+		for _, path := range filesToDelete {
+			fmt.Printf("  - %s\n", path)
+		}
+		return nil
+	}
 
 	// If execute flag is set, delete the files
 	if execute {
