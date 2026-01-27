@@ -1,9 +1,16 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
+	"github.com/spf13/cobra"
+
+	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
@@ -60,27 +67,57 @@ func runAudit(cmd *cobra.Command, args []string) error {
 
 	// Load and execute plan
 	plan, err := plans.LoadAuditPlans()
-	if err != nil {
-		return fmt.Errorf("failed to load audit plans: %w", err)
-	}
-
 	if plan == nil {
 		fmt.Println("No audit plans found. Run with --generate to create one.")
 		return nil
 	}
 
-	// Dry run - just show the plan
+	// Dry run - just show to plan
 	if auditOpts.DryRun {
 		return displayAuditPlan(plan, true)
 	}
 
-	// Execute mode - apply the plan
+	// Execute mode - apply to plan
 	if auditOpts.Execute {
 		return executeAuditPlan(db, plan)
 	}
 
 	// Default - show plan
 	return displayAuditPlan(plan, false)
+}
+
+// dbProvider implements ai.DatabaseProvider interface
+type dbProvider struct {
+	mediaDB *database.MediaDB
+}
+
+func (p *dbProvider) DB() *sql.DB {
+	return p.mediaDB.DB()
+}
+
+// buildCorrectPath constructs a new file path based on AI-suggested metadata
+func buildCorrectPath(currentPath, newTitle string, newYear, newSeason, newEpisode *int) string {
+	dir := filepath.Dir(currentPath)
+	ext := filepath.Ext(currentPath)
+
+	var filename string
+	if newSeason != nil && newEpisode != nil {
+		// TV show episode
+		if newYear != nil {
+			filename = fmt.Sprintf("%s (%d) - S%02dE%02d%s", newTitle, *newYear, *newSeason, *newEpisode, ext)
+		} else {
+			filename = fmt.Sprintf("%s - S%02dE%02d%s", newTitle, *newSeason, *newEpisode, ext)
+		}
+	} else {
+		// Movie
+		if newYear != nil {
+			filename = fmt.Sprintf("%s (%d)%s", newTitle, *newYear, ext)
+		} else {
+			filename = fmt.Sprintf("%s%s", newTitle, ext)
+		}
+	}
+
+	return filepath.Join(dir, filename)
 }
 
 func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, limit int) error {
@@ -98,7 +135,56 @@ func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, 
 
 	fmt.Printf("Found %d low-confidence files\n", len(files))
 
-	// TODO: Generate AI suggestions (task 8)
+	// Initialize AI matcher directly to get full Result
+	matcher, err := ai.NewMatcher(cfg.AI)
+	if err != nil {
+		return fmt.Errorf("failed to initialize AI matcher: %w", err)
+	}
+
+	// Generate AI suggestions for each file
+	actions := make([]plans.AuditAction, 0, len(files))
+	for _, file := range files {
+		mediaType := file.MediaType
+		if mediaType == "movie" {
+			mediaType = "tv" // AI expects "tv" for episodes
+		}
+
+		ctx := context.Background()
+		aiResult, err := matcher.Parse(ctx, filepath.Base(file.Path))
+		if err != nil {
+			fmt.Printf("⚠️  AI error for %s: %v\n", file.Path, err)
+			continue
+		}
+
+		// Check if AI gave a better result
+		if aiResult.Confidence >= cfg.AI.ConfidenceThreshold && aiResult.Title != file.NormalizedTitle {
+			// Build new filename/path based on AI suggestion
+			var newSeason, newEpisode *int
+			if aiResult.Season != nil {
+				newSeason = aiResult.Season
+			} else {
+				newSeason = file.Season
+			}
+
+			if len(aiResult.Episodes) > 0 {
+				newEpisode = &aiResult.Episodes[0]
+			} else {
+				newEpisode = file.Episode
+			}
+
+			actions = append(actions, plans.AuditAction{
+				Action:      "rename",
+				NewTitle:    aiResult.Title,
+				NewYear:     aiResult.Year,
+				NewSeason:   newSeason,
+				NewEpisode:  newEpisode,
+				NewPath:     buildCorrectPath(file.Path, aiResult.Title, aiResult.Year, newSeason, newEpisode),
+				Reasoning:   fmt.Sprintf("AI suggested: %s (confidence: %.2f)", aiResult.Title, aiResult.Confidence),
+				Confidence:  aiResult.Confidence,
+			})
+		}
+	}
+
 	plan := &plans.AuditPlan{
 		CreatedAt: time.Now(),
 		Command:    "audit",
@@ -109,7 +195,7 @@ func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, 
 			FilesToSkip:   len(files),
 			AvgConfidence: calculateAvgConfidence(files),
 		},
-		Items: filesToAuditItems(files),
+			Items: filesToAuditItems(files),
 	}
 
 	err = plans.SaveAuditPlans(plan)
@@ -171,12 +257,12 @@ func filesToAuditItems(files []*database.MediaFile) []plans.AuditItem {
 			ID:         file.ID,
 			Path:       file.Path,
 			Size:       file.Size,
-			MediaType: file.MediaType,
+			MediaType:   file.MediaType,
 			Title:      file.NormalizedTitle,
 			Year:       file.Year,
 			Season:     file.Season,
 			Episode:    file.Episode,
-			Confidence: file.Confidence,
+			Confidence:  file.Confidence,
 			Resolution: file.Resolution,
 			SourceType: file.SourceType,
 		}
