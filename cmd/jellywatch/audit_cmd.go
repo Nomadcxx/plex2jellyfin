@@ -354,3 +354,8 @@ func getAuditPlansPath() string {
 	}
 	return fmt.Sprintf("%s/.config/jellywatch/plans/audit.json", homeDir)
 }
+
+// newAuditCmd returns the audit command
+func newAuditCmd() *cobra.Command {
+	return auditCmd
+}

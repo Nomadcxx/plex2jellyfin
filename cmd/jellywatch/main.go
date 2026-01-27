@@ -1040,25 +1040,3 @@ can help you clean up wasted space.`,
 	return cmd
 }
 
-// newAuditCmd creates the audit command
-func newAuditCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "audit",
-		Short: "Audit low-confidence file parses",
-		Long: `Review and fix files with low parse confidence.
-
-This command identifies files where the parser was uncertain about
-the title extraction and can use AI to suggest corrections.`,
-	}
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "--generate",
-		Short: "Generate audit plans",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Audit generate - not yet implemented")
-			return nil
-		},
-	})
-
-	return cmd
-}
