@@ -120,7 +120,7 @@ func NewIntegrator(cfg config.AIConfig, dbProvider DatabaseProvider) (*Integrato
 		i.keepalive.Start(bgCtx)
 	}
 
-	i.bgQueue = NewBackgroundQueue(100, 2)
+	i.bgQueue = NewBackgroundQueue(100, 2, cfg.RetryDelay)
 	i.bgWg.Add(1)
 	go i.backgroundWorker()
 

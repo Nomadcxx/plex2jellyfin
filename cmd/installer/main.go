@@ -66,6 +66,9 @@ func newModel(debugMode bool, logFile *os.File) model {
 		// Existing install detection
 		existingDBDetected: existingDB,
 		existingDBPath:     dbPath,
+
+		// Timing config
+		inputDelay: 200 * time.Millisecond,
 	}
 
 	return m

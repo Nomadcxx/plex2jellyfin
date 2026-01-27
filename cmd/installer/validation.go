@@ -393,7 +393,7 @@ func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd) {
 
 func executeTaskCmd(index int, m *model) tea.Cmd {
 	return func() tea.Msg {
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(m.inputDelay)
 		err := m.tasks[index].execute(m)
 		if err != nil {
 			return taskCompleteMsg{index: index, success: false, err: err.Error()}

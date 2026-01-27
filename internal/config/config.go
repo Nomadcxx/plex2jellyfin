@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -141,6 +142,7 @@ type AIConfig struct {
 	AutoResolveRisky     bool                 `mapstructure:"auto_resolve_risky"`
 	CircuitBreaker       CircuitBreakerConfig `mapstructure:"circuit_breaker"`
 	Keepalive            KeepaliveConfig      `mapstructure:"keepalive"`
+	RetryDelay           time.Duration        `mapstructure:"retry_delay"`
 }
 
 // WatchConfig contains directories to watch
@@ -225,6 +227,7 @@ func DefaultConfig() *Config {
 			TimeoutSeconds:       5,
 			CacheEnabled:         true,
 			CloudModel:           "nemotron-3-nano:30b-cloud",
+			RetryDelay:           100 * time.Millisecond,
 			CircuitBreaker: CircuitBreakerConfig{
 				FailureThreshold:     5,
 				FailureWindowSeconds: 120,
@@ -483,6 +486,7 @@ func DefaultAIConfig() AIConfig {
 		AutoTriggerThreshold: 0.6,
 		TimeoutSeconds:       5,
 		CacheEnabled:         true,
+		RetryDelay:           100 * time.Millisecond,
 		CircuitBreaker: CircuitBreakerConfig{
 			FailureThreshold:     5,
 			FailureWindowSeconds: 120,

@@ -6,7 +6,7 @@ import (
 )
 
 func TestBackgroundQueue_Enqueue(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 
 	req := &EnhancementRequest{
 		ID:        "test-1",
@@ -32,7 +32,7 @@ func TestBackgroundQueue_Enqueue(t *testing.T) {
 }
 
 func TestBackgroundQueue_EnqueueAfterShutdown(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 	queue.Stop()
 
 	req := &EnhancementRequest{
@@ -50,7 +50,7 @@ func TestBackgroundQueue_EnqueueAfterShutdown(t *testing.T) {
 }
 
 func TestBackgroundQueue_EnqueueInvalidRequest(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 
 	req := &EnhancementRequest{
 		ID:        "",
@@ -67,7 +67,7 @@ func TestBackgroundQueue_EnqueueInvalidRequest(t *testing.T) {
 }
 
 func TestBackgroundQueue_EnqueueQueueFull(t *testing.T) {
-	queue := NewBackgroundQueue(2, 1)
+	queue := NewBackgroundQueue(2, 1, time.Millisecond)
 
 	for i := 0; i < 3; i++ {
 		req := &EnhancementRequest{
@@ -89,7 +89,7 @@ func TestBackgroundQueue_EnqueueQueueFull(t *testing.T) {
 }
 
 func TestBackgroundQueue_Dequeue(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 
 	req := &EnhancementRequest{
 		ID:        "test-1",
@@ -116,7 +116,7 @@ func TestBackgroundQueue_Dequeue(t *testing.T) {
 }
 
 func TestBackgroundQueue_DequeueEmpty(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 
 	item := queue.Dequeue()
 	if item != nil {
@@ -125,7 +125,7 @@ func TestBackgroundQueue_DequeueEmpty(t *testing.T) {
 }
 
 func TestBackgroundQueue_Complete(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 
 	req := &EnhancementRequest{
 		ID:        "test-1",
@@ -151,7 +151,7 @@ func TestBackgroundQueue_Complete(t *testing.T) {
 }
 
 func TestBackgroundQueue_Fail(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 
 	req := &EnhancementRequest{
 		ID:        "test-1",
@@ -181,7 +181,7 @@ func TestBackgroundQueue_Fail(t *testing.T) {
 }
 
 func TestBackgroundQueue_QueueStats(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 
 	req1 := &EnhancementRequest{
 		ID:        "test-1",
@@ -238,7 +238,7 @@ func TestBackgroundQueue_QueueStats(t *testing.T) {
 }
 
 func TestBackgroundQueue_Stop(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 
 	req := &EnhancementRequest{
 		ID:        "test-1",
@@ -262,7 +262,7 @@ func TestBackgroundQueue_Stop(t *testing.T) {
 }
 
 func TestBackgroundQueue_Output(t *testing.T) {
-	queue := NewBackgroundQueue(10, 1)
+	queue := NewBackgroundQueue(10, 1, time.Millisecond)
 
 	req := &EnhancementRequest{
 		ID:        "test-1",

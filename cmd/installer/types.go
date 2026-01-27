@@ -168,6 +168,9 @@ type model struct {
 	scanResult   *ScanResult
 	scanStats    *ScanStats
 	scanCancel   context.CancelFunc
+
+	// Timing config
+	inputDelay time.Duration
 }
 
 // ScanProgress tracks library scanning progress

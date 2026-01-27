@@ -47,17 +47,21 @@ type BackgroundQueue struct {
 	stopped  bool
 	stopLock sync.RWMutex
 
-	queueSize int
-	workers   int
+	queueSize  int
+	workers    int
+	retryDelay time.Duration
 }
 
 // NewBackgroundQueue creates a new background processing queue.
-func NewBackgroundQueue(queueSize, workers int) *BackgroundQueue {
+func NewBackgroundQueue(queueSize, workers int, retryDelay time.Duration) *BackgroundQueue {
 	if queueSize <= 0 {
 		queueSize = 100
 	}
 	if workers <= 0 {
 		workers = 1
+	}
+	if retryDelay <= 0 {
+		retryDelay = 100 * time.Millisecond
 	}
 
 	q := &BackgroundQueue{
@@ -67,6 +71,7 @@ func NewBackgroundQueue(queueSize, workers int) *BackgroundQueue {
 		stopChan:   make(chan struct{}),
 		queueSize:  queueSize,
 		workers:    workers,
+		retryDelay: retryDelay,
 	}
 
 	return q
@@ -206,7 +211,7 @@ func (q *BackgroundQueue) Stop() {
 	for range q.inputChan {
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(q.retryDelay)
 }
 
 // IsStopped returns true if the queue has been stopped.
