@@ -394,19 +394,19 @@ func DeleteAuditPlans() error {
 }
 
 // ExecuteAuditAction executes an audit action (rename or delete) on a file
-func ExecuteAuditAction(db *database.MediaDB, item AuditItem, action AuditAction) error {
+func ExecuteAuditAction(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool) error {
 	switch action.Action {
 	case "rename":
-		return executeRename(db, item, action)
+		return executeRename(db, item, action, dryRun)
 	case "delete":
-		return executeDelete(db, item, action)
+		return executeDelete(db, item, action, dryRun)
 	default:
 		return fmt.Errorf("unknown action: %s", action.Action)
 	}
 }
 
 // executeDelete performs a delete operation on a media file
-func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction) error {
+func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool) error {
 	// Get the current file record
 	file, err := db.GetMediaFileByID(item.ID)
 	if err != nil {
@@ -414,6 +414,12 @@ func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction) err
 	}
 	if file == nil {
 		return fmt.Errorf("media file not found: %d", item.ID)
+	}
+
+	// In dry-run mode, just print what would happen
+	if dryRun {
+		fmt.Printf("[DRY RUN] Would delete: %s\n", file.Path)
+		return nil
 	}
 
 	// Delete from filesystem
@@ -430,7 +436,7 @@ func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction) err
 }
 
 // executeRename performs a rename operation on a media file
-func executeRename(db *database.MediaDB, item AuditItem, action AuditAction) error {
+func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool) error {
 	// Get the current file record
 	file, err := db.GetMediaFileByID(item.ID)
 	if err != nil {
@@ -438,6 +444,12 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction) err
 	}
 	if file == nil {
 		return fmt.Errorf("media file not found: %d", item.ID)
+	}
+
+	// In dry-run mode, just print what would happen
+	if dryRun {
+		fmt.Printf("[DRY RUN] Would rename: %s -> %s\n", file.Path, action.NewPath)
+		return nil
 	}
 
 	// Perform filesystem move

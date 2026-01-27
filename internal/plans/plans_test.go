@@ -226,7 +226,7 @@ func TestExecuteAuditAction_Rename(t *testing.T) {
 		NewYear:  func() *int { y := 2020; return &y }(),
 	}
 
-	err = ExecuteAuditAction(db, item, action)
+	err = ExecuteAuditAction(db, item, action, false)
 	if err != nil {
 		t.Fatalf("ExecuteAuditAction failed: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestExecuteAuditAction_Delete(t *testing.T) {
 		Reasoning: "Low quality duplicate",
 	}
 
-	err = ExecuteAuditAction(db, item, action)
+	err = ExecuteAuditAction(db, item, action, false)
 	if err != nil {
 		t.Fatalf("ExecuteAuditAction failed: %v", err)
 	}
@@ -330,11 +330,151 @@ func TestExecuteAuditAction_UnknownAction(t *testing.T) {
 		Action: "unknown",
 	}
 
-	err := ExecuteAuditAction(nil, item, action)
+	err := ExecuteAuditAction(nil, item, action, false)
 	if err == nil {
 		t.Fatal("ExecuteAuditAction should return error for unknown action")
 	}
 	if !strings.Contains(err.Error(), "unknown action") {
 		t.Errorf("Expected 'unknown action' error, got: %v", err)
+	}
+}
+
+func TestExecuteAuditAction_Rename_DryRun(t *testing.T) {
+	// Use temp directory
+	tempDir := t.TempDir()
+	os.Setenv("HOME", tempDir)
+	defer os.Unsetenv("HOME")
+
+	// Create a test database
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test file
+	sourcePath := filepath.Join(tempDir, "movie.mkv")
+	if err := os.WriteFile(sourcePath, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Insert a media file
+	file := &database.MediaFile{
+		Path:            sourcePath,
+		Size:            4,
+		ModifiedAt:      time.Now(),
+		MediaType:       "movie",
+		NormalizedTitle: "movie",
+		Year:            func() *int { y := 2019; return &y }(),
+		Resolution:      "1080p",
+		QualityScore:    100,
+		LibraryRoot:     tempDir,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("Failed to insert media file: %v", err)
+	}
+
+	// Test rename action with dryRun=true
+	item := AuditItem{
+		ID:   file.ID,
+		Path: sourcePath,
+	}
+	targetPath := filepath.Join(tempDir, "Correct Title.mkv")
+	action := AuditAction{
+		Action:   "rename",
+		NewTitle: "Correct Title",
+		NewPath:  targetPath,
+		NewYear:  func() *int { y := 2020; return &y }(),
+	}
+
+	err = ExecuteAuditAction(db, item, action, true) // dryRun=true
+	if err != nil {
+		t.Fatalf("ExecuteAuditAction failed: %v", err)
+	}
+
+	// Verify file still exists (no change in dry-run mode)
+	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+		t.Error("Source file should still exist in dry-run mode")
+	}
+
+	// Verify target file was not created
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Error("Target file should not be created in dry-run mode")
+	}
+
+	// Verify database record was not updated
+	updated, err := db.GetMediaFileByID(file.ID)
+	if err != nil {
+		t.Fatalf("Failed to get file: %v", err)
+	}
+	if updated.Path != sourcePath {
+		t.Errorf("Database should not be updated in dry-run mode, expected %s, got %s", sourcePath, updated.Path)
+	}
+}
+
+func TestExecuteAuditAction_Delete_DryRun(t *testing.T) {
+	// Use temp directory
+	tempDir := t.TempDir()
+	os.Setenv("HOME", tempDir)
+	defer os.Unsetenv("HOME")
+
+	// Create a test database
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test file
+	sourcePath := filepath.Join(tempDir, "movie.mkv")
+	if err := os.WriteFile(sourcePath, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Insert a media file
+	file := &database.MediaFile{
+		Path:            sourcePath,
+		Size:            4,
+		ModifiedAt:      time.Now(),
+		MediaType:       "movie",
+		NormalizedTitle: "movie",
+		Year:            func() *int { y := 2019; return &y }(),
+		Resolution:      "1080p",
+		QualityScore:    100,
+		LibraryRoot:     tempDir,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("Failed to insert media file: %v", err)
+	}
+
+	// Test delete action with dryRun=true
+	item := AuditItem{
+		ID:   file.ID,
+		Path: sourcePath,
+	}
+	action := AuditAction{
+		Action:    "delete",
+		Reasoning: "Low quality duplicate",
+	}
+
+	err = ExecuteAuditAction(db, item, action, true) // dryRun=true
+	if err != nil {
+		t.Fatalf("ExecuteAuditAction failed: %v", err)
+	}
+
+	// Verify file still exists (no change in dry-run mode)
+	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+		t.Error("Source file should still exist in dry-run mode")
+	}
+
+	// Verify database record still exists
+	existing, err := db.GetMediaFileByID(file.ID)
+	if err != nil {
+		t.Fatalf("Failed to get file: %v", err)
+	}
+	if existing == nil {
+		t.Error("Database record should not be removed in dry-run mode")
 	}
 }

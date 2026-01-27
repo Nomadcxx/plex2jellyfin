@@ -290,7 +290,7 @@ func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan) error {
 			}
 		}
 
-		if err := plans.ExecuteAuditAction(db, item, action); err != nil {
+		if err := plans.ExecuteAuditAction(db, item, action, auditOpts.DryRun); err != nil {
 			fmt.Printf("  ✗ Failed: %v\n", err)
 			failed++
 		} else {
