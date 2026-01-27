@@ -158,6 +158,7 @@ func (m *MediaDB) GetMediaFile(path string) (*MediaFile, error) {
 			media_type, parent_movie_id, parent_series_id, parent_episode_id,
 			normalized_title, year, season, episode,
 			resolution, source_type, codec, audio_format, quality_score,
+			confidence, parse_method, needs_review,
 			is_jellyfin_compliant, compliance_issues,
 			source, source_priority, library_root,
 			created_at, updated_at
@@ -165,11 +166,13 @@ func (m *MediaDB) GetMediaFile(path string) (*MediaFile, error) {
 		WHERE path = ?
 	`
 
+	var needsReviewInt int
 	err := m.db.QueryRow(query, path).Scan(
 		&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
 		&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
 		&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
 		&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
+		&file.Confidence, &file.ParseMethod, &needsReviewInt,
 		&file.IsJellyfinCompliant, &complianceJSON,
 		&file.Source, &file.SourcePriority, &file.LibraryRoot,
 		&file.CreatedAt, &file.UpdatedAt,
@@ -180,6 +183,8 @@ func (m *MediaDB) GetMediaFile(path string) (*MediaFile, error) {
 		}
 		return nil, fmt.Errorf("failed to get media file: %w", err)
 	}
+
+	file.NeedsReview = needsReviewInt != 0
 
 	// Deserialize compliance issues
 	if complianceJSON != "" {
@@ -205,6 +210,7 @@ func (m *MediaDB) GetMediaFileByID(id int64) (*MediaFile, error) {
 			media_type, parent_movie_id, parent_series_id, parent_episode_id,
 			normalized_title, year, season, episode,
 			resolution, source_type, codec, audio_format, quality_score,
+			confidence, parse_method, needs_review,
 			is_jellyfin_compliant, compliance_issues,
 			source, source_priority, library_root,
 			created_at, updated_at
@@ -212,11 +218,13 @@ func (m *MediaDB) GetMediaFileByID(id int64) (*MediaFile, error) {
 		WHERE id = ?
 	`
 
+	var needsReviewInt int
 	err := m.db.QueryRow(query, id).Scan(
 		&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
 		&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
 		&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
 		&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
+		&file.Confidence, &file.ParseMethod, &needsReviewInt,
 		&file.IsJellyfinCompliant, &complianceJSON,
 		&file.Source, &file.SourcePriority, &file.LibraryRoot,
 		&file.CreatedAt, &file.UpdatedAt,
@@ -227,6 +235,8 @@ func (m *MediaDB) GetMediaFileByID(id int64) (*MediaFile, error) {
 		}
 		return nil, fmt.Errorf("failed to get media file: %w", err)
 	}
+
+	file.NeedsReview = needsReviewInt != 0
 
 	// Deserialize compliance issues
 	if complianceJSON != "" {
@@ -277,6 +287,7 @@ func (m *MediaDB) GetMediaFilesByNormalizedKey(title string, year int, season, e
 			media_type, parent_movie_id, parent_series_id, parent_episode_id,
 			normalized_title, year, season, episode,
 			resolution, source_type, codec, audio_format, quality_score,
+			confidence, parse_method, needs_review,
 			is_jellyfin_compliant, compliance_issues,
 			source, source_priority, library_root,
 			created_at, updated_at
@@ -311,12 +322,14 @@ func (m *MediaDB) GetMediaFilesByNormalizedKey(title string, year int, season, e
 	for rows.Next() {
 		var file MediaFile
 		var complianceJSON string
+		var needsReviewInt int
 
 		err := rows.Scan(
 			&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
 			&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
 			&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
 			&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
+			&file.Confidence, &file.ParseMethod, &needsReviewInt,
 			&file.IsJellyfinCompliant, &complianceJSON,
 			&file.Source, &file.SourcePriority, &file.LibraryRoot,
 			&file.CreatedAt, &file.UpdatedAt,
@@ -324,6 +337,8 @@ func (m *MediaDB) GetMediaFilesByNormalizedKey(title string, year int, season, e
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan media file: %w", err)
 		}
+
+		file.NeedsReview = needsReviewInt != 0
 
 		// Deserialize compliance issues
 		if complianceJSON != "" {
