@@ -361,6 +361,7 @@ func (m model) runInitialScan() tea.Cmd {
 
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		// Send cancel function to model via global program
 		if globalProgram != nil {
