@@ -36,6 +36,7 @@ type MediaFile struct {
 	// Confidence tracking
 	Confidence  float64
 	NeedsReview bool
+	ParseMethod string // "regex", "folder", "ai"
 
 	// Jellyfin compliance
 	IsJellyfinCompliant bool
@@ -82,8 +83,9 @@ func (m *MediaDB) UpsertMediaFile(file *MediaFile) error {
 			resolution, source_type, codec, audio_format, quality_score,
 			is_jellyfin_compliant, compliance_issues,
 			source, source_priority, library_root,
+			confidence, parse_method, needs_review,
 			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(path) DO UPDATE SET
 			size = excluded.size,
 			modified_at = excluded.modified_at,
@@ -105,8 +107,17 @@ func (m *MediaDB) UpsertMediaFile(file *MediaFile) error {
 			source = excluded.source,
 			source_priority = excluded.source_priority,
 			library_root = excluded.library_root,
+			confidence = excluded.confidence,
+			parse_method = excluded.parse_method,
+			needs_review = excluded.needs_review,
 			updated_at = CURRENT_TIMESTAMP
 	`
+
+	// Convert bool to int for SQLite
+	needsReviewInt := 0
+	if file.NeedsReview {
+		needsReviewInt = 1
+	}
 
 	result, err := m.db.Exec(
 		query,
@@ -116,6 +127,7 @@ func (m *MediaDB) UpsertMediaFile(file *MediaFile) error {
 		file.Resolution, file.SourceType, file.Codec, file.AudioFormat, file.QualityScore,
 		file.IsJellyfinCompliant, string(complianceJSON),
 		file.Source, file.SourcePriority, file.LibraryRoot,
+		file.Confidence, file.ParseMethod, needsReviewInt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to upsert media file: %w", err)
