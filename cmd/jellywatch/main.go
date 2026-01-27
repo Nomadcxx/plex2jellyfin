@@ -137,7 +137,7 @@ func runOrganize(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot access source: %w", err)
 	}
 
-	org := organizer.NewOrganizer(
+	org, err := organizer.NewOrganizer(
 		[]string{target},
 		organizer.WithDryRun(dryRun),
 		organizer.WithKeepSource(keepSource),
@@ -146,6 +146,9 @@ func runOrganize(cmd *cobra.Command, args []string) error {
 		organizer.WithChecksumVerify(verifyChecksum),
 		organizer.WithBackend(transfer.ParseBackend(backendName)),
 	)
+	if err != nil {
+		return fmt.Errorf("failed to create organizer: %w", err)
+	}
 
 	if info.IsDir() {
 		return organizeDirectory(org, source, target)
@@ -253,7 +256,7 @@ Examples:
 				}
 			}
 
-			org := organizer.NewOrganizer(
+			org, err := organizer.NewOrganizer(
 				[]string{target},
 				organizer.WithDryRun(dryRun),
 				organizer.WithKeepSource(keepSource),
@@ -262,6 +265,9 @@ Examples:
 				organizer.WithChecksumVerify(verifyChecksum),
 				organizer.WithBackend(transfer.ParseBackend(backendName)),
 			)
+			if err != nil {
+				return fmt.Errorf("failed to create organizer: %w", err)
+			}
 
 			result, err := org.OrganizeFolder(source, target, keepExtras)
 			if err != nil {
@@ -928,7 +934,7 @@ Examples:
 				return fmt.Errorf("no libraries configured (use --tv-library or --movie-library, or set in config)")
 			}
 
-			handler := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
+			handler, err := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
 				TVLibraries:  tvLibs,
 				MovieLibs:    movieLibs,
 				DebounceTime: debounce,
@@ -936,6 +942,9 @@ Examples:
 				Timeout:      timeout,
 				Backend:      transfer.ParseBackend(backendName),
 			})
+			if err != nil {
+				return fmt.Errorf("failed to create media handler: %w", err)
+			}
 			defer handler.Shutdown()
 
 			w, err := watcher.NewWatcher(handler, dryRun)

@@ -114,7 +114,7 @@ type MediaHandlerConfig struct {
 	ConfigDir       string
 }
 
-func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
+func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	if cfg.DebounceTime == 0 {
 		cfg.DebounceTime = 10 * time.Second
 	}
@@ -148,7 +148,10 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
 		orgOpts = append(orgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
 	}
-	org := organizer.NewOrganizer(allLibs, orgOpts...)
+	org, err := organizer.NewOrganizer(allLibs, orgOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create organizer: %w", err)
+	}
 
 	return &MediaHandler{
 		organizer:       org,
@@ -164,7 +167,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 		logger:          cfg.Logger,
 		sonarrClient:    cfg.SonarrClient,
 		activityLogger:  activityLogger,
-	}
+	}, nil
 }
 
 func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {

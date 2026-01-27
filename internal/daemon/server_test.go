@@ -10,11 +10,14 @@ import (
 )
 
 func TestServerHealth(t *testing.T) {
-	handler := NewMediaHandler(MediaHandlerConfig{
+	handler, err := NewMediaHandler(MediaHandlerConfig{
 		TVLibraries: []string{"/tv"},
 		MovieLibs:   []string{"/movies"},
 		Backend:     transfer.BackendNative,
 	})
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
 	defer handler.Shutdown()
 
 	server := NewServer(handler, nil, ":0", nil)
@@ -39,11 +42,14 @@ func TestServerHealth(t *testing.T) {
 }
 
 func TestServerHealthUnhealthy(t *testing.T) {
-	handler := NewMediaHandler(MediaHandlerConfig{
+	handler, err := NewMediaHandler(MediaHandlerConfig{
 		TVLibraries: []string{"/tv"},
 		MovieLibs:   []string{"/movies"},
 		Backend:     transfer.BackendNative,
 	})
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
 	defer handler.Shutdown()
 
 	server := NewServer(handler, nil, ":0", nil)
@@ -69,11 +75,14 @@ func TestServerHealthUnhealthy(t *testing.T) {
 }
 
 func TestServerReady(t *testing.T) {
-	handler := NewMediaHandler(MediaHandlerConfig{
+	handler, err := NewMediaHandler(MediaHandlerConfig{
 		TVLibraries: []string{"/tv"},
 		MovieLibs:   []string{"/movies"},
 		Backend:     transfer.BackendNative,
 	})
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
 	defer handler.Shutdown()
 
 	server := NewServer(handler, nil, ":0", nil)
@@ -93,11 +102,14 @@ func TestServerReady(t *testing.T) {
 }
 
 func TestServerMetrics(t *testing.T) {
-	handler := NewMediaHandler(MediaHandlerConfig{
+	handler, err := NewMediaHandler(MediaHandlerConfig{
 		TVLibraries: []string{"/tv"},
 		MovieLibs:   []string{"/movies"},
 		Backend:     transfer.BackendNative,
 	})
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
 	defer handler.Shutdown()
 
 	handler.stats.RecordMovie(1024 * 1024 * 100)

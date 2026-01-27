@@ -206,6 +206,10 @@ func New(backend Backend) (Transferer, error) {
 	}
 }
 
+// MustNew creates a new Transferer with the specified backend.
+// Deprecated: Use New instead. MustNew panics on error which is not recommended
+// for production code. Migrate to New(backend) (Transferer, error) for proper
+// error handling.
 func MustNew(backend Backend) Transferer {
 	t, err := New(backend)
 	if err != nil {

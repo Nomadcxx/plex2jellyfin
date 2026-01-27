@@ -28,10 +28,11 @@ func TestOrganizeWorkflow_EndToEnd(t *testing.T) {
 	transferer, err := transfer.New(transfer.BackendRsync)
 	require.NoError(t, err)
 
-	org := NewOrganizer([]string{libraryDir},
+	org, err := NewOrganizer([]string{libraryDir},
 		WithDatabase(db),
 		WithBackend(transfer.BackendRsync),
 	)
+	require.NoError(t, err)
 	org.transferer = transferer
 
 	// Organize movie

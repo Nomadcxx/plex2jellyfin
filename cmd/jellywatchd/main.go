@@ -145,7 +145,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		configDir = filepath.Dir(cfgFile)
 	}
 
-	handler := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
+	handler, err := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
 		TVLibraries:     cfg.Libraries.TV,
 		MovieLibs:       cfg.Libraries.Movies,
 		TVWatchPaths:    cfg.Watch.TV,
@@ -163,6 +163,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		SonarrClient:    sonarrClient,
 		ConfigDir:       configDir,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create media handler: %w", err)
+	}
 
 	// Prune old activity logs (keep 7 days)
 	if err := handler.PruneActivityLogs(7); err != nil {

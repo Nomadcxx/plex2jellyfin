@@ -312,10 +312,13 @@ func main() {
     defer logger.Close()
     
     // Pass logger to all components
-    handler := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
+    handler, err := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
         Logger: logger,
         // ... existing config
     })
+    if err != nil {
+        logger.Fatal("failed to create handler", logging.F("error", err))
+    }
 }
 ```
 

@@ -47,10 +47,10 @@ type Organizer struct {
 	db             *database.MediaDB // HOLDEN: Database for self-learning
 }
 
-func NewOrganizer(libraries []string, options ...func(*Organizer)) *Organizer {
+func NewOrganizer(libraries []string, options ...func(*Organizer)) (*Organizer, error) {
 	transferer, err := transfer.New(transfer.BackendAuto)
 	if err != nil {
-		panic(fmt.Sprintf("failed to create transferer: %v", err))
+		return nil, fmt.Errorf("failed to create transferer: %w", err)
 	}
 
 	org := &Organizer{
@@ -79,7 +79,7 @@ func NewOrganizer(libraries []string, options ...func(*Organizer)) *Organizer {
 		DB:            org.db,
 	})
 
-	return org
+	return org, nil
 }
 
 // WithDryRun sets dry run mode

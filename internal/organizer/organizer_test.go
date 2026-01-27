@@ -72,10 +72,11 @@ func TestOrganizeMovie_Basic(t *testing.T) {
 	transferer, err := transfer.New(transfer.BackendRsync)
 	require.NoError(t, err)
 
-	org := NewOrganizer([]string{libraryDir},
+	org, err := NewOrganizer([]string{libraryDir},
 		WithDatabase(db),
 		WithBackend(transfer.BackendRsync),
 	)
+	require.NoError(t, err)
 
 	// Override transferer (since NewOrganizer creates its own)
 	org.transferer = transferer
@@ -112,10 +113,11 @@ func TestOrganizeMovie_DryRun(t *testing.T) {
 	transferer, err := transfer.New(transfer.BackendRsync)
 	require.NoError(t, err)
 
-	org := NewOrganizer([]string{libraryDir},
+	org, err := NewOrganizer([]string{libraryDir},
 		WithDryRun(true),
 		WithBackend(transfer.BackendRsync),
 	)
+	require.NoError(t, err)
 	org.transferer = transferer
 
 	// Organize
@@ -156,10 +158,11 @@ func TestOrganizeMovie_DuplicateExists(t *testing.T) {
 	transferer, err := transfer.New(transfer.BackendRsync)
 	require.NoError(t, err)
 
-	org := NewOrganizer([]string{libraryDir},
+	org, err := NewOrganizer([]string{libraryDir},
 		WithDatabase(db),
 		WithBackend(transfer.BackendRsync),
 	)
+	require.NoError(t, err)
 	org.transferer = transferer
 
 	// Organize
@@ -194,10 +197,11 @@ func TestOrganizeMovie_DatabaseUpdate(t *testing.T) {
 	transferer, err := transfer.New(transfer.BackendRsync)
 	require.NoError(t, err)
 
-	org := NewOrganizer([]string{libraryDir},
+	org, err := NewOrganizer([]string{libraryDir},
 		WithDatabase(db),
 		WithBackend(transfer.BackendRsync),
 	)
+	require.NoError(t, err)
 	org.transferer = transferer
 
 	// Organize
@@ -231,10 +235,11 @@ func TestOrganizeTVEpisode_Basic(t *testing.T) {
 	transferer, err := transfer.New(transfer.BackendRsync)
 	require.NoError(t, err)
 
-	org := NewOrganizer([]string{libraryDir},
+	org, err := NewOrganizer([]string{libraryDir},
 		WithDatabase(db),
 		WithBackend(transfer.BackendRsync),
 	)
+	require.NoError(t, err)
 	org.transferer = transferer
 
 	// Organize
@@ -286,10 +291,11 @@ func TestOrganizeTVEpisode_DatabaseUpdate(t *testing.T) {
 	transferer, err := transfer.New(transfer.BackendRsync)
 	require.NoError(t, err)
 
-	org := NewOrganizer([]string{libraryDir},
+	org, err := NewOrganizer([]string{libraryDir},
 		WithDatabase(db),
 		WithBackend(transfer.BackendRsync),
 	)
+	require.NoError(t, err)
 	org.transferer = transferer
 
 	// Organize
@@ -335,10 +341,11 @@ func TestOrganizeTVEpisode_ExistingShow(t *testing.T) {
 	transferer, err := transfer.New(transfer.BackendRsync)
 	require.NoError(t, err)
 
-	org := NewOrganizer([]string{libraryDir},
+	org, err := NewOrganizer([]string{libraryDir},
 		WithDatabase(db),
 		WithBackend(transfer.BackendRsync),
 	)
+	require.NoError(t, err)
 	org.transferer = transferer
 
 	// Organize
