@@ -394,8 +394,53 @@ func DeleteAuditPlans() error {
 }
 
 // ExecuteAuditAction executes an audit action (rename or delete) on a file
-func ExecuteAuditAction(db *database.MediaDB, action AuditAction) error {
-	return fmt.Errorf("not implemented")
+func ExecuteAuditAction(db *database.MediaDB, item AuditItem, action AuditAction) error {
+	switch action.Action {
+	case "rename":
+		return executeRename(db, item, action)
+	case "delete":
+		return fmt.Errorf("delete not implemented (Task 3)")
+	default:
+		return fmt.Errorf("unknown action: %s", action.Action)
+	}
+}
+
+// executeRename performs a rename operation on a media file
+func executeRename(db *database.MediaDB, item AuditItem, action AuditAction) error {
+	// Get the current file record
+	file, err := db.GetMediaFileByID(item.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get media file: %w", err)
+	}
+	if file == nil {
+		return fmt.Errorf("media file not found: %d", item.ID)
+	}
+
+	// Perform filesystem move
+	if err := os.Rename(file.Path, action.NewPath); err != nil {
+		return fmt.Errorf("failed to rename file: %w", err)
+	}
+
+	// Update database record
+	file.Path = action.NewPath
+	file.NormalizedTitle = action.NewTitle
+	if action.NewYear != nil {
+		file.Year = action.NewYear
+	}
+	if action.NewSeason != nil {
+		file.Season = action.NewSeason
+	}
+	if action.NewEpisode != nil {
+		file.Episode = action.NewEpisode
+	}
+
+	if err := db.UpdateMediaFile(file); err != nil {
+		// Attempt to rollback filesystem move on database failure
+		_ = os.Rename(action.NewPath, file.Path)
+		return fmt.Errorf("failed to update database: %w", err)
+	}
+
+	return nil
 }
 
 // ArchiveAuditPlans renames audit.json to audit.json.old

@@ -3,8 +3,11 @@ package plans
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/Nomadcxx/jellywatch/internal/database"
 )
 
 func TestSaveAndLoadDuplicatePlans(t *testing.T) {
@@ -174,19 +177,116 @@ func TestGetPlansDir(t *testing.T) {
 	}
 }
 
-func TestExecuteAuditAction(t *testing.T) {
+func TestExecuteAuditAction_Rename(t *testing.T) {
+	// Use temp directory
+	tempDir := t.TempDir()
+	os.Setenv("HOME", tempDir)
+	defer os.Unsetenv("HOME")
+
+	// Create a test database
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test file
+	sourcePath := filepath.Join(tempDir, "movie.mkv")
+	if err := os.WriteFile(sourcePath, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Insert a media file
+	file := &database.MediaFile{
+		Path:            sourcePath,
+		Size:            4,
+		ModifiedAt:      time.Now(),
+		MediaType:       "movie",
+		NormalizedTitle: "movie",
+		Year:            func() *int { y := 2019; return &y }(),
+		Resolution:      "1080p",
+		QualityScore:    100,
+		LibraryRoot:     tempDir,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("Failed to insert media file: %v", err)
+	}
+
+	// Test rename action
+	item := AuditItem{
+		ID:   file.ID,
+		Path: sourcePath,
+	}
+	targetPath := filepath.Join(tempDir, "Correct Title.mkv")
 	action := AuditAction{
 		Action:   "rename",
 		NewTitle: "Correct Title",
+		NewPath:  targetPath,
 		NewYear:  func() *int { y := 2020; return &y }(),
 	}
 
-	err := ExecuteAuditAction(nil, action)
-	if err == nil {
-		t.Fatal("ExecuteAuditAction should return not implemented error")
+	err = ExecuteAuditAction(db, item, action)
+	if err != nil {
+		t.Fatalf("ExecuteAuditAction failed: %v", err)
 	}
 
-	if err.Error() != "not implemented" {
-		t.Fatalf("Expected 'not implemented' error, got: %v", err)
+	// Verify filesystem change
+	if _, err := os.Stat(sourcePath); !os.IsNotExist(err) {
+		t.Error("Source file should not exist after rename")
+	}
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		t.Error("Target file should exist after rename")
+	}
+
+	// Verify database update
+	updated, err := db.GetMediaFileByID(file.ID)
+	if err != nil {
+		t.Fatalf("Failed to get updated file: %v", err)
+	}
+	if updated.Path != targetPath {
+		t.Errorf("Expected path %s, got %s", targetPath, updated.Path)
+	}
+	if updated.NormalizedTitle != "Correct Title" {
+		t.Errorf("Expected title 'Correct Title', got %s", updated.NormalizedTitle)
+	}
+	if updated.Year == nil || *updated.Year != 2020 {
+		t.Errorf("Expected year 2020, got %v", updated.Year)
+	}
+}
+
+func TestExecuteAuditAction_DeleteNotImplemented(t *testing.T) {
+	item := AuditItem{
+		ID:   1,
+		Path: "/test/movie.mkv",
+	}
+	action := AuditAction{
+		Action: "delete",
+	}
+
+	err := ExecuteAuditAction(nil, item, action)
+	if err == nil {
+		t.Fatal("ExecuteAuditAction should return error for delete (not implemented)")
+	}
+	if !strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("Expected 'not implemented' error, got: %v", err)
+	}
+}
+
+func TestExecuteAuditAction_UnknownAction(t *testing.T) {
+	item := AuditItem{
+		ID:   1,
+		Path: "/test/movie.mkv",
+	}
+	action := AuditAction{
+		Action: "unknown",
+	}
+
+	err := ExecuteAuditAction(nil, item, action)
+	if err == nil {
+		t.Fatal("ExecuteAuditAction should return error for unknown action")
+	}
+	if !strings.Contains(err.Error(), "unknown action") {
+		t.Errorf("Expected 'unknown action' error, got: %v", err)
 	}
 }

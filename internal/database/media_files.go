@@ -248,6 +248,71 @@ func (m *MediaDB) GetMediaFileByID(id int64) (*MediaFile, error) {
 	return &file, nil
 }
 
+// UpdateMediaFile updates a media file's metadata in the database
+func (m *MediaDB) UpdateMediaFile(file *MediaFile) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Serialize compliance issues
+	complianceJSON, err := json.Marshal(file.ComplianceIssues)
+	if err != nil {
+		return fmt.Errorf("failed to marshal compliance issues: %w", err)
+	}
+
+	query := `
+		UPDATE media_files SET
+			path = ?,
+			size = ?,
+			modified_at = ?,
+			media_type = ?,
+			parent_movie_id = ?,
+			parent_series_id = ?,
+			parent_episode_id = ?,
+			normalized_title = ?,
+			year = ?,
+			season = ?,
+			episode = ?,
+			resolution = ?,
+			source_type = ?,
+			codec = ?,
+			audio_format = ?,
+			quality_score = ?,
+			is_jellyfin_compliant = ?,
+			compliance_issues = ?,
+			source = ?,
+			source_priority = ?,
+			library_root = ?,
+			confidence = ?,
+			parse_method = ?,
+			needs_review = ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`
+
+	// Convert bool to int for SQLite
+	needsReviewInt := 0
+	if file.NeedsReview {
+		needsReviewInt = 1
+	}
+
+	_, err = m.db.Exec(
+		query,
+		file.Path, file.Size, file.ModifiedAt,
+		file.MediaType, file.ParentMovieID, file.ParentSeriesID, file.ParentEpisodeID,
+		file.NormalizedTitle, file.Year, file.Season, file.Episode,
+		file.Resolution, file.SourceType, file.Codec, file.AudioFormat, file.QualityScore,
+		file.IsJellyfinCompliant, string(complianceJSON),
+		file.Source, file.SourcePriority, file.LibraryRoot,
+		file.Confidence, file.ParseMethod, needsReviewInt,
+		file.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update media file: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteMediaFile removes a media file from the database
 func (m *MediaDB) DeleteMediaFile(path string) error {
 	m.mu.Lock()
