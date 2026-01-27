@@ -78,32 +78,28 @@ func runDuplicatesExecute(db *database.MediaDB) error {
 			fmt.Printf("[%d] %s S%02dE%02d\n", i+1, p.Title, p.Season, p.Episode)
 		}
 
-		for _, file := range []FileInfo{p.Keep, p.Delete} {
-			yearStr := ""
-			if file.Year != nil {
-				yearStr = fmt.Sprintf(" (%d)", *file.Year)
-			}
-
-			var fileStr string
-			if p.MediaType == "movie" {
-				fileStr = fmt.Sprintf("%s%s", file.Title, yearStr)
-			} else {
-				fileStr = fmt.Sprintf("%s S%02dE%02d", file.Title, p.Season, p.Episode)
-			}
-
-			// Delete file
-			if err := os.Remove(file.Path); err != nil && !os.IsNotExist(err) {
-				fmt.Printf("  ❌ Failed to delete %s: %v\n", fileStr, err)
-				continue
-			}
-
-			deletedCount++
-			reclaimedBytes += file.Size
+		// Only delete the duplicate file, not the keeper
+		file := p.Delete
+		yearStr = ""
+		if file.Year != nil {
+			yearStr = fmt.Sprintf(" (%d)", *file.Year)
 		}
 
-			if i == len(plan.Plans)-1 {
-			fmt.Printf("\n🗑️ Successfully deleted: %d files, reclaiming %s\n", deletedCount, formatBytes(reclaimedBytes))
+		var fileStr string
+		if p.MediaType == "movie" {
+			fileStr = fmt.Sprintf("%s%s", file.Title, yearStr)
+		} else {
+			fileStr = fmt.Sprintf("%s S%02dE%02d", file.Title, p.Season, p.Episode)
 		}
+
+		// Delete file
+		if err := os.Remove(file.Path); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("  ❌ Failed to delete %s: %v\n", fileStr, err)
+			continue
+		}
+
+		deletedCount++
+		reclaimedBytes += file.Size
 	}
 
 	// Handle plan file on results
@@ -118,7 +114,6 @@ func runDuplicatesExecute(db *database.MediaDB) error {
 		}
 		fmt.Println("\n⚠️  Plan archived to duplicates.json.old due to failures")
 	}
-}
 
 	fmt.Println("\n=== Execution Complete ===")
 	fmt.Printf("✅ Successfully deleted: %d files\n", deletedCount)
