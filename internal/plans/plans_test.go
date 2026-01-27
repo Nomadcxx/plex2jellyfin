@@ -255,21 +255,69 @@ func TestExecuteAuditAction_Rename(t *testing.T) {
 	}
 }
 
-func TestExecuteAuditAction_DeleteNotImplemented(t *testing.T) {
-	item := AuditItem{
-		ID:   1,
-		Path: "/test/movie.mkv",
+func TestExecuteAuditAction_Delete(t *testing.T) {
+	// Use temp directory
+	tempDir := t.TempDir()
+	os.Setenv("HOME", tempDir)
+	defer os.Unsetenv("HOME")
+
+	// Create a test database
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
 	}
-	action := AuditAction{
-		Action: "delete",
+	defer db.Close()
+
+	// Create test file
+	sourcePath := filepath.Join(tempDir, "movie.mkv")
+	if err := os.WriteFile(sourcePath, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	err := ExecuteAuditAction(nil, item, action)
-	if err == nil {
-		t.Fatal("ExecuteAuditAction should return error for delete (not implemented)")
+	// Insert a media file
+	file := &database.MediaFile{
+		Path:            sourcePath,
+		Size:            4,
+		ModifiedAt:      time.Now(),
+		MediaType:       "movie",
+		NormalizedTitle: "movie",
+		Year:            func() *int { y := 2019; return &y }(),
+		Resolution:      "1080p",
+		QualityScore:    100,
+		LibraryRoot:     tempDir,
 	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("Expected 'not implemented' error, got: %v", err)
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("Failed to insert media file: %v", err)
+	}
+
+	// Test delete action
+	item := AuditItem{
+		ID:   file.ID,
+		Path: sourcePath,
+	}
+	action := AuditAction{
+		Action:   "delete",
+		Reasoning: "Low quality duplicate",
+	}
+
+	err = ExecuteAuditAction(db, item, action)
+	if err != nil {
+		t.Fatalf("ExecuteAuditAction failed: %v", err)
+	}
+
+	// Verify file is deleted from filesystem
+	if _, err := os.Stat(sourcePath); !os.IsNotExist(err) {
+		t.Error("Source file should not exist after delete")
+	}
+
+	// Verify database record is removed
+	deleted, err := db.GetMediaFileByID(file.ID)
+	if err != nil {
+		t.Fatalf("Failed to check deleted file: %v", err)
+	}
+	if deleted != nil {
+		t.Error("Database record should be removed after delete")
 	}
 }
 

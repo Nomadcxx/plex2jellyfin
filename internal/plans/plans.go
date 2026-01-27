@@ -399,10 +399,34 @@ func ExecuteAuditAction(db *database.MediaDB, item AuditItem, action AuditAction
 	case "rename":
 		return executeRename(db, item, action)
 	case "delete":
-		return fmt.Errorf("delete not implemented (Task 3)")
+		return executeDelete(db, item, action)
 	default:
 		return fmt.Errorf("unknown action: %s", action.Action)
 	}
+}
+
+// executeDelete performs a delete operation on a media file
+func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction) error {
+	// Get the current file record
+	file, err := db.GetMediaFileByID(item.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get media file: %w", err)
+	}
+	if file == nil {
+		return fmt.Errorf("media file not found: %d", item.ID)
+	}
+
+	// Delete from filesystem
+	if err := os.Remove(file.Path); err != nil {
+		return fmt.Errorf("failed to delete file: %w", err)
+	}
+
+	// Remove from database
+	if err := db.DeleteMediaFileByID(file.ID); err != nil {
+		return fmt.Errorf("failed to delete media file from database: %w", err)
+	}
+
+	return nil
 }
 
 // executeRename performs a rename operation on a media file
