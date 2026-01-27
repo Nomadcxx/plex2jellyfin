@@ -232,20 +232,86 @@ func displayAuditPlan(plan *plans.AuditPlan, showActions bool) error {
 func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan) error {
 	fmt.Printf("\n🚀 Executing Audit Plan\n")
 
-	for _, action := range plan.Actions {
-		fmt.Printf("%s: %s\n", action.Action, action.Reasoning)
-
-		switch action.Action {
-		case "rename":
-			// TODO: Implement rename (task 9)
-			fmt.Printf("  Skipping: %s\n", action.NewPath)
-		case "delete":
-			// TODO: Implement delete
-			fmt.Printf("  Skipping: delete %s\n", action.NewPath)
+	// Filter actions with confidence >= 0.8
+	var filteredIndices []int
+	for i, action := range plan.Actions {
+		if action.Confidence >= 0.8 {
+			filteredIndices = append(filteredIndices, i)
 		}
 	}
 
-	fmt.Println("✓ Audit plan executed")
+	if len(filteredIndices) == 0 {
+		fmt.Println("No actions meet the confidence threshold (>= 0.8)")
+		return nil
+	}
+
+	fmt.Printf("Found %d actions to execute (confidence >= 0.8)\n\n", len(filteredIndices))
+
+	// Show actions and prompt for confirmation
+	for _, idx := range filteredIndices {
+		action := plan.Actions[idx]
+		item := plan.Items[idx]
+		fmt.Printf("[%s] %s\n", action.Action, filepath.Base(item.Path))
+		fmt.Printf("  -> %s (confidence: %.2f)\n", action.NewPath, action.Confidence)
+		fmt.Printf("  Reason: %s\n\n", action.Reasoning)
+	}
+
+	fmt.Printf("Execute %d actions? [y/N/all]: ", len(filteredIndices))
+	var response string
+	fmt.Scanln(&response)
+
+	confirmedAll := false
+	switch response {
+	case "y", "Y":
+		// Continue with execution
+	case "all", "All", "ALL":
+		confirmedAll = true
+	default:
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	// Track results
+	succeeded := 0
+	failed := 0
+
+	// Execute actions
+	for _, idx := range filteredIndices {
+		action := plan.Actions[idx]
+		item := plan.Items[idx]
+
+		if !confirmedAll {
+			fmt.Printf("\nExecute: %s %s -> %s? [y/N]: ", action.Action, filepath.Base(item.Path), filepath.Base(action.NewPath))
+			var confirm string
+			fmt.Scanln(&confirm)
+			if confirm != "y" && confirm != "Y" {
+				fmt.Printf("  Skipped\n")
+				continue
+			}
+		}
+
+		if err := plans.ExecuteAuditAction(db, item, action); err != nil {
+			fmt.Printf("  ✗ Failed: %v\n", err)
+			failed++
+		} else {
+			fmt.Printf("  ✓ Success\n")
+			succeeded++
+		}
+	}
+
+	// Print summary
+	fmt.Printf("\n📊 Summary:\n")
+	fmt.Printf("  Succeeded: %d\n", succeeded)
+	fmt.Printf("  Failed: %d\n", failed)
+
+	// Delete plan file on success (all actions completed successfully)
+	if failed == 0 && succeeded > 0 {
+		if err := plans.DeleteAuditPlans(); err != nil {
+			fmt.Printf("  ⚠️  Warning: failed to delete plan file: %v\n", err)
+		} else {
+			fmt.Printf("  ✓ Plan file deleted\n")
+		}
+	}
 
 	return nil
 }
