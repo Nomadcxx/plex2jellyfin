@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 8
+const currentSchemaVersion = 10
 
 // SQL migration scripts
 var migrations = []migration{
@@ -421,6 +421,24 @@ var migrations = []migration{
 		up: []string{
 			`ALTER TABLE consolidation_plans ADD COLUMN conflict_id INTEGER REFERENCES conflicts(id)`,
 			`INSERT INTO schema_version (version) VALUES (8)`,
+		},
+	},
+	{
+		version: 9,
+		up: []string{
+			// Migration removed - plans are now stored in JSON files
+			`INSERT INTO schema_version (version) VALUES (9)`,
+		},
+	},
+	{
+		version: 10,
+		up: []string{
+			// Add confidence tracking to media_files
+			`ALTER TABLE media_files ADD COLUMN confidence REAL DEFAULT 1.0`,
+			`ALTER TABLE media_files ADD COLUMN needs_review BOOLEAN NOT NULL DEFAULT 0`,
+			`CREATE INDEX idx_media_files_confidence ON media_files(confidence)`,
+			`CREATE INDEX idx_media_files_needs_review ON media_files(needs_review)`,
+			`INSERT INTO schema_version (version) VALUES (10)`,
 		},
 	},
 }

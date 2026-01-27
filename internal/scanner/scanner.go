@@ -314,6 +314,10 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 		}
 	}
 
+	// Calculate confidence score from parsed title and original filename
+	confidence := naming.CalculateTitleConfidence(normalizedTitle, filename)
+	needsReview := confidence < 0.8
+
 	// Create MediaFile record
 	file := &database.MediaFile{
 		Path:                filePath,
@@ -329,6 +333,8 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 		Codec:               qualityMeta.Codec,
 		AudioFormat:         qualityMeta.AudioFormat,
 		QualityScore:        qualityMeta.QualityScore,
+		Confidence:          confidence,
+		NeedsReview:         needsReview,
 		IsJellyfinCompliant: isCompliant,
 		ComplianceIssues:    issues,
 		Source:              "filesystem",

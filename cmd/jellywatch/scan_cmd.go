@@ -202,8 +202,9 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool) error {
 
 			if hasDuplicates {
 				fmt.Println("\n1. Handle duplicates first (recommended):")
-				fmt.Println("   jellywatch fix              # Interactive wizard (handles all)")
-				fmt.Println("   jellywatch duplicates       # Review duplicates only")
+				fmt.Println("   jellywatch duplicates --generate   # Generate deletion plans")
+				fmt.Println("   jellywatch duplicates --dry-run    # Preview plans")
+				fmt.Println("   jellywatch duplicates --execute    # Execute plans")
 			}
 
 			if hasScattered {
@@ -212,8 +213,13 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool) error {
 					step = "2"
 				}
 				fmt.Printf("\n%s. Then consolidate scattered media:\n", step)
-				fmt.Println("   jellywatch consolidate      # Review and organize")
+				fmt.Println("   jellywatch consolidate --generate  # Generate move plans")
+				fmt.Println("   jellywatch consolidate --dry-run   # Preview plans")
+				fmt.Println("   jellywatch consolidate --execute   # Execute plans")
 			}
+
+			fmt.Println("\nOr use the interactive wizard:")
+			fmt.Println("   jellywatch fix                     # Guided cleanup")
 		} else {
 			fmt.Println("\n✨ No issues detected - your library is clean!")
 		}

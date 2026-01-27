@@ -15,10 +15,10 @@ type MediaFile struct {
 	ModifiedAt time.Time
 
 	// Classification
-	MediaType       string  // "movie" or "episode"
-	ParentMovieID   *int64  // NULL for episodes
-	ParentSeriesID  *int64  // NULL for movies
-	ParentEpisodeID *int64  // NULL for movies
+	MediaType       string // "movie" or "episode"
+	ParentMovieID   *int64 // NULL for episodes
+	ParentSeriesID  *int64 // NULL for movies
+	ParentEpisodeID *int64 // NULL for movies
 
 	// Normalized identity (for duplicate detection)
 	NormalizedTitle string
@@ -27,11 +27,15 @@ type MediaFile struct {
 	Episode         *int // NULL for movies
 
 	// Quality metadata
-	Resolution  string
-	SourceType  string
-	Codec       string
-	AudioFormat string
+	Resolution   string
+	SourceType   string
+	Codec        string
+	AudioFormat  string
 	QualityScore int
+
+	// Confidence tracking
+	Confidence  float64
+	NeedsReview bool
 
 	// Jellyfin compliance
 	IsJellyfinCompliant bool
@@ -407,4 +411,68 @@ func (m *MediaDB) UpdateEpisodeBestFile(episodeID int64, fileID *int64) error {
 	}
 
 	return nil
+}
+
+// GetLowConfidenceFiles retrieves files with confidence below threshold
+func (m *MediaDB) GetLowConfidenceFiles(threshold float64, limit int) ([]*MediaFile, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var files []*MediaFile
+
+	query := `
+		SELECT
+			id, path, size, modified_at,
+			media_type, parent_movie_id, parent_series_id, parent_episode_id,
+			normalized_title, year, season, episode,
+			resolution, source_type, codec, audio_format, quality_score,
+			confidence, needs_review,
+			is_jellyfin_compliant, compliance_issues,
+			source, source_priority, library_root,
+			created_at, updated_at
+		FROM media_files
+		WHERE confidence < ?
+		ORDER BY confidence ASC
+	`
+
+	args := []interface{}{threshold}
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := m.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query low confidence files: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var file MediaFile
+		var complianceJSON string
+
+		err := rows.Scan(
+			&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
+			&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
+			&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
+			&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
+			&file.Confidence, &file.NeedsReview,
+			&file.IsJellyfinCompliant, &complianceJSON,
+			&file.Source, &file.SourcePriority, &file.LibraryRoot,
+			&file.CreatedAt, &file.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan low confidence file: %w", err)
+		}
+
+		if complianceJSON != "" {
+			if err := json.Unmarshal([]byte(complianceJSON), &file.ComplianceIssues); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal compliance issues: %w", err)
+			}
+		}
+
+		files = append(files, &file)
+	}
+
+	return files, rows.Err()
 }

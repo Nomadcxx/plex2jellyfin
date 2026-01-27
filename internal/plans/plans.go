@@ -210,3 +210,134 @@ func ArchiveDuplicatePlans() error {
 
 	return nil
 }
+
+
+// AuditItem represents a low-confidence file that needs review
+type AuditItem struct {
+	ID           int64   `json:"id"`
+	Path         string  `json:"path"`
+	Size         int64   `json:"size"`
+	MediaType   string   `json:"media_type"`
+	Title        string   `json:"title"`
+	Year         *int     `json:"year"`
+	Season       *int     `json:"season,omitempty"`
+	Episode      *int     `json:"episode,omitempty"`
+	Confidence  float64  `json:"confidence"`
+	Resolution   string    `json:"resolution,omitempty"`
+	SourceType   string    `json:"source_type,omitempty"`
+}
+
+// AuditAction represents an AI-suggested correction
+type AuditAction struct {
+	Action      string  `json:"action"` // "rename" or "delete"
+	NewTitle    string  `json:"new_title,omitempty"`
+	NewYear     *int    `json:"new_year,omitempty"`
+	NewSeason   *int    `json:"new_season,omitempty"`
+	NewEpisode  *int    `json:"new_episode,omitempty"`
+	NewPath     string  `json:"new_path,omitempty"`
+	Reasoning   string  `json:"reasoning,omitempty"`
+	Confidence  float64 `json:"confidence"`
+}
+
+// AuditSummary contains summary stats for audit plans
+type AuditSummary struct {
+	TotalFiles      int     `json:"total_files"`
+	FilesToRename   int     `json:"files_to_rename"`
+	FilesToDelete   int     `json:"files_to_delete"`
+	FilesToSkip    int     `json:"files_to_skip"`
+	AvgConfidence   float64 `json:"avg_confidence"`
+}
+
+// AuditPlan represents a full audit plan
+type AuditPlan struct {
+	CreatedAt time.Time    `json:"created_at"`
+	Command   string        `json:"command"`
+	Summary   AuditSummary  `json:"summary"`
+	Items     []AuditItem   `json:"items"`
+	Actions   []AuditAction `json:"actions,omitempty"`
+}
+
+// getAuditPlansPath returns path to audit.json
+func getAuditPlansPath() (string, error) {
+	dir, err := GetPlansDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(dir, "audit.json"), nil
+}
+
+// SaveAuditPlans saves an audit plan to JSON file
+func SaveAuditPlans(plan *AuditPlan) error {
+	path, err := getAuditPlansPath()
+	if err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(plan, "", "	")
+	if err != nil {
+		return fmt.Errorf("failed to marshal plan: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write plan file: %w", err)
+	}
+
+	return nil
+}
+
+// LoadAuditPlans loads an audit plan from JSON file
+func LoadAuditPlans() (*AuditPlan, error) {
+	path, err := getAuditPlansPath()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open plans file: %w", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read plans file: %w", err)
+	}
+
+	var plan AuditPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse plans file: %w", err)
+	}
+
+	return &plan, nil
+}
+
+// DeleteAuditPlans removes the audit plans file
+func DeleteAuditPlans() error {
+	path, err := getAuditPlansPath()
+	if err != nil {
+		return err
+	}
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete plan file: %w", err)
+	}
+
+	return nil
+}
+
+// ArchiveAuditPlans renames audit.json to audit.json.old
+func ArchiveAuditPlans() error {
+	path, err := getAuditPlansPath()
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil // Nothing to archive
+	}
+
+	oldPath := path + ".old"
+
+	os.Remove(oldPath)
+
+	if err := os.Rename(path, oldPath); err != nil {
+		return fmt.Errorf("failed to archive plan file: %w", err)
+	}
+
+	return nil
+}
