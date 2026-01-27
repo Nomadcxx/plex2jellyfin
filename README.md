@@ -16,7 +16,11 @@ curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh 
 
 - **File System Monitoring**: Watches download directories for new media files
 - **Automatic Organization**: Renames and organizes files according to Jellyfin standards
+- **AI-Powered Parsing**: Uses local AI (Ollama) to parse ambiguous filenames when confidence is low
+- **Confidence Scoring**: Tracks parse confidence for each file and flags uncertain parses for review
+- **Audit Command**: Review and fix low-confidence parses with AI suggestions
 - **Duplicate Detection**: Identifies duplicate files before moving
+- **Consolidation**: Consolidates scattered media files into single locations
 - **Compliance Validation**: Ensures all files follow Jellyfin naming conventions
 - **Daemon Support**: Runs as a background service with systemd integration
 - **Dry Run Mode**: Preview changes before applying them
@@ -105,6 +109,32 @@ jellywatch watch /path/to/downloads
 jellywatch organize /path/to/library
 ```
 
+### Scan Library with AI
+```bash
+jellywatch scan
+```
+
+### Audit Low-Confidence Parses
+```bash
+jellywatch audit --generate    # Find low-confidence files
+jellywatch audit --dry-run     # Preview AI suggestions
+jellywatch audit --execute     # Apply AI suggestions
+```
+
+### Find Duplicates
+```bash
+jellywatch duplicates --generate
+jellywatch duplicates --dry-run
+jellywatch duplicates --execute
+```
+
+### Consolidate Scattered Files
+```bash
+jellywatch consolidate --generate
+jellywatch consolidate --dry-run
+jellywatch consolidate --execute
+```
+
 ### Validate Compliance
 ```bash
 jellywatch validate /path/to/library
@@ -136,6 +166,14 @@ scan_frequency = "5m"
 dry_run = false
 verify_checksums = false
 delete_source = true
+
+[ai]
+enabled = true
+ollama_endpoint = "http://localhost:11434"
+model = "llama3.1"
+confidence_threshold = 0.8
+auto_trigger_threshold = 0.6
+cache_enabled = true
 ```
 
 ### File Permissions
