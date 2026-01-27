@@ -110,7 +110,7 @@ func TestSyncFromFilesystem(t *testing.T) {
 
 	// Run filesystem sync
 	ctx := context.Background()
-	err := svc.SyncFromFilesystem(ctx)
+	_, err := svc.SyncFromFilesystem(ctx)
 	if err != nil {
 		t.Fatalf("filesystem sync failed: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestSyncFromFilesystemContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := svc.SyncFromFilesystem(ctx)
+	_, err := svc.SyncFromFilesystem(ctx)
 	if err != context.Canceled {
 		t.Errorf("expected context.Canceled error, got %v", err)
 	}
@@ -410,7 +410,7 @@ func TestSyncLogCreation(t *testing.T) {
 	svc := NewSyncService(cfg)
 
 	// Run sync
-	err := svc.SyncFromFilesystem(context.Background())
+	_, err := svc.SyncFromFilesystem(context.Background())
 	if err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}

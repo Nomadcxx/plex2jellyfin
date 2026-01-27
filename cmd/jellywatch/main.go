@@ -80,6 +80,7 @@ Features:
 	rootCmd.AddCommand(newMonitorCmd())
 	rootCmd.AddCommand(newFixCmd())
 	rootCmd.AddCommand(newServeCmd())
+	rootCmd.AddCommand(newAuditCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -982,6 +983,7 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
+// isMediaFileCheck checks if extension is a media file type
 func isMediaFileCheck(ext string) bool {
 	ext = strings.ToLower(ext)
 	mediaExts := map[string]bool{
@@ -990,4 +992,73 @@ func isMediaFileCheck(ext string) bool {
 		".mpg": true, ".mpeg": true, ".m2ts": true, ".ts": true,
 	}
 	return mediaExts[ext]
+}
+
+// newConsolidateCmd creates the consolidate command
+func newConsolidateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "consolidate",
+		Short: "Consolidate scattered media files",
+		Long: `Find and consolidate media files scattered across multiple locations.
+
+This command identifies when the same title exists in multiple library folders
+and generates plans to consolidate them into a single location.`,
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "--generate",
+		Short: "Generate consolidation plans",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("Consolidate generate - not yet implemented")
+			return nil
+		},
+	})
+
+	return cmd
+}
+
+// newDuplicatesCmd creates the duplicates command
+func newDuplicatesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "duplicates",
+		Short: "Find and manage duplicate files",
+		Long: `Identify duplicate media files across your libraries.
+
+This command finds files that are duplicates of each other and
+can help you clean up wasted space.`,
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "--generate",
+		Short: "Generate duplicate plans",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("Duplicates generate - not yet implemented")
+			return nil
+		},
+	})
+
+	return cmd
+}
+
+// newAuditCmd creates the audit command
+func newAuditCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "audit",
+		Short: "Audit low-confidence file parses",
+		Long: `Review and fix files with low parse confidence.
+
+This command identifies files where the parser was uncertain about
+the title extraction and can use AI to suggest corrections.`,
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "--generate",
+		Short: "Generate audit plans",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("Audit generate - not yet implemented")
+			return nil
+		},
+	})
+
+	return cmd
 }

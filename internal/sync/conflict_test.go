@@ -95,7 +95,7 @@ func TestSyncFromFilesystem_DetectsConflicts(t *testing.T) {
 
 	// Sync from filesystem (this calls UpsertSeries which triggers conflict detection)
 	// Note: SyncFromFilesystem processes all libraries in one call
-	err = syncService.SyncFromFilesystem(ctx)
+	_, err = syncService.SyncFromFilesystem(ctx)
 	require.NoError(t, err)
 	
 	// Verify both shows were processed

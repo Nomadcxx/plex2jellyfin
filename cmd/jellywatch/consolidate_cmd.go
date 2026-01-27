@@ -2,35 +2,16 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
-
-// formatBytes formats byte count to human-readable size
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(unit))
-	}
-	div, exp := int64(0), 0
-	for bytes >= unit {
-		div++
-		exp *= 10
-	}
-	if exp > 0 {
-		return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(exp))
-	}
-	return fmt.Sprintf("%d %s", bytes/unit)
-}
 
 func runConsolidateExecute(db *database.MediaDB) error {
 	plan, err := plans.LoadConsolidatePlans()

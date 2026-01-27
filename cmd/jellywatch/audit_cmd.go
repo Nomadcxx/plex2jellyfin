@@ -238,7 +238,7 @@ func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan) error {
 		switch action.Action {
 		case "rename":
 			// TODO: Implement rename (task 9)
-			fmt.Printf("  Skipping: %s -> %s\n", action.NewPath)
+			fmt.Printf("  Skipping: %s\n", action.NewPath)
 		case "delete":
 			// TODO: Implement delete
 			fmt.Printf("  Skipping: delete %s\n", action.NewPath)

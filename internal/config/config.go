@@ -130,16 +130,17 @@ type KeepaliveConfig struct {
 
 // AIConfig contains AI title matching configuration
 type AIConfig struct {
-	Enabled             bool                 `mapstructure:"enabled"`
-	OllamaEndpoint      string               `mapstructure:"ollama_endpoint"`
-	Model               string               `mapstructure:"model"`
-	ConfidenceThreshold float64              `mapstructure:"confidence_threshold"`
-	TimeoutSeconds      int                  `mapstructure:"timeout_seconds"`
-	CacheEnabled        bool                 `mapstructure:"cache_enabled"`
-	CloudModel          string               `mapstructure:"cloud_model"`
-	AutoResolveRisky    bool                 `mapstructure:"auto_resolve_risky"`
-	CircuitBreaker      CircuitBreakerConfig `mapstructure:"circuit_breaker"`
-	Keepalive           KeepaliveConfig      `mapstructure:"keepalive"`
+	Enabled              bool                 `mapstructure:"enabled"`
+	OllamaEndpoint       string               `mapstructure:"ollama_endpoint"`
+	Model                string               `mapstructure:"model"`
+	ConfidenceThreshold  float64              `mapstructure:"confidence_threshold"`
+	AutoTriggerThreshold float64              `mapstructure:"auto_trigger_threshold"`
+	TimeoutSeconds       int                  `mapstructure:"timeout_seconds"`
+	CacheEnabled         bool                 `mapstructure:"cache_enabled"`
+	CloudModel           string               `mapstructure:"cloud_model"`
+	AutoResolveRisky     bool                 `mapstructure:"auto_resolve_risky"`
+	CircuitBreaker       CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	Keepalive            KeepaliveConfig      `mapstructure:"keepalive"`
 }
 
 // WatchConfig contains directories to watch
@@ -216,13 +217,14 @@ func DefaultConfig() *Config {
 			NotifyOnImport: true,
 		},
 		AI: AIConfig{
-			Enabled:             false,
-			OllamaEndpoint:      "http://localhost:11434",
-			Model:               "qwen2.5vl:7b",
-			ConfidenceThreshold: 0.8,
-			TimeoutSeconds:      5,
-			CacheEnabled:        true,
-			CloudModel:          "nemotron-3-nano:30b-cloud",
+			Enabled:              false,
+			OllamaEndpoint:       "http://localhost:11434",
+			Model:                "qwen2.5vl:7b",
+			ConfidenceThreshold:  0.8,
+			AutoTriggerThreshold: 0.6,
+			TimeoutSeconds:       5,
+			CacheEnabled:         true,
+			CloudModel:           "nemotron-3-nano:30b-cloud",
 			CircuitBreaker: CircuitBreakerConfig{
 				FailureThreshold:     5,
 				FailureWindowSeconds: 120,
@@ -384,6 +386,7 @@ enabled = %v
 ollama_endpoint = "%s"
 model = "%s"
 confidence_threshold = %.2f
+auto_trigger_threshold = %.2f
 timeout_seconds = %d
 cache_enabled = %v
 cloud_model = "%s"
@@ -419,6 +422,7 @@ max_backups = %d
 		c.AI.OllamaEndpoint,
 		c.AI.Model,
 		c.AI.ConfidenceThreshold,
+		c.AI.AutoTriggerThreshold,
 		c.AI.TimeoutSeconds,
 		c.AI.CacheEnabled,
 		c.AI.CloudModel,
@@ -472,12 +476,13 @@ func GetDatabasePath() string {
 // DefaultAIConfig returns default AI configuration
 func DefaultAIConfig() AIConfig {
 	return AIConfig{
-		Enabled:             false,
-		OllamaEndpoint:      "http://localhost:11434",
-		Model:               "qwen2.5vl:7b",
-		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:      5,
-		CacheEnabled:        true,
+		Enabled:              false,
+		OllamaEndpoint:       "http://localhost:11434",
+		Model:                "qwen2.5vl:7b",
+		ConfidenceThreshold:  0.8,
+		AutoTriggerThreshold: 0.6,
+		TimeoutSeconds:       5,
+		CacheEnabled:         true,
 		CircuitBreaker: CircuitBreakerConfig{
 			FailureThreshold:     5,
 			FailureWindowSeconds: 120,

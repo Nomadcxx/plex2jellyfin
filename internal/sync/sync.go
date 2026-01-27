@@ -9,6 +9,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
+	"github.com/Nomadcxx/jellywatch/internal/scanner"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 )
 
@@ -20,6 +21,7 @@ type SyncService struct {
 	tvLibraries    []string
 	movieLibraries []string
 	logger         *slog.Logger
+	aiHelper       *scanner.AIHelper // Optional AI helper for auto-trigger
 
 	// Scheduler
 	syncHour int // Hour to run daily sync (0-23), default 3
@@ -30,8 +32,9 @@ type SyncService struct {
 // SyncConfig holds configuration for SyncService
 type SyncConfig struct {
 	DB             *database.MediaDB
-	Sonarr         *sonarr.Client // nil if not configured
-	Radarr         *radarr.Client // nil if not configured
+	Sonarr         *sonarr.Client     // nil if not configured
+	Radarr         *radarr.Client     // nil if not configured
+	AIHelper       *scanner.AIHelper  // Optional AI helper for auto-trigger
 	TVLibraries    []string
 	MovieLibraries []string
 	SyncHour       int // Hour for daily sync, default 3
@@ -52,6 +55,7 @@ func NewSyncService(cfg SyncConfig) *SyncService {
 		db:             cfg.DB,
 		sonarr:         cfg.Sonarr,
 		radarr:         cfg.Radarr,
+		aiHelper:       cfg.AIHelper,
 		tvLibraries:    cfg.TVLibraries,
 		movieLibraries: cfg.MovieLibraries,
 		syncHour:       cfg.SyncHour,
@@ -119,7 +123,7 @@ func (s *SyncService) RunFullSync(ctx context.Context) error {
 	}
 
 	// 3. Always scan filesystem (catches manual additions, verifies counts)
-	if err := s.SyncFromFilesystem(ctx); err != nil {
+	if _, err := s.SyncFromFilesystem(ctx); err != nil {
 		s.logger.Error("filesystem sync failed", "error", err)
 	}
 

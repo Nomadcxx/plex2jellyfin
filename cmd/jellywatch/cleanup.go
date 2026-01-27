@@ -101,7 +101,8 @@ func cleanupSourceDir(dir string, libraryRoots []string) error {
 		if err := os.Remove(currentDir); err != nil {
 			return nil // Not empty or error, stop
 		}
-	}
 
-	return nil
+		// Move up one level
+		currentDir = filepath.Dir(currentDir)
+	}
 }

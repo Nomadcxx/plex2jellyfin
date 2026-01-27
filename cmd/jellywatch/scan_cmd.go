@@ -7,9 +7,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
+	"github.com/Nomadcxx/jellywatch/internal/scanner"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/sync"
@@ -76,6 +78,7 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool) error {
 	// Create sync service
 	var sonarrClient *sonarr.Client
 	var radarrClient *radarr.Client
+	var aiHelper *scanner.AIHelper
 
 	if syncSonarr && cfg.Sonarr.Enabled {
 		sonarrClient = sonarr.NewClient(sonarr.Config{
@@ -91,10 +94,22 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool) error {
 		})
 	}
 
+	// Create AI helper if enabled
+	if cfg.AI.Enabled {
+		matcher, err := ai.NewMatcher(cfg.AI)
+		if err != nil {
+			fmt.Printf("  Warning: AI matcher initialization failed: %v\n", err)
+			fmt.Println("  Continuing without AI auto-trigger")
+		} else {
+			aiHelper = scanner.NewAIHelper(cfg.AI, db.DB(), matcher)
+		}
+	}
+
 	syncService := sync.NewSyncService(sync.SyncConfig{
 		DB:             db,
 		Sonarr:         sonarrClient,
 		Radarr:         radarrClient,
+		AIHelper:       aiHelper,
 		TVLibraries:    cfg.Libraries.TV,
 		MovieLibraries: cfg.Libraries.Movies,
 		Logger:         logger,
@@ -124,6 +139,7 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool) error {
 	}
 
 	// Scan filesystem (higher priority)
+	var scanResult *scanner.ScanResult
 	if syncFilesystem {
 		fmt.Printf("Scanning %d TV libraries...\n", len(cfg.Libraries.TV))
 		for _, lib := range cfg.Libraries.TV {
@@ -135,7 +151,9 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool) error {
 		}
 		fmt.Println()
 
-		if err := syncService.SyncFromFilesystem(ctx); err != nil {
+		var err error
+		scanResult, err = syncService.SyncFromFilesystem(ctx)
+		if err != nil {
 			return fmt.Errorf("filesystem sync failed: %w", err)
 		}
 		fmt.Println("Filesystem sync complete")
@@ -143,6 +161,26 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool) error {
 
 	duration := time.Since(startTime)
 	fmt.Printf("\nScan completed in %s\n", duration.Round(time.Millisecond))
+
+	// Display scan statistics
+	if scanResult != nil {
+		fmt.Printf("\n=== Scan Statistics ===\n")
+		fmt.Printf("Files scanned: %d\n", scanResult.FilesScanned)
+		fmt.Printf("Files added:   %d\n", scanResult.FilesAdded)
+		fmt.Printf("Files updated: %d\n", scanResult.FilesUpdated)
+
+		// Show AI statistics if AI was used
+		if aiHelper != nil && (scanResult.AITriggered > 0 || scanResult.NeedsReview > 0) {
+			fmt.Printf("\n=== AI Summary ===\n")
+			fmt.Printf("Triggered:   %d\n", scanResult.AITriggered)
+			fmt.Printf("Cache hits:  %d\n", scanResult.AICacheHits)
+			fmt.Printf("Improved:    %d\n", scanResult.AISucceeded)
+			fmt.Printf("Failed:      %d\n", scanResult.AIFailed)
+			if scanResult.NeedsReview > 0 {
+				fmt.Printf("Needs review: %d (run 'jellywatch audit --generate' to review)\n", scanResult.NeedsReview)
+			}
+		}
+	}
 
 	// Show stats
 	if showStats {

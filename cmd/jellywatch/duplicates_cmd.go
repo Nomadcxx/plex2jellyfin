@@ -2,35 +2,13 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
-	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
-
-// formatBytes formats byte count to human-readable size
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(unit))
-	}
-	div, exp := int64(0), 0
-	for bytes >= unit {
-		div++
-		exp *= 10
-	}
-	if exp > 0 {
-		return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(exp))
-	}
-	return fmt.Sprintf("%d %s", bytes/unit)
-}
 
 func runDuplicatesExecute(db *database.MediaDB) error {
 	plan, err := plans.LoadDuplicatePlans()
@@ -80,21 +58,11 @@ func runDuplicatesExecute(db *database.MediaDB) error {
 
 		// Only delete the duplicate file, not the keeper
 		file := p.Delete
-		yearStr = ""
-		if file.Year != nil {
-			yearStr = fmt.Sprintf(" (%d)", *file.Year)
-		}
-
-		var fileStr string
-		if p.MediaType == "movie" {
-			fileStr = fmt.Sprintf("%s%s", file.Title, yearStr)
-		} else {
-			fileStr = fmt.Sprintf("%s S%02dE%02d", file.Title, p.Season, p.Episode)
-		}
+		filePath := file.Path
 
 		// Delete file
-		if err := os.Remove(file.Path); err != nil && !os.IsNotExist(err) {
-			fmt.Printf("  ❌ Failed to delete %s: %v\n", fileStr, err)
+		if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("  ❌ Failed to delete %s: %v\n", filePath, err)
 			continue
 		}
 

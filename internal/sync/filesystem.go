@@ -13,16 +13,22 @@ import (
 const filesystemSourcePriority = 50
 
 // SyncFromFilesystem scans library directories and updates the database
-func (s *SyncService) SyncFromFilesystem(ctx context.Context) error {
+// Returns the scan result including AI statistics
+func (s *SyncService) SyncFromFilesystem(ctx context.Context) (*scanner.ScanResult, error) {
 	s.logger.Info("syncing from filesystem")
 
 	logID, err := s.db.StartSyncLog("filesystem")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Create file scanner for file-level scanning (Phase 4: CONDOR system)
-	fileScanner := scanner.NewFileScanner(s.db)
+	var fileScanner *scanner.FileScanner
+	if s.aiHelper != nil {
+		fileScanner = scanner.NewFileScannerWithAI(s.db, s.aiHelper)
+	} else {
+		fileScanner = scanner.NewFileScanner(s.db)
+	}
 
 	// Scan files into media_files table
 	s.logger.Info("scanning files into media_files table")
@@ -49,7 +55,7 @@ func (s *SyncService) SyncFromFilesystem(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			s.db.CompleteSyncLog(logID, "failed", processed, added, updated, "context cancelled")
-			return ctx.Err()
+			return result, ctx.Err()
 		default:
 		}
 
@@ -68,7 +74,7 @@ func (s *SyncService) SyncFromFilesystem(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			s.db.CompleteSyncLog(logID, "failed", processed, added, updated, "context cancelled")
-			return ctx.Err()
+			return result, ctx.Err()
 		default:
 		}
 
@@ -85,7 +91,7 @@ func (s *SyncService) SyncFromFilesystem(ctx context.Context) error {
 	s.db.CompleteSyncLog(logID, "success", processed, added, updated, "")
 	s.logger.Info("filesystem sync completed", "processed", processed, "added", added, "updated", updated)
 
-	return nil
+	return result, nil
 }
 
 func (s *SyncService) scanTVLibrary(ctx context.Context, libraryPath string) (processed, added, updated int, err error) {

@@ -177,7 +177,8 @@ func TestProcessFile_Movie(t *testing.T) {
 	}
 
 	// Process the file
-	err = scanner.processFile(moviePath, info, tempDir, "movie")
+	result := &ScanResult{}
+	err = scanner.processFile(moviePath, info, tempDir, "movie", result)
 	if err != nil {
 		t.Fatalf("processFile failed: %v", err)
 	}
@@ -234,7 +235,8 @@ func TestProcessFile_Episode(t *testing.T) {
 	}
 
 	// Process the file
-	err = scanner.processFile(episodePath, info, tempDir, "episode")
+	result := &ScanResult{}
+	err = scanner.processFile(episodePath, info, tempDir, "episode", result)
 	if err != nil {
 		t.Fatalf("processFile failed: %v", err)
 	}
@@ -299,7 +301,8 @@ func TestProcessFile_NonCompliant(t *testing.T) {
 	}
 
 	// Process the file
-	err = scanner.processFile(moviePath, info, tempDir, "movie")
+	result := &ScanResult{}
+	err = scanner.processFile(moviePath, info, tempDir, "movie", result)
 	if err != nil {
 		t.Fatalf("processFile failed: %v", err)
 	}
