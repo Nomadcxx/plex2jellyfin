@@ -1,6 +1,7 @@
 package consolidate
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 
@@ -171,4 +172,77 @@ func TestConsolidator_GenerateAllPlans_AllMovies(t *testing.T) {
 	if c.stats.ConflictsFound != 5 {
 		t.Errorf("Expected 5 conflicts found, got %d", c.stats.ConflictsFound)
 	}
+}
+
+func TestExecutorOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		format   string
+		args     []interface{}
+		expected string
+	}{
+		{
+			name:     "simple message",
+			format:   "Test message\n",
+			args:     nil,
+			expected: "Test message\n",
+		},
+		{
+			name:     "message with string argument",
+			format:   "Hello %s\n",
+			args:     []interface{}{"World"},
+			expected: "Hello World\n",
+		},
+		{
+			name:     "message with multiple arguments",
+			format:   "Files: %d, Size: %d bytes\n",
+			args:     []interface{}{5, 1024},
+			expected: "Files: 5, Size: 1024 bytes\n",
+		},
+		{
+			name:     "warning message format",
+			format:   "Warning: Failed to cleanup empty directory %s: %v\n",
+			args:     []interface{}{"/path/to/dir", "permission denied"},
+			expected: "Warning: Failed to cleanup empty directory /path/to/dir: permission denied\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a buffer to capture output
+			buf := &bytes.Buffer{}
+
+			// Create executor with our buffer as writer
+			// We can pass nil for db since we're only testing Printf
+			executor := &Executor{
+				writer: buf,
+			}
+
+			// Call Printf with the test format and args
+			executor.Printf(tt.format, tt.args...)
+
+			// Verify the output
+			got := buf.String()
+			if got != tt.expected {
+				t.Errorf("Printf() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExecutorPrintfWithNilWriter(t *testing.T) {
+	// This test documents that Printf will panic with nil writer
+	// NewExecutor ensures writer is never nil by defaulting to os.Stdout
+	executor := &Executor{
+		writer: nil,
+	}
+
+	// Expect panic with nil writer - this is standard fmt.Fprintf behavior
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("Printf() with nil writer should have panicked, but didn't")
+		}
+	}()
+
+	executor.Printf("Test message\n")
 }

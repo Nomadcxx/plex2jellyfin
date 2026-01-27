@@ -3,6 +3,7 @@ package consolidate
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,6 +18,7 @@ type Executor struct {
 	planner    *Planner
 	transferer transfer.Transferer
 	dryRun     bool
+	writer     io.Writer
 }
 
 // ExecutionResult contains statistics from plan execution
@@ -33,14 +35,23 @@ type ExecutionResult struct {
 }
 
 // NewExecutor creates a new plan executor
-func NewExecutor(db *database.MediaDB, dryRun bool) *Executor {
+func NewExecutor(db *database.MediaDB, dryRun bool, writer io.Writer) *Executor {
+	if writer == nil {
+		writer = os.Stdout
+	}
 	transferer, _ := transfer.New(transfer.BackendRsync)
 	return &Executor{
 		db:         db,
 		planner:    NewPlanner(db),
 		transferer: transferer,
 		dryRun:     dryRun,
+		writer:     writer,
 	}
+}
+
+// Printf writes formatted output to the configured writer
+func (e *Executor) Printf(format string, a ...interface{}) {
+	fmt.Fprintf(e.writer, format, a...)
 }
 
 // ExecutePlans runs all pending consolidation plans
@@ -224,7 +235,7 @@ func (e *Executor) executeMove(ctx context.Context, plan *ConsolidationPlan) err
 
 	parentDir := filepath.Dir(plan.SourcePath)
 	if err := CleanupEmptyDir(parentDir); err != nil {
-		fmt.Printf("Warning: Failed to cleanup empty directory %s: %v\n", parentDir, err)
+		e.Printf("Warning: Failed to cleanup empty directory %s: %v\n", parentDir, err)
 	}
 
 	return nil
