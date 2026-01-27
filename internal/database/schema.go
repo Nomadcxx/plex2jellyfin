@@ -435,6 +435,7 @@ var migrations = []migration{
 		up: []string{
 			// Add confidence tracking to media_files
 			`ALTER TABLE media_files ADD COLUMN confidence REAL DEFAULT 1.0`,
+			`ALTER TABLE media_files ADD COLUMN parse_method TEXT DEFAULT 'regex'`,
 			`ALTER TABLE media_files ADD COLUMN needs_review BOOLEAN NOT NULL DEFAULT 0`,
 			`CREATE INDEX idx_media_files_confidence ON media_files(confidence)`,
 			`CREATE INDEX idx_media_files_needs_review ON media_files(needs_review)`,
