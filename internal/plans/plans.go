@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/Nomadcxx/jellywatch/internal/database"
 )
 
 // FileInfo represents a media file in a plan
@@ -392,7 +394,7 @@ func DeleteAuditPlans() error {
 }
 
 // ExecuteAuditAction executes an audit action (rename or delete) on a file
-func ExecuteAuditAction(action *AuditAction, filePath string) error {
+func ExecuteAuditAction(db *database.MediaDB, action AuditAction) error {
 	return fmt.Errorf("not implemented")
 }
 

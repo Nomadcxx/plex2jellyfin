@@ -175,13 +175,13 @@ func TestGetPlansDir(t *testing.T) {
 }
 
 func TestExecuteAuditAction(t *testing.T) {
-	action := &AuditAction{
+	action := AuditAction{
 		Action:   "rename",
 		NewTitle: "Correct Title",
 		NewYear:  func() *int { y := 2020; return &y }(),
 	}
 
-	err := ExecuteAuditAction(action, "test/path.mkv")
+	err := ExecuteAuditAction(nil, action)
 	if err == nil {
 		t.Fatal("ExecuteAuditAction should return not implemented error")
 	}
