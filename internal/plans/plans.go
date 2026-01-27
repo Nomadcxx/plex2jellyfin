@@ -391,6 +391,11 @@ func DeleteAuditPlans() error {
 	return nil
 }
 
+// ExecuteAuditAction executes an audit action (rename or delete) on a file
+func ExecuteAuditAction(action *AuditAction, filePath string) error {
+	return fmt.Errorf("not implemented")
+}
+
 // ArchiveAuditPlans renames audit.json to audit.json.old
 func ArchiveAuditPlans() error {
 	path, err := getAuditPlansPath()

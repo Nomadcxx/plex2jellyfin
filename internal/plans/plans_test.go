@@ -173,3 +173,20 @@ func TestGetPlansDir(t *testing.T) {
 		t.Errorf("Expected %s, got %s", expected, dir)
 	}
 }
+
+func TestExecuteAuditAction(t *testing.T) {
+	action := &AuditAction{
+		Action:   "rename",
+		NewTitle: "Correct Title",
+		NewYear:  func() *int { y := 2020; return &y }(),
+	}
+
+	err := ExecuteAuditAction(action, "test/path.mkv")
+	if err == nil {
+		t.Fatal("ExecuteAuditAction should return not implemented error")
+	}
+
+	if err.Error() != "not implemented" {
+		t.Fatalf("Expected 'not implemented' error, got: %v", err)
+	}
+}
