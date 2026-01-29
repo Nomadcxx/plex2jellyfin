@@ -19,15 +19,24 @@ Your *arr stack downloads `Movie.Name.2024.1080p.WEB-DL.x264-RARBG.mkv`. Jellyfi
 
 ## How It Works
 
-See the [architecture diagram](docs/architecture.md) for the full system flow.
+```mermaid
+flowchart LR
+    A[Sonarr/Radarr] -->|sends| B[Download]
+    B -->|drops| C[Watch Dir]
+    C -->|detects| D[JellyWatch]
+    D -->|rename & move| E[Library]
+    E -->|serves| F[Jellyfin]
+    
+    D -.->|queries| A
+    
+    G[scan] --> H[(DB)]
+    I[audit] --> H
+    J[duplicates] --> H
+    K[consolidate] --> H
+    H -.-> E
+```
 
-In short:
-1. **Scan** your library to build a database of what you have
-2. **Watch** download directories for new files
-3. **Organize** files according to Jellyfin naming rules
-4. **Audit** questionable parses with AI assistance
-5. **Deduplicate** when you've hoarded the same movie five times
-6. **Consolidate** when a series is scattered across six drives
+See [docs/architecture.md](docs/architecture.md) for the detailed flow.
 
 ## Quick Commands
 
