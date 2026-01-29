@@ -26,6 +26,61 @@ Your *arr stack downloads `Movie.Name.2024.1080p.WEB-DL.x264-RARBG.mkv`. Jellyfi
 5. **Deduplicate** when you've hoarded the same movie five times
 6. **Consolidate** when a series is scattered across six drives
 
+```mermaid
+graph TB
+    classDef service fill:#20283e,stroke:#657b83,stroke-width:2px,color:#fff;
+    classDef storage fill:#3d3418,stroke:#b58900,stroke-width:2px,color:#fff,shape:cylinder;
+    classDef logic fill:#183d22,stroke:#2aa198,stroke-width:2px,color:#fff;
+    classDef file fill:#2e3440,stroke:#839496,stroke-width:1px,color:#fff,stroke-dasharray: 5 5;
+    classDef decision fill:#4c1818,stroke:#dc322f,stroke-width:2px,color:#fff;
+
+    subgraph ArrStack ["Arr Stack"]
+        direction LR
+        Sonarr[Sonarr]:::service
+        Radarr[Radarr]:::service
+    end
+
+    Downloader[Download Client]:::service
+    WatchDir[/Watch Directory/]:::file
+
+    Sonarr --> Downloader
+    Radarr --> Downloader
+    Downloader --> WatchDir
+
+    subgraph JW ["JellyWatch Core"]
+        Watcher[File Watcher]:::logic
+        Parser[Name Parser]:::logic
+        Decision{low confidence?}:::decision
+        AI[AI/Ollama]:::logic
+        Organizer[Organizer]:::logic
+        
+        WatchDir --> Watcher --> Parser --> Decision
+        Decision --> AI --> Organizer
+        Decision --> Organizer
+    end
+
+    Organizer -.-> Sonarr
+    Organizer -.-> Radarr
+    Organizer --> JWDB[(JellyWatch DB)]:::storage
+    Organizer --> Library[/Jellyfin Library/]:::file
+
+    subgraph Maint ["CLI Maintenance"]
+        Scan[scan]:::logic
+        Audit[audit]:::logic
+        Dedupe[duplicates]:::logic
+        Consolidate[consolidate]:::logic
+    end
+
+    Scan --> JWDB
+    Audit --> JWDB
+    Dedupe --> JWDB
+    Consolidate --> JWDB
+    JWDB -.-> Library
+    Library -.-> Jellyfin[Jellyfin]:::service
+```
+
+*Full diagram: [docs/architecture.md](docs/architecture.md)*
+
 ## Quick Commands
 
 ```bash
