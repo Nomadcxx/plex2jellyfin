@@ -9,6 +9,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/organizer"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
@@ -1007,19 +1008,41 @@ func isMediaFileCheck(ext string) bool {
 func newConsolidateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "consolidate",
-		Short: "Consolidate scattered media files",
-		Long: `Find and consolidate media files scattered across multiple locations.
+		Short: "Consolidate scattered TV series across drives",
+		Long: `Find and consolidate TV series episodes scattered across multiple drives.
 
-This command identifies when the same title exists in multiple library folders
-and generates plans to consolidate them into a single location.`,
+This command identifies TV series where episodes are split across multiple
+library drives and generates plans to consolidate them into a single location.
+
+NOTE: Only applies to TV series. Movies are single files and don't need consolidation.`,
 	}
 
 	cmd.AddCommand(&cobra.Command{
-		Use:   "--generate",
+		Use:   "generate",
 		Short: "Generate consolidation plans",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Consolidate generate - not yet implemented")
-			return nil
+			return runConsolidateGenerate()
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "execute",
+		Short: "Execute consolidation plans",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			db, err := database.Open()
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			return runConsolidateExecute(db)
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "dry-run",
+		Short: "Preview consolidation plans",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConsolidateDryRun()
 		},
 	})
 
@@ -1038,14 +1061,33 @@ can help you clean up wasted space.`,
 	}
 
 	cmd.AddCommand(&cobra.Command{
-		Use:   "--generate",
+		Use:   "generate",
 		Short: "Generate duplicate plans",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Duplicates generate - not yet implemented")
-			return nil
+			return runDuplicatesGenerate()
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "execute",
+		Short: "Execute duplicate plans",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			db, err := database.Open()
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			return runDuplicatesExecute(db)
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "dry-run",
+		Short: "Preview duplicate plans",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDuplicatesDryRun()
 		},
 	})
 
 	return cmd
 }
-

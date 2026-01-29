@@ -21,7 +21,7 @@ func runConsolidateExecute(db *database.MediaDB) error {
 
 	if plan == nil {
 		fmt.Println("No pending plans found.")
-		fmt.Println("Run 'jellywatch consolidate --generate' first to create plans.")
+		fmt.Println("Run 'jellywatch consolidate generate' first to create plans.")
 		return nil
 	}
 

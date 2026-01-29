@@ -166,6 +166,10 @@ func (s *CleanupService) AnalyzeScattered() (*ScatteredAnalysis, error) {
 	}
 
 	for _, c := range conflicts {
+		if c.MediaType != "series" {
+			continue
+		}
+
 		item := ScatteredItem{
 			ID:        c.ID,
 			Title:     c.Title,

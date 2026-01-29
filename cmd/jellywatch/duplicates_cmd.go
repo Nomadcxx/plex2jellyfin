@@ -18,7 +18,7 @@ func runDuplicatesExecute(db *database.MediaDB) error {
 
 	if plan == nil {
 		fmt.Println("No pending plans found.")
-		fmt.Println("Run 'jellywatch duplicates --generate' first to create plans.")
+		fmt.Println("Run 'jellywatch duplicates generate' first to create plans.")
 		return nil
 	}
 
