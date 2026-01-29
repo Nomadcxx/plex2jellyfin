@@ -314,6 +314,14 @@ type AuditSummary struct {
 	FilesToDelete int     `json:"files_to_delete"`
 	FilesToSkip   int     `json:"files_to_skip"`
 	AvgConfidence float64 `json:"avg_confidence"`
+
+	// AI processing statistics
+	AITotalCalls          int `json:"ai_total_calls"`
+	AISuccessCount        int `json:"ai_success_count"`
+	AIErrorCount          int `json:"ai_error_count"`
+	TypeMismatchesSkipped int `json:"type_mismatches_skipped"`
+	ConfidenceTooLow      int `json:"confidence_too_low"`
+	TitleUnchanged        int `json:"title_unchanged"`
 }
 
 // AuditPlan represents a full audit plan
