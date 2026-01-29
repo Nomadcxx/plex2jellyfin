@@ -109,7 +109,19 @@ func (m model) View() string {
 		Foreground(FgPrimary).
 		Background(BgBase).
 		Width(m.width - 4)
-	content.WriteString(mainStyle.Render(mainContent))
+
+	// Calculate content height and use Place to fill background completely
+	mainRendered := mainStyle.Render(mainContent)
+	mainHeight := lipgloss.Height(mainRendered)
+
+	// Place content with filled background to prevent terminal bleed-through
+	mainPlaced := lipgloss.Place(
+		m.width-4, mainHeight,
+		lipgloss.Left, lipgloss.Top,
+		mainRendered,
+		lipgloss.WithWhitespaceBackground(BgBase),
+	)
+	content.WriteString(mainPlaced)
 	content.WriteString("\n")
 
 	helpText := m.getHelpText()

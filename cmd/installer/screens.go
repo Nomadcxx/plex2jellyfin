@@ -641,9 +641,10 @@ func (m model) renderComplete() string {
 	cmdStyle := lipgloss.NewStyle().Foreground(Secondary)
 	descStyle := lipgloss.NewStyle().Foreground(FgMuted)
 
-	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch scan"), descStyle.Render("Rescan libraries")))
-	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch duplicates"), descStyle.Render("View duplicates")))
-	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch consolidate"), descStyle.Render("Consolidate duplicates")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch scan"), descStyle.Render("Index libraries")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch audit generate"), descStyle.Render("Find low-confidence parses")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch duplicates generate"), descStyle.Render("Find duplicates")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch consolidate generate"), descStyle.Render("Find scattered series")))
 	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("systemctl status jellywatchd"), descStyle.Render("Check daemon")))
 
 	b.WriteString("\n")
