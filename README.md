@@ -20,20 +20,27 @@ Your *arr stack downloads `Movie.Name.2024.1080p.WEB-DL.x264-RARBG.mkv`. Jellyfi
 ## How It Works
 
 ```mermaid
-flowchart LR
-    A[Sonarr/Radarr] -->|sends| B[Download]
+flowchart TB
+    subgraph Input[" "]
+        A[Sonarr/Radarr] -->|sends| B[Download]
+    end
+    
     B -->|drops| C[Watch Dir]
     C -->|detects| D[JellyWatch]
+    
+    D -->|indexes| DB[(DB)]
+    DB -->|tells| D
+    
     D -->|rename & move| E[Library]
     E -->|serves| F[Jellyfin]
     
     D -.->|queries| A
     
-    G[scan] --> H[(DB)]
-    I[audit] --> H
-    J[duplicates] --> H
-    K[consolidate] --> H
-    H -.-> E
+    G[scan] -->|updates| DB
+    H[audit] -->|fixes| DB
+    I[duplicates] -->|finds in| DB
+    J[consolidate] -->|finds in| DB
+    DB -.->|operates on| E
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the detailed flow.
