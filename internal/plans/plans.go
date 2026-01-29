@@ -279,46 +279,46 @@ func ArchiveDuplicatePlans() error {
 	return nil
 }
 
-
 // AuditItem represents a low-confidence file that needs review
 type AuditItem struct {
-	ID           int64   `json:"id"`
-	Path         string  `json:"path"`
-	Size         int64   `json:"size"`
-	MediaType   string   `json:"media_type"`
-	Title        string   `json:"title"`
-	Year         *int     `json:"year"`
-	Season       *int     `json:"season,omitempty"`
-	Episode      *int     `json:"episode,omitempty"`
-	Confidence  float64  `json:"confidence"`
-	Resolution   string    `json:"resolution,omitempty"`
-	SourceType   string    `json:"source_type,omitempty"`
+	ID         int64   `json:"id"`
+	Path       string  `json:"path"`
+	Size       int64   `json:"size"`
+	MediaType  string  `json:"media_type"`
+	Title      string  `json:"title"`
+	Year       *int    `json:"year"`
+	Season     *int    `json:"season,omitempty"`
+	Episode    *int    `json:"episode,omitempty"`
+	Confidence float64 `json:"confidence"`
+	Resolution string  `json:"resolution,omitempty"`
+	SourceType string  `json:"source_type,omitempty"`
+	SkipReason string  `json:"skip_reason,omitempty"`
 }
 
 // AuditAction represents an AI-suggested correction
 type AuditAction struct {
-	Action      string  `json:"action"` // "rename" or "delete"
-	NewTitle    string  `json:"new_title,omitempty"`
-	NewYear     *int    `json:"new_year,omitempty"`
-	NewSeason   *int    `json:"new_season,omitempty"`
-	NewEpisode  *int    `json:"new_episode,omitempty"`
-	NewPath     string  `json:"new_path,omitempty"`
-	Reasoning   string  `json:"reasoning,omitempty"`
-	Confidence  float64 `json:"confidence"`
+	Action     string  `json:"action"` // "rename" or "delete"
+	NewTitle   string  `json:"new_title,omitempty"`
+	NewYear    *int    `json:"new_year,omitempty"`
+	NewSeason  *int    `json:"new_season,omitempty"`
+	NewEpisode *int    `json:"new_episode,omitempty"`
+	NewPath    string  `json:"new_path,omitempty"`
+	Reasoning  string  `json:"reasoning,omitempty"`
+	Confidence float64 `json:"confidence"`
 }
 
 // AuditSummary contains summary stats for audit plans
 type AuditSummary struct {
-	TotalFiles      int     `json:"total_files"`
-	FilesToRename   int     `json:"files_to_rename"`
-	FilesToDelete   int     `json:"files_to_delete"`
-	FilesToSkip    int     `json:"files_to_skip"`
-	AvgConfidence   float64 `json:"avg_confidence"`
+	TotalFiles    int     `json:"total_files"`
+	FilesToRename int     `json:"files_to_rename"`
+	FilesToDelete int     `json:"files_to_delete"`
+	FilesToSkip   int     `json:"files_to_skip"`
+	AvgConfidence float64 `json:"avg_confidence"`
 }
 
 // AuditPlan represents a full audit plan
 type AuditPlan struct {
-	CreatedAt time.Time    `json:"created_at"`
+	CreatedAt time.Time     `json:"created_at"`
 	Command   string        `json:"command"`
 	Summary   AuditSummary  `json:"summary"`
 	Items     []AuditItem   `json:"items"`
