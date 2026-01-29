@@ -13,6 +13,10 @@ import (
 )
 
 func runConsolidateGenerate() error {
+	if err := checkDatabasePopulated(); err != nil {
+		return err
+	}
+
 	db, err := database.Open()
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -54,8 +58,20 @@ func runConsolidateGenerate() error {
 		},
 	}
 
+	type skippedItem struct {
+		title   string
+		year    *int
+		reasons []string
+	}
+	var skippedItems []skippedItem
+
 	for _, cp := range consolidatePlans {
 		if !cp.CanProceed {
+			skippedItems = append(skippedItems, skippedItem{
+				title:   cp.Title,
+				year:    cp.Year,
+				reasons: cp.Reasons,
+			})
 			continue
 		}
 
@@ -93,6 +109,20 @@ func runConsolidateGenerate() error {
 
 	if len(plan.Plans) == 0 {
 		fmt.Println("✅ No consolidation needed (all files already in place)")
+		if len(skippedItems) > 0 {
+			fmt.Printf("\n⚠️  %d conflicts were skipped:\n", len(skippedItems))
+			for _, item := range skippedItems {
+				yearStr := ""
+				if item.year != nil {
+					yearStr = fmt.Sprintf(" (%d)", *item.year)
+				}
+				fmt.Printf("  • %s%s\n", item.title, yearStr)
+				for _, reason := range item.reasons {
+					fmt.Printf("    - %s\n", reason)
+				}
+			}
+			fmt.Println("\nThis may indicate permission issues or inaccessible paths.")
+		}
 		return nil
 	}
 
@@ -103,8 +133,24 @@ func runConsolidateGenerate() error {
 	fmt.Println("✅ Consolidation plan generated")
 	fmt.Printf("   Conflicts to consolidate: %d\n", len(plan.Plans))
 	fmt.Printf("   Files to move: %d\n", plan.Summary.TotalMoves)
-	fmt.Printf("   Data to relocate: %s\n\n", formatBytes(plan.Summary.TotalBytes))
-	fmt.Println("Next steps:")
+	fmt.Printf("   Data to relocate: %s\n", formatBytes(plan.Summary.TotalBytes))
+
+	if len(skippedItems) > 0 {
+		fmt.Printf("\n⚠️  %d conflicts were skipped (could not proceed):\n", len(skippedItems))
+		for _, item := range skippedItems {
+			yearStr := ""
+			if item.year != nil {
+				yearStr = fmt.Sprintf(" (%d)", *item.year)
+			}
+			fmt.Printf("  • %s%s\n", item.title, yearStr)
+			for _, reason := range item.reasons {
+				fmt.Printf("    - %s\n", reason)
+			}
+		}
+		fmt.Println("\n  Check permissions and path accessibility for the above items.")
+	}
+
+	fmt.Println("\nNext steps:")
 	fmt.Println("  jellywatch consolidate dry-run   # Preview moves")
 	fmt.Println("  jellywatch consolidate execute   # Execute moves")
 

@@ -9,6 +9,10 @@ import (
 )
 
 func runDuplicatesGenerate() error {
+	if err := checkDatabasePopulated(); err != nil {
+		return err
+	}
+
 	db, err := database.Open()
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
