@@ -19,9 +19,9 @@ import (
 type auditOptions struct {
 	Generate  bool
 	DryRun    bool
-	Execute    bool
-	Threshold  float64
-	Limit      int
+	Execute   bool
+	Threshold float64
+	Limit     int
 }
 
 var auditOpts auditOptions
@@ -135,67 +135,117 @@ func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, 
 
 	fmt.Printf("Found %d low-confidence files\n", len(files))
 
-	// Initialize AI matcher directly to get full Result
 	matcher, err := ai.NewMatcher(cfg.AI)
 	if err != nil {
 		return fmt.Errorf("failed to initialize AI matcher: %w", err)
 	}
 
-	// Generate AI suggestions for each file
 	actions := make([]plans.AuditAction, 0, len(files))
-	for _, file := range files {
-		mediaType := file.MediaType
-		if mediaType == "movie" {
-			mediaType = "tv" // AI expects "tv" for episodes
+	items := make([]plans.AuditItem, len(files))
+	stats := NewAuditStats()
+	progress := NewProgressBar(len(files))
+
+	fmt.Printf("\nProcessing with AI...\n")
+
+	for i, file := range files {
+		items[i] = plans.AuditItem{
+			ID:         file.ID,
+			Path:       file.Path,
+			Size:       file.Size,
+			MediaType:  file.MediaType,
+			Title:      file.NormalizedTitle,
+			Year:       file.Year,
+			Season:     file.Season,
+			Episode:    file.Episode,
+			Confidence: file.Confidence,
+			Resolution: file.Resolution,
+			SourceType: file.SourceType,
 		}
 
 		ctx := context.Background()
 		aiResult, err := matcher.Parse(ctx, filepath.Base(file.Path))
+
 		if err != nil {
-			fmt.Printf("⚠️  AI error for %s: %v\n", file.Path, err)
+			stats.RecordAICall(false)
+			items[i].SkipReason = fmt.Sprintf("AI error: %v", err)
+			progress.Update(len(actions), stats.AIErrorCount)
 			continue
 		}
 
-		// Check if AI gave a better result
-		if aiResult.Confidence >= cfg.AI.ConfidenceThreshold && aiResult.Title != file.NormalizedTitle {
-			// Build new filename/path based on AI suggestion
-			var newSeason, newEpisode *int
-			if aiResult.Season != nil {
-				newSeason = aiResult.Season
-			} else {
-				newSeason = file.Season
-			}
+		stats.RecordAICall(true)
 
-			if len(aiResult.Episodes) > 0 {
-				newEpisode = &aiResult.Episodes[0]
-			} else {
-				newEpisode = file.Episode
-			}
-
-			actions = append(actions, plans.AuditAction{
-				Action:      "rename",
-				NewTitle:    aiResult.Title,
-				NewYear:     aiResult.Year,
-				NewSeason:   newSeason,
-				NewEpisode:  newEpisode,
-				NewPath:     buildCorrectPath(file.Path, aiResult.Title, aiResult.Year, newSeason, newEpisode),
-				Reasoning:   fmt.Sprintf("AI suggested: %s (confidence: %.2f)", aiResult.Title, aiResult.Confidence),
-				Confidence:  aiResult.Confidence,
-			})
+		if aiResult.Confidence < cfg.AI.ConfidenceThreshold {
+			stats.RecordSkip("confidence too low")
+			items[i].SkipReason = fmt.Sprintf("AI confidence %.2f below threshold %.2f",
+				aiResult.Confidence, cfg.AI.ConfidenceThreshold)
+			progress.Update(len(actions), stats.AIErrorCount)
+			continue
 		}
+
+		if aiResult.Title == file.NormalizedTitle {
+			stats.RecordSkip("title unchanged")
+			items[i].SkipReason = "Title unchanged after AI analysis"
+			progress.Update(len(actions), stats.AIErrorCount)
+			continue
+		}
+
+		valid, reason := validateMediaType(file, aiResult, cfg)
+		if !valid {
+			stats.RecordSkip(reason)
+			items[i].SkipReason = reason
+			progress.Update(len(actions), stats.AIErrorCount)
+			continue
+		}
+
+		var newSeason, newEpisode *int
+		if aiResult.Season != nil {
+			newSeason = aiResult.Season
+		} else {
+			newSeason = file.Season
+		}
+
+		if len(aiResult.Episodes) > 0 {
+			newEpisode = &aiResult.Episodes[0]
+		} else {
+			newEpisode = file.Episode
+		}
+
+		action := plans.AuditAction{
+			Action:     "rename",
+			NewTitle:   aiResult.Title,
+			NewYear:    aiResult.Year,
+			NewSeason:  newSeason,
+			NewEpisode: newEpisode,
+			NewPath:    buildCorrectPath(file.Path, aiResult.Title, aiResult.Year, newSeason, newEpisode),
+			Reasoning:  fmt.Sprintf("AI suggested: %s (confidence: %.2f)", aiResult.Title, aiResult.Confidence),
+			Confidence: aiResult.Confidence,
+		}
+
+		actions = append(actions, action)
+		stats.RecordAction()
+		progress.Update(len(actions), stats.AIErrorCount)
 	}
+
+	progress.Finish()
 
 	plan := &plans.AuditPlan{
 		CreatedAt: time.Now(),
-		Command:    "audit",
+		Command:   "audit",
 		Summary: plans.AuditSummary{
-			TotalFiles:    len(files),
-			FilesToRename: 0,
-			FilesToDelete: 0,
-			FilesToSkip:   len(files),
-			AvgConfidence: calculateAvgConfidence(files),
+			TotalFiles:            len(files),
+			FilesToRename:         len(actions),
+			FilesToDelete:         0,
+			FilesToSkip:           len(files) - len(actions),
+			AvgConfidence:         calculateAvgConfidence(files),
+			AITotalCalls:          stats.AITotalCalls,
+			AISuccessCount:        stats.AISuccessCount,
+			AIErrorCount:          stats.AIErrorCount,
+			TypeMismatchesSkipped: stats.TypeMismatches,
+			ConfidenceTooLow:      stats.ConfidenceTooLow,
+			TitleUnchanged:        stats.TitleUnchanged,
 		},
-			Items: filesToAuditItems(files),
+		Items:   items,
+		Actions: actions,
 	}
 
 	err = plans.SaveAuditPlans(plan)
@@ -203,10 +253,42 @@ func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, 
 		return fmt.Errorf("failed to save audit plans: %w", err)
 	}
 
-	fmt.Printf("✓ Generated audit plan with %d items\n", len(files))
-	fmt.Printf("📁 Plan saved to: %s\n", getAuditPlansPath())
+	printAuditSummary(plan)
 
 	return nil
+}
+
+// printAuditSummary displays the audit generation results
+func printAuditSummary(plan *plans.AuditPlan) {
+	fmt.Printf("\n✓ Processing complete\n\n")
+	fmt.Printf("Summary:\n")
+	fmt.Printf("  Total files analyzed: %d\n", plan.Summary.TotalFiles)
+	fmt.Printf("  AI calls: %d (%d successful, %d errors)\n",
+		plan.Summary.AITotalCalls, plan.Summary.AISuccessCount, plan.Summary.AIErrorCount)
+	fmt.Printf("  Actions created: %d (renames)\n", plan.Summary.FilesToRename)
+	fmt.Printf("  Skipped: %d\n", plan.Summary.FilesToSkip)
+
+	if plan.Summary.FilesToSkip > 0 {
+		if plan.Summary.ConfidenceTooLow > 0 {
+			fmt.Printf("    - AI confidence too low: %d\n", plan.Summary.ConfidenceTooLow)
+		}
+		if plan.Summary.TypeMismatchesSkipped > 0 {
+			fmt.Printf("    - Type validation failed: %d\n", plan.Summary.TypeMismatchesSkipped)
+		}
+		if plan.Summary.TitleUnchanged > 0 {
+			fmt.Printf("    - Title unchanged: %d\n", plan.Summary.TitleUnchanged)
+		}
+		otherSkips := plan.Summary.FilesToSkip - plan.Summary.ConfidenceTooLow -
+			plan.Summary.TypeMismatchesSkipped - plan.Summary.TitleUnchanged
+		if otherSkips > 0 {
+			fmt.Printf("    - Other (AI errors, etc.): %d\n", otherSkips)
+		}
+	}
+
+	fmt.Printf("\n📁 Plan saved to: %s\n", getAuditPlansPath())
+	if plan.Summary.FilesToRename > 0 {
+		fmt.Printf("💡 Run 'jellywatch audit --dry-run' to preview changes\n")
+	}
 }
 
 func displayAuditPlan(plan *plans.AuditPlan, showActions bool) error {
@@ -314,26 +396,6 @@ func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan) error {
 	}
 
 	return nil
-}
-
-func filesToAuditItems(files []*database.MediaFile) []plans.AuditItem {
-	items := make([]plans.AuditItem, len(files))
-	for i, file := range files {
-		items[i] = plans.AuditItem{
-			ID:         file.ID,
-			Path:       file.Path,
-			Size:       file.Size,
-			MediaType:   file.MediaType,
-			Title:      file.NormalizedTitle,
-			Year:       file.Year,
-			Season:     file.Season,
-			Episode:    file.Episode,
-			Confidence:  file.Confidence,
-			Resolution: file.Resolution,
-			SourceType: file.SourceType,
-		}
-	}
-	return items
 }
 
 func calculateAvgConfidence(files []*database.MediaFile) float64 {

@@ -54,7 +54,7 @@ func TestValidateMediaType(t *testing.T) {
 		file         *database.MediaFile
 		aiResult     *ai.Result
 		expectValid  bool
-		expectReason string // substring to check for in reason
+		expectReason string
 	}{
 		{
 			name: "TV folder with AI type tv - valid",
@@ -130,5 +130,72 @@ func TestValidateMediaType(t *testing.T) {
 					reason, tt.expectReason)
 			}
 		})
+	}
+}
+
+func TestProgressBar(t *testing.T) {
+	t.Run("tracks progress correctly", func(t *testing.T) {
+		pb := NewProgressBar(100)
+
+		if pb.total != 100 {
+			t.Errorf("total = %d, want 100", pb.total)
+		}
+		if pb.current != 0 {
+			t.Errorf("current = %d, want 0", pb.current)
+		}
+
+		pb.Update(5, 1)
+		if pb.current != 1 {
+			t.Errorf("after Update, current = %d, want 1", pb.current)
+		}
+		if pb.actionsCreated != 5 {
+			t.Errorf("actionsCreated = %d, want 5", pb.actionsCreated)
+		}
+	})
+
+	t.Run("handles zero total", func(t *testing.T) {
+		pb := NewProgressBar(0)
+		pb.Update(0, 0)
+		pb.Finish()
+	})
+}
+
+func TestAuditStats(t *testing.T) {
+	stats := NewAuditStats()
+
+	// Record some AI calls
+	stats.RecordAICall(true)
+	stats.RecordAICall(true)
+	stats.RecordAICall(false)
+
+	if stats.AITotalCalls != 3 {
+		t.Errorf("AITotalCalls = %d, want 3", stats.AITotalCalls)
+	}
+	if stats.AISuccessCount != 2 {
+		t.Errorf("AISuccessCount = %d, want 2", stats.AISuccessCount)
+	}
+	if stats.AIErrorCount != 1 {
+		t.Errorf("AIErrorCount = %d, want 1", stats.AIErrorCount)
+	}
+
+	// Record skips
+	stats.RecordSkip("AI suggests movie but file is in episode library")
+	stats.RecordSkip("confidence too low")
+	stats.RecordSkip("title unchanged")
+
+	if stats.TypeMismatches != 1 {
+		t.Errorf("TypeMismatches = %d, want 1", stats.TypeMismatches)
+	}
+	if stats.ConfidenceTooLow != 1 {
+		t.Errorf("ConfidenceTooLow = %d, want 1", stats.ConfidenceTooLow)
+	}
+	if stats.TitleUnchanged != 1 {
+		t.Errorf("TitleUnchanged = %d, want 1", stats.TitleUnchanged)
+	}
+
+	// Record action
+	stats.RecordAction()
+	if stats.ActionsCreated != 1 {
+		t.Errorf("ActionsCreated = %d, want 1", stats.ActionsCreated)
 	}
 }
