@@ -13,9 +13,9 @@ var (
 	FgPrimary    = lipgloss.Color("#ffffff")
 	FgSecondary  = lipgloss.Color("#cccccc")
 	FgMuted      = lipgloss.Color("#666666")
-	ErrorColor   = lipgloss.Color("#ffffff")  // White (monochrome)
-	WarningColor = lipgloss.Color("#888888")  // Medium gray
-	SuccessColor = lipgloss.Color("#ffffff")  // White (monochrome)
+	ErrorColor   = lipgloss.Color("#ffffff") // White (monochrome)
+	WarningColor = lipgloss.Color("#888888") // Medium gray
+	SuccessColor = lipgloss.Color("#ffffff") // White (monochrome)
 )
 
 // Styles
@@ -26,7 +26,13 @@ var (
 	headerStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 )
 
-// ASCII header from /home/nomadx/bit/JELLOWATCH.txt
+var asciiHeaderLines = []string{
+	"    ███  ██████  ██       ██      ██   ██  ██   ██   ▄█████  ██████   ▄█████  ██   ██",
+	"▄▄   ██  ██▄▄    ██       ██      ██▄  ██  ██▄█▄██  ██▀  ██    ██    ██▀      ██▄▄▄██",
+	"▀██▄▄██  ██▄▄▄▄  ██▄▄██   ██▄▄██   ▀█████  ███▀███  ███████    ██    ██▄▄▄▄▄  ██▀▀▀██",
+	"  ▀▀▀▀▀  ▀▀▀▀▀▀  ▀▀▀▀▀▀   ▀▀▀▀▀▀       ▀▀  ▀▀   ▀▀  ▀▀   ▀▀    ▀▀    ▀▀▀▀▀▀▀  ▀▀   ▀▀",
+}
+
 const asciiHeader = `    ███  ██████  ██       ██      ██   ██  ██   ██   ▄█████  ██████   ▄█████  ██   ██
 ▄▄   ██  ██▄▄    ██       ██      ██▄  ██  ██▄█▄██  ██▀  ██    ██    ██▀      ██▄▄▄██
 ▀██▄▄██  ██▄▄▄▄  ██▄▄██   ██▄▄██   ▀█████  ███▀███  ███████    ██    ██▄▄▄▄▄  ██▀▀▀██

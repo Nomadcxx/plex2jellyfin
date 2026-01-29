@@ -590,7 +590,7 @@ func (m model) renderComplete() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("✓ Installation Complete"))
+	b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("Installation complete"))
 	b.WriteString("\n\n")
 
 	// Show scan results if we scanned
@@ -655,6 +655,12 @@ func (m model) renderComplete() string {
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Logs:    "), pathStyle.Render("journalctl -u jellywatchd -f")))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Press Enter to exit"))
+
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(FgMuted).
+		Italic(true).
+		Render("you could trust sonarr/radarr... or you know.. not do that"))
 
 	return b.String()
 }

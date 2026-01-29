@@ -35,16 +35,27 @@ func (m model) View() string {
 		content.WriteString("\n")
 	} else {
 		// Fallback: render static header if beams not initialized
-		headerLines := strings.Split(asciiHeader, "\n")
-		for _, line := range headerLines {
-			centered := lipgloss.NewStyle().
-				Width(m.width).
-				Align(lipgloss.Center).
+		blockWidth := 0
+		for _, line := range asciiHeaderLines {
+			lineWidth := lipgloss.Width(line)
+			if lineWidth > blockWidth {
+				blockWidth = lineWidth
+			}
+		}
+
+		padding := (m.width - blockWidth) / 2
+		if padding < 0 {
+			padding = 0
+		}
+
+		for _, line := range asciiHeaderLines {
+			styled := lipgloss.NewStyle().
+				PaddingLeft(padding).
 				Foreground(Primary).
 				Background(BgBase).
 				Bold(true).
 				Render(line)
-			content.WriteString(centered)
+			content.WriteString(styled)
 			content.WriteString("\n")
 		}
 	}
