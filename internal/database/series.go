@@ -247,3 +247,42 @@ func (m *MediaDB) CountSeriesInLibrary(libraryRoot string) (int, error) {
 	err := m.db.QueryRow(`SELECT COUNT(*) FROM series WHERE library_root = ?`, libraryRoot).Scan(&count)
 	return count, err
 }
+
+func (m *MediaDB) GetAllSeries() ([]*Series, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query(`
+		SELECT id, title, title_normalized, year, tvdb_id, imdb_id,
+		       sonarr_id, canonical_path, library_root, source,
+		       source_priority, episode_count, last_episode_added,
+		       created_at, updated_at, last_synced_at,
+		       sonarr_synced_at, sonarr_path_dirty,
+		       radarr_synced_at, radarr_path_dirty
+		FROM series
+		ORDER BY title`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var series []*Series
+	for rows.Next() {
+		var s Series
+		err := rows.Scan(
+			&s.ID, &s.Title, &s.TitleNormalized, &s.Year,
+			&s.TvdbID, &s.ImdbID, &s.SonarrID,
+			&s.CanonicalPath, &s.LibraryRoot, &s.Source,
+			&s.SourcePriority, &s.EpisodeCount, &s.LastEpisodeAdded,
+			&s.CreatedAt, &s.UpdatedAt, &s.LastSyncedAt,
+			&s.SonarrSyncedAt, &s.SonarrPathDirty,
+			&s.RadarrSyncedAt, &s.RadarrPathDirty,
+		)
+		if err != nil {
+			return nil, err
+		}
+		series = append(series, &s)
+	}
+
+	return series, rows.Err()
+}

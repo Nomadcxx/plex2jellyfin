@@ -389,51 +389,6 @@ func executeSonarrDisableAutoImport(m *model) tea.Cmd {
 	}
 }
 
-	sonarrURL := m.sonarrURL
-	apiKey := m.sonarrAPIKey
-
-	client := sonarr.NewClient(sonarr.Config{
-		URL:    sonarrURL,
-		APIKey: apiKey,
-			Timeout: 15 * time.Second,
-	})
-
-	m.sonarrVersion = "checking"
-	m.sonarrTested = false
-	m.sonarrTesting = true
-
-	go func() {
-		if err := client.Ping(); err != nil {
-			m.sonarrVersion = fmt.Sprintf("%s", err.Error())
-			m.sonarrTested = true
-			m.sonarrTesting = false
-		} else {
-			m.sonarrVersion = "connected"
-			m.sonarrTested = true
-			m.sonarrTesting = false
-
-			if m.sonarrVersion != "" {
-				if config, err := client.GetMediaManagementConfig(); err != nil {
-					m.sonarrVersion = fmt.Sprintf("%s %s", config.ID, config.Version)
-				} else {
-					m.sonarrVersion = "connected"
-				}
-			}
-		}
-
-		m.sonarrTesting = false
-	}()
-
-	return tea.Batch(
-		m.spinner.Tick,
-		func() tea.Msg {
-			if globalProgram != nil {
-				globalProgram.Send(tea.Quit())
-			}
-		},
-	)
-}
-
 func executeRadarrIntegration(m *model) tea.Cmd {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

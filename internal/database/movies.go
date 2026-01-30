@@ -214,3 +214,38 @@ func (m *MediaDB) CountMoviesInLibrary(libraryRoot string) (int, error) {
 	err := m.db.QueryRow(`SELECT COUNT(*) FROM movies WHERE library_root = ?`, libraryRoot).Scan(&count)
 	return count, err
 }
+
+func (m *MediaDB) GetAllMovies() ([]*Movie, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query(`
+		SELECT id, title, title_normalized, year, tmdb_id, imdb_id,
+		       radarr_id, canonical_path, library_root, source,
+		       source_priority, created_at, updated_at, last_synced_at,
+		       radarr_synced_at, radarr_path_dirty
+		FROM movies
+		ORDER BY title`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var movies []*Movie
+	for rows.Next() {
+		var mov Movie
+		err := rows.Scan(
+			&mov.ID, &mov.Title, &mov.TitleNormalized, &mov.Year,
+			&mov.TmdbID, &mov.ImdbID, &mov.RadarrID,
+			&mov.CanonicalPath, &mov.LibraryRoot, &mov.Source,
+			&mov.SourcePriority, &mov.CreatedAt, &mov.UpdatedAt, &mov.LastSyncedAt,
+			&mov.RadarrSyncedAt, &mov.RadarrPathDirty,
+		)
+		if err != nil {
+			return nil, err
+		}
+		movies = append(movies, &mov)
+	}
+
+	return movies, rows.Err()
+}

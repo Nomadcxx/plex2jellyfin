@@ -82,6 +82,7 @@ Features:
 	rootCmd.AddCommand(newFixCmd())
 	rootCmd.AddCommand(newServeCmd())
 	rootCmd.AddCommand(newAuditCmd())
+	rootCmd.AddCommand(newMigrateCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
