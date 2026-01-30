@@ -144,4 +144,4 @@ Requires Go 1.21+.
 
 ## License
 
-MIT
+GPL-3.0 or later
