@@ -52,33 +52,33 @@ Review implementation against the original plan:
 - [ ] **Test file:** `internal/library/scanner_helper_test.go`
 
 #### Phase 3: Database Dirty Flags (Migration 11)
-- [ ] Verify migration 11 adds columns to `series` table:
+- [x] Verify migration 11 adds columns to `series` table - PASS (schema.go:449-452)
   - `sonarr_synced_at DATETIME`
   - `sonarr_path_dirty BOOLEAN DEFAULT 0`
   - `radarr_synced_at DATETIME`  
   - `radarr_path_dirty BOOLEAN DEFAULT 0`
-- [ ] Verify migration 11 adds columns to `movies` table:
+- [x] Verify migration 11 adds columns to `movies` table - PASS (schema.go:453-454)
   - `radarr_synced_at DATETIME`
   - `radarr_path_dirty BOOLEAN DEFAULT 0`
-- [ ] Confirm `currentSchemaVersion = 11`
-- [ ] Verify all SELECT queries include new columns
-- [ ] Verify all structs (`Series`, `Movie`) have new fields
-- [ ] **Test file:** `internal/database/migration11_test.go`
-- [ ] **Test file:** `internal/database/dirty_test.go`
+- [x] Confirm `currentSchemaVersion = 11` - PASS (schema.go:6)
+- [x] Verify all SELECT queries include new columns - PASS (checked dirty.go, series.go, movies.go)
+- [x] Verify all structs (`Series`, `Movie`) have new fields - PASS (Series: 4 fields, Movie: 2 fields)
+- [ ] **Test file:** `internal/database/migration11_test.go` - TODO: create tests
+- [ ] **Test file:** `internal/database/dirty_test.go` - TODO: create tests
 
 #### Phase 4: Hybrid Sync Service
-- [ ] Verify `SyncService` has:
-  - `syncChan chan SyncRequest` (capacity 100)
-  - `retryInterval time.Duration` (5 minutes)
-- [ ] Verify three goroutines start in `Start()`:
+- [x] Verify `SyncService` has - PASS:
+  - `syncChan chan SyncRequest` (capacity 100) - sync.go:73
+  - `retryInterval time.Duration` (5 minutes) - sync.go:74
+- [x] Verify three goroutines start in `Start()` - PASS (sync.go:81-83):
   - `runScheduler()` - daily sync
   - `runSyncWorker()` - immediate sync
   - `runRetryLoop()` - periodic sweep
-- [ ] Confirm exponential backoff: 1s, 2s, 4s, 8s, max 30s
-- [ ] Verify `QueueSync()` is non-blocking
-- [ ] Verify organizer calls `SetSeriesDirty()`/`SetMovieDirty()` after upserting
-- [ ] Verify organizer calls `QueueSync()` after marking dirty
-- [ ] **Test file:** `internal/sync/sync_test.go`
+- [x] Confirm exponential backoff: 1s, 2s, 4s, 8s, max 30s - PASS (retryWithBackoff func)
+- [x] Verify `QueueSync()` is non-blocking - PASS (buffered channel, no blocking send)
+- [ ] Verify organizer calls `SetSeriesDirty()`/`SetMovieDirty()` after upserting - TODO: check
+- [ ] Verify organizer calls `QueueSync()` after marking dirty - TODO: check
+- [ ] **Test file:** `internal/sync/sync_test.go` - TODO: create tests
 
 #### Phase 5: Config API
 - [ ] Verify Sonarr config methods exist:
