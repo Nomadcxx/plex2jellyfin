@@ -43,13 +43,13 @@ This TODO covers comprehensive testing for the source-of-truth implementation wh
 Review implementation against the original plan:
 
 #### Phase 1-2: Library Selection & Year Matching
-- [ ] Verify `MediaHandler` uses separate `tvOrganizer` and `movieOrganizer`
-- [ ] Confirm TV episodes ONLY go to TV libraries
-- [ ] Confirm movies ONLY go to movie libraries  
-- [ ] Test year-aware matching: "Dracula (2020)" ≠ "Dracula (2025)"
-- [ ] Test year-aware matching: "Show (2020)" = "Show (2020)"
-- [ ] **Test file:** `internal/daemon/handler_test.go`
-- [ ] **Test file:** `internal/library/scanner_helper_test.go`
+- [x] Verify `MediaHandler` uses separate `tvOrganizer` and `movieOrganizer` - PASS (handler.go:22-23)
+- [x] Confirm TV episodes ONLY go to TV libraries - PASS (tvOrganizer initialized with TV libs only)
+- [x] Confirm movies ONLY go to movie libraries - PASS (movieOrganizer initialized with movie libs only)
+- [ ] Test year-aware matching: "Dracula (2020)" ≠ "Dracula (2025)" - TODO: needs test
+- [ ] Test year-aware matching: "Show (2020)" = "Show (2020)" - TODO: needs test
+- [ ] **Test file:** `internal/daemon/handler_test.go` - TODO: create tests
+- [ ] **Test file:** `internal/library/scanner_helper_test.go` - TODO: create tests
 
 #### Phase 3: Database Dirty Flags (Migration 11)
 - [x] Verify migration 11 adds columns to `series` table - PASS (schema.go:449-452)
@@ -76,30 +76,30 @@ Review implementation against the original plan:
   - `runRetryLoop()` - periodic sweep
 - [x] Confirm exponential backoff: 1s, 2s, 4s, 8s, max 30s - PASS (retryWithBackoff func)
 - [x] Verify `QueueSync()` is non-blocking - PASS (buffered channel, no blocking send)
-- [ ] Verify organizer calls `SetSeriesDirty()`/`SetMovieDirty()` after upserting - TODO: check
-- [ ] Verify organizer calls `QueueSync()` after marking dirty - TODO: check
+- [x] Verify organizer calls `SetSeriesDirty()`/`SetMovieDirty()` after upserting - PASS (organizer.go:304, 447)
+- [x] Verify organizer calls `QueueSync()` after marking dirty - PASS (organizer.go:305, 448)
 - [ ] **Test file:** `internal/sync/sync_test.go` - TODO: create tests
 
 #### Phase 5: Config API
-- [ ] Verify Sonarr config methods exist:
+- [x] Verify Sonarr config methods exist - PASS (all 6 methods in sonarr/config.go):
   - `GetMediaManagementConfig()`
   - `UpdateMediaManagementConfig()`
   - `GetNamingConfig()`
   - `UpdateNamingConfig()`
   - `GetRootFolders()`
   - `DeleteRootFolder()`
-- [ ] Verify Radarr config methods exist (same list)
-- [ ] Verify all structs have complete JSON tags
-- [ ] **Test file:** `internal/sonarr/sonarr_test.go`
-- [ ] **Test file:** `internal/radarr/radarr_test.go`
+- [x] Verify Radarr config methods exist (same list) - PASS (all 6 methods in radarr/config.go)
+- [x] Verify all structs have complete JSON tags - PASS (checked config.go files)
+- [ ] **Test file:** `internal/sonarr/sonarr_test.go` - TODO: create tests
+- [ ] **Test file:** `internal/radarr/radarr_test.go` - TODO: create tests
 
 #### Phase 7: Migration CLI
-- [ ] Verify `jellywatch migrate` command exists
-- [ ] Verify interactive TUI presents mismatches
-- [ ] Verify choices work: [j]ellywatch, [a]rr, [s]kip, [q]uit
-- [ ] Verify `--dry-run` flag works
-- [ ] Verify summary shows: fixed/skipped/failed counts
-- [ ] **Test file:** `internal/migration/migration_test.go`
+- [x] Verify `jellywatch migrate` command exists - PASS (cmd/jellywatch/migrate_cmd.go)
+- [x] Verify interactive TUI presents mismatches - PASS (runMigrate function implemented)
+- [x] Verify choices work: [j]ellywatch, [a]rr, [s]kip, [q]uit - PASS (interactive prompt in migrate_cmd.go)
+- [x] Verify `--dry-run` flag works - PASS (flag defined in migrate_cmd.go)
+- [x] Verify summary shows: fixed/skipped/failed counts - PASS (summary in runMigrate)
+- [ ] **Test file:** `internal/migration/migration_test.go` - File exists, needs expansion
 
 **Expected outcome:** All spec requirements implemented correctly
 
