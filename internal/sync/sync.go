@@ -21,20 +21,28 @@ type SyncService struct {
 	tvLibraries    []string
 	movieLibraries []string
 	logger         *slog.Logger
-	aiHelper       *scanner.AIHelper // Optional AI helper for auto-trigger
+	aiHelper       *scanner.AIHelper
 
-	// Scheduler
-	syncHour int // Hour to run daily sync (0-23), default 3
+	syncHour int
 	stopCh   chan struct{}
 	stopOnce stdsync.Once
+
+	syncChan      chan SyncRequest
+	retryInterval time.Duration
+}
+
+// SyncRequest represents a request to sync a media item to external services
+type SyncRequest struct {
+	MediaType string
+	ID        int64
 }
 
 // SyncConfig holds configuration for SyncService
 type SyncConfig struct {
 	DB             *database.MediaDB
-	Sonarr         *sonarr.Client     // nil if not configured
-	Radarr         *radarr.Client     // nil if not configured
-	AIHelper       *scanner.AIHelper  // Optional AI helper for auto-trigger
+	Sonarr         *sonarr.Client    // nil if not configured
+	Radarr         *radarr.Client    // nil if not configured
+	AIHelper       *scanner.AIHelper // Optional AI helper for auto-trigger
 	TVLibraries    []string
 	MovieLibraries []string
 	SyncHour       int // Hour for daily sync, default 3
@@ -61,18 +69,22 @@ func NewSyncService(cfg SyncConfig) *SyncService {
 		syncHour:       cfg.SyncHour,
 		logger:         cfg.Logger,
 		stopCh:         make(chan struct{}),
+		syncChan:       make(chan SyncRequest, 100),
+		retryInterval:  5 * time.Minute,
 	}
 }
 
 // Start begins the daily sync scheduler in a background goroutine
 func (s *SyncService) Start() {
 	go s.runScheduler()
+	go s.runSyncWorker()
 }
 
 // Stop stops the scheduler (safe to call multiple times)
 func (s *SyncService) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
+		close(s.syncChan)
 	})
 }
 
@@ -135,6 +147,78 @@ func (s *SyncService) RunFullSync(ctx context.Context) error {
 // SyncNow triggers an immediate sync (for CLI use)
 func (s *SyncService) SyncNow(ctx context.Context) error {
 	return s.RunFullSync(ctx)
+}
+
+// runSyncWorker processes immediate sync requests from channel
+func (s *SyncService) runSyncWorker() {
+	for {
+		select {
+		case req := <-s.syncChan:
+			s.processSyncRequest(context.Background(), req)
+		case <-s.stopCh:
+			s.logger.Info("sync worker stopped")
+			return
+		}
+	}
+}
+
+// processSyncRequest handles a single sync request
+func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
+	switch req.MediaType {
+	case "series":
+		if s.sonarr == nil {
+			s.logger.Debug("sonarr not configured, skipping series sync")
+			return
+		}
+		series, err := s.db.GetSeriesByID(req.ID)
+		if err != nil || series == nil {
+			s.logger.Warn("failed to get series for sync", "id", req.ID, "error", err)
+			return
+		}
+
+		if series.SonarrID == nil || *series.SonarrID <= 0 {
+			s.logger.Debug("series has no Sonarr ID, skipping", "id", req.ID)
+			return
+		}
+
+		s.logger.Info("syncing series to Sonarr", "id", req.ID, "sonarr_id", *series.SonarrID, "path", series.CanonicalPath)
+		err = s.sonarr.UpdateSeriesPath(*series.SonarrID, series.CanonicalPath)
+		if err != nil {
+			s.logger.Error("failed to update Sonarr path", "id", req.ID, "error", err)
+			return
+		}
+
+		if err := s.db.MarkSeriesSynced(req.ID); err != nil {
+			s.logger.Error("failed to mark series synced", "id", req.ID, "error", err)
+		}
+
+	case "movie":
+		if s.radarr == nil {
+			s.logger.Debug("radarr not configured, skipping movie sync")
+			return
+		}
+		movie, err := s.db.GetMovieByID(req.ID)
+		if err != nil || movie == nil {
+			s.logger.Warn("failed to get movie for sync", "id", req.ID, "error", err)
+			return
+		}
+
+		if movie.RadarrID == nil || *movie.RadarrID <= 0 {
+			s.logger.Debug("movie has no Radarr ID, skipping", "id", req.ID)
+			return
+		}
+
+		s.logger.Info("syncing movie to Radarr", "id", req.ID, "radarr_id", *movie.RadarrID, "path", movie.CanonicalPath)
+		err = s.radarr.UpdateMoviePath(*movie.RadarrID, movie.CanonicalPath)
+		if err != nil {
+			s.logger.Error("failed to update Radarr path", "id", req.ID, "error", err)
+			return
+		}
+
+		if err := s.db.MarkMovieSynced(req.ID); err != nil {
+			s.logger.Error("failed to mark movie synced", "id", req.ID, "error", err)
+		}
+	}
 }
 
 // UpdateSonarrPath updates a series path in Sonarr to match JellyWatch
