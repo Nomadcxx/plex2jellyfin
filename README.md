@@ -52,6 +52,9 @@ jellywatch scan                    # Index your library
 jellywatch watch /downloads        # Watch for new files
 jellywatch organize /library       # Fix existing files
 
+jellywatch migrate                 # Sync Sonarr/Radarr paths with database
+jellywatch migrate --dry-run       # Preview sync changes
+
 jellywatch audit generate          # Find low-confidence parses
 jellywatch audit dry-run           # Preview AI suggestions
 jellywatch audit execute           # Apply fixes
