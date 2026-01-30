@@ -23,6 +23,10 @@ type Series struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	LastSyncedAt     *time.Time
+	SonarrSyncedAt   *time.Time // NEW: last sync to Sonarr
+	SonarrPathDirty  bool       // NEW: needs sync to Sonarr
+	RadarrSyncedAt   *time.Time // NEW: last sync to Radarr (future)
+	RadarrPathDirty  bool       // NEW: needs sync to Radarr (future)
 }
 
 // GetSeriesByTitle looks up a series by normalized title and optional year
@@ -39,16 +43,19 @@ func (m *MediaDB) GetSeriesByTitle(title string, year int) (*Series, error) {
 		query = `SELECT id, title, title_normalized, year, tvdb_id, imdb_id, 
 		                sonarr_id, canonical_path, library_root, source, 
 		                source_priority, episode_count, last_episode_added,
-		                created_at, updated_at, last_synced_at
+		                created_at, updated_at, last_synced_at,
+		                sonarr_synced_at, sonarr_path_dirty,
+		                radarr_synced_at, radarr_path_dirty
 		         FROM series 
 		         WHERE title_normalized = ? AND year = ?`
 		args = []interface{}{normalized, year}
 	} else {
-		// No year specified - return highest priority match
 		query = `SELECT id, title, title_normalized, year, tvdb_id, imdb_id,
 		                sonarr_id, canonical_path, library_root, source,
 		                source_priority, episode_count, last_episode_added,
-		                created_at, updated_at, last_synced_at
+		                created_at, updated_at, last_synced_at,
+		                sonarr_synced_at, sonarr_path_dirty,
+		                radarr_synced_at, radarr_path_dirty
 		         FROM series 
 		         WHERE title_normalized = ?
 		         ORDER BY source_priority DESC, episode_count DESC
@@ -63,6 +70,8 @@ func (m *MediaDB) GetSeriesByTitle(title string, year int) (*Series, error) {
 		&s.CanonicalPath, &s.LibraryRoot, &s.Source,
 		&s.SourcePriority, &s.EpisodeCount, &s.LastEpisodeAdded,
 		&s.CreatedAt, &s.UpdatedAt, &s.LastSyncedAt,
+		&s.SonarrSyncedAt, &s.SonarrPathDirty,
+		&s.RadarrSyncedAt, &s.RadarrPathDirty,
 	)
 
 	if err == sql.ErrNoRows {
@@ -178,7 +187,9 @@ func (m *MediaDB) GetAllSeriesInLibrary(libraryRoot string) ([]*Series, error) {
 		SELECT id, title, title_normalized, year, tvdb_id, imdb_id,
 		       sonarr_id, canonical_path, library_root, source,
 		       source_priority, episode_count, last_episode_added,
-		       created_at, updated_at, last_synced_at
+		       created_at, updated_at, last_synced_at,
+		       sonarr_synced_at, sonarr_path_dirty,
+		       radarr_synced_at, radarr_path_dirty
 		FROM series
 		WHERE library_root = ?
 		ORDER BY title`,
@@ -198,6 +209,8 @@ func (m *MediaDB) GetAllSeriesInLibrary(libraryRoot string) ([]*Series, error) {
 			&s.CanonicalPath, &s.LibraryRoot, &s.Source,
 			&s.SourcePriority, &s.EpisodeCount, &s.LastEpisodeAdded,
 			&s.CreatedAt, &s.UpdatedAt, &s.LastSyncedAt,
+			&s.SonarrSyncedAt, &s.SonarrPathDirty,
+			&s.RadarrSyncedAt, &s.RadarrPathDirty,
 		)
 		if err != nil {
 			return nil, err

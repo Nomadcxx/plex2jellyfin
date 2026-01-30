@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 10
+const currentSchemaVersion = 11
 
 // SQL migration scripts
 var migrations = []migration{
@@ -440,6 +440,19 @@ var migrations = []migration{
 			`CREATE INDEX idx_media_files_confidence ON media_files(confidence)`,
 			`CREATE INDEX idx_media_files_needs_review ON media_files(needs_review)`,
 			`INSERT INTO schema_version (version) VALUES (10)`,
+		},
+	},
+	{
+		version: 11,
+		up: []string{
+			// Add sync tracking dirty flags for Sonarr/Radarr integration
+			`ALTER TABLE series ADD COLUMN sonarr_synced_at DATETIME`,
+			`ALTER TABLE series ADD COLUMN sonarr_path_dirty BOOLEAN DEFAULT 0`,
+			`ALTER TABLE series ADD COLUMN radarr_synced_at DATETIME`,
+			`ALTER TABLE series ADD COLUMN radarr_path_dirty BOOLEAN DEFAULT 0`,
+			`ALTER TABLE movies ADD COLUMN radarr_synced_at DATETIME`,
+			`ALTER TABLE movies ADD COLUMN radarr_path_dirty BOOLEAN DEFAULT 0`,
+			`INSERT INTO schema_version (version) VALUES (11)`,
 		},
 	},
 }

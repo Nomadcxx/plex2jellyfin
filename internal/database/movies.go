@@ -21,6 +21,8 @@ type Movie struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	LastSyncedAt    *time.Time
+	RadarrSyncedAt  *time.Time // NEW: last sync to Radarr
+	RadarrPathDirty bool       // NEW: needs sync to Radarr
 }
 
 // GetMovieByTitle looks up a movie by normalized title and optional year
@@ -36,15 +38,16 @@ func (m *MediaDB) GetMovieByTitle(title string, year int) (*Movie, error) {
 	if year > 0 {
 		query = `SELECT id, title, title_normalized, year, tmdb_id, imdb_id, 
 		                radarr_id, canonical_path, library_root, source, 
-		                source_priority, created_at, updated_at, last_synced_at
+		                source_priority, created_at, updated_at, last_synced_at,
+		                radarr_synced_at, radarr_path_dirty
 		         FROM movies 
 		         WHERE title_normalized = ? AND year = ?`
 		args = []interface{}{normalized, year}
 	} else {
-		// No year specified - return highest priority match
 		query = `SELECT id, title, title_normalized, year, tmdb_id, imdb_id,
 		                radarr_id, canonical_path, library_root, source,
-		                source_priority, created_at, updated_at, last_synced_at
+		                source_priority, created_at, updated_at, last_synced_at,
+		                radarr_synced_at, radarr_path_dirty
 		         FROM movies 
 		         WHERE title_normalized = ?
 		         ORDER BY source_priority DESC
@@ -58,6 +61,7 @@ func (m *MediaDB) GetMovieByTitle(title string, year int) (*Movie, error) {
 		&mov.TmdbID, &mov.ImdbID, &mov.RadarrID,
 		&mov.CanonicalPath, &mov.LibraryRoot, &mov.Source,
 		&mov.SourcePriority, &mov.CreatedAt, &mov.UpdatedAt, &mov.LastSyncedAt,
+		&mov.RadarrSyncedAt, &mov.RadarrPathDirty,
 	)
 
 	if err == sql.ErrNoRows {
@@ -170,7 +174,8 @@ func (m *MediaDB) GetAllMoviesInLibrary(libraryRoot string) ([]*Movie, error) {
 	rows, err := m.db.Query(`
 		SELECT id, title, title_normalized, year, tmdb_id, imdb_id,
 		       radarr_id, canonical_path, library_root, source,
-		       source_priority, created_at, updated_at, last_synced_at
+		       source_priority, created_at, updated_at, last_synced_at,
+		       radarr_synced_at, radarr_path_dirty
 		FROM movies
 		WHERE library_root = ?
 		ORDER BY title`,
@@ -189,6 +194,7 @@ func (m *MediaDB) GetAllMoviesInLibrary(libraryRoot string) ([]*Movie, error) {
 			&mov.TmdbID, &mov.ImdbID, &mov.RadarrID,
 			&mov.CanonicalPath, &mov.LibraryRoot, &mov.Source,
 			&mov.SourcePriority, &mov.CreatedAt, &mov.UpdatedAt, &mov.LastSyncedAt,
+			&mov.RadarrSyncedAt, &mov.RadarrPathDirty,
 		)
 		if err != nil {
 			return nil, err
