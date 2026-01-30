@@ -1,4 +1,4 @@
-package sonarr
+package radarr
 
 import (
 	"encoding/json"
@@ -7,27 +7,27 @@ import (
 	"testing"
 )
 
-func newMockSonarrServer(t *testing.T) *httptest.Server {
+func newMockRadarrServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch r.URL.Path {
 		case "/api/v3/config/mediamanagement":
 			json.NewEncoder(w).Encode(MediaManagementConfig{
-				ID:                       1,
-				CreateEmptySeriesFolders: true,
+				ID:                      1,
+				CreateEmptyMovieFolders: true,
 			})
 		case "/api/v3/config/naming":
 			json.NewEncoder(w).Encode(NamingConfig{
 				ID:                  1,
-				RenameEpisodes:      false,
+				RenameMovies:        false,
 				ReplaceIllegalChars: true,
 			})
 		case "/api/v3/rootfolder":
 			json.NewEncoder(w).Encode([]RootFolder{
 				{
 					ID:         1,
-					Path:       "/tv",
+					Path:       "/movies",
 					FreeSpace:  1000000000000,
 					TotalSpace: 2000000000000,
 				},
@@ -39,7 +39,7 @@ func newMockSonarrServer(t *testing.T) *httptest.Server {
 }
 
 func TestGetMediaManagementConfig(t *testing.T) {
-	server := newMockSonarrServer(t)
+	server := newMockRadarrServer(t)
 	defer server.Close()
 
 	client := NewClient(Config{
@@ -60,7 +60,7 @@ func TestGetMediaManagementConfig(t *testing.T) {
 }
 
 func TestGetNamingConfig(t *testing.T) {
-	server := newMockSonarrServer(t)
+	server := newMockRadarrServer(t)
 	defer server.Close()
 
 	client := NewClient(Config{
@@ -78,7 +78,7 @@ func TestGetNamingConfig(t *testing.T) {
 }
 
 func TestGetRootFolders(t *testing.T) {
-	server := newMockSonarrServer(t)
+	server := newMockRadarrServer(t)
 	defer server.Close()
 
 	client := NewClient(Config{
@@ -96,7 +96,7 @@ func TestGetRootFolders(t *testing.T) {
 }
 
 func TestUpdateMediaManagementConfig(t *testing.T) {
-	server := newMockSonarrServer(t)
+	server := newMockRadarrServer(t)
 	defer server.Close()
 
 	client := NewClient(Config{
@@ -105,8 +105,8 @@ func TestUpdateMediaManagementConfig(t *testing.T) {
 	})
 
 	config := &MediaManagementConfig{
-		ID:                       1,
-		CreateEmptySeriesFolders: true,
+		ID:                      1,
+		CreateEmptyMovieFolders: true,
 	}
 
 	err := client.UpdateMediaManagementConfig(config)
@@ -116,7 +116,7 @@ func TestUpdateMediaManagementConfig(t *testing.T) {
 }
 
 func TestUpdateNamingConfig(t *testing.T) {
-	server := newMockSonarrServer(t)
+	server := newMockRadarrServer(t)
 	defer server.Close()
 
 	client := NewClient(Config{
@@ -126,7 +126,7 @@ func TestUpdateNamingConfig(t *testing.T) {
 
 	config := &NamingConfig{
 		ID:                  1,
-		RenameEpisodes:      false,
+		RenameMovies:        false,
 		ReplaceIllegalChars: true,
 	}
 
@@ -143,7 +143,7 @@ func TestDeleteRootFolder(t *testing.T) {
 			json.NewEncoder(w).Encode([]RootFolder{
 				{
 					ID:         1,
-					Path:       "/tv",
+					Path:       "/movies",
 					FreeSpace:  1000000000000,
 					TotalSpace: 2000000000000,
 				},
