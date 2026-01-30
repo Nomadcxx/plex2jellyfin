@@ -14,6 +14,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/quality"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	syncsvc "github.com/Nomadcxx/jellywatch/internal/sync"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
 
@@ -44,7 +45,8 @@ type Organizer struct {
 	fileMode       os.FileMode
 	dirMode        os.FileMode
 	sonarrClient   *sonarr.Client
-	db             *database.MediaDB // HOLDEN: Database for self-learning
+	db             *database.MediaDB
+	syncService    *syncsvc.SyncService
 }
 
 func NewOrganizer(libraries []string, options ...func(*Organizer)) (*Organizer, error) {
@@ -145,6 +147,12 @@ func WithSonarrClient(client *sonarr.Client) func(*Organizer) {
 func WithDatabase(db *database.MediaDB) func(*Organizer) {
 	return func(o *Organizer) {
 		o.db = db
+	}
+}
+
+func WithSyncService(svc *syncsvc.SyncService) func(*Organizer) {
+	return func(o *Organizer) {
+		o.syncService = svc
 	}
 }
 
@@ -288,10 +296,14 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 			CanonicalPath:  movieDir,
 			LibraryRoot:    libraryPath,
 			Source:         "jellywatch",
-			SourcePriority: 100, // Highest priority
+			SourcePriority: 100,
 		}
 		_, _ = o.db.UpsertMovie(movieRecord)
-		// Ignore errors - database update is best-effort
+
+		if o.syncService != nil {
+			o.db.SetMovieDirty(movieRecord.ID)
+			o.syncService.QueueSync("movie", movieRecord.ID)
+		}
 	}
 
 	return &OrganizationResult{
@@ -426,11 +438,15 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 			CanonicalPath:  showDir,
 			LibraryRoot:    libraryPath,
 			Source:         "jellywatch",
-			SourcePriority: 100, // Highest priority
-			EpisodeCount:   0,   // Will be updated by filesystem sync
+			SourcePriority: 100,
+			EpisodeCount:   0,
 		}
 		_, _ = o.db.UpsertSeries(seriesRecord)
-		// Ignore errors - database update is best-effort
+
+		if o.syncService != nil {
+			o.db.SetSeriesDirty(seriesRecord.ID)
+			o.syncService.QueueSync("series", seriesRecord.ID)
+		}
 	}
 
 	return &OrganizationResult{

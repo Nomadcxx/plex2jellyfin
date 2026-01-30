@@ -91,6 +91,21 @@ func (s *SyncService) Stop() {
 	})
 }
 
+// QueueSync queues a sync request for a media item
+func (s *SyncService) QueueSync(mediaType string, id int64) {
+	req := SyncRequest{
+		MediaType: mediaType,
+		ID:        id,
+	}
+
+	select {
+	case s.syncChan <- req:
+		s.logger.Debug("sync request queued", "type", mediaType, "id", id)
+	default:
+		s.logger.Warn("sync channel full, dropping request (will retry via sweep)", "type", mediaType, "id", id)
+	}
+}
+
 // runScheduler runs the daily sync at the configured hour
 func (s *SyncService) runScheduler() {
 	for {

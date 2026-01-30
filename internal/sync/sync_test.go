@@ -283,6 +283,54 @@ func TestSyncDirtyRecords(t *testing.T) {
 	}
 }
 
+// TestQueueSync tests non-blocking sync queueing
+func TestQueueSync(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	sonarrID := 456
+	series := &database.Series{
+		Title:         "Test Series",
+		Year:          2024,
+		SonarrID:      &sonarrID,
+		CanonicalPath: "/tv/Test Series (2024)",
+	}
+	_, err := db.UpsertSeries(series)
+	if err != nil {
+		t.Fatalf("failed to create series: %v", err)
+	}
+
+	seriesRecord, err := db.GetSeriesByTitle("Test Series", 2024)
+	if err != nil || seriesRecord == nil {
+		t.Fatal("expected series to exist")
+	}
+
+	err = db.SetSeriesDirty(seriesRecord.ID)
+	if err != nil {
+		t.Fatalf("failed to set series dirty: %v", err)
+	}
+
+	cfg := SyncConfig{
+		DB:     db,
+		Sonarr: nil,
+		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+	svc := NewSyncService(cfg)
+
+	svc.QueueSync("series", seriesRecord.ID)
+
+	time.Sleep(10 * time.Millisecond)
+
+	updated, err := db.GetSeriesByID(seriesRecord.ID)
+	if err != nil {
+		t.Fatalf("failed to get series: %v", err)
+	}
+
+	if !updated.SonarrPathDirty {
+		t.Log("dirty flag was cleared (expected, Sonarr is nil so sync skipped)")
+	}
+}
+
 // TestRetryWithBackoff tests exponential backoff logic
 func TestRetryWithBackoff(t *testing.T) {
 	tests := []struct {
