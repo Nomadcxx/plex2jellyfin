@@ -55,13 +55,16 @@ func (s *Selector) findShowDirInLibrary(library, normalizedTitle, year string) s
 		dirName := entry.Name()
 		normalizedDir := normalizeTitle(dirName)
 
-		// Match patterns:
-		// - "fallout" == "fallout"
-		// - "fallout2024" == "fallout" + "2024"
-		// - "fallout(2024)" starts with "fallout("
-		if normalizedDir == normalizedTitle ||
-			normalizedDir == normalizedTitle+year ||
-			strings.HasPrefix(normalizedDir, normalizedTitle+"(") {
+		// Extract year from directory if present
+		dirYear := extractYearFromDir(dirName)
+
+		// If both have years, they MUST match
+		if year != "" && dirYear != "" && year != dirYear {
+			continue // Different years - not a match
+		}
+
+		// Match patterns (now year-safe):
+		if normalizedDir == normalizedTitle || normalizedDir == normalizedTitle+year || strings.HasPrefix(normalizedDir, normalizedTitle+"(") {
 			return filepath.Join(library, dirName)
 		}
 	}
