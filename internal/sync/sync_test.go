@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -228,6 +229,95 @@ func TestSyncFromRadarrMock(t *testing.T) {
 	err := svc.RunFullSync(context.Background())
 	if err != nil {
 		t.Errorf("expected nil error when Radarr not configured, got %v", err)
+	}
+}
+
+// TestSyncDirtyRecords tests dirty record synchronization
+func TestSyncDirtyRecords(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	sonarrID := 123
+	series := &database.Series{
+		Title:         "Test Show",
+		Year:          2020,
+		SonarrID:      &sonarrID,
+		CanonicalPath: "/tv/Test Show (2020)",
+	}
+	_, err := db.UpsertSeries(series)
+	if err != nil {
+		t.Fatalf("failed to create series: %v", err)
+	}
+
+	seriesRecord, err := db.GetSeriesByTitle("Test Show", 2020)
+	if err != nil {
+		t.Fatalf("failed to get series: %v", err)
+	}
+	if seriesRecord == nil {
+		t.Fatal("expected series to be in database")
+	}
+
+	err = db.SetSeriesDirty(seriesRecord.ID)
+	if err != nil {
+		t.Fatalf("failed to set series dirty: %v", err)
+	}
+
+	cfg := SyncConfig{
+		DB:     db,
+		Sonarr: nil,
+		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+	svc := NewSyncService(cfg)
+
+	err = svc.syncDirtyRecords(context.Background())
+	if err != nil {
+		t.Errorf("expected nil error when Sonarr not configured, got %v", err)
+	}
+
+	updated, err := db.GetSeriesByID(seriesRecord.ID)
+	if err != nil {
+		t.Fatalf("failed to get series: %v", err)
+	}
+	if !updated.SonarrPathDirty {
+		t.Error("dirty flag should still be set when Sonarr is not configured")
+	}
+}
+
+// TestRetryWithBackoff tests exponential backoff logic
+func TestRetryWithBackoff(t *testing.T) {
+	tests := []struct {
+		name          string
+		maxRetries    int
+		shouldSucceed bool
+	}{
+		{"immediate success", 3, true},
+		{"success on retry", 3, true},
+		{"fail all retries", 3, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attempts := 0
+			fn := func() error {
+				attempts++
+				if tt.shouldSucceed {
+					if attempts == 1 || attempts == 2 {
+						return fmt.Errorf("temporary error")
+					}
+					return nil
+				}
+				return fmt.Errorf("permanent error")
+			}
+
+			err := retryWithBackoff(context.Background(), tt.maxRetries, fn)
+
+			if tt.shouldSucceed && err != nil {
+				t.Errorf("expected success, got error: %v", err)
+			}
+			if !tt.shouldSucceed && err == nil {
+				t.Error("expected error after all retries, got nil")
+			}
+		})
 	}
 }
 

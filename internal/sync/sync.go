@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	stdsync "sync"
@@ -76,8 +77,10 @@ func NewSyncService(cfg SyncConfig) *SyncService {
 
 // Start begins the daily sync scheduler in a background goroutine
 func (s *SyncService) Start() {
+	ctx := context.Background()
 	go s.runScheduler()
 	go s.runSyncWorker()
+	go s.runRetryLoop(ctx)
 }
 
 // Stop stops the scheduler (safe to call multiple times)
@@ -182,9 +185,13 @@ func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
 		}
 
 		s.logger.Info("syncing series to Sonarr", "id", req.ID, "sonarr_id", *series.SonarrID, "path", series.CanonicalPath)
-		err = s.sonarr.UpdateSeriesPath(*series.SonarrID, series.CanonicalPath)
+
+		err = retryWithBackoff(ctx, 3, func() error {
+			return s.sonarr.UpdateSeriesPath(*series.SonarrID, series.CanonicalPath)
+		})
+
 		if err != nil {
-			s.logger.Error("failed to update Sonarr path", "id", req.ID, "error", err)
+			s.logger.Error("failed to update Sonarr path (will retry)", "id", req.ID, "error", err)
 			return
 		}
 
@@ -209,14 +216,147 @@ func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
 		}
 
 		s.logger.Info("syncing movie to Radarr", "id", req.ID, "radarr_id", *movie.RadarrID, "path", movie.CanonicalPath)
-		err = s.radarr.UpdateMoviePath(*movie.RadarrID, movie.CanonicalPath)
+
+		err = retryWithBackoff(ctx, 3, func() error {
+			return s.radarr.UpdateMoviePath(*movie.RadarrID, movie.CanonicalPath)
+		})
+
 		if err != nil {
-			s.logger.Error("failed to update Radarr path", "id", req.ID, "error", err)
+			s.logger.Error("failed to update Radarr path (will retry)", "id", req.ID, "error", err)
 			return
 		}
 
 		if err := s.db.MarkMovieSynced(req.ID); err != nil {
 			s.logger.Error("failed to mark movie synced", "id", req.ID, "error", err)
+		}
+	}
+}
+
+// retryWithBackoff executes fn with exponential backoff up to maxRetries
+func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) error {
+	var lastErr error
+	baseDelay := 1 * time.Second
+	maxDelay := 30 * time.Second
+
+	for i := 0; i <= maxRetries; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		err := fn()
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		delay := baseDelay * time.Duration(1<<uint(i))
+		if delay > maxDelay {
+			delay = maxDelay
+		}
+
+		slog.Debug("retry with backoff", "attempt", i+1, "max_retries", maxRetries+1, "delay", delay, "error", err)
+
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	return fmt.Errorf("failed after %d retries: %w", maxRetries+1, lastErr)
+}
+
+// syncDirtyRecords synchronizes all dirty series and movies to Sonarr/Radarr
+func (s *SyncService) syncDirtyRecords(ctx context.Context) error {
+	dirtySeries, err := s.db.GetDirtySeries()
+	if err != nil {
+		s.logger.Error("failed to get dirty series", "error", err)
+		return err
+	}
+
+	for _, series := range dirtySeries {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if series.SonarrID != nil && *series.SonarrID > 0 && s.sonarr != nil {
+			if series.SonarrPathDirty {
+				s.logger.Info("syncing dirty series to Sonarr", "id", series.ID, "sonarr_id", *series.SonarrID, "path", series.CanonicalPath)
+
+				err := retryWithBackoff(ctx, 3, func() error {
+					return s.sonarr.UpdateSeriesPath(*series.SonarrID, series.CanonicalPath)
+				})
+
+				if err != nil {
+					s.logger.Error("failed to update Sonarr path (will retry)", "id", series.ID, "error", err)
+					continue
+				}
+
+				if err := s.db.MarkSeriesSynced(series.ID); err != nil {
+					s.logger.Error("failed to mark series synced", "id", series.ID, "error", err)
+				}
+			}
+		}
+	}
+
+	dirtyMovies, err := s.db.GetDirtyMovies()
+	if err != nil {
+		s.logger.Error("failed to get dirty movies", "error", err)
+		return err
+	}
+
+	for _, movie := range dirtyMovies {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if movie.RadarrID != nil && *movie.RadarrID > 0 && s.radarr != nil {
+			if movie.RadarrPathDirty {
+				s.logger.Info("syncing dirty movie to Radarr", "id", movie.ID, "radarr_id", *movie.RadarrID, "path", movie.CanonicalPath)
+
+				err := retryWithBackoff(ctx, 3, func() error {
+					return s.radarr.UpdateMoviePath(*movie.RadarrID, movie.CanonicalPath)
+				})
+
+				if err != nil {
+					s.logger.Error("failed to update Radarr path (will retry)", "id", movie.ID, "error", err)
+					continue
+				}
+
+				if err := s.db.MarkMovieSynced(movie.ID); err != nil {
+					s.logger.Error("failed to mark movie synced", "id", movie.ID, "error", err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// runRetryLoop runs periodic dirty record sync
+func (s *SyncService) runRetryLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.retryInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := s.syncDirtyRecords(ctx); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				s.logger.Error("dirty record sync failed", "error", err)
+			}
+		case <-ctx.Done():
+			s.logger.Info("retry loop stopped")
+			return
 		}
 	}
 }
