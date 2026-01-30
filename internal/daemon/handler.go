@@ -19,7 +19,8 @@ import (
 )
 
 type MediaHandler struct {
-	organizer       *organizer.Organizer
+	tvOrganizer     *organizer.Organizer // NEW: TV-specific organizer
+	movieOrganizer  *organizer.Organizer // NEW: Movie-specific organizer
 	notifyManager   *notify.Manager
 	tvLibraries     []string
 	movieLibs       []string
@@ -136,25 +137,40 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		}
 	}
 
-	allLibs := append(cfg.TVLibraries, cfg.MovieLibs...)
-	orgOpts := []func(*organizer.Organizer){
+	// Create TV-specific organizer
+	tvOrgOpts := []func(*organizer.Organizer){
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithBackend(cfg.Backend),
 	}
 	if cfg.SonarrClient != nil {
-		orgOpts = append(orgOpts, organizer.WithSonarrClient(cfg.SonarrClient))
+		tvOrgOpts = append(tvOrgOpts, organizer.WithSonarrClient(cfg.SonarrClient))
 	}
 	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
-		orgOpts = append(orgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
+		tvOrgOpts = append(tvOrgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
 	}
-	org, err := organizer.NewOrganizer(allLibs, orgOpts...)
+	tvOrganizer, err := organizer.NewOrganizer(cfg.TVLibraries, tvOrgOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create organizer: %w", err)
+		return nil, fmt.Errorf("failed to create TV organizer: %w", err)
+	}
+
+	// Create Movie-specific organizer
+	movieOrgOpts := []func(*organizer.Organizer){
+		organizer.WithDryRun(cfg.DryRun),
+		organizer.WithTimeout(cfg.Timeout),
+		organizer.WithBackend(cfg.Backend),
+	}
+	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
+		movieOrgOpts = append(movieOrgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
+	}
+	movieOrganizer, err := organizer.NewOrganizer(cfg.MovieLibs, movieOrgOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Movie organizer: %w", err)
 	}
 
 	return &MediaHandler{
-		organizer:       org,
+		tvOrganizer:     tvOrganizer,
+		movieOrganizer:  movieOrganizer,
 		notifyManager:   cfg.NotifyManager,
 		tvLibraries:     cfg.TVLibraries,
 		movieLibs:       cfg.MovieLibs,
@@ -314,7 +330,7 @@ func (h *MediaHandler) processFile(path string) {
 		}
 
 		// Use auto-selection (queries Sonarr + filesystem)
-		result, err = h.organizer.OrganizeTVEpisodeAuto(path, func(p string) (int64, error) {
+		result, err = h.tvOrganizer.OrganizeTVEpisodeAuto(path, func(p string) (int64, error) {
 			info, err := os.Stat(p)
 			if err != nil {
 				return 0, err
@@ -349,7 +365,7 @@ func (h *MediaHandler) processFile(path string) {
 			return
 		}
 
-		result, err = h.organizer.OrganizeMovie(path, targetLib)
+		result, err = h.movieOrganizer.OrganizeMovie(path, targetLib)
 	}
 
 	duration := time.Since(startTime)
