@@ -167,7 +167,24 @@ func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, 
 		}
 
 		ctx := context.Background()
-		aiResult, err := matcher.Parse(ctx, filepath.Base(file.Path))
+
+		libraryType := "unknown"
+		if file.MediaType == "movie" {
+			libraryType = "movie library"
+		} else if file.MediaType == "episode" {
+			libraryType = "TV show library"
+		}
+
+		folderPath := filepath.Dir(file.Path)
+
+		aiResult, err := matcher.ParseWithContext(
+			ctx,
+			filepath.Base(file.Path),
+			libraryType,
+			folderPath,
+			file.NormalizedTitle,
+			file.Confidence,
+		)
 
 		if err != nil {
 			stats.RecordAICall(false)

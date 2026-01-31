@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -68,6 +69,26 @@ func NewMatcher(cfg config.AIConfig) (*Matcher, error) {
 // Parse sends a filename to Ollama and returns parsed metadata
 func (m *Matcher) Parse(ctx context.Context, filename string) (*Result, error) {
 	return m.parseWithModel(ctx, filename, m.config.Model)
+}
+
+// ParseWithContext sends a filename with additional library context to Ollama
+func (m *Matcher) ParseWithContext(ctx context.Context, filename string, libraryType string, folderPath string, currentTitle string, currentConfidence float64) (*Result, error) {
+	contextPrompt := m.systemPrompt
+
+	if libraryType != "" {
+		contextPrompt += fmt.Sprintf("\n\n## File Context\n- File is in a %s\n", libraryType)
+	}
+
+	if folderPath != "" {
+		sanitizedPath := filepath.Base(folderPath)
+		contextPrompt += fmt.Sprintf("- Folder name: %s\n", sanitizedPath)
+	}
+
+	if currentTitle != "" {
+		contextPrompt += fmt.Sprintf("- Current title: %s (confidence: %.2f)\n", currentTitle, currentConfidence)
+	}
+
+	return m.parseWithModel(ctx, contextPrompt+"\n\nNow parse this filename: "+filename, m.config.Model)
 }
 
 // ParseWithRetry sends a filename to Ollama with one retry attempt on malformed JSON responses.
@@ -319,6 +340,17 @@ Lower confidence when:
 - Unusual numbering schemes
 - Foreign language content
 - Very short/generic titles
+
+## Using Context
+The context above (File Context section) provides critical information:
+- Library type (movies vs TV shows): Use this to disambiguate titles
+- Folder name: May contain additional clues about the content
+- Current title: The existing parse that needs improvement - use as a hint but don't be bound by it
+- Confidence: Low confidence (e.g., < 0.8) indicates the current parse may be wrong
+
+Example:
+- Library type: episode, Folder: "Prison Break", Current: "pb" → Likely "Prison Break"
+- Library type: movie library, Folder: "MOVIES", File: "pb.s04e15.mkv" → Probably incorrect file location OR TV show misclassified
 
 Now parse this filename:`
 }

@@ -31,11 +31,11 @@ func TestMatcher_ParseMovie(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -44,7 +44,14 @@ func TestMatcher_ParseMovie(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := matcher.Parse(ctx, "The.Matrix.1999.1080p.BluRay.x264-Group.mkv")
+	result, err := matcher.ParseWithContext(
+		ctx,
+		"The.Matrix.1999.1080p.BluRay.x264-Group.mkv",
+		"movie library",
+		"/media/Movies",
+		"the.matrix",
+		0.65,
+	)
 
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
@@ -89,11 +96,11 @@ func TestMatcher_ParseTVEpisode(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -102,7 +109,14 @@ func TestMatcher_ParseTVEpisode(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := matcher.Parse(ctx, "Breaking.Bad.S01E01.720p.HDTV.x264.mkv")
+	result, err := matcher.ParseWithContext(
+		ctx,
+		"Breaking.Bad.S01E01.720p.HDTV.x264.mkv",
+		"TV show library",
+		"/media/TV/Breaking Bad",
+		"breaking.bad",
+		0.70,
+	)
 
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
@@ -130,9 +144,9 @@ func TestMatcher_ParseWithMarkdownCodeBlock(t *testing.T) {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/generate" {
 			response := GenerateResponse{
-				Model: "test-model",
+				Model:    "test-model",
 				Response: "```json\n{\n  \"title\": \"Inception\",\n  \"year\": 2010,\n  \"type\": \"movie\",\n  \"confidence\": 0.97\n}\n```",
-				Done:  true,
+				Done:     true,
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(response)
@@ -141,11 +155,11 @@ func TestMatcher_ParseWithMarkdownCodeBlock(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -154,7 +168,14 @@ func TestMatcher_ParseWithMarkdownCodeBlock(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := matcher.Parse(ctx, "Inception.2010.1080p.BluRay.mkv")
+	result, err := matcher.ParseWithContext(
+		ctx,
+		"Inception.2010.1080p.BluRay.mkv",
+		"movie library",
+		"/media/Movies",
+		"inception",
+		0.60,
+	)
 
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
@@ -190,11 +211,11 @@ func TestMatcher_ParseWithAbsoluteEpisode(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -203,7 +224,14 @@ func TestMatcher_ParseWithAbsoluteEpisode(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := matcher.Parse(ctx, "One.Piece.E243.1080p.mkv")
+	result, err := matcher.ParseWithContext(
+		ctx,
+		"One.Piece.E243.1080p.mkv",
+		"TV show library",
+		"/media/TV/One Piece",
+		"one.piece",
+		0.55,
+	)
 
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
@@ -243,11 +271,11 @@ func TestMatcher_ParseWithAirDate(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -256,7 +284,14 @@ func TestMatcher_ParseWithAirDate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := matcher.Parse(ctx, "The.Daily.Show.2024.01.09.mkv")
+	result, err := matcher.ParseWithContext(
+		ctx,
+		"The.Daily.Show.2024.01.09.mkv",
+		"TV show library",
+		"/media/TV/The Daily Show",
+		"the.daily.show",
+		0.50,
+	)
 
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
@@ -297,11 +332,11 @@ func TestMatcher_ParseWithMultiEpisode(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -310,7 +345,14 @@ func TestMatcher_ParseWithMultiEpisode(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := matcher.Parse(ctx, "Game.of.Thrones.S08E05-E06.1080p.mkv")
+	result, err := matcher.ParseWithContext(
+		ctx,
+		"Game.of.Thrones.S08E05-E06.1080p.mkv",
+		"TV show library",
+		"/media/TV/Game of Thrones",
+		"game.of.thrones",
+		0.72,
+	)
 
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
@@ -403,11 +445,11 @@ func TestMatcher_ServerError(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -416,7 +458,14 @@ func TestMatcher_ServerError(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, err = matcher.Parse(ctx, "Some.Movie.2024.mkv")
+	_, err = matcher.ParseWithContext(
+		ctx,
+		"Some.Movie.2024.mkv",
+		"movie library",
+		"/media/Movies",
+		"some.movie",
+		0.45,
+	)
 
 	if err == nil {
 		t.Error("Expected error for server error response")
@@ -439,11 +488,11 @@ func TestMatcher_InvalidJSONResponse(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -452,7 +501,14 @@ func TestMatcher_InvalidJSONResponse(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, err = matcher.Parse(ctx, "Some.Movie.2024.mkv")
+	_, err = matcher.ParseWithContext(
+		ctx,
+		"Some.Movie.2024.mkv",
+		"movie library",
+		"/media/Movies",
+		"some.movie",
+		0.45,
+	)
 
 	if err == nil {
 		t.Error("Expected error for invalid JSON response")
@@ -482,11 +538,11 @@ func TestMatcher_IsAvailable(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -516,11 +572,11 @@ func TestMatcher_IsAvailableNegative(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -557,11 +613,11 @@ func TestMatcher_YearWithoutValue(t *testing.T) {
 	defer mockServer.Close()
 
 	cfg := config.AIConfig{
-		Enabled:           true,
-		Model:             "test-model",
-		OllamaEndpoint:    mockServer.URL,
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
 		ConfidenceThreshold: 0.8,
-		TimeoutSeconds:    30,
+		TimeoutSeconds:      30,
 	}
 
 	matcher, err := NewMatcher(cfg)
@@ -570,7 +626,14 @@ func TestMatcher_YearWithoutValue(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := matcher.Parse(ctx, "Some.Show.S01E01.mkv")
+	result, err := matcher.ParseWithContext(
+		ctx,
+		"Some.Show.S01E01.mkv",
+		"TV show library",
+		"/media/TV/Some Show",
+		"some.show",
+		0.40,
+	)
 
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
@@ -582,5 +645,57 @@ func TestMatcher_YearWithoutValue(t *testing.T) {
 
 	if result.Year != nil {
 		t.Errorf("Expected nil year, got %v", *result.Year)
+	}
+}
+
+func TestMatcher_Parse_Legacy(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/generate" {
+			response := GenerateResponse{
+				Model: "test-model",
+				Response: `{
+					"title": "Interstellar",
+					"year": 2014,
+					"type": "movie",
+					"confidence": 0.99
+				}`,
+				Done: true,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+		}
+	}))
+	defer mockServer.Close()
+
+	cfg := config.AIConfig{
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      mockServer.URL,
+		ConfidenceThreshold: 0.8,
+		TimeoutSeconds:      30,
+	}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	ctx := context.Background()
+	result, err := matcher.Parse(ctx, "Interstellar.2014.IMAX.1080p.BluRay.x264.mkv")
+
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if result.Title != "Interstellar" {
+		t.Errorf("Expected title 'Interstellar', got '%s'", result.Title)
+	}
+
+	if result.Year == nil || *result.Year != 2014 {
+		t.Errorf("Expected year 2014, got %v", result.Year)
+	}
+
+	if result.Type != "movie" {
+		t.Errorf("Expected type 'movie', got '%s'", result.Type)
 	}
 }
