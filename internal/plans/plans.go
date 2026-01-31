@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/permissions"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
 
@@ -431,14 +432,38 @@ func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction, dry
 		return nil
 	}
 
-	// Delete from filesystem
+	// Check if file exists before attempting deletion
+	if _, err := os.Stat(file.Path); os.IsNotExist(err) {
+		// File already gone - clean up database and return success
+		_ = db.DeleteMediaFileByID(file.ID)
+		return nil
+	}
+
+	// Check if we can delete the file (using uid/gid = -1 to not change ownership)
+	canDelete, err := permissions.CanDelete(file.Path)
+	if err != nil {
+		return fmt.Errorf("failed to check permissions: %w", err)
+	}
+
+	if !canDelete {
+		if err := permissions.FixPermissions(file.Path, -1, -1); err != nil {
+			if removeErr := os.Remove(file.Path); removeErr != nil {
+				_ = db.DeleteMediaFileByID(file.ID)
+				return fmt.Errorf("permission denied (tried chmod but failed: %v): %w", err, removeErr)
+			}
+		}
+	}
+
 	if err := os.Remove(file.Path); err != nil {
+		_ = db.DeleteMediaFileByID(file.ID)
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return fmt.Errorf("failed to delete file: %w", err)
 	}
 
-	// Remove from database
 	if err := db.DeleteMediaFileByID(file.ID); err != nil {
-		return fmt.Errorf("failed to delete media file from database: %w", err)
+		fmt.Printf("Warning: File deleted but database cleanup failed: %v\n", err)
 	}
 
 	return nil

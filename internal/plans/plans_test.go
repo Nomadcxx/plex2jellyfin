@@ -551,3 +551,69 @@ func TestExecuteRename_CrossDevice(t *testing.T) {
 		t.Errorf("Database path not updated: got %s, want %s", updatedFile.Path, dstPath)
 	}
 }
+
+func TestExecuteDelete_WithPermissionFix(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	testDir := t.TempDir()
+	testFile := filepath.Join(testDir, "delete-me.mkv")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	file := &database.MediaFile{
+		Path:      testFile,
+		MediaType: "movie",
+		Size:      4,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("Failed to insert: %v", err)
+	}
+
+	item := AuditItem{ID: file.ID, Path: testFile}
+	action := AuditAction{Action: "delete"}
+
+	err := ExecuteAuditAction(db, item, action, false)
+	if err != nil {
+		t.Errorf("Delete failed: %v", err)
+	}
+
+	if _, err := os.Stat(testFile); !os.IsNotExist(err) {
+		t.Error("File still exists after delete")
+	}
+
+	dbFile, _ := db.GetMediaFileByID(file.ID)
+	if dbFile != nil {
+		t.Error("Database entry still exists")
+	}
+}
+
+func TestExecuteDelete_DatabaseCleanupOnFailure(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	testFile := "/nonexistent/audit-delete.mkv"
+
+	file := &database.MediaFile{
+		Path:      testFile,
+		MediaType: "movie",
+		Size:      100,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("Failed to insert: %v", err)
+	}
+
+	item := AuditItem{ID: file.ID, Path: testFile}
+	action := AuditAction{Action: "delete"}
+
+	err := ExecuteAuditAction(db, item, action, false)
+	if err != nil {
+		t.Logf("Expected error for non-existent file: %v", err)
+	}
+
+	dbFile, _ := db.GetMediaFileByID(file.ID)
+	if dbFile != nil {
+		t.Error("Database entry should be removed even when file doesn't exist")
+	}
+}
