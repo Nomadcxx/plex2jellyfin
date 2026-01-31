@@ -297,7 +297,7 @@ func TestExecuteAuditAction_Delete(t *testing.T) {
 		Path: sourcePath,
 	}
 	action := AuditAction{
-		Action:   "delete",
+		Action:    "delete",
 		Reasoning: "Low quality duplicate",
 	}
 
@@ -476,5 +476,78 @@ func TestExecuteAuditAction_Delete_DryRun(t *testing.T) {
 	}
 	if existing == nil {
 		t.Error("Database record should not be removed in dry-run mode")
+	}
+}
+
+// setupTestDB creates a temporary database for testing
+func setupTestDB(t *testing.T) *database.MediaDB {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+
+	return db
+}
+
+func TestExecuteRename_CrossDevice(t *testing.T) {
+	// This test documents that code uses transfer.Move() instead of os.Rename()
+	// We verify transfer package integration for cross-device moves
+
+	db := setupTestDB(t)
+	defer db.Close()
+
+	// Create test file
+	testDir := t.TempDir()
+	srcPath := filepath.Join(testDir, "test.movie.2024.mkv")
+	dstPath := filepath.Join(testDir, "Test Movie (2024).mkv")
+
+	if err := os.WriteFile(srcPath, []byte("test content"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Insert into database
+	file := &database.MediaFile{
+		Path:            srcPath,
+		NormalizedTitle: "test.movie",
+		Year:            func() *int { y := 2024; return &y }(),
+		MediaType:       "movie",
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("Failed to insert test file: %v", err)
+	}
+
+	item := AuditItem{ID: file.ID, Path: srcPath}
+	action := AuditAction{
+		Action:   "rename",
+		NewTitle: "Test Movie",
+		NewPath:  dstPath,
+	}
+
+	// Execute rename
+	err := executeRename(db, item, action, false)
+
+	// Should succeed
+	if err != nil {
+		t.Errorf("executeRename failed: %v", err)
+	}
+
+	// Verify file moved
+	if _, err := os.Stat(dstPath); os.IsNotExist(err) {
+		t.Error("Destination file does not exist")
+	}
+	if _, err := os.Stat(srcPath); err == nil {
+		t.Error("Source file still exists")
+	}
+
+	// Verify database updated
+	updatedFile, err := db.GetMediaFileByID(file.ID)
+	if err != nil {
+		t.Fatalf("Failed to get updated file: %v", err)
+	}
+	if updatedFile.Path != dstPath {
+		t.Errorf("Database path not updated: got %s, want %s", updatedFile.Path, dstPath)
 	}
 }

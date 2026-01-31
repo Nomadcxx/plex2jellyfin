@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
 
 // FileInfo represents a media file in a plan
@@ -460,9 +461,18 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 		return nil
 	}
 
-	// Perform filesystem move
-	if err := os.Rename(file.Path, action.NewPath); err != nil {
-		return fmt.Errorf("failed to rename file: %w", err)
+	// Perform filesystem move using transfer package (handles cross-device)
+	transferer, err := transfer.New(transfer.BackendAuto)
+	if err != nil {
+		return fmt.Errorf("failed to create transferer: %w", err)
+	}
+
+	result, err := transferer.Move(file.Path, action.NewPath, transfer.DefaultOptions())
+	if err != nil {
+		return fmt.Errorf("failed to move file: %w", err)
+	}
+	if !result.Success {
+		return fmt.Errorf("file transfer failed: %v", result.Error)
 	}
 
 	// Update database record
@@ -479,8 +489,13 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 	}
 
 	if err := db.UpdateMediaFile(file); err != nil {
-		// Attempt to rollback filesystem move on database failure
-		_ = os.Rename(action.NewPath, file.Path)
+		// Attempt rollback on DB failure
+		rollbackResult, rollbackErr := transferer.Move(action.NewPath, file.Path, transfer.DefaultOptions())
+		if rollbackErr != nil {
+			fmt.Printf("Failed to rollback file move: %v\n", rollbackErr)
+		} else if !rollbackResult.Success {
+			fmt.Printf("Rollback transfer failed: %v\n", rollbackResult.Error)
+		}
 		return fmt.Errorf("failed to update database: %w", err)
 	}
 
