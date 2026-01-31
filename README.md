@@ -58,7 +58,20 @@ jellywatch migrate --dry-run       # Preview sync changes
 jellywatch audit generate          # Find low-confidence parses
 jellywatch audit dry-run           # Preview AI suggestions
 jellywatch audit execute           # Apply fixes
+```
 
+### AI Context
+
+The audit command uses local AI (Ollama) to analyze low-confidence files.
+AI receives contextual information including:
+
+- Library type (Movies vs TV Shows) - prevents misclassifying shows as movies
+- Folder path - helps identify correct series from directory structure
+- Existing metadata - current parse and confidence score as hints
+
+See [docs/ai-context.md](docs/ai-context.md) for details.
+
+```bash
 jellywatch duplicates generate     # Find duplicates
 jellywatch duplicates execute      # Keep the best, delete the rest
 
