@@ -252,9 +252,18 @@ func (e *Executor) executeRename(ctx context.Context, plan *ConsolidationPlan) e
 		return fmt.Errorf("source file does not exist")
 	}
 
-	// Rename the file
-	if err := os.Rename(plan.SourcePath, plan.TargetPath); err != nil {
-		return fmt.Errorf("failed to rename file: %w", err)
+	result, err := e.transferer.Move(plan.SourcePath, plan.TargetPath, transfer.TransferOptions{
+		Timeout:   5 * time.Minute,
+		TargetUID: -1,
+		TargetGID: -1,
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to move file: %w", err)
+	}
+
+	if result.Error != nil {
+		return fmt.Errorf("file transfer failed: %w", result.Error)
 	}
 
 	// Update database path
