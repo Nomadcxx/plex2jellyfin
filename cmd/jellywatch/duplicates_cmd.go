@@ -29,7 +29,7 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 				if os.IsNotExist(removeErr) {
 					return nil
 				}
-				return fmt.Errorf("permission denied (tried chmod but failed: %v): %w", err, removeErr)
+				return permissions.NewPermissionError(filePath, "delete", removeErr, uid, gid)
 			}
 		}
 	}

@@ -1,8 +1,10 @@
 package permissions
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -61,5 +63,47 @@ func TestGetFileOwnership(t *testing.T) {
 	// Should return valid UIDs (non-negative)
 	if uid < 0 || gid < 0 {
 		t.Errorf("Invalid ownership: uid=%d, gid=%d", uid, gid)
+	}
+}
+
+func TestPermissionError_MessageFormat(t *testing.T) {
+	err := NewPermissionError(
+		"/path/to/file.mkv",
+		"delete",
+		fmt.Errorf("permission denied"),
+		1000,
+		1000,
+	)
+
+	msg := err.Error()
+
+	expectedContains := []string{
+		"permission denied: cannot delete /path/to/file.mkv: permission denied",
+		"\n\nTo fix this, run:\n  sudo chown 1000:1000 /path/to/file.mkv",
+	}
+
+	for _, expected := range expectedContains {
+		if !strings.Contains(msg, expected) {
+			t.Errorf("Error message missing expected text:\nGot: %s\nExpected to contain: %s", msg, expected)
+		}
+	}
+}
+
+func TestPermissionError_ChmodOnly(t *testing.T) {
+	err := NewPermissionError(
+		"/path/to/file.mkv",
+		"delete",
+		fmt.Errorf("permission denied"),
+		-1,
+		-1,
+	)
+
+	msg := err.Error()
+
+	if !strings.Contains(msg, "sudo chmod") {
+		t.Error("Should not suggest sudo chown when no ownership change needed")
+	}
+	if !strings.Contains(msg, "chmod 644") {
+		t.Error("Should suggest chmod 644 when no ownership change")
 	}
 }

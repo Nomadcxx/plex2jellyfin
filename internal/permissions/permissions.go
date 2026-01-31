@@ -103,3 +103,43 @@ func NeedsOwnershipChange(path string, targetUID, targetGID int) (bool, error) {
 
 	return false, nil
 }
+
+// PermissionError represents a permission-related error with helpful guidance
+type PermissionError struct {
+	Path    string
+	Op      string
+	Err     error
+	NeedUID int
+	NeedGID int
+}
+
+func (e *PermissionError) Error() string {
+	msg := fmt.Sprintf("permission denied: cannot %s %s: %v", e.Op, e.Path, e.Err)
+
+	if e.NeedUID >= 0 || e.NeedGID >= 0 {
+		msg += fmt.Sprintf("\n\nTo fix this, run:\n  sudo chown")
+		if e.NeedUID >= 0 && e.NeedGID >= 0 {
+			msg += fmt.Sprintf(" %d:%d", e.NeedUID, e.NeedGID)
+		} else if e.NeedUID >= 0 {
+			msg += fmt.Sprintf(" %d", e.NeedUID)
+		} else {
+			msg += fmt.Sprintf(" :%d", e.NeedGID)
+		}
+		msg += fmt.Sprintf(" %s", e.Path)
+	} else {
+		msg += fmt.Sprintf("\n\nTo fix this, run:\n  sudo chmod 644 %s", e.Path)
+	}
+
+	return msg
+}
+
+// NewPermissionError creates a helpful permission error
+func NewPermissionError(path, op string, err error, uid, gid int) error {
+	return &PermissionError{
+		Path:    path,
+		Op:      op,
+		Err:     err,
+		NeedUID: uid,
+		NeedGID: gid,
+	}
+}

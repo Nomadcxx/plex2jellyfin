@@ -455,7 +455,7 @@ func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction, dry
 		if err := permissions.FixPermissions(file.Path, uid, gid); err != nil {
 			if removeErr := os.Remove(file.Path); removeErr != nil {
 				_ = db.DeleteMediaFileByID(file.ID)
-				return fmt.Errorf("permission denied (tried chmod but failed: %v): %w", err, removeErr)
+				return permissions.NewPermissionError(file.Path, "delete", removeErr, uid, gid)
 			}
 		}
 	}
