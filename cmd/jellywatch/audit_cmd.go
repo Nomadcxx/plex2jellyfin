@@ -335,6 +335,12 @@ func displayAuditPlan(plan *plans.AuditPlan, showActions bool) error {
 func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan) error {
 	fmt.Printf("\n🚀 Executing Audit Plan\n")
 
+	// Load config for permission settings
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
 	// Filter actions with confidence >= 0.8
 	var filteredIndices []int
 	for i, action := range plan.Actions {
@@ -393,7 +399,7 @@ func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan) error {
 			}
 		}
 
-		if err := plans.ExecuteAuditAction(db, item, action, auditOpts.DryRun); err != nil {
+		if err := plans.ExecuteAuditAction(db, item, action, auditOpts.DryRun, cfg); err != nil {
 			fmt.Printf("  ✗ Failed: %v\n", err)
 			failed++
 		} else {

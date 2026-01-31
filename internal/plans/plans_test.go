@@ -226,7 +226,7 @@ func TestExecuteAuditAction_Rename(t *testing.T) {
 		NewYear:  func() *int { y := 2020; return &y }(),
 	}
 
-	err = ExecuteAuditAction(db, item, action, false)
+	err = ExecuteAuditAction(db, item, action, false, nil)
 	if err != nil {
 		t.Fatalf("ExecuteAuditAction failed: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestExecuteAuditAction_Delete(t *testing.T) {
 		Reasoning: "Low quality duplicate",
 	}
 
-	err = ExecuteAuditAction(db, item, action, false)
+	err = ExecuteAuditAction(db, item, action, false, nil)
 	if err != nil {
 		t.Fatalf("ExecuteAuditAction failed: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestExecuteAuditAction_UnknownAction(t *testing.T) {
 		Action: "unknown",
 	}
 
-	err := ExecuteAuditAction(nil, item, action, false)
+	err := ExecuteAuditAction(nil, item, action, false, nil)
 	if err == nil {
 		t.Fatal("ExecuteAuditAction should return error for unknown action")
 	}
@@ -388,7 +388,7 @@ func TestExecuteAuditAction_Rename_DryRun(t *testing.T) {
 		NewYear:  func() *int { y := 2020; return &y }(),
 	}
 
-	err = ExecuteAuditAction(db, item, action, true) // dryRun=true
+	err = ExecuteAuditAction(db, item, action, true, nil) // dryRun=true
 	if err != nil {
 		t.Fatalf("ExecuteAuditAction failed: %v", err)
 	}
@@ -459,7 +459,7 @@ func TestExecuteAuditAction_Delete_DryRun(t *testing.T) {
 		Reasoning: "Low quality duplicate",
 	}
 
-	err = ExecuteAuditAction(db, item, action, true) // dryRun=true
+	err = ExecuteAuditAction(db, item, action, true, nil) // dryRun=true
 	if err != nil {
 		t.Fatalf("ExecuteAuditAction failed: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestExecuteRename_CrossDevice(t *testing.T) {
 	}
 
 	// Execute rename
-	err := executeRename(db, item, action, false)
+	err := executeRename(db, item, action, false, nil)
 
 	// Should succeed
 	if err != nil {
@@ -574,7 +574,7 @@ func TestExecuteDelete_WithPermissionFix(t *testing.T) {
 	item := AuditItem{ID: file.ID, Path: testFile}
 	action := AuditAction{Action: "delete"}
 
-	err := ExecuteAuditAction(db, item, action, false)
+	err := ExecuteAuditAction(db, item, action, false, nil)
 	if err != nil {
 		t.Errorf("Delete failed: %v", err)
 	}
@@ -607,7 +607,7 @@ func TestExecuteDelete_DatabaseCleanupOnFailure(t *testing.T) {
 	item := AuditItem{ID: file.ID, Path: testFile}
 	action := AuditAction{Action: "delete"}
 
-	err := ExecuteAuditAction(db, item, action, false)
+	err := ExecuteAuditAction(db, item, action, false, nil)
 	if err != nil {
 		t.Logf("Expected error for non-existent file: %v", err)
 	}

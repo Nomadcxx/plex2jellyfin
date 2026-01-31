@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/permissions"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
@@ -404,19 +405,19 @@ func DeleteAuditPlans() error {
 }
 
 // ExecuteAuditAction executes an audit action (rename or delete) on a file
-func ExecuteAuditAction(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool) error {
+func ExecuteAuditAction(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool, cfg *config.Config) error {
 	switch action.Action {
 	case "rename":
-		return executeRename(db, item, action, dryRun)
+		return executeRename(db, item, action, dryRun, cfg)
 	case "delete":
-		return executeDelete(db, item, action, dryRun)
+		return executeDelete(db, item, action, dryRun, cfg)
 	default:
 		return fmt.Errorf("unknown action: %s", action.Action)
 	}
 }
 
 // executeDelete performs a delete operation on a media file
-func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool) error {
+func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool, cfg *config.Config) error {
 	// Get the current file record
 	file, err := db.GetMediaFileByID(item.ID)
 	if err != nil {
@@ -446,7 +447,12 @@ func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction, dry
 	}
 
 	if !canDelete {
-		if err := permissions.FixPermissions(file.Path, -1, -1); err != nil {
+		var uid, gid int = -1, -1
+		if cfg != nil && cfg.Permissions.WantsOwnership() {
+			uid, _ = cfg.Permissions.ResolveUID()
+			gid, _ = cfg.Permissions.ResolveGID()
+		}
+		if err := permissions.FixPermissions(file.Path, uid, gid); err != nil {
 			if removeErr := os.Remove(file.Path); removeErr != nil {
 				_ = db.DeleteMediaFileByID(file.ID)
 				return fmt.Errorf("permission denied (tried chmod but failed: %v): %w", err, removeErr)
@@ -470,7 +476,7 @@ func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction, dry
 }
 
 // executeRename performs a rename operation on a media file
-func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool) error {
+func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool, cfg *config.Config) error {
 	// Get the current file record
 	file, err := db.GetMediaFileByID(item.ID)
 	if err != nil {
