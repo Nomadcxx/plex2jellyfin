@@ -51,7 +51,7 @@ func TestAuditMove_CrossDevice(t *testing.T) {
 	}
 
 	// Execute rename
-	err = plans.ExecuteAuditAction(db, item, action, false)
+	err = plans.ExecuteAuditAction(db, item, action, false, nil)
 
 	// Verify success
 	if err != nil {

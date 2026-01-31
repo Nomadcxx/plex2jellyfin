@@ -17,7 +17,6 @@ const (
 	stepWelcome installStep = iota
 	stepPaths
 	stepIntegrationsSonarr
-	stepSonarrDisableAutoImport
 	stepIntegrationsRadarr
 	stepIntegrationsAI
 	stepSystemPermissions

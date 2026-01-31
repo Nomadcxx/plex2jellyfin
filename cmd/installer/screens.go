@@ -348,8 +348,36 @@ func (m model) renderPermissions() string {
 		}
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
-		"Files will be owned by this user/group for Jellyfin access"))
+	b.WriteString("\n")
+
+	tipStyle := lipgloss.NewStyle().Foreground(FgMuted)
+	warnStyle := lipgloss.NewStyle().Foreground(WarningColor)
+
+	if mediaServer := detectMediaServer(); mediaServer != nil {
+		b.WriteString(tipStyle.Render(fmt.Sprintf("  Detected: %s (user/group auto-filled)", mediaServer.Name)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(tipStyle.Render("  Recommended settings:"))
+	b.WriteString("\n")
+	b.WriteString(tipStyle.Render("  • User: empty (root owns) or your media server user"))
+	b.WriteString("\n")
+	b.WriteString(tipStyle.Render("  • Group: shared group (e.g., 'media') for multi-app access"))
+	b.WriteString("\n")
+	b.WriteString(tipStyle.Render("  • Dir Mode: 0775 allows group to delete files"))
+	b.WriteString("\n\n")
+
+	actualUser := getActualUser()
+	currentGroup := m.inputs[1].Value()
+	if currentGroup != "" && !isUserInGroup(actualUser, currentGroup) {
+		b.WriteString(warnStyle.Render(fmt.Sprintf("  ⚠ User '%s' is not in group '%s'", actualUser, currentGroup)))
+		b.WriteString("\n")
+		b.WriteString(tipStyle.Render(fmt.Sprintf("  Run: sudo usermod -aG %s %s", currentGroup, actualUser)))
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString(tipStyle.Render("  📖 Full guide: https://github.com/Nomadcxx/jellywatch/blob/main/docs/permissions.md"))
 
 	return b.String()
 }
@@ -593,59 +621,43 @@ func (m model) renderComplete() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("Installation complete"))
 	b.WriteString("\n\n")
 
-	// Show scan results if we scanned
+	// Show database build results if we scanned
 	if m.scanResult != nil {
-		// Scan summary box
-		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Library Scan Results"))
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Database Built"))
 		b.WriteString("\n")
 		b.WriteString(strings.Repeat("─", 40))
 		b.WriteString("\n")
 
-		b.WriteString(fmt.Sprintf("  Files scanned:  %s\n",
-			lipgloss.NewStyle().Foreground(Secondary).Bold(true).Render(fmt.Sprintf("%d", m.scanResult.FilesScanned))))
 		b.WriteString(fmt.Sprintf("  Files indexed:  %s\n",
 			lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render(fmt.Sprintf("%d", m.scanResult.FilesAdded))))
-		b.WriteString(fmt.Sprintf("  Scan time:      %s\n",
+		b.WriteString(fmt.Sprintf("  Build time:     %s\n",
 			lipgloss.NewStyle().Foreground(FgMuted).Render(m.scanResult.Duration.Round(100*time.Millisecond).String())))
-
-		if m.scanStats != nil {
-			b.WriteString("\n")
-			b.WriteString(fmt.Sprintf("  TV Episodes:    %s\n",
-				lipgloss.NewStyle().Foreground(Secondary).Render(fmt.Sprintf("%d", m.scanStats.TVShows))))
-			b.WriteString(fmt.Sprintf("  Movies:         %s\n",
-				lipgloss.NewStyle().Foreground(Secondary).Render(fmt.Sprintf("%d", m.scanStats.Movies))))
-
-			if m.scanStats.DuplicateGroups > 0 {
-				b.WriteString(fmt.Sprintf("  Duplicates:     %s\n",
-					lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render(fmt.Sprintf("%d groups found", m.scanStats.DuplicateGroups))))
-			} else {
-				b.WriteString(fmt.Sprintf("  Duplicates:     %s\n",
-					lipgloss.NewStyle().Foreground(SuccessColor).Render("None detected")))
-			}
-		}
 
 		b.WriteString(strings.Repeat("─", 40))
 		b.WriteString("\n\n")
 
 		if len(m.scanResult.Errors) > 0 {
 			b.WriteString(lipgloss.NewStyle().Foreground(WarningColor).Render(
-				fmt.Sprintf("⚠ %d scan errors (check logs for details)\n\n", len(m.scanResult.Errors))))
+				fmt.Sprintf("⚠ %d errors during indexing (check logs)\n\n", len(m.scanResult.Errors))))
 		}
+
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Italic(true).Render(
+			"Your library is now indexed. Run the commands below to analyze it."))
+		b.WriteString("\n\n")
 	} else {
 		b.WriteString("JellyWatch is ready. The daemon is running and watching your\nconfigured directories.\n\n")
 	}
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Quick Start"))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("What's Next?"))
 	b.WriteString("\n")
 
 	cmdStyle := lipgloss.NewStyle().Foreground(Secondary)
 	descStyle := lipgloss.NewStyle().Foreground(FgMuted)
 
-	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch scan"), descStyle.Render("Index libraries")))
-	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch audit generate"), descStyle.Render("Find low-confidence parses")))
-	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch duplicates generate"), descStyle.Render("Find duplicates")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch duplicates generate"), descStyle.Render("Find duplicate files")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch audit generate"), descStyle.Render("Find naming issues")))
 	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch consolidate generate"), descStyle.Render("Find scattered series")))
-	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("systemctl status jellywatchd"), descStyle.Render("Check daemon")))
+	b.WriteString(fmt.Sprintf("  %s  %s\n", cmdStyle.Render("jellywatch scan"), descStyle.Render("Re-index after changes")))
 
 	b.WriteString("\n")
 
@@ -656,6 +668,16 @@ func (m model) renderComplete() string {
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Logs:    "), pathStyle.Render("journalctl -u jellywatchd -f")))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Press Enter to exit"))
+
+	if len(m.errors) > 0 {
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(WarningColor).Render("Warnings"))
+		b.WriteString("\n")
+		for _, err := range m.errors {
+			b.WriteString(lipgloss.NewStyle().Foreground(WarningColor).Render("  • " + err))
+			b.WriteString("\n")
+		}
+	}
 
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().

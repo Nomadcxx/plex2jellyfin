@@ -182,13 +182,14 @@ func (r *RsyncTransferer) buildArgs(opts TransferOptions, removeSource bool) []s
 	if opts.TargetUID >= 0 || opts.TargetGID >= 0 {
 		uid := opts.TargetUID
 		gid := opts.TargetGID
-		if uid < 0 {
-			uid = 0
+
+		if uid >= 0 && gid >= 0 {
+			args = append(args, fmt.Sprintf("--chown=%d:%d", uid, gid))
+		} else if uid >= 0 {
+			args = append(args, fmt.Sprintf("--chown=%d", uid))
+		} else if gid >= 0 {
+			args = append(args, fmt.Sprintf("--chown=:%d", gid))
 		}
-		if gid < 0 {
-			gid = 0
-		}
-		args = append(args, fmt.Sprintf("--chown=%d:%d", uid, gid))
 	}
 
 	if opts.FileMode != 0 || opts.DirMode != 0 {

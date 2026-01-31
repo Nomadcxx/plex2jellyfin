@@ -93,6 +93,16 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "File ownership configured",
 			logging.F("uid", targetUID),
 			logging.F("gid", targetGID))
+
+		if os.Geteuid() != 0 {
+			logger.Error("daemon", "Permission ownership configured but daemon not running as root",
+				fmt.Errorf("chown will fail"),
+				logging.F("current_euid", os.Geteuid()),
+				logging.F("target_uid", targetUID),
+				logging.F("target_gid", targetGID),
+				logging.F("fix", "Update systemd service to run as root: User=root"))
+			return fmt.Errorf("daemon must run as root to set file ownership (current euid=%d)", os.Geteuid())
+		}
 	}
 	if cfg.Permissions.WantsMode() {
 		var err error

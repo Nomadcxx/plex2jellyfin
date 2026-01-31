@@ -216,28 +216,28 @@ func setupSystemd(m *model) error {
 		return nil
 	}
 
-	actualUser := getActualUser()
-	configDir, err := getConfigDir()
-	if err != nil {
-		return fmt.Errorf("failed to get config directory: %w", err)
-	}
-
-	serviceContent := fmt.Sprintf(`[Unit]
+	serviceContent := `[Unit]
 Description=JellyWatch Media Organizer Daemon
 After=network.target
 
 [Service]
 Type=simple
-User=%s
+User=root
+Group=root
 ExecStart=/usr/local/bin/jellywatchd
 Restart=on-failure
 RestartSec=5
-Environment=HOME=%s
-WorkingDirectory=%s
+
+# Security settings
+PrivateTmp=true
+
+# Restrict capabilities to minimum needed for file ownership changes
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
 
 [Install]
 WantedBy=multi-user.target
-`, actualUser, filepath.Dir(configDir), filepath.Dir(configDir))
+`
 
 	servicePath := "/etc/systemd/system/jellywatchd.service"
 	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
@@ -269,382 +269,12 @@ func stopDaemon(m *model) error {
 	return nil
 }
 
-func executeSonarrIntegration(m *model) tea.Cmd {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if !m.sonarrEnabled {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	sonarrURL := m.sonarrURL
-	apiKey := m.sonarrAPIKey
-
-	client := sonarr.NewClient(sonarr.Config{
-		URL:    sonarrURL,
-		APIKey: apiKey,
-		Timeout: 15 * time.Second,
-	})
-
-	m.sonarrVersion = "checking"
-	m.sonarrTested = false
-	m.sonarrTesting = true
-
-	go func() {
-		if err := client.Ping(); err != nil {
-			m.sonarrVersion = fmt.Sprintf("%s", err.Error())
-			m.sonarrTested = true
-		} else {
-			m.sonarrVersion = "connected"
-	}
-		m.sonarrTesting = false
-	}()
-
-	return tea.Batch(
-		m.spinner.Tick,
-		func() tea.Msg {
-			if globalProgram != nil {
-				globalProgram.Send(tea.Quit())
-			}
-			},
-		)
-}
-
-func executeRadarrIntegration(m *model) tea.Cmd {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if !m.radarrEnabled {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	radarrURL := m.radarrURL
-	apiKey := m.radarrAPIKey
-
-	client := radarr.NewClient(radarr.Config{
-		URL:    radarrURL,
-		APIKey: apiKey,
-		Timeout: 15 * time.Second,
-	})
-
-	m.radarrVersion = "checking"
-	m.radarrTested = false
-	m.radarrTesting = true
-
-	go func() {
-		if err := client.Ping(); err != nil {
-			m.radarrVersion = fmt.Sprintf("%s", err.Error())
-			m.radarrTested = true
-		} else {
-			m.radarrVersion = "connected"
-		}
-		m.radarrTesting = false
-	}()
-
-	return tea.Batch(
-		m.spinner.Tick,
-		func() tea.Msg {
-			if globalProgram != nil {
-				globalProgram.Send(tea.Quit())
-			}
-			},
-		)
-}
-
-func executeSonarrDisableAutoImport(m *model) tea.Cmd {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if !m.sonarrEnabled {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	client := sonarr.NewClient(sonarr.Config{
-		URL:    m.sonarrURL,
-			APIKey: m.sonarrAPIKey,
-		Timeout: 15 * time.NewSecond,
-	})
-
-	config, err := client.GetMediaManagementConfig()
-	if err != nil {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	config.RenameEpisodes = false
-	if err := client.UpdateMediaManagementConfig(config); err != nil {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	return func() tea.Msg {
-		if globalProgram != nil {
-			globalProgram.Send(scanProgressMsg{
-				progress: ScanProgress{
-					FilesScanned:   100,
-					CurrentPath:    "Auto-import disabled for Sonarr",
-					LibrariesDone:   100,
-					LibrariesTotal: 100,
-				},
-			})
-		}
-	}
-}
-
-func executeRadarrIntegration(m *model) tea.Cmd {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if !m.radarrEnabled {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	radarrURL := m.radarrURL
-	apiKey := m.radarrAPIKey
-
-	client := radarr.NewClient(radarr.Config{
-		URL:    radarrURL,
-		APIKey: apiKey,
-			Timeout: 15 * time.Second,
-	})
-
-	m.radarrVersion = "checking"
-	m.radarrTested = false
-	m.radarrTesting = true
-
-	go func() {
-		if err := client.Ping(); err != nil {
-			m.radarrVersion = fmt.Sprintf("%s", err.Error())
-			m.radarrTested = true
-			m.radarrTesting = false
-		} else {
-			m.radarrVersion = "connected"
-			m.radarrTested = true
-			m.radarrTesting = false
-
-			if m.radarrVersion != "" {
-				if config, err := client.GetMediaManagementConfig(); err != nil {
-					m.radarrVersion = fmt.Sprintf("%s %s", config.ID, config.Version)
-				} else {
-					m.radarrVersion = "connected"
-				}
-			}
-		}
-
-		m.radarrTesting = false
-	}()
-
-	return tea.Batch(
-		m.spinner.Tick,
-		func() tea.Msg {
-			if globalProgram != nil {
-				globalProgram.Send(tea.Quit())
-			}
-		},
-	)
-}
-
-func executeSonarrDisableAutoImport(m *model) tea.Cmd {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if !m.sonarrEnabled {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	client := sonarr.NewClient(sonarr.Config{
-		URL:    m.sonarrURL,
-		APIKey: m.sonarrAPIKey,
-			Timeout: 15 * time,
-	})
-
-	config, err := client.GetMediaManagementConfig()
-	if err != nil {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	config.RenameEpisodes = false
-	if err := client.UpdateMediaManagementConfig(config); err != nil {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	return func() tea.Msg {
-		if globalProgram != nil {
-			globalProgram.Send(scanProgressMsg{
-				progress: ScanProgress{
-					FilesScanned:   100,
-					CurrentPath:    "Auto-import disabled for Sonarr",
-					LibrariesDone:   100,
-					LibrariesTotal: 100,
-				},
-			})
-		}
-
-		}
-	}()
-}
-
-func executeSonarrIntegration(m *model) tea.Cmd {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if !m.sonarrEnabled {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	sonarrURL := m.sonarrURL
-	apiKey := m.sonarrAPIKey
-
-	client := sonarr.NewClient(sonarr.Config{
-		URL:    sonarrURL,
-			APIKey: apiKey,
-			Timeout: 15 * time.Second,
-	})
-
-	m.sonarrVersion = "checking"
-	m.sonarrTested = false
-	m.sonarrTesting = true
-
-	go func() {
-		if err := client.Ping(); err != nil {
-			m.sonarrVersion = fmt.Sprintf("%s", err.Error())
-			m.sonarrTested = true
-			m.sonarrTesting = false
-		} else {
-			m.sonarrVersion = "connected"
-			m.sonarrTested = true
-			m.sonarrTesting = false
-		}
-	}()
-
-	return tea.Batch(
-		m.spinner.Tick,
-		func() tea.Msg {
-			if globalProgram != nil {
-				globalProgram.Send(tea.Quit())
-			}
-		},
-	)
-}
-
-func executeSonarrDisableAutoImport(m *model) tea.Cmd {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if !m.sonarrEnabled {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	client := sonarr.NewClient(sonarr.Config{
-		URL:    m.sonarrURL,
-		APIKey: m.sonarrAPIKey,
-		Timeout: 15 * time.Second,
-	})
-
-	config, err := client.GetMediaManagementConfig()
-	if err != nil {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	config.RenameEpisodes = false
-	if err := client.UpdateMediaManagementConfig(config); err != nil {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	return func() tea.Msg {
-		if globalProgram != nil {
-			globalProgram.Send(scanProgressMsg{
-				progress: ScanProgress{
-					FilesScanned:   100,
-					CurrentPath:    "Auto-import disabled for Sonarr",
-					LibrariesDone:   100,
-					LibrariesTotal: 100,
-				},
-			})
-		}
-	}()
-}
-
-func executeRadarrIntegration(m *model) tea.Cmd {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if !m.radarrEnabled {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	radarrURL := m.radarrURL
-	apiKey := m.radarrAPIKey
-
-	client := radarr.NewClient(radarr.Config{
-		URL:    radarrURL,
-		APIKey: apiKey,
-		Timeout: 15 * time.Second,
-	})
-
-	m.radarrVersion = "checking"
-	m.radarrTested = false
-	m.radarrTesting = true
-
-	go func() {
-		if err := client.Ping(); err != nil {
-			m.radarrVersion = fmt.Sprintf("%s", err.Error())
-			m.radarrTested = true
-			m.radarrTesting = false
-		} else {
-			m.radarrVersion = "connected"
-			m.radarrTested = true
-			m.radarrTesting = false
-		}
-	}()
-
-	return tea.Batch(
-		m.spinner.Tick,
-		func() tea.Msg {
-			if globalProgram != nil {
-				globalProgram.Send(tea.Quit())
-			}
-		},
-	)
-}
-
-func executeRadarrDisableAutoImport(m *model) tea.Cmd {
-	ctx, cancel := context.With context.Background(), 30*time.Second)
-	defer cancel()
-
-	if !m.radarrEnabled {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	client := radarr.NewClient(radarr.Config{
-		URL:    radarrURL,
-		APIKey: apiKapiKey,
-		Timeout: 15 * time,
-	})
-
-	config, err := client.GetMediaManagementConfig()
-	if err != nil {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	config.RenameEpisodes = false
-	if err := client.UpdateMediaManagementConfig(config); err != nil {
-		return func() tea.Msg { tea.Quit }
-	}
-
-	return func() tea.Msg {
-		if globalProgram != nil {
-			globalProgram.Send(scanProgressMsg{
-				progress: ScanProgress{
-					FilesScanned:   100,
-					CurrentPath:    "Auto-import disabled for Radarr",
-					LibrariesDone:   100,
-					LibrariesTotal: 100,
-				},
-			})
-		}
-	}()
-}
-
 func disableService(m *model) error {
+	exec.Command("systemctl", "disable", "jellywatchd.service").Run()
+	os.Remove("/etc/systemd/system/jellywatchd.service")
+	exec.Command("systemctl", "daemon-reload").Run()
+	return nil
+}
 
 func removeBinaries(m *model) error {
 	binaries := []string{
@@ -771,6 +401,22 @@ func (m model) runInitialScan() tea.Cmd {
 			},
 		})
 
+		// Fix ownership BEFORE checking scan error - database was already created
+		// and we need to ensure the user can access it even if scan failed
+		actualUser := getActualUser()
+		if actualUser != "root" && actualUser != "" {
+			jellywatchDir := filepath.Dir(dbPath)
+
+			// Use configured group if set, otherwise fall back to user's primary group
+			group := actualUser
+			if permGroup != "" {
+				group = permGroup
+			}
+
+			ownership := actualUser + ":" + group
+			exec.Command("chown", "-R", ownership, jellywatchDir).Run()
+		}
+
 		if err != nil {
 			return scanCompleteMsg{err: err}
 		}
@@ -789,22 +435,6 @@ func (m model) runInitialScan() tea.Cmd {
 			TVShows:         tvCount,
 			Movies:          movieCount,
 			DuplicateGroups: dupeCount,
-		}
-
-		// Fix ownership of config directory and database
-		// Use the actual user (not root) and the configured group from permissions
-		actualUser := getActualUser()
-		if actualUser != "root" && actualUser != "" {
-			jellywatchDir := filepath.Dir(dbPath)
-			
-			// Use configured group if set, otherwise fall back to user's primary group
-			group := actualUser
-			if permGroup != "" {
-				group = permGroup
-			}
-			
-			ownership := actualUser + ":" + group
-			exec.Command("chown", "-R", ownership, jellywatchDir).Run()
 		}
 
 		return scanCompleteMsg{

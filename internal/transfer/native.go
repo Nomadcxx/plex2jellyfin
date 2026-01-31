@@ -206,7 +206,8 @@ func applyPermissions(path string, opts TransferOptions) error {
 		}
 		if err := os.Chown(path, uid, gid); err != nil {
 			if os.Geteuid() != 0 {
-				return nil
+				return fmt.Errorf("chown failed (daemon not running as root): target uid=%d gid=%d, current euid=%d: %w",
+					uid, gid, os.Geteuid(), err)
 			}
 			return fmt.Errorf("chown failed: %w", err)
 		}

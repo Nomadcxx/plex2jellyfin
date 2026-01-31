@@ -1,35 +1,295 @@
 openapi: 3.0.3
 info:
-  title: Jellywatch API
+  title: JellyWatch API
   description: API for managing media library cleanup operations
-  version: 1.0.0
+  version: 2.0.0
   license:
-    name: MIT
+    name: GPL-3.0
 
 servers:
-  - url: http://localhost:8080/api/v1
-    description: Local development server
+  - url: /api/v1
+    description: API v1
 
 paths:
+  # ============ DASHBOARD ============
+  /dashboard:
+    get:
+      operationId: getDashboard
+      summary: Get dashboard aggregate data
+      tags: [Dashboard]
+      responses:
+        '200':
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardData'
+
+  # ============ MEDIA MANAGERS ============
+  /media-managers:
+    get:
+      operationId: listMediaManagers
+      summary: List all configured media managers
+      tags: [Media Managers]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MediaManagerInfo'
+
+  /media-managers/{managerId}/status:
+    get:
+      operationId: getMediaManagerStatus
+      summary: Get service health and stats
+      tags: [Media Managers]
+      parameters:
+        - name: managerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Manager status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceStatus'
+
+  /media-managers/{managerId}/queue:
+    get:
+      operationId: getMediaManagerQueue
+      summary: Get download queue
+      tags: [Media Managers]
+      parameters:
+        - name: managerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Queue items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QueueItem'
+
+  /media-managers/{managerId}/queue/{itemId}:
+    delete:
+      operationId: clearQueueItem
+      summary: Clear item from queue
+      tags: [Media Managers]
+      parameters:
+        - name: managerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: blocklist
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Item cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+
+  /media-managers/{managerId}/stuck:
+    get:
+      operationId: getStuckItems
+      summary: Get stuck queue items
+      tags: [Media Managers]
+      parameters:
+        - name: managerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stuck items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QueueItem'
+    delete:
+      operationId: clearStuckItems
+      summary: Clear all stuck items
+      tags: [Media Managers]
+      parameters:
+        - name: managerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: blocklist
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Items cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+
+  /media-managers/{managerId}/scan:
+    post:
+      operationId: triggerManagerScan
+      summary: Trigger import scan
+      tags: [Media Managers]
+      parameters:
+        - name: managerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+      responses:
+        '202':
+          description: Scan triggered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+
+  # ============ LLM PROVIDERS ============
+  /llm-providers:
+    get:
+      operationId: listLLMProviders
+      summary: List configured LLM providers
+      tags: [LLM Providers]
+      responses:
+        '200':
+          description: List of providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LLMProviderInfo'
+
+  /llm-providers/{providerId}/status:
+    get:
+      operationId: getLLMProviderStatus
+      summary: Get provider health and model
+      tags: [LLM Providers]
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Provider status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderStatus'
+
+  /ai/settings:
+    get:
+      operationId: getAISettings
+      summary: Get current AI settings
+      tags: [AI]
+      responses:
+        '200':
+          description: AI settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AISettings'
+
+  # ============ ACTIVITY ============
+  /activity:
+    get:
+      operationId: getActivity
+      summary: Get paginated activity log
+      tags: [Activity]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Activity events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActivityEvent'
+
+  /activity/stream:
+    get:
+      operationId: activityStream
+      summary: SSE stream for real-time activity
+      tags: [Activity]
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  # ============ DUPLICATES (existing) ============
   /duplicates:
     get:
       operationId: getDuplicates
       summary: Get duplicate analysis
-      description: Analyzes the media library for duplicate files
+      tags: [Duplicates]
       responses:
         '200':
-          description: Duplicate analysis results
+          description: Duplicate analysis
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DuplicateAnalysis'
-        '500':
-          $ref: '#/components/responses/InternalError'
 
   /duplicates/{groupId}:
     delete:
       operationId: deleteDuplicate
       summary: Delete inferior file from duplicate group
+      tags: [Duplicates]
       parameters:
         - name: groupId
           in: path
@@ -38,41 +298,36 @@ paths:
             type: string
         - name: fileId
           in: query
-          description: Specific file to delete (default is auto-selected inferior)
           schema:
             type: integer
             format: int64
       responses:
         '200':
-          description: Deletion result
+          description: File deleted
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationResult'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
 
+  # ============ SCATTERED (existing) ============
   /scattered:
     get:
       operationId: getScattered
       summary: Get scattered media analysis
-      description: Finds media scattered across multiple locations
+      tags: [Consolidation]
       responses:
         '200':
-          description: Scattered media analysis
+          description: Scattered analysis
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScatteredAnalysis'
-        '500':
-          $ref: '#/components/responses/InternalError'
 
   /scattered/{itemId}/consolidate:
     post:
       operationId: consolidateItem
       summary: Consolidate scattered media item
+      tags: [Consolidation]
       parameters:
         - name: itemId
           in: path
@@ -80,22 +335,29 @@ paths:
           schema:
             type: integer
             format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dryRun:
+                  type: boolean
+                  default: false
       responses:
         '200':
           description: Consolidation result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OperationResult'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: '#/components/schemas/ConsolidationResult'
 
+  # ============ SCAN (existing) ============
   /scan:
     post:
       operationId: startScan
       summary: Trigger library scan
+      tags: [Scan]
       responses:
         '202':
           description: Scan started
@@ -103,29 +365,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScanStatus'
-        '409':
-          description: Scan already in progress
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
 
   /scan/status:
     get:
       operationId: getScanStatus
-      summary: Get scan status with SSE for progress
+      summary: Get scan status
+      tags: [Scan]
       responses:
         '200':
-          description: Scan status stream
+          description: Scan status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanStatus'
+
+  /scan/stream:
+    get:
+      operationId: scanStream
+      summary: SSE stream for scan progress
+      tags: [Scan]
+      responses:
+        '200':
+          description: Server-Sent Events stream
           content:
             text/event-stream:
               schema:
-                $ref: '#/components/schemas/ScanProgress'
+                type: string
 
+  # ============ AUTH ============
+  /auth/status:
+    get:
+      operationId: getAuthStatus
+      summary: Check if auth is enabled and current state
+      tags: [Auth]
+      responses:
+        '200':
+          description: Auth status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthStatus'
+
+  /auth/login:
+    post:
+      operationId: login
+      summary: Authenticate with password
+      tags: [Auth]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+        '401':
+          description: Invalid password
+
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Clear session cookie
+      tags: [Auth]
+      responses:
+        '200':
+          description: Logged out
+
+  # ============ HEALTH ============
   /health:
     get:
       operationId: healthCheck
       summary: Health check endpoint
+      tags: [Health]
       responses:
         '200':
           description: Service is healthy
@@ -136,19 +451,233 @@ paths:
                 properties:
                   status:
                     type: string
-                    example: ok
                   version:
                     type: string
 
 components:
   schemas:
+    # Dashboard
+    DashboardData:
+      type: object
+      properties:
+        libraryStats:
+          $ref: '#/components/schemas/LibraryStats'
+        mediaManagers:
+          type: array
+          items:
+            $ref: '#/components/schemas/MediaManagerSummary'
+        llmProvider:
+          $ref: '#/components/schemas/LLMProviderSummary'
+        recentActivity:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityEvent'
+
+    LibraryStats:
+      type: object
+      properties:
+        totalFiles:
+          type: integer
+        totalSize:
+          type: integer
+          format: int64
+        movieCount:
+          type: integer
+        seriesCount:
+          type: integer
+        episodeCount:
+          type: integer
+        duplicateGroups:
+          type: integer
+        reclaimableBytes:
+          type: integer
+          format: int64
+        scatteredSeries:
+          type: integer
+
+    # Media Managers
+    MediaManagerInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [sonarr, radarr, mediadownloader, custom]
+        name:
+          type: string
+        enabled:
+          type: boolean
+        capabilities:
+          $ref: '#/components/schemas/ManagerCapabilities'
+
+    MediaManagerSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        online:
+          type: boolean
+        queueSize:
+          type: integer
+        stuckCount:
+          type: integer
+
+    ServiceStatus:
+      type: object
+      properties:
+        online:
+          type: boolean
+        version:
+          type: string
+        queueSize:
+          type: integer
+        stuckCount:
+          type: integer
+        error:
+          type: string
+
+    ManagerCapabilities:
+      type: object
+      properties:
+        supportsRetry:
+          type: boolean
+        supportsPriority:
+          type: boolean
+        supportsHistory:
+          type: boolean
+        supportsQualityEdit:
+          type: boolean
+        supportsBulkActions:
+          type: boolean
+
+    QueueItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        status:
+          type: string
+        progress:
+          type: number
+        size:
+          type: integer
+          format: int64
+        sizeRemaining:
+          type: integer
+          format: int64
+        timeLeft:
+          type: string
+        isStuck:
+          type: boolean
+        errorMessage:
+          type: string
+        downloadClient:
+          type: string
+
+    # LLM
+    LLMProviderInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [ollama, openai, anthropic, lmstudio, custom]
+        name:
+          type: string
+        enabled:
+          type: boolean
+        currentModel:
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/LLMCapabilities'
+
+    LLMProviderSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        online:
+          type: boolean
+        currentModel:
+          type: string
+
+    LLMProviderStatus:
+      type: object
+      properties:
+        online:
+          type: boolean
+        model:
+          type: string
+        modelList:
+          type: array
+          items:
+            $ref: '#/components/schemas/LLMModel'
+        error:
+          type: string
+
+    LLMModel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        size:
+          type: string
+
+    LLMCapabilities:
+      type: object
+      properties:
+        supportsStreaming:
+          type: boolean
+        supportsVision:
+          type: boolean
+        supportsModelSwitch:
+          type: boolean
+        localOnly:
+          type: boolean
+
+    AISettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        defaultProvider:
+          type: string
+        confidenceThreshold:
+          type: number
+        autoApply:
+          type: boolean
+
+    # Activity
+    ActivityEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [FILE_DETECTED, FILE_ORGANIZED, DUPLICATE_FOUND, SYNC_COMPLETED, ERROR]
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    # Duplicates
     DuplicateAnalysis:
       type: object
-      required:
-        - groups
-        - totalFiles
-        - totalGroups
-        - reclaimableBytes
       properties:
         groups:
           type: array
@@ -164,13 +693,6 @@ components:
 
     DuplicateGroup:
       type: object
-      required:
-        - id
-        - title
-        - mediaType
-        - files
-        - bestFileId
-        - reclaimableBytes
       properties:
         id:
           type: string
@@ -178,16 +700,9 @@ components:
           type: string
         year:
           type: integer
-          nullable: true
         mediaType:
           type: string
           enum: [movie, series]
-        season:
-          type: integer
-          nullable: true
-        episode:
-          type: integer
-          nullable: true
         files:
           type: array
           items:
@@ -201,11 +716,6 @@ components:
 
     MediaFile:
       type: object
-      required:
-        - id
-        - path
-        - size
-        - qualityScore
       properties:
         id:
           type: integer
@@ -222,13 +732,9 @@ components:
         qualityScore:
           type: integer
 
+    # Scattered
     ScatteredAnalysis:
       type: object
-      required:
-        - items
-        - totalItems
-        - totalMoves
-        - totalBytes
       properties:
         items:
           type: array
@@ -244,13 +750,6 @@ components:
 
     ScatteredItem:
       type: object
-      required:
-        - id
-        - title
-        - mediaType
-        - locations
-        - targetLocation
-        - filesToMove
       properties:
         id:
           type: integer
@@ -259,7 +758,6 @@ components:
           type: string
         year:
           type: integer
-          nullable: true
         mediaType:
           type: string
         locations:
@@ -274,10 +772,45 @@ components:
           type: integer
           format: int64
 
+    ConsolidationResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        filesMoved:
+          type: integer
+        bytesMoved:
+          type: integer
+          format: int64
+        errors:
+          type: array
+          items:
+            type: string
+
+    # Scan
+    ScanStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [idle, scanning, completed, failed]
+        progress:
+          type: integer
+        message:
+          type: string
+
+    # Auth
+    AuthStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        authenticated:
+          type: boolean
+
+    # Common
     OperationResult:
       type: object
-      required:
-        - success
       properties:
         success:
           type: boolean
@@ -288,68 +821,11 @@ components:
         bytesAffected:
           type: integer
           format: int64
-        error:
-          type: string
-
-    ScanStatus:
-      type: object
-      required:
-        - status
-      properties:
-        status:
-          type: string
-          enum: [idle, scanning, completed, failed]
-        startedAt:
-          type: string
-          format: date-time
-        completedAt:
-          type: string
-          format: date-time
-        progress:
-          type: integer
-          minimum: 0
-          maximum: 100
-        message:
-          type: string
-
-    ScanProgress:
-      type: object
-      properties:
-        type:
-          type: string
-          enum: [started, progress, completed, error]
-        current:
-          type: integer
-        total:
-          type: integer
-        message:
-          type: string
-        duplicatesFound:
-          type: integer
-        scatteredFound:
-          type: integer
 
     Error:
       type: object
-      required:
-        - code
-        - message
       properties:
         code:
           type: string
         message:
           type: string
-
-  responses:
-    NotFound:
-      description: Resource not found
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-    InternalError:
-      description: Internal server error
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'

@@ -23,6 +23,10 @@ type PathMismatch struct {
 }
 
 func DetectSeriesMismatches(db *database.MediaDB, sonarrClient *sonarr.Client) ([]PathMismatch, error) {
+	if sonarrClient == nil {
+		return nil, fmt.Errorf("getting series from Sonarr: nil client")
+	}
+
 	allSeries, err := db.GetAllSeries()
 	if err != nil {
 		return nil, fmt.Errorf("getting all series from DB: %w", err)
@@ -67,6 +71,10 @@ func DetectSeriesMismatches(db *database.MediaDB, sonarrClient *sonarr.Client) (
 }
 
 func DetectMovieMismatches(db *database.MediaDB, radarrClient *radarr.Client) ([]PathMismatch, error) {
+	if radarrClient == nil {
+		return nil, fmt.Errorf("getting movies from Radarr: nil client")
+	}
+
 	allMovies, err := db.GetAllMovies()
 	if err != nil {
 		return nil, fmt.Errorf("getting all movies from DB: %w", err)

@@ -31,6 +31,19 @@ func newModel(debugMode bool, logFile *os.File) model {
 	// Detect existing installation
 	existingDB, dbPath, _ := detectExistingInstall()
 
+	// Smart permission defaults based on detected media server
+	permUser := ""
+	permGroup := "media"
+	permFileMode := "0664"
+	permDirMode := "0775"
+
+	if mediaServer := detectMediaServer(); mediaServer != nil {
+		permUser = mediaServer.User
+		permGroup = mediaServer.Group
+	} else if mediaGroup := detectMediaGroup(); mediaGroup != "" {
+		permGroup = mediaGroup
+	}
+
 	m := model{
 		step:             stepWelcome,
 		tasks:            []installTask{},
@@ -53,10 +66,10 @@ func newModel(debugMode bool, logFile *os.File) model {
 		sonarrURL:    "http://localhost:8989",
 		radarrURL:    "http://localhost:7878",
 		aiOllamaURL:  "http://localhost:11434",
-		permUser:     "jellyfin",
-		permGroup:    "jellyfin",
-		permFileMode: "0644",
-		permDirMode:  "0755",
+		permUser:     permUser,
+		permGroup:    permGroup,
+		permFileMode: permFileMode,
+		permDirMode:  permDirMode,
 
 		// Service defaults
 		serviceEnabled:  true,

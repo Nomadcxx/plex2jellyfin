@@ -138,6 +138,28 @@ file_mode = "0644"
 dir_mode = "0755"
 ```
 
+**IMPORTANT**: The jellywatchd daemon must run as root to set file ownership. The systemd service is configured to run as root with minimal capabilities (CAP_CHOWN, CAP_FOWNER, CAP_DAC_OVERRIDE) for security.
+
+If you see permission errors in the logs, verify the daemon is running as root:
+```bash
+ps aux | grep jellywatchd
+# Should show "root" as the user
+```
+
+If running as a non-root user, file ownership will fail and you'll see errors like:
+```
+chown failed (daemon not running as root): target uid=XXX gid=XXX
+```
+
+To fix: Update the systemd service to run as root:
+```bash
+sudo systemctl stop jellywatchd
+sudo nano /etc/systemd/system/jellywatchd.service
+# Change User=<username> to User=root
+sudo systemctl daemon-reload
+sudo systemctl start jellywatchd
+```
+
 ## Daemon
 
 Runs as a systemd service. The installer sets this up.

@@ -152,3 +152,59 @@ func validatePath(path string) error {
 	}
 	return nil
 }
+
+type DetectedMediaServer struct {
+	Name  string
+	User  string
+	Group string
+}
+
+func detectMediaServer() *DetectedMediaServer {
+	candidates := []struct {
+		name  string
+		user  string
+		group string
+	}{
+		{"jellyfin", "jellyfin", "jellyfin"},
+		{"plex", "plex", "plex"},
+		{"emby", "emby", "emby"},
+	}
+
+	for _, c := range candidates {
+		if _, err := user.Lookup(c.user); err == nil {
+			return &DetectedMediaServer{Name: c.name, User: c.user, Group: c.group}
+		}
+	}
+	return nil
+}
+
+func detectMediaGroup() string {
+	candidates := []string{"media", "video", "render"}
+	for _, g := range candidates {
+		if _, err := user.LookupGroup(g); err == nil {
+			return g
+		}
+	}
+	return ""
+}
+
+func isUserInGroup(username, groupname string) bool {
+	u, err := user.Lookup(username)
+	if err != nil {
+		return false
+	}
+	gids, err := u.GroupIds()
+	if err != nil {
+		return false
+	}
+	g, err := user.LookupGroup(groupname)
+	if err != nil {
+		return false
+	}
+	for _, gid := range gids {
+		if gid == g.Gid {
+			return true
+		}
+	}
+	return false
+}

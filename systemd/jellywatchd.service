@@ -4,14 +4,20 @@ After=network.target
 
 [Service]
 Type=simple
-User=%USERNAME%
+User=root
+Group=root
 ExecStart=/usr/local/bin/jellywatchd
 Restart=on-failure
 RestartSec=10
 
 # Security settings
-NoNewPrivileges=true
+# NoNewPrivileges disabled - daemon needs to chown files
+# NoNewPrivileges=true
 PrivateTmp=true
+
+# Restrict capabilities to minimum needed
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
 
 [Install]
 WantedBy=multi-user.target
