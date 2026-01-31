@@ -6,11 +6,51 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/permissions"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
 )
 
-func runDuplicatesExecute(db *database.MediaDB) error {
+func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) error {
+	canDelete, err := permissions.CanDelete(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			_ = db.DeleteMediaFile(filePath)
+			return nil
+		}
+		return fmt.Errorf("failed to check permissions: %w", err)
+	}
+
+	if !canDelete {
+		if err := permissions.FixPermissions(filePath, uid, gid); err != nil {
+			if removeErr := os.Remove(filePath); removeErr != nil {
+				_ = db.DeleteMediaFile(filePath)
+				if os.IsNotExist(removeErr) {
+					return nil
+				}
+				return fmt.Errorf("permission denied (tried chmod but failed: %v): %w", err, removeErr)
+			}
+		}
+	}
+
+	if err := os.Remove(filePath); err != nil {
+		_ = db.DeleteMediaFile(filePath)
+
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to delete file: %w", err)
+	}
+
+	if err := db.DeleteMediaFile(filePath); err != nil {
+		fmt.Printf("  ⚠️  Warning: File deleted but database cleanup failed: %v\n", err)
+	}
+
+	return nil
+}
+
+func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 	plan, err := plans.LoadDuplicatePlans()
 	if err != nil {
 		return fmt.Errorf("failed to load plans: %w", err)
@@ -60,8 +100,13 @@ func runDuplicatesExecute(db *database.MediaDB) error {
 		file := p.Delete
 		filePath := file.Path
 
-		// Delete file
-		if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+		var uid, gid int = -1, -1
+		if cfg != nil && cfg.Permissions.WantsOwnership() {
+			uid, _ = cfg.Permissions.ResolveUID()
+			gid, _ = cfg.Permissions.ResolveGID()
+		}
+
+		if err := deleteDuplicateFile(db, filePath, uid, gid); err != nil {
 			fmt.Printf("  ❌ Failed to delete %s: %v\n", filePath, err)
 			continue
 		}

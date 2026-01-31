@@ -1078,7 +1078,8 @@ can help you clean up wasted space.`,
 				return err
 			}
 			defer db.Close()
-			return runDuplicatesExecute(db)
+			cfg, _ := config.Load()
+			return runDuplicatesExecute(db, cfg)
 		},
 	})
 
