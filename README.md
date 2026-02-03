@@ -2,7 +2,7 @@
   <img src="assets/jellywatch-header.png" alt="JellyWatch" />
   <p><em>Because Sonarr and Radarr can't be trusted with naming conventions</em></p>
 </div>
-
+THIS IS WIP
 ---
 
 ## What It Does
