@@ -1,5 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
+import type { components } from '@/types/api';
+
+type DuplicateAnalysis = components['schemas']['DuplicateAnalysis'];
 
 export const queryKeys = {
   dashboard: ['dashboard'] as const,
@@ -25,7 +28,7 @@ export function useMediaManagers() {
 }
 
 export function useDuplicates() {
-  return useQuery({
+  return useQuery<DuplicateAnalysis>({
     queryKey: queryKeys.duplicates,
     queryFn: () => api.get('/duplicates'),
     refetchInterval: 60 * 1000,
