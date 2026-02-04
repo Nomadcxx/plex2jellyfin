@@ -83,7 +83,7 @@ func (c *Consolidator) executeOperation(op *Operation, dryRun bool) error {
 		return fmt.Errorf("failed to create transferer: %w", err)
 	}
 
-	opts := transfer.DefaultOptions()
+	opts := transfer.OptionsFromConfig(c.cfg)
 	opts.Checksum = c.cfg.Options.VerifyChecksums
 
 	// Move file (rsync backend handles failing disks)

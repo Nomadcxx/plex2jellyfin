@@ -498,7 +498,7 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 		return fmt.Errorf("failed to create transferer: %w", err)
 	}
 
-	result, err := transferer.Move(file.Path, action.NewPath, transfer.DefaultOptions())
+	result, err := transferer.Move(file.Path, action.NewPath, transfer.OptionsFromConfig(cfg))
 	if err != nil {
 		return fmt.Errorf("failed to move file: %w", err)
 	}
@@ -521,7 +521,7 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 
 	if err := db.UpdateMediaFile(file); err != nil {
 		// Attempt rollback on DB failure
-		rollbackResult, rollbackErr := transferer.Move(action.NewPath, file.Path, transfer.DefaultOptions())
+		rollbackResult, rollbackErr := transferer.Move(action.NewPath, file.Path, transfer.OptionsFromConfig(cfg))
 		if rollbackErr != nil {
 			fmt.Printf("Failed to rollback file move: %v\n", rollbackErr)
 		} else if !rollbackResult.Success {

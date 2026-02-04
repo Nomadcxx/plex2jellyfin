@@ -89,7 +89,7 @@ func runConsolidateExecute(db *database.MediaDB) error {
 			}
 
 			// Move file
-			result, err := transferer.Move(op.SourcePath, op.TargetPath, transfer.DefaultOptions())
+			result, err := transferer.Move(op.SourcePath, op.TargetPath, transfer.OptionsFromConfig(cfg))
 			if err != nil {
 				fmt.Printf("  ❌ Failed to move: %v\n", err)
 				failedCount++
