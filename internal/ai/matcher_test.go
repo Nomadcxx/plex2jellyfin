@@ -61,7 +61,7 @@ func TestMatcher_ParseMovie(t *testing.T) {
 		t.Errorf("Expected title 'The Matrix', got '%s'", result.Title)
 	}
 
-	if result.Year == nil || *result.Year != 1999 {
+	if result.Year == nil || result.Year.Value == nil || *result.Year.Value != 1999 {
 		t.Errorf("Expected year 1999, got %v", result.Year)
 	}
 
@@ -130,7 +130,7 @@ func TestMatcher_ParseTVEpisode(t *testing.T) {
 		t.Errorf("Expected type 'tv', got '%s'", result.Type)
 	}
 
-	if result.Season == nil || *result.Season != 1 {
+	if result.Season == nil || result.Season.Value == nil || *result.Season.Value != 1 {
 		t.Errorf("Expected season 1, got %v", result.Season)
 	}
 
@@ -185,7 +185,7 @@ func TestMatcher_ParseWithMarkdownCodeBlock(t *testing.T) {
 		t.Errorf("Expected title 'Inception', got '%s'", result.Title)
 	}
 
-	if result.Year == nil || *result.Year != 2010 {
+	if result.Year == nil || result.Year.Value == nil || *result.Year.Value != 2010 {
 		t.Errorf("Expected year 2010, got %v", result.Year)
 	}
 }
@@ -241,7 +241,7 @@ func TestMatcher_ParseWithAbsoluteEpisode(t *testing.T) {
 		t.Errorf("Expected title 'One Piece', got '%s'", result.Title)
 	}
 
-	if result.AbsoluteEpisode == nil || *result.AbsoluteEpisode != 243 {
+	if result.AbsoluteEpisode == nil || result.AbsoluteEpisode.Value == nil || *result.AbsoluteEpisode.Value != 243 {
 		t.Errorf("Expected absolute episode 243, got %v", result.AbsoluteEpisode)
 	}
 
@@ -362,7 +362,7 @@ func TestMatcher_ParseWithMultiEpisode(t *testing.T) {
 		t.Errorf("Expected title 'Game of Thrones', got '%s'", result.Title)
 	}
 
-	if result.Season == nil || *result.Season != 8 {
+	if result.Season == nil || result.Season.Value == nil || *result.Season.Value != 8 {
 		t.Errorf("Expected season 8, got %v", result.Season)
 	}
 
@@ -643,8 +643,8 @@ func TestMatcher_YearWithoutValue(t *testing.T) {
 		t.Errorf("Expected title 'Some Show', got '%s'", result.Title)
 	}
 
-	if result.Year != nil {
-		t.Errorf("Expected nil year, got %v", *result.Year)
+	if result.Year != nil && result.Year.Value != nil {
+		t.Errorf("Expected nil year, got %v", *result.Year.Value)
 	}
 }
 
@@ -691,7 +691,7 @@ func TestMatcher_Parse_Legacy(t *testing.T) {
 		t.Errorf("Expected title 'Interstellar', got '%s'", result.Title)
 	}
 
-	if result.Year == nil || *result.Year != 2014 {
+	if result.Year == nil || result.Year.Value == nil || *result.Year.Value != 2014 {
 		t.Errorf("Expected year 2014, got %v", result.Year)
 	}
 

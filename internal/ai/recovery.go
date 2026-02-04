@@ -31,7 +31,7 @@ func ExtractPartialResult(response string) (*Result, bool) {
 
 	if yearMatch := yearPattern.FindStringSubmatch(response); yearMatch != nil {
 		if year, err := strconv.Atoi(yearMatch[1]); err == nil {
-			result.Year = &year
+			result.Year = NewFlexInt(&year)
 		}
 	}
 

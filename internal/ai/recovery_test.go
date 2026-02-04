@@ -12,7 +12,7 @@ func TestExtractPartialResult_ValidJSON(t *testing.T) {
 	if result.Title != "The Matrix" {
 		t.Errorf("expected title 'The Matrix', got '%s'", result.Title)
 	}
-	if result.Year == nil || *result.Year != 1999 {
+	if result.Year == nil || result.Year.Value == nil || *result.Year.Value != 1999 {
 		t.Errorf("expected year 1999, got %v", result.Year)
 	}
 }

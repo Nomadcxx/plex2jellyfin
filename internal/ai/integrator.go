@@ -364,7 +364,7 @@ func (i *Integrator) saveImprovementResult(item *QueueItem, result *Result) {
 		item.Request.UserYear,
 		result.Title,
 		result.Type,
-		result.Year,
+		result.Year.Int(),
 		result.Confidence,
 		"completed",
 		item.Attempts,

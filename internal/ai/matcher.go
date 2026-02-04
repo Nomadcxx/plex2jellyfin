@@ -25,14 +25,14 @@ import (
 
 // Result represents the AI's parsed output
 type Result struct {
-	Title           string  `json:"title"`
-	Year            *int    `json:"year,omitempty"`
-	Type            string  `json:"type"` // "movie" or "tv"
-	Season          *int    `json:"season,omitempty"`
-	Episodes        []int   `json:"episodes,omitempty"`
-	AbsoluteEpisode *int    `json:"absolute_episode,omitempty"`
-	AirDate         string  `json:"air_date,omitempty"`
-	Confidence      float64 `json:"confidence"`
+	Title           string       `json:"title"`
+	Year            *FlexInt     `json:"year,omitempty"`
+	Type            string       `json:"type"` // "movie" or "tv"
+	Season          *FlexInt     `json:"season,omitempty"`
+	Episodes        FlexIntSlice `json:"episodes,omitempty"`
+	AbsoluteEpisode *FlexInt     `json:"absolute_episode,omitempty"`
+	AirDate         string       `json:"air_date,omitempty"`
+	Confidence      float64      `json:"confidence"`
 }
 
 // Matcher handles AI-based title matching

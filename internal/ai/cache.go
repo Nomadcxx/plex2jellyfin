@@ -67,11 +67,11 @@ func (c *Cache) Get(inputNormalized, inputType, model string) (*Result, error) {
 
 	return &Result{
 		Title:           title,
-		Year:            year,
+		Year:            NewFlexInt(year),
 		Type:            mediaType,
-		Season:          season,
+		Season:          NewFlexInt(season),
 		Episodes:        episodes,
-		AbsoluteEpisode: absoluteEp,
+		AbsoluteEpisode: NewFlexInt(absoluteEp),
 		AirDate:         airDate,
 		Confidence:      confidence,
 	}, nil
@@ -107,8 +107,8 @@ func (c *Cache) Put(inputNormalized, inputType, model string, result *Result, la
 	`
 
 	_, err = c.db.Exec(query,
-		inputNormalized, inputType, result.Title, result.Year, result.Type,
-		result.Season, string(episodesJSON), result.AbsoluteEpisode, result.AirDate,
+		inputNormalized, inputType, result.Title, result.Year.Int(), result.Type,
+		result.Season.Int(), string(episodesJSON), result.AbsoluteEpisode.Int(), result.AirDate,
 		result.Confidence, model, latency.Milliseconds(),
 	)
 
