@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
 
 export const queryKeys = {
@@ -43,5 +43,31 @@ export function useAuthStatus() {
   return useQuery({
     queryKey: queryKeys.auth,
     queryFn: () => api.get('/auth/status'),
+  });
+}
+
+export function useDeleteDuplicate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ groupId, fileId }: { groupId: string; fileId?: number }) =>
+      api.delete(`/duplicates/${groupId}${fileId ? `?fileId=${fileId}` : ''}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.duplicates });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
+    },
+  });
+}
+
+export function useClearQueueItem(managerId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ itemId, blocklist = false }: { itemId: number; blocklist?: boolean }) =>
+      api.delete(`/media-managers/${managerId}/queue/${itemId}?blocklist=${blocklist}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['media-managers', managerId, 'queue'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.mediaManagers });
+    },
   });
 }
