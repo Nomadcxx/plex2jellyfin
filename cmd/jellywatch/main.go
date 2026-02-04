@@ -83,6 +83,7 @@ Features:
 	rootCmd.AddCommand(newServeCmd())
 	rootCmd.AddCommand(newAuditCmd())
 	rootCmd.AddCommand(newMigrateCmd())
+	rootCmd.AddCommand(newCleanupCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
