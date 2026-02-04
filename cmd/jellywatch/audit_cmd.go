@@ -220,7 +220,7 @@ func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, 
 
 		var newSeason, newEpisode *int
 		if aiResult.Season != nil {
-			newSeason = aiResult.Season
+			newSeason = aiResult.Season.Int()
 		} else {
 			newSeason = file.Season
 		}
@@ -234,10 +234,10 @@ func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, 
 		action := plans.AuditAction{
 			Action:     "rename",
 			NewTitle:   aiResult.Title,
-			NewYear:    aiResult.Year,
+			NewYear:    aiResult.Year.Int(),
 			NewSeason:  newSeason,
 			NewEpisode: newEpisode,
-			NewPath:    buildCorrectPath(file.Path, aiResult.Title, aiResult.Year, newSeason, newEpisode),
+			NewPath:    buildCorrectPath(file.Path, aiResult.Title, aiResult.Year.Int(), newSeason, newEpisode),
 			Reasoning:  fmt.Sprintf("AI suggested: %s (confidence: %.2f)", aiResult.Title, aiResult.Confidence),
 			Confidence: aiResult.Confidence,
 		}
@@ -312,7 +312,7 @@ func printAuditSummary(plan *plans.AuditPlan) {
 	}
 }
 
-func displayAuditPlan(plan *plans.AuditPlan, showActions bool) error {
+func displayAuditPlan(plan *plans.AuditPlan, showDetails bool) error {
 	fmt.Printf("\n📋 Audit Plan\n")
 	fmt.Printf("Created: %s\n", plan.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Printf("\nSummary:\n")
@@ -322,11 +322,38 @@ func displayAuditPlan(plan *plans.AuditPlan, showActions bool) error {
 	fmt.Printf("  Files to Skip: %d\n", plan.Summary.FilesToSkip)
 	fmt.Printf("  Avg Confidence: %.2f\n", plan.Summary.AvgConfidence)
 
-	if showActions && len(plan.Actions) > 0 {
-		fmt.Printf("\nActions:\n")
-		for i, action := range plan.Actions {
-			fmt.Printf("  %d. %s: %s -> %s\n", i+1, action.Action, action.NewTitle, action.NewPath)
+	if !showDetails {
+		if plan.Summary.FilesToRename > 0 {
+			fmt.Printf("\n💡 Run 'jellywatch audit --dry-run' to see detailed changes\n")
 		}
+		return nil
+	}
+
+	// Build action index for items that have actions
+	// Actions are created in order for items that pass validation
+	actionIdx := 0
+
+	fmt.Printf("\nFiles:\n")
+	for i, item := range plan.Items {
+		fmt.Printf("\n[%d] %s\n", i+1, filepath.Base(item.Path))
+		fmt.Printf("    Path: %s\n", filepath.Dir(item.Path))
+		fmt.Printf("    Current: %s (confidence: %.2f)\n", item.Title, item.Confidence)
+
+		if item.SkipReason != "" {
+			fmt.Printf("    ⚠️  Skipped: %s\n", item.SkipReason)
+		} else if actionIdx < len(plan.Actions) {
+			action := plan.Actions[actionIdx]
+			fmt.Printf("    ✓ %s → %s\n", action.Action, filepath.Base(action.NewPath))
+			fmt.Printf("      New title: %s (confidence: %.2f)\n", action.NewTitle, action.Confidence)
+			if action.Reasoning != "" {
+				fmt.Printf("      Reason: %s\n", action.Reasoning)
+			}
+			actionIdx++
+		}
+	}
+
+	if plan.Summary.FilesToRename > 0 {
+		fmt.Printf("\n💡 Run 'jellywatch audit --execute' to apply changes\n")
 	}
 
 	return nil
