@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { AppShell } from '@/components/layout/AppShell';
 import { useDashboard } from '@/hooks/useDashboard';
 import { formatBytes } from '@/lib/utils';
@@ -11,7 +12,16 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold">Dashboard</h1>
+        <div className="flex items-center gap-4">
+          <Image
+            src="/jellywatch_brand.png"
+            alt="JellyWatch"
+            width={100}
+            height={100}
+            className="rounded"
+          />
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+        </div>
         
         {isLoading ? (
           <div className="grid grid-cols-4 gap-4">

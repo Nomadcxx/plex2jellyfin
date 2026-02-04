@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { LayoutDashboard, Copy, Download, Activity, FolderSync } from 'lucide-react';
 
 const navigation = [
@@ -14,7 +15,14 @@ const navigation = [
 export function Sidebar() {
   return (
     <aside className="w-64 bg-zinc-900 border-r border-zinc-800 h-screen p-4">
-      <div className="mb-8">
+      <div className="mb-8 flex items-center gap-3">
+        <Image
+          src="/jellywooch.png"
+          alt="JellyWatch"
+          width={36}
+          height={36}
+          className="rounded"
+        />
         <h1 className="text-xl font-bold">JellyWatch</h1>
       </div>
       <nav className="space-y-2">
