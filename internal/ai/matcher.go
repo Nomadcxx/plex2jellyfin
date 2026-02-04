@@ -80,8 +80,15 @@ func (m *Matcher) ParseWithContext(ctx context.Context, filename string, library
 	}
 
 	if folderPath != "" {
-		sanitizedPath := filepath.Base(folderPath)
-		contextPrompt += fmt.Sprintf("- Folder name: %s\n", sanitizedPath)
+		// Extract both parent folder (series/movie name) and immediate folder (season)
+		parentName := filepath.Base(filepath.Dir(folderPath))
+		immediateName := filepath.Base(folderPath)
+
+		// Include parent context if it's a meaningful name (not a storage root)
+		if !shouldSkipParentFolder(parentName) {
+			contextPrompt += fmt.Sprintf("- Parent folder: %s\n", parentName)
+		}
+		contextPrompt += fmt.Sprintf("- Folder: %s\n", immediateName)
 	}
 
 	if currentTitle != "" {
@@ -353,4 +360,21 @@ Example:
 - Library type: movie library, Folder: "MOVIES", File: "pb.s04e15.mkv" → Probably incorrect file location OR TV show misclassified
 
 Now parse this filename:`
+}
+
+// shouldSkipParentFolder returns true for folder names that provide no useful context
+// for AI title matching, such as storage root names and library type directories.
+func shouldSkipParentFolder(name string) bool {
+	if name == "" || name == "." || name == "/" {
+		return true
+	}
+	upper := strings.ToUpper(name)
+	if strings.HasPrefix(upper, "STORAGE") {
+		return true
+	}
+	switch upper {
+	case "TVSHOWS", "TV SHOWS", "MOVIES", "FILMS":
+		return true
+	}
+	return false
 }

@@ -699,3 +699,23 @@ func TestMatcher_Parse_Legacy(t *testing.T) {
 		t.Errorf("Expected type 'movie', got '%s'", result.Type)
 	}
 }
+
+func TestShouldSkipParentFolder_StorageRoots(t *testing.T) {
+	// These should all be skipped
+	skipNames := []string{"TVSHOWS", "MOVIES", "TV SHOWS", "FILMS", "STORAGE1", "STORAGE10", ".", "/", ""}
+	for _, name := range skipNames {
+		if !shouldSkipParentFolder(name) {
+			t.Errorf("expected to skip parent folder %q", name)
+		}
+	}
+}
+
+func TestShouldSkipParentFolder_RealNames(t *testing.T) {
+	// These should NOT be skipped
+	keepNames := []string{"Family Guy (1999)", "Breaking Bad", "The Office (US)", "Dark (2017)"}
+	for _, name := range keepNames {
+		if shouldSkipParentFolder(name) {
+			t.Errorf("should NOT skip parent folder %q", name)
+		}
+	}
+}
