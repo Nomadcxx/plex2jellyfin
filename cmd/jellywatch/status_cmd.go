@@ -83,21 +83,49 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Total Files:          %d\n", stats.TotalFiles)
 	fmt.Printf("TV Episodes:          %d\n", episodeCount)
 	fmt.Printf("Movies:               %d\n", movieCount)
-	fmt.Printf("Duplicate Groups:     %d\n", stats.DuplicateGroups)
 	fmt.Printf("Non-Compliant Files:  %d\n", stats.NonCompliantFiles)
+	fmt.Println()
+
+	// Get duplicate breakdowns
+	movieDups, _ := db.FindDuplicateMovies()
+	episodeDups, _ := db.FindDuplicateEpisodes()
+
+	fmt.Println("Duplicates (same content exists multiple times)")
+	fmt.Println("------------------------------------------------")
+	fmt.Printf("Movie duplicates:     %d groups\n", len(movieDups))
+	fmt.Printf("Episode duplicates:   %d groups\n", len(episodeDups))
 	if stats.SpaceReclaimable > 0 {
-		fmt.Printf("Space Reclaimable:    %s\n", formatBytes(stats.SpaceReclaimable))
+		fmt.Printf("Space reclaimable:    %s\n", formatBytes(stats.SpaceReclaimable))
+	}
+	if len(movieDups)+len(episodeDups) > 0 {
+		fmt.Println("→ Run 'jellywatch duplicates generate' to review")
 	}
 	fmt.Println()
 
-	fmt.Println("Conflicts")
-	fmt.Println("---------")
-	if len(conflicts) == 0 {
-		fmt.Println("No unresolved conflicts")
-	} else {
-		fmt.Printf("Unresolved: %d\n", len(conflicts))
-		for i, c := range conflicts {
-			if i >= 5 {
+	// Categorize conflicts
+	seriesConflicts := 0
+	movieConflicts := 0
+	for _, c := range conflicts {
+		if c.MediaType == "series" {
+			seriesConflicts++
+		} else {
+			movieConflicts++
+		}
+	}
+
+	fmt.Println("Scattered (same title across storage drives)")
+	fmt.Println("--------------------------------------------")
+	fmt.Printf("Series in multiple locations:  %d\n", seriesConflicts)
+	fmt.Printf("Movies in multiple locations:  %d\n", movieConflicts)
+	if seriesConflicts > 0 {
+		fmt.Println("→ Run 'jellywatch consolidate generate' to review")
+	}
+
+	if len(conflicts) > 0 {
+		fmt.Println("\nDetails:")
+		shown := 0
+		for _, c := range conflicts {
+			if shown >= 5 {
 				fmt.Printf("  ... and %d more\n", len(conflicts)-5)
 				break
 			}
@@ -105,7 +133,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			if c.Year != nil {
 				yearStr = fmt.Sprintf(" (%d)", *c.Year)
 			}
-			fmt.Printf("  %s%s - %d locations\n", c.Title, yearStr, len(c.Locations))
+			fmt.Printf("  [%s] %s%s - %d locations\n", c.MediaType, c.Title, yearStr, len(c.Locations))
+			shown++
 		}
 	}
 	fmt.Println()
