@@ -56,7 +56,7 @@ func runConsolidateExecute(db *database.MediaDB) error {
 
 	allLibraryRoots := append(cfg.Libraries.TV, cfg.Libraries.Movies...)
 
-	transferer, err := transfer.New(transfer.BackendRsync)
+	transferer, err := transfer.New(transfer.BackendAuto)
 	if err != nil {
 		return fmt.Errorf("failed to create transferer: %w", err)
 	}
