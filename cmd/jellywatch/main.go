@@ -12,6 +12,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/organizer"
+	"github.com/Nomadcxx/jellywatch/internal/privilege"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
@@ -119,6 +120,11 @@ Examples:
 }
 
 func runOrganize(cmd *cobra.Command, args []string) error {
+	// Escalate to root if needed for file operations
+	if privilege.NeedsRoot() {
+		return privilege.Escalate("move files and set ownership")
+	}
+
 	source := args[0]
 
 	target := libraryPath
