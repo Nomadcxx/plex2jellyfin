@@ -15,6 +15,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
+	"github.com/Nomadcxx/jellywatch/internal/privilege"
 )
 
 type auditOptions struct {
@@ -377,6 +378,11 @@ func displayAuditPlan(plan *plans.AuditPlan, showDetails bool) error {
 }
 
 func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan) error {
+	// Escalate to root if needed for file operations
+	if privilege.NeedsRoot() {
+		return privilege.Escalate("rename/delete files and modify ownership")
+	}
+
 	fmt.Printf("\n🚀 Executing Audit Plan\n")
 
 	// Load config for permission settings
