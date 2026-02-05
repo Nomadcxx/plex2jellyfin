@@ -299,7 +299,8 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 	isCompliant, issues := database.CheckCompliance(filePath, libraryRoot)
 
 	// === STEP 1: REGEX PARSE ===
-	var normalizedTitle string
+	var rawTitle string        // For confidence calculation
+	var normalizedTitle string // For database storage
 	var year *int
 	var season, episode *int
 	parseMethod := "regex"
@@ -309,6 +310,7 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 		if err != nil {
 			return fmt.Errorf("parse TV show: %w", err)
 		}
+		rawTitle = tv.Title
 		normalizedTitle = database.NormalizeTitle(tv.Title)
 		if tv.Year != "" {
 			if yearInt, err := parseInt(tv.Year); err == nil {
@@ -322,6 +324,7 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 		if err != nil {
 			return fmt.Errorf("parse movie: %w", err)
 		}
+		rawTitle = movie.Title
 		normalizedTitle = database.NormalizeTitle(movie.Title)
 		if movie.Year != "" {
 			if yearInt, err := parseInt(movie.Year); err == nil {
@@ -330,16 +333,17 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 		}
 	}
 
-	bestConfidence := naming.CalculateTitleConfidence(normalizedTitle, filename)
+	bestConfidence := naming.CalculateTitleConfidence(rawTitle, filename)
 
 	// === STEP 2: DE-OBFUSCATION (if obfuscated filename) ===
 	if naming.IsObfuscatedFilename(filename) {
 		if isEpisode {
 			if tvInfo, err := naming.ParseTVShowFromPath(filePath); err == nil {
-				folderTitle := database.NormalizeTitle(tvInfo.Title)
-				folderConfidence := naming.CalculateTitleConfidence(folderTitle, filepath.Base(filepath.Dir(filePath)))
+				folderRawTitle := tvInfo.Title
+				folderConfidence := naming.CalculateTitleConfidence(folderRawTitle, filepath.Base(filepath.Dir(filePath)))
 				if folderConfidence > bestConfidence {
-					normalizedTitle = folderTitle
+					rawTitle = folderRawTitle
+					normalizedTitle = database.NormalizeTitle(folderRawTitle)
 					if tvInfo.Year != "" {
 						if yearInt, err := parseInt(tvInfo.Year); err == nil {
 							year = &yearInt
@@ -353,10 +357,11 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 			}
 		} else {
 			if movieInfo, err := naming.ParseMovieFromPath(filePath); err == nil {
-				folderTitle := database.NormalizeTitle(movieInfo.Title)
-				folderConfidence := naming.CalculateTitleConfidence(folderTitle, filepath.Base(filepath.Dir(filePath)))
+				folderRawTitle := movieInfo.Title
+				folderConfidence := naming.CalculateTitleConfidence(folderRawTitle, filepath.Base(filepath.Dir(filePath)))
 				if folderConfidence > bestConfidence {
-					normalizedTitle = folderTitle
+					rawTitle = folderRawTitle
+					normalizedTitle = database.NormalizeTitle(folderRawTitle)
 					if movieInfo.Year != "" {
 						if yearInt, err := parseInt(movieInfo.Year); err == nil {
 							year = &yearInt
@@ -388,9 +393,9 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 				if aiResult.Confidence >= s.aiHelper.GetConfidenceThreshold() {
 					// AI is confident - use it
 					normalizedTitle = database.NormalizeTitle(aiResult.Title)
-					year = aiResult.Year
+					year = aiResult.Year.Int()
 					if isEpisode && aiResult.Season != nil {
-						season = aiResult.Season
+						season = aiResult.Season.Int()
 						if len(aiResult.Episodes) > 0 {
 							ep := aiResult.Episodes[0]
 							episode = &ep
@@ -402,9 +407,9 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 				} else if aiResult.Confidence > bestConfidence {
 					// AI not confident but still better than regex
 					normalizedTitle = database.NormalizeTitle(aiResult.Title)
-					year = aiResult.Year
+					year = aiResult.Year.Int()
 					if isEpisode && aiResult.Season != nil {
-						season = aiResult.Season
+						season = aiResult.Season.Int()
 						if len(aiResult.Episodes) > 0 {
 							ep := aiResult.Episodes[0]
 							episode = &ep

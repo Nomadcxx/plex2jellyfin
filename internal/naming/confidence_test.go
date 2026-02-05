@@ -73,6 +73,51 @@ func TestCalculateTitleConfidence(t *testing.T) {
 	}
 }
 
+func TestCalculateTitleConfidence_RawTitles(t *testing.T) {
+	// These should use RAW parsed titles, not normalized ones
+	tests := []struct {
+		name     string
+		title    string // RAW title (with spaces, proper case)
+		original string
+		wantMin  float64
+	}{
+		{
+			name:     "Barry with proper case",
+			title:    "Barry",
+			original: "Barry.S01E01.mkv",
+			wantMin:  0.6, // Should be reasonable, not 0.0
+		},
+		{
+			name:     "Westworld with proper case",
+			title:    "Westworld",
+			original: "Westworld.S01E01.mkv",
+			wantMin:  0.6,
+		},
+		{
+			name:     "Ted Lasso with spaces",
+			title:    "Ted Lasso",
+			original: "Ted.Lasso.S02E06.mkv",
+			wantMin:  0.8, // Multi-word, clean
+		},
+		{
+			name:     "Babylon 5 with space and number",
+			title:    "Babylon 5",
+			original: "Babylon.5.S01E01.mkv",
+			wantMin:  0.5, // Has number but known title
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CalculateTitleConfidence(tt.title, tt.original)
+			if got < tt.wantMin {
+				t.Errorf("CalculateTitleConfidence(%q, %q) = %.2f, want >= %.2f",
+					tt.title, tt.original, got, tt.wantMin)
+			}
+		})
+	}
+}
+
 func TestHasDuplicateYear(t *testing.T) {
 	tests := []struct {
 		input string
