@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Nomadcxx/jellywatch/internal/privilege"
 )
 
 // globalProgram is used to send messages from goroutines
@@ -101,6 +103,14 @@ func tickCmd() tea.Cmd {
 }
 
 func main() {
+	// Escalate to root immediately - installer needs privileges throughout
+	if privilege.NeedsRoot() {
+		if err := privilege.Escalate("install binaries and configure systemd services"); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	// Check for debug flag
 	debugMode := false
 	for _, arg := range os.Args[1:] {
