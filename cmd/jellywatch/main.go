@@ -249,6 +249,11 @@ Examples:
   jellywatch organize-folder /downloads/folder/ --dry-run`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Escalate to root if needed for file operations
+			if privilege.NeedsRoot() {
+				return privilege.Escalate("move files and set ownership")
+			}
+
 			source := args[0]
 
 			target := libraryPath
