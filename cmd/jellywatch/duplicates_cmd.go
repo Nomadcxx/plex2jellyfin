@@ -10,6 +10,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/permissions"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
+	"github.com/Nomadcxx/jellywatch/internal/privilege"
 )
 
 func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) error {
@@ -51,11 +52,9 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 }
 
 func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
-	// Require root for file operations with proper permissions
-	if os.Geteuid() != 0 {
-		fmt.Println("Error: This command requires root privileges for proper file permissions.")
-		fmt.Println("Please run with: sudo jellywatch duplicates execute")
-		return fmt.Errorf("root privileges required")
+	// Escalate to root if needed for file operations
+	if privilege.NeedsRoot() {
+		return privilege.Escalate("delete files and modify ownership")
 	}
 
 	plan, err := plans.LoadDuplicatePlans()
