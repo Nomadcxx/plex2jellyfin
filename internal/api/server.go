@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/Nomadcxx/jellywatch"
 	"github.com/Nomadcxx/jellywatch/api"
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -13,13 +14,15 @@ import (
 // Server implements the API
 type Server struct {
 	db      *database.MediaDB
+	cfg     *config.Config
 	service *service.CleanupService
 }
 
 // NewServer creates a new API server
-func NewServer(db *database.MediaDB) *Server {
+func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 	return &Server{
 		db:      db,
+		cfg:     cfg,
 		service: service.NewCleanupService(db),
 	}
 }

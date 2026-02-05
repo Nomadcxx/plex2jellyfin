@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Nomadcxx/jellywatch/internal/api"
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/spf13/cobra"
 )
@@ -36,13 +37,18 @@ Examples:
 }
 
 func runServe(addr string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
 	db, err := database.Open()
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
 
-	server := api.NewServer(db)
+	server := api.NewServer(db, cfg)
 
 	fmt.Printf("Starting Jellywatch API server on %s\n", addr)
 	fmt.Println("Endpoints:")
