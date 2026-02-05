@@ -13,6 +13,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
 )
 
@@ -229,6 +230,22 @@ func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, 
 			newEpisode = &aiResult.Episodes[0]
 		} else {
 			newEpisode = file.Episode
+		}
+
+		// Check if file is already Jellyfin-compliant before suggesting changes
+		currentFilename := filepath.Base(file.Path)
+		if naming.IsJellyfinCompliantFilename(currentFilename, file.MediaType) {
+			// File is already compliant - check if AI suggestion is meaningfully different
+			suggestedPath := buildCorrectPath(file.Path, aiResult.Title, aiResult.Year.Int(), newSeason, newEpisode)
+			suggestedFilename := filepath.Base(suggestedPath)
+
+			// Normalize both for comparison (ignore trivial differences like hyphen vs space)
+			if normalizeForComparison(currentFilename) == normalizeForComparison(suggestedFilename) {
+				stats.RecordSkip("already compliant")
+				items[i].SkipReason = "File already follows Jellyfin naming conventions"
+				progress.Update(len(actions), stats.AIErrorCount)
+				continue
+			}
 		}
 
 		action := plans.AuditAction{

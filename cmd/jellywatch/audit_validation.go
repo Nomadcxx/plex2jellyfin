@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -234,4 +235,23 @@ func (s *AuditStats) RecordAction() {
 func (s *AuditStats) ToSummary(totalFiles int) (aiTotal, aiSuccess, aiError, typeMismatch, confLow, titleUnch int) {
 	return s.AITotalCalls, s.AISuccessCount, s.AIErrorCount,
 		s.TypeMismatches, s.ConfidenceTooLow, s.TitleUnchanged
+}
+
+// normalizeForComparison normalizes filenames for comparison
+// to detect trivial differences (hyphen vs space, etc.)
+func normalizeForComparison(filename string) string {
+	// Remove extension
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+
+	// Normalize separators
+	base = strings.ReplaceAll(base, " - ", " ")
+	base = strings.ReplaceAll(base, ".", " ")
+	base = strings.ReplaceAll(base, "_", " ")
+
+	// Collapse spaces
+	base = strings.Join(strings.Fields(base), " ")
+
+	// Lowercase for comparison
+	return strings.ToLower(base) + strings.ToLower(ext)
 }
