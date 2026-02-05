@@ -515,6 +515,11 @@ func IsGarbageTitle(title string) bool {
 			return true
 		}
 
+		// Check if it's a known media title (definitely NOT garbage)
+		if IsKnownMediaTitle(wordLower) {
+			return false
+		}
+
 		// Check if it's a known release group (probably garbage unless preserved)
 		if IsKnownReleaseGroup(wordLower) && !IsPreservedAcronym(wordLower) {
 			return true
@@ -549,6 +554,11 @@ func IsGarbageTitle(title string) bool {
 			if wordLower == "the" || wordLower == "a" || wordLower == "an" || wordLower == "of" || wordLower == "and" || wordLower == "in" || wordLower == "to" || wordLower == "for" || wordLower == "on" || wordLower == "by" || wordLower == "with" || wordLower == "vs" || wordLower == "vs." {
 				continue
 			}
+		}
+
+		// Check if it's a known media title first
+		if IsKnownMediaTitle(wordLower) {
+			continue // Don't count as garbage
 		}
 
 		// Check against known release groups (only in multi-word context)

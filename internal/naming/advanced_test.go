@@ -65,6 +65,29 @@ func TestIsGarbageTitle(t *testing.T) {
 	}
 }
 
+func TestIsGarbageTitle_KnownMediaTitles(t *testing.T) {
+	// These are known media titles that appear in release group blacklist
+	// They should NOT be flagged as garbage
+	knownTitles := []string{
+		"Barry",
+		"Westworld",
+		"Ted Lasso",
+		"Ragnarok",
+		"Rome",
+		"Fargo",
+		"Her",
+		"Babylon 5",
+	}
+
+	for _, title := range knownTitles {
+		t.Run(title, func(t *testing.T) {
+			if IsGarbageTitle(title) {
+				t.Errorf("IsGarbageTitle(%q) = true, want false (known media title)", title)
+			}
+		})
+	}
+}
+
 func TestStripReleaseGroup(t *testing.T) {
 	testCases := []struct {
 		input    string
