@@ -926,6 +926,11 @@ Examples:
   jellywatch watch /downloads -n  # dry-run mode`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Escalate to root if needed for file ownership
+			if privilege.NeedsRoot() {
+				return privilege.Escalate("set file ownership to match media server")
+			}
+
 			watchDir := args[0]
 
 			cfg, _ := config.Load()
