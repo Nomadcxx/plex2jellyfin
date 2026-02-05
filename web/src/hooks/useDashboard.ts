@@ -4,6 +4,50 @@ import type { components } from '@/types/api';
 
 type DuplicateAnalysis = components['schemas']['DuplicateAnalysis'];
 
+type DashboardResponse = {
+  libraryStats?: {
+    totalFiles?: number;
+    totalSize?: number;
+    duplicateGroups?: number;
+    scatteredSeries?: number;
+  };
+  mediaManagers?: Array<{
+    id: string;
+    name: string;
+    type: string;
+    online?: boolean;
+  }>;
+};
+
+type MediaManagerInfo = {
+  id: string;
+  name: string;
+  type: string;
+  enabled: boolean;
+  online?: boolean;
+};
+
+type ScatteredAnalysis = {
+  items?: Array<{
+    id: number;
+    title: string;
+    year?: number;
+    mediaType: string;
+    locations: string[];
+    targetLocation?: string;
+    filesToMove?: number;
+    bytesToMove?: number;
+  }>;
+  totalItems?: number;
+  totalMoves?: number;
+  totalBytes?: number;
+};
+
+type AuthStatus = {
+  enabled: boolean;
+  authenticated?: boolean;
+};
+
 export const queryKeys = {
   dashboard: ['dashboard'] as const,
   mediaManagers: ['media-managers'] as const,
@@ -13,7 +57,7 @@ export const queryKeys = {
 };
 
 export function useDashboard() {
-  return useQuery({
+  return useQuery<DashboardResponse>({
     queryKey: queryKeys.dashboard,
     queryFn: () => api.get('/dashboard'),
     refetchInterval: 30 * 1000,
@@ -21,7 +65,7 @@ export function useDashboard() {
 }
 
 export function useMediaManagers() {
-  return useQuery({
+  return useQuery<MediaManagerInfo[]>({
     queryKey: queryKeys.mediaManagers,
     queryFn: () => api.get('/media-managers'),
   });
@@ -36,14 +80,14 @@ export function useDuplicates() {
 }
 
 export function useScattered() {
-  return useQuery({
+  return useQuery<ScatteredAnalysis>({
     queryKey: queryKeys.scattered,
     queryFn: () => api.get('/scattered'),
   });
 }
 
 export function useAuthStatus() {
-  return useQuery({
+  return useQuery<AuthStatus>({
     queryKey: queryKeys.auth,
     queryFn: () => api.get('/auth/status'),
   });
