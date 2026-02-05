@@ -201,6 +201,7 @@ type taskCompleteMsg struct {
 	index   int
 	success bool
 	err     string
+	cmdErr  *CommandError // Rich error details from command execution
 }
 
 type subTaskUpdateMsg struct {
