@@ -396,6 +396,15 @@ func executeTaskCmd(index int, m *model) tea.Cmd {
 		time.Sleep(m.inputDelay)
 		err := m.tasks[index].execute(m)
 		if err != nil {
+			// Check if it's a CommandError for rich error details
+			if cmdErr, ok := err.(*CommandError); ok {
+				return taskCompleteMsg{
+					index:   index,
+					success: false,
+					err:     cmdErr.Error(),
+					cmdErr:  cmdErr,
+				}
+			}
 			return taskCompleteMsg{index: index, success: false, err: err.Error()}
 		}
 		return taskCompleteMsg{index: index, success: true}
