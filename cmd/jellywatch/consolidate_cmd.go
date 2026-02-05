@@ -10,15 +10,14 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
+	"github.com/Nomadcxx/jellywatch/internal/privilege"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
 
 func runConsolidateExecute(db *database.MediaDB) error {
-	// Require root for file operations with proper permissions
-	if os.Geteuid() != 0 {
-		fmt.Println("Error: This command requires root privileges for proper file permissions.")
-		fmt.Println("Please run with: sudo jellywatch consolidate execute")
-		return fmt.Errorf("root privileges required")
+	// Escalate to root if needed for file operations
+	if privilege.NeedsRoot() {
+		return privilege.Escalate("move files across filesystems and set ownership")
 	}
 
 	plan, err := plans.LoadConsolidatePlans()
