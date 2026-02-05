@@ -95,6 +95,21 @@ func detectPackageManager() string {
 	return ""
 }
 
+// CommandError captures command execution details for error reporting
+type CommandError struct {
+	Name    string // e.g., "jellywatch"
+	Command string // full command string
+	Output  string // combined stdout/stderr
+	Err     error  // underlying error
+}
+
+func (e *CommandError) Error() string {
+	if e.Output != "" {
+		return fmt.Sprintf("%s: %v\n%s", e.Name, e.Err, e.Output)
+	}
+	return fmt.Sprintf("%s: %v", e.Name, e.Err)
+}
+
 // runCommand executes a command and logs to file
 func runCommand(name string, cmd *exec.Cmd, logFile *os.File) error {
 	if logFile != nil {
