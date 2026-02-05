@@ -364,6 +364,19 @@ func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd) {
 	if msg.success {
 		m.tasks[msg.index].status = statusComplete
 	} else {
+		// Populate errorDetails for rich error display
+		if msg.cmdErr != nil {
+			logPath := ""
+			if m.logFile != nil {
+				logPath = m.logFile.Name()
+			}
+			m.tasks[msg.index].errorDetails = &errorInfo{
+				message: "Command failed",
+				command: msg.cmdErr.Command,
+				logFile: logPath,
+			}
+		}
+
 		if m.tasks[msg.index].optional {
 			m.tasks[msg.index].status = statusSkipped
 			m.errors = append(m.errors, fmt.Sprintf("%s (skipped): %s", m.tasks[msg.index].name, msg.err))
