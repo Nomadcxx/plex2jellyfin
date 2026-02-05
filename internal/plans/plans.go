@@ -9,6 +9,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/Nomadcxx/jellywatch/internal/permissions"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
@@ -85,12 +86,7 @@ type ConsolidatePlan struct {
 
 // GetPlansDir returns the directory for plan files
 func GetPlansDir() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	return filepath.Join(homeDir, ".config", "jellywatch", "plans"), nil
+	return paths.PlansDir()
 }
 
 // getConsolidatePlansPath returns the path to consolidate.json
