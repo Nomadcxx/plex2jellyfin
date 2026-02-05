@@ -492,15 +492,10 @@ func (m model) renderInstalling() string {
 		}
 
 		if task.status == statusFailed && task.errorDetails != nil {
-			err := task.errorDetails
-			b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(
-				fmt.Sprintf("  └─ Error: %s\n", err.message)))
-			if err.command != "" {
+			if task.errorDetails.logFile != "" {
 				b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
-					fmt.Sprintf("  └─ Command: %s\n", err.command)))
+					fmt.Sprintf("     See log: %s\n", task.errorDetails.logFile)))
 			}
-			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
-				fmt.Sprintf("  └─ See full logs: %s\n", err.logFile)))
 		}
 	}
 
