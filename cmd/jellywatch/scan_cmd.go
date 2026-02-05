@@ -256,6 +256,9 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool) error {
 				fmt.Println("   jellywatch consolidate execute   # Execute plans")
 			}
 
+			fmt.Println("\n3. Review files needing classification:")
+			fmt.Println("   jellywatch audit generate        # Generate audit report")
+
 			fmt.Println("\nOr use the interactive wizard:")
 			fmt.Println("   jellywatch fix                     # Guided cleanup")
 		} else {
