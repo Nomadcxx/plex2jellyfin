@@ -181,37 +181,9 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 		return bytesCopied, fmt.Errorf("sync error: %w", err)
 	}
 
-	if err := applyPermissions(dst, opts); err != nil {
+	if err := ApplyPermissions(dst, opts); err != nil {
 		return bytesCopied, fmt.Errorf("permission error: %w", err)
 	}
 
 	return bytesCopied, nil
-}
-
-func applyPermissions(path string, opts TransferOptions) error {
-	if opts.FileMode != 0 {
-		if err := os.Chmod(path, opts.FileMode); err != nil {
-			return fmt.Errorf("chmod failed: %w", err)
-		}
-	}
-
-	if opts.TargetUID >= 0 || opts.TargetGID >= 0 {
-		uid := opts.TargetUID
-		gid := opts.TargetGID
-		if uid < 0 {
-			uid = -1
-		}
-		if gid < 0 {
-			gid = -1
-		}
-		if err := os.Chown(path, uid, gid); err != nil {
-			if os.Geteuid() != 0 {
-				return fmt.Errorf("chown failed (daemon not running as root): target uid=%d gid=%d, current euid=%d: %w",
-					uid, gid, os.Geteuid(), err)
-			}
-			return fmt.Errorf("chown failed: %w", err)
-		}
-	}
-
-	return nil
 }
