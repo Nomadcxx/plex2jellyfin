@@ -35,12 +35,20 @@ func (n *NativeTransferer) Move(src, dst string, opts TransferOptions) (*Transfe
 		return result, err
 	}
 
-	if err := RemoveWithTimeout(src, 30*time.Second); err != nil {
-		result.SourceRemoved = false
-		return result, nil
+	if result.Success {
+		// Apply configured permissions (chown/chmod)
+		if err := ApplyPermissions(dst, opts); err != nil {
+			// Log warning but don't fail - file was transferred successfully
+			result.Error = fmt.Errorf("transfer succeeded but permission application failed: %w", err)
+		}
+
+		if err := RemoveWithTimeout(src, 30*time.Second); err != nil {
+			result.SourceRemoved = false
+			return result, nil
+		}
+		result.SourceRemoved = true
 	}
 
-	result.SourceRemoved = true
 	return result, nil
 }
 
@@ -179,10 +187,6 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 
 	if err := dstFile.Sync(); err != nil {
 		return bytesCopied, fmt.Errorf("sync error: %w", err)
-	}
-
-	if err := ApplyPermissions(dst, opts); err != nil {
-		return bytesCopied, fmt.Errorf("permission error: %w", err)
 	}
 
 	return bytesCopied, nil

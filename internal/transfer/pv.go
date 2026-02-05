@@ -95,11 +95,6 @@ func (p *PVTransferer) Copy(src, dst string, opts TransferOptions) (*TransferRes
 				result.Success = true
 				result.BytesCopied = bytesCopied
 				result.Duration = time.Since(startTime)
-				// Apply configured permissions (chown/chmod)
-				if err := ApplyPermissions(dst, opts); err != nil {
-					// Log warning but don't fail - file was transferred successfully
-					result.Error = fmt.Errorf("transfer succeeded but permission application failed: %w", err)
-				}
 				return result, nil
 			}
 		} else {
