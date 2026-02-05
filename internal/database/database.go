@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/Nomadcxx/jellywatch/internal/paths"
 	_ "modernc.org/sqlite"
 )
 
@@ -19,12 +20,10 @@ type MediaDB struct {
 
 // Open opens or creates the database at the default location
 func Open() (*MediaDB, error) {
-	configDir, err := os.UserConfigDir()
+	dbPath, err := paths.DatabasePath()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get config dir: %w", err)
+		return nil, fmt.Errorf("failed to get database path: %w", err)
 	}
-
-	dbPath := filepath.Join(configDir, "jellywatch", "media.db")
 	return OpenPath(dbPath)
 }
 
