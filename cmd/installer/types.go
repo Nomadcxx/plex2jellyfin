@@ -179,6 +179,7 @@ type ScanProgress struct {
 	CurrentPath    string
 	LibrariesDone  int
 	LibrariesTotal int
+	ErrorCount     int
 }
 
 // ScanResult holds the final scan results
