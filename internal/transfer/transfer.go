@@ -196,13 +196,23 @@ func New(backend Backend) (Transferer, error) {
 	case BackendAuto:
 		fallthrough
 	default:
-		if pvPath, err := exec.LookPath("pv"); err == nil {
-			return NewPVTransferer(pvPath), nil
-		}
+		// Build fallback chain: rsync -> pv -> native
+		var backends []Transferer
+
 		if rsyncPath, err := exec.LookPath("rsync"); err == nil {
-			return NewRsyncTransferer(rsyncPath), nil
+			backends = append(backends, NewRsyncTransferer(rsyncPath))
 		}
-		return NewNativeTransferer(32 * 1024 * 1024), nil
+		if pvPath, err := exec.LookPath("pv"); err == nil {
+			backends = append(backends, NewPVTransferer(pvPath))
+		}
+		// Native is always available as final fallback
+		backends = append(backends, NewNativeTransferer(32*1024*1024))
+
+		if len(backends) == 1 {
+			// Only native available, return it directly
+			return backends[0], nil
+		}
+		return NewFallbackTransferer(backends...), nil
 	}
 }
 
