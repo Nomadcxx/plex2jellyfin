@@ -89,7 +89,7 @@ func buildBinaries(m *model) error {
 	for _, c := range cmds {
 		cmd := exec.Command(c.args[0], c.args[1:]...)
 		if err := runCommand(c.name, cmd, m.logFile); err != nil {
-			return fmt.Errorf("failed to build %s", c.name)
+			return err
 		}
 	}
 	return nil
