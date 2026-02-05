@@ -14,6 +14,13 @@ import (
 )
 
 func runConsolidateExecute(db *database.MediaDB) error {
+	// Require root for file operations with proper permissions
+	if os.Geteuid() != 0 {
+		fmt.Println("Error: This command requires root privileges for proper file permissions.")
+		fmt.Println("Please run with: sudo jellywatch consolidate execute")
+		return fmt.Errorf("root privileges required")
+	}
+
 	plan, err := plans.LoadConsolidatePlans()
 	if err != nil {
 		return fmt.Errorf("failed to load plans: %w", err)
