@@ -133,6 +133,11 @@ func runCleanupCruft(dryRun bool) error {
 }
 
 func runCleanupEmpty(dryRun bool) error {
+	// Escalate to root if needed for directory deletion (skip for dry-run)
+	if !dryRun && privilege.NeedsRoot() {
+		return privilege.Escalate("delete empty directories")
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
