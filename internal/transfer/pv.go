@@ -37,6 +37,12 @@ func (p *PVTransferer) Move(src, dst string, opts TransferOptions) (*TransferRes
 	}
 
 	if result.Success {
+		// Apply configured permissions (chown/chmod)
+		if err := ApplyPermissions(dst, opts); err != nil {
+			// Log warning but don't fail - file was transferred successfully
+			result.Error = fmt.Errorf("transfer succeeded but permission application failed: %w", err)
+		}
+
 		if err := RemoveWithTimeout(src, 30*time.Second); err != nil {
 			result.SourceRemoved = false
 			return result, nil
@@ -89,6 +95,11 @@ func (p *PVTransferer) Copy(src, dst string, opts TransferOptions) (*TransferRes
 				result.Success = true
 				result.BytesCopied = bytesCopied
 				result.Duration = time.Since(startTime)
+				// Apply configured permissions (chown/chmod)
+				if err := ApplyPermissions(dst, opts); err != nil {
+					// Log warning but don't fail - file was transferred successfully
+					result.Error = fmt.Errorf("transfer succeeded but permission application failed: %w", err)
+				}
 				return result, nil
 			}
 		} else {
