@@ -110,11 +110,13 @@ func (e *CommandError) Error() string {
 	return fmt.Sprintf("%s: %v", e.Name, e.Err)
 }
 
-// runCommand executes a command and logs to file
+// runCommand executes a command and logs to file.
+// Returns *CommandError on failure with full output context.
 func runCommand(name string, cmd *exec.Cmd, logFile *os.File) error {
+	cmdStr := cmd.String()
 	if logFile != nil {
 		logFile.WriteString(fmt.Sprintf("[%s] Running: %s\n",
-			time.Now().Format("15:04:05"), cmd.String()))
+			time.Now().Format("15:04:05"), cmdStr))
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -134,7 +136,15 @@ func runCommand(name string, cmd *exec.Cmd, logFile *os.File) error {
 		logFile.Sync()
 	}
 
-	return err
+	if err != nil {
+		return &CommandError{
+			Name:    name,
+			Command: cmdStr,
+			Output:  string(output),
+			Err:     err,
+		}
+	}
+	return nil
 }
 
 // splitPaths splits comma-separated paths and trims whitespace
