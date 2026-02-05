@@ -9,35 +9,18 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Nomadcxx/jellywatch/internal/paths"
 )
 
 // getConfigDir returns the config directory for the actual user (not root)
 func getConfigDir() (string, error) {
-	// Check SUDO_USER first (running with sudo)
-	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && sudoUser != "root" {
-		u, err := user.Lookup(sudoUser)
-		if err == nil {
-			return filepath.Join(u.HomeDir, ".config"), nil
-		}
-	}
-
-	// Fallback to current user
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(homeDir, ".config"), nil
+	return paths.UserConfigDir()
 }
 
 // getActualUser returns the actual username (not root when using sudo)
 func getActualUser() string {
-	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && sudoUser != "root" {
-		return sudoUser
-	}
-	if u, err := user.Current(); err == nil {
-		return u.Username
-	}
-	return "unknown"
+	return paths.ActualUser()
 }
 
 // detectExistingInstall checks for existing JellyWatch installation
