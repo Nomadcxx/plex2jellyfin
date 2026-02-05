@@ -549,6 +549,13 @@ func (m model) renderScanning() string {
 		m.spinner.View(),
 		lipgloss.NewStyle().Foreground(Secondary).Bold(true).Render(fmt.Sprintf("%d", m.scanProgress.FilesScanned))))
 
+	// Show error count if any
+	if m.scanProgress.ErrorCount > 0 {
+		b.WriteString(fmt.Sprintf("  %s Errors: %d\n",
+			lipgloss.NewStyle().Foreground(WarningColor).Render("!"),
+			m.scanProgress.ErrorCount))
+	}
+
 	// Current file being scanned
 	if m.scanProgress.CurrentPath != "" {
 		// Truncate long paths intelligently
