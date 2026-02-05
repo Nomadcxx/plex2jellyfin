@@ -51,6 +51,13 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 }
 
 func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
+	// Require root for file operations with proper permissions
+	if os.Geteuid() != 0 {
+		fmt.Println("Error: This command requires root privileges for proper file permissions.")
+		fmt.Println("Please run with: sudo jellywatch duplicates execute")
+		return fmt.Errorf("root privileges required")
+	}
+
 	plan, err := plans.LoadDuplicatePlans()
 	if err != nil {
 		return fmt.Errorf("failed to load plans: %w", err)
