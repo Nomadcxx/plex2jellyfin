@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/spf13/viper"
 )
 
@@ -253,12 +254,10 @@ func Load() (*Config, error) {
 	v := viper.New()
 
 	// Set config file location
-	configDir, err := os.UserConfigDir()
+	configPath, err := paths.ConfigPath()
 	if err != nil {
-		return nil, fmt.Errorf("unable to get config dir: %w", err)
+		return nil, fmt.Errorf("unable to get config path: %w", err)
 	}
-
-	configPath := filepath.Join(configDir, "jellywatch", "config.toml")
 	v.SetConfigFile(configPath)
 
 	// Read config file if it exists
@@ -294,11 +293,7 @@ func (c *Config) Save() error {
 }
 
 func ConfigPath() (string, error) {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("unable to get config dir: %w", err)
-	}
-	return filepath.Join(configDir, "jellywatch", "config.toml"), nil
+	return paths.ConfigPath()
 }
 
 func ConfigExists() bool {
@@ -469,11 +464,11 @@ func formatStringSlice(s []string) string {
 
 // GetDatabasePath returns the path to the HOLDEN database file
 func GetDatabasePath() string {
-	homeDir, err := os.UserHomeDir()
+	dbPath, err := paths.DatabasePath()
 	if err != nil {
-		homeDir = "."
+		return "./media.db"
 	}
-	return filepath.Join(homeDir, ".config", "jellywatch", "media.db")
+	return dbPath
 }
 
 // DefaultAIConfig returns default AI configuration
