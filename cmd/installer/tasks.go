@@ -103,7 +103,7 @@ func installBinaries(m *model) error {
 		}
 		cmd := exec.Command("install", "-Dm755", bin, filepath.Join("/usr/local/bin", bin))
 		if err := runCommand("install "+bin, cmd, m.logFile); err != nil {
-			return fmt.Errorf("failed to install %s", bin)
+			return err
 		}
 		os.Remove(bin)
 	}
