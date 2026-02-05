@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/jellywatch/internal/privilege"
 )
 
 func newCleanupCmd() *cobra.Command {
@@ -70,6 +71,11 @@ var cruftExtensions = map[string]bool{
 const maxSampleSize = 50 * 1024 * 1024
 
 func runCleanupCruft(dryRun bool) error {
+	// Escalate to root if needed for file deletion (skip for dry-run)
+	if !dryRun && privilege.NeedsRoot() {
+		return privilege.Escalate("delete cruft files")
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
