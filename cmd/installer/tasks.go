@@ -216,7 +216,15 @@ func setupSystemd(m *model) error {
 		return nil
 	}
 
-	serviceContent := `[Unit]
+	// Get the actual user for SUDO_USER environment variable
+	// This ensures paths.UserConfigDir() returns the correct user's config
+	// when running as a systemd service (which doesn't set SUDO_USER)
+	actualUser := getActualUser()
+	if actualUser == "" || actualUser == "root" {
+		actualUser = "root" // fallback, though this shouldn't happen in normal install
+	}
+
+	serviceContent := fmt.Sprintf(`[Unit]
 Description=JellyWatch Media Organizer Daemon
 After=network.target
 
@@ -224,6 +232,7 @@ After=network.target
 Type=simple
 User=root
 Group=root
+Environment=SUDO_USER=%s
 ExecStart=/usr/local/bin/jellywatchd
 Restart=on-failure
 RestartSec=5
@@ -237,7 +246,7 @@ AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
 
 [Install]
 WantedBy=multi-user.target
-`
+`, actualUser)
 
 	servicePath := "/etc/systemd/system/jellywatchd.service"
 	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
