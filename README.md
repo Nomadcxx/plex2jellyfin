@@ -1,9 +1,16 @@
 <div align="center">
-  <img src="assets/jellywatch-header.png" alt="JellyWatch" />
-  <p><em>Because Sonarr and Radarr can't be trusted with naming conventions</em></p>
+  <img src="assets/jellywooch.png" alt="JellyWatch" width="200" />
 </div>
-THIS IS WIP
+
 ---
+
+> ⚠️ **WORK IN PROGRESS - NOT STABLE**
+>
+> This project is under active development. Features may change, break, or disappear without notice. Not recommended for production use. Use at your own risk.
+
+---
+
+Because Sonarr and Radarr can't be trusted with naming conventions.
 
 ## What It Does
 
@@ -24,18 +31,18 @@ flowchart TB
     subgraph Input[" "]
         A[Sonarr/Radarr] -->|sends| B[Download]
     end
-    
+
     B -->|drops| C[Watch Dir]
     C -->|detects| D[JellyWatch]
-    
+
     D -->|indexes| DB[(DB)]
     DB -->|tells| D
-    
+
     D -->|rename & move| E[Library]
     E -->|serves| F[Jellyfin]
-    
+
     D -.->|queries| A
-    
+
     G[scan] -->|updates| DB
     H[audit] -->|fixes| DB
     I[duplicates] -->|finds in| DB
