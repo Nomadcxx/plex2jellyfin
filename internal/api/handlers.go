@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/Nomadcxx/jellywatch/api"
+	"github.com/Nomadcxx/jellywatch/internal/activity"
+	"github.com/google/uuid"
 )
 
 // Ensure Server implements the interface
@@ -139,14 +142,141 @@ func (s *Server) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 // ActivityStream implements api.ServerInterface - SSE stream for real-time activity
 func (s *Server) ActivityStream(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement SSE streaming
-	w.WriteHeader(http.StatusNotImplemented)
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Flush helper
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming_unsupported", "Streaming not supported")
+		return
+	}
+
+	// Send initial connection message
+	fmt.Fprintf(w, "event: connected\ndata: {\"message\":\"Connected to activity stream\"}\n\n")
+	flusher.Flush()
+
+	// Heartbeat ticker
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			// Client disconnected
+			return
+		case <-ticker.C:
+			// Send heartbeat
+			fmt.Fprintf(w, "event: heartbeat\ndata: {\"ts\":%d}\n\n", time.Now().Unix())
+			flusher.Flush()
+		}
+	}
 }
 
 // GetActivity implements api.ServerInterface - Get paginated activity log
 func (s *Server) GetActivity(w http.ResponseWriter, r *http.Request, params api.GetActivityParams) {
-	// TODO: Implement activity log retrieval
-	writeJSON(w, http.StatusOK, []api.ActivityEvent{})
+	// Default limit to 50 if not specified
+	limit := 50
+	if params.Limit != nil && *params.Limit > 0 {
+		limit = *params.Limit
+		// Cap at 500
+		if limit > 500 {
+			limit = 500
+		}
+	}
+
+	// Check if activity logger is available
+	if s.activityLogger == nil {
+		writeJSON(w, http.StatusOK, []api.ActivityEvent{})
+		return
+	}
+
+	// Get recent entries from activity log
+	entries, err := s.activityLogger.GetRecentEntries(limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "activity_read_error", fmt.Sprintf("Failed to read activity log: %v", err))
+		return
+	}
+
+	// Convert to API ActivityEvent type
+	events := make([]api.ActivityEvent, len(entries))
+	for i, entry := range entries {
+		events[i] = convertEntryToActivityEvent(entry)
+	}
+
+	writeJSON(w, http.StatusOK, events)
+}
+
+// convertEntryToActivityEvent converts an activity.Entry to an API ActivityEvent
+func convertEntryToActivityEvent(entry activity.Entry) api.ActivityEvent {
+	event := api.ActivityEvent{
+		Id:        ptrString(generateEventID(entry)),
+		Timestamp: &entry.Timestamp,
+		Message:   ptrString(buildActivityMessage(entry)),
+		Type:      ptrActivityEventType(determineEventType(entry)),
+	}
+	return event
+}
+
+// generateEventID creates a unique ID for an activity entry
+func generateEventID(entry activity.Entry) string {
+	// Use timestamp and source to create a unique ID
+	return uuid.NewMD5(uuid.Nil, []byte(fmt.Sprintf("%d-%s-%s", entry.Timestamp.UnixNano(), entry.Action, entry.Source))).String()
+}
+
+// buildActivityMessage creates a human-readable message for an activity entry
+func buildActivityMessage(entry activity.Entry) string {
+	switch entry.Action {
+	case "file_detected":
+		if entry.Success {
+			return fmt.Sprintf("Detected: %s", entry.Source)
+		}
+		return fmt.Sprintf("Detection failed: %s", entry.Source)
+	case "file_organized":
+		if entry.Success {
+			if entry.Target != "" {
+				return fmt.Sprintf("Organized: %s -> %s", entry.Source, entry.Target)
+			}
+			return fmt.Sprintf("Organized: %s", entry.Source)
+		}
+		return fmt.Sprintf("Organization failed: %s - %s", entry.Source, entry.Error)
+	case "duplicate_found":
+		return fmt.Sprintf("Duplicate found: %s", entry.Source)
+	case "sync_completed":
+		return fmt.Sprintf("Sync completed: %s", entry.Source)
+	default:
+		if entry.Error != "" {
+			return fmt.Sprintf("%s: %s (error: %s)", entry.Action, entry.Source, entry.Error)
+		}
+		return fmt.Sprintf("%s: %s", entry.Action, entry.Source)
+	}
+}
+
+// determineEventType maps an activity entry to an API event type
+func determineEventType(entry activity.Entry) api.ActivityEventType {
+	switch entry.Action {
+	case "file_detected":
+		return api.FILEDETECTED
+	case "file_organized":
+		return api.FILEORGANIZED
+	case "duplicate_found":
+		return api.DUPLICATEFOUND
+	case "sync_completed":
+		return api.SYNCCOMPLETED
+	default:
+		if !entry.Success {
+			return api.ERROR
+		}
+		return api.FILEORGANIZED
+	}
+}
+
+// ptrActivityEventType creates a pointer to an ActivityEventType
+func ptrActivityEventType(t api.ActivityEventType) *api.ActivityEventType {
+	return &t
 }
 
 // GetAISettings implements api.ServerInterface

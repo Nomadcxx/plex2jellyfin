@@ -1,7 +1,9 @@
 package activity
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,4 +148,111 @@ func (l *Logger) rotateFile(date string) error {
 
 func (l *Logger) GetLogDir() string {
 	return l.logDir
+}
+
+// GetRecentEntries returns the most recent activity entries, up to limit.
+// Entries are returned in reverse chronological order (newest first).
+func (l *Logger) GetRecentEntries(limit int) ([]Entry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// Get all activity files, sorted by date (newest first)
+	entries, err := os.ReadDir(l.logDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter and sort log files
+	var logFiles []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "activity-") && strings.HasSuffix(entry.Name(), ".jsonl") {
+			logFiles = append(logFiles, entry.Name())
+		}
+	}
+	// Sort descending (newest first)
+	for i, j := 0, len(logFiles)-1; i < j; i, j = i+1, j-1 {
+		logFiles[i], logFiles[j] = logFiles[j], logFiles[i]
+	}
+
+	var results []Entry
+	for _, fileName := range logFiles {
+		filePath := filepath.Join(l.logDir, fileName)
+		fileEntries, err := l.readEntriesFromFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		// Reverse to get newest first within the file
+		for i, j := 0, len(fileEntries)-1; i < j; i, j = i+1, j-1 {
+			fileEntries[i], fileEntries[j] = fileEntries[j], fileEntries[i]
+		}
+
+		for _, e := range fileEntries {
+			results = append(results, e)
+			if len(results) >= limit {
+				return results, nil
+			}
+		}
+	}
+
+	return results, nil
+}
+
+// readEntriesFromFile reads all entries from a JSONL file
+func (l *Logger) readEntriesFromFile(filePath string) ([]Entry, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var entries []Entry
+	scanner := NewJSONLScanner(file)
+	for scanner.Scan() {
+		var entry Entry
+		if err := scanner.Entry(&entry); err != nil {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, scanner.Err()
+}
+
+// JSONLScanner scans a JSONL file line by line
+type JSONLScanner struct {
+	scanner *bufio.Scanner
+	entry   []byte
+	err     error
+}
+
+// NewJSONLScanner creates a new JSONL scanner
+func NewJSONLScanner(r io.Reader) *JSONLScanner {
+	return &JSONLScanner{
+		scanner: bufio.NewScanner(r),
+	}
+}
+
+// Scan advances to the next entry
+func (s *JSONLScanner) Scan() bool {
+	if s.scanner.Scan() {
+		s.entry = s.scanner.Bytes()
+		return true
+	}
+	s.err = s.scanner.Err()
+	return false
+}
+
+// Entry unmarshals the current entry into the provided value
+func (s *JSONLScanner) Entry(v interface{}) error {
+	return json.Unmarshal(s.entry, v)
+}
+
+// Err returns any error encountered during scanning
+func (s *JSONLScanner) Err() error {
+	return s.err
 }

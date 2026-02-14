@@ -1,8 +1,11 @@
 package api
 
 import (
+	"os"
+
 	"github.com/Nomadcxx/jellywatch"
 	"github.com/Nomadcxx/jellywatch/api"
+	"github.com/Nomadcxx/jellywatch/internal/activity"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/service"
@@ -13,18 +16,46 @@ import (
 
 // Server implements the API
 type Server struct {
-	db      *database.MediaDB
-	cfg     *config.Config
-	service *service.CleanupService
+	db             *database.MediaDB
+	cfg            *config.Config
+	service        *service.CleanupService
+	activityLogger *activity.Logger
 }
 
 // NewServer creates a new API server
 func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
-	return &Server{
-		db:      db,
-		cfg:     cfg,
-		service: service.NewCleanupService(db),
+	// Initialize activity logger
+	configDir, err := getConfigDir()
+	var activityLogger *activity.Logger
+	if err == nil {
+		activityLogger, _ = activity.NewLogger(configDir)
 	}
+
+	return &Server{
+		db:             db,
+		cfg:            cfg,
+		service:        service.NewCleanupService(db),
+		activityLogger: activityLogger,
+	}
+}
+
+// getConfigDir returns the config directory path
+func getConfigDir() (string, error) {
+	// Use the paths package to get the config directory
+	homeDir, err := getHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return homeDir + "/.config/jellywatch", nil
+}
+
+// getHomeDir returns the user's home directory
+func getHomeDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return home, nil
 }
 
 // Handler returns the HTTP handler with CORS, API routes, and static file serving
