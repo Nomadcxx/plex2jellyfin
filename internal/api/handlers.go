@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/Nomadcxx/jellywatch/api"
@@ -203,16 +204,70 @@ func (s *Server) ListMediaManagers(w http.ResponseWriter, r *http.Request) {
 
 // GetMediaManagerQueue implements api.ServerInterface
 func (s *Server) GetMediaManagerQueue(w http.ResponseWriter, r *http.Request, managerId string, params api.GetMediaManagerQueueParams) {
-	// TODO: Implement queue retrieval
-	writeJSON(w, http.StatusOK, []api.QueueItem{})
+	// Check if manager is configured
+	if !isManagerConfigured(s.cfg, managerId) {
+		writeError(w, http.StatusNotFound, "not_found", fmt.Sprintf("Media manager '%s' not configured", managerId))
+		return
+	}
+
+	// Get client
+	client, err := getManagerClient(s.cfg, managerId)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	// Fetch queue items
+	items, err := client.GetAllQueueItems()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "manager_error", fmt.Sprintf("Failed to get queue: %v", err))
+		return
+	}
+
+	// Convert to API types
+	apiItems := make([]api.QueueItem, len(items))
+	for i, item := range items {
+		apiItems[i] = convertToAPIQueueItem(item)
+	}
+
+	// Apply limit if specified
+	if params.Limit != nil && *params.Limit > 0 && len(apiItems) > *params.Limit {
+		apiItems = apiItems[:*params.Limit]
+	}
+
+	writeJSON(w, http.StatusOK, apiItems)
 }
 
 // ClearQueueItem implements api.ServerInterface
 func (s *Server) ClearQueueItem(w http.ResponseWriter, r *http.Request, managerId string, itemId int64, params api.ClearQueueItemParams) {
-	// TODO: Implement queue item clearing
+	// Check if manager is configured
+	if !isManagerConfigured(s.cfg, managerId) {
+		writeError(w, http.StatusNotFound, "not_found", fmt.Sprintf("Media manager '%s' not configured", managerId))
+		return
+	}
+
+	// Get client
+	client, err := getManagerClient(s.cfg, managerId)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	// Determine blocklist option
+	blocklist := false
+	if params.Blocklist != nil {
+		blocklist = *params.Blocklist
+	}
+
+	// Remove from queue
+	if err := client.RemoveFromQueue(int(itemId), blocklist); err != nil {
+		writeError(w, http.StatusBadGateway, "manager_error", fmt.Sprintf("Failed to clear queue item: %v", err))
+		return
+	}
+
 	writeJSON(w, http.StatusOK, api.OperationResult{
 		Success: ptrBool(true),
-		Message: ptrString("Not implemented yet"),
+		Message: ptrString(fmt.Sprintf("Queue item %d cleared successfully", itemId)),
 	})
 }
 
@@ -227,25 +282,121 @@ func (s *Server) TriggerManagerScan(w http.ResponseWriter, r *http.Request, mana
 
 // GetMediaManagerStatus implements api.ServerInterface
 func (s *Server) GetMediaManagerStatus(w http.ResponseWriter, r *http.Request, managerId string) {
-	// TODO: Implement manager status check
+	// Check if manager is configured
+	if !isManagerConfigured(s.cfg, managerId) {
+		writeError(w, http.StatusNotFound, "not_found", fmt.Sprintf("Media manager '%s' not configured", managerId))
+		return
+	}
+
+	// Get client
+	client, err := getManagerClient(s.cfg, managerId)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	// Get system status (version)
+	version, err := client.GetSystemStatus()
+	if err != nil {
+		writeJSON(w, http.StatusOK, api.ServiceStatus{
+			Online: ptrBool(false),
+			Error:  ptrString(fmt.Sprintf("Failed to connect: %v", err)),
+		})
+		return
+	}
+
+	// Get queue info for additional status
+	items, err := client.GetAllQueueItems()
+	if err != nil {
+		writeJSON(w, http.StatusOK, api.ServiceStatus{
+			Online:  ptrBool(true),
+			Version: &version,
+			Error:   ptrString(fmt.Sprintf("Failed to get queue: %v", err)),
+		})
+		return
+	}
+
+	// Get stuck count
+	stuckItems, _ := client.GetStuckItems()
+	stuckCount := len(stuckItems)
+
 	writeJSON(w, http.StatusOK, api.ServiceStatus{
-		Online: ptrBool(false),
+		Online:     ptrBool(true),
+		Version:    &version,
+		QueueSize:  ptrInt(len(items)),
+		StuckCount: ptrInt(stuckCount),
 	})
 }
 
 // ClearStuckItems implements api.ServerInterface
 func (s *Server) ClearStuckItems(w http.ResponseWriter, r *http.Request, managerId string, params api.ClearStuckItemsParams) {
-	// TODO: Implement stuck items clearing
+	// Check if manager is configured
+	if !isManagerConfigured(s.cfg, managerId) {
+		writeError(w, http.StatusNotFound, "not_found", fmt.Sprintf("Media manager '%s' not configured", managerId))
+		return
+	}
+
+	// Get client
+	client, err := getManagerClient(s.cfg, managerId)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	// Determine blocklist option
+	blocklist := false
+	if params.Blocklist != nil {
+		blocklist = *params.Blocklist
+	}
+
+	// Clear stuck items
+	count, err := client.ClearStuckItems(blocklist)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "manager_error", fmt.Sprintf("Failed to clear stuck items: %v", err))
+		return
+	}
+
+	message := fmt.Sprintf("Cleared %d stuck items", count)
+	if blocklist {
+		message = fmt.Sprintf("Cleared %d stuck items and added to blocklist", count)
+	}
+
 	writeJSON(w, http.StatusOK, api.OperationResult{
-		Success: ptrBool(true),
-		Message: ptrString("Not implemented yet"),
+		Success:       ptrBool(true),
+		Message:       &message,
+		FilesAffected: ptrInt(count),
 	})
 }
 
 // GetStuckItems implements api.ServerInterface
 func (s *Server) GetStuckItems(w http.ResponseWriter, r *http.Request, managerId string) {
-	// TODO: Implement stuck items retrieval
-	writeJSON(w, http.StatusOK, []api.QueueItem{})
+	// Check if manager is configured
+	if !isManagerConfigured(s.cfg, managerId) {
+		writeError(w, http.StatusNotFound, "not_found", fmt.Sprintf("Media manager '%s' not configured", managerId))
+		return
+	}
+
+	// Get client
+	client, err := getManagerClient(s.cfg, managerId)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	// Fetch stuck items
+	items, err := client.GetStuckItems()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "manager_error", fmt.Sprintf("Failed to get stuck items: %v", err))
+		return
+	}
+
+	// Convert to API types
+	apiItems := make([]api.QueueItem, len(items))
+	for i, item := range items {
+		apiItems[i] = convertToAPIQueueItem(item)
+	}
+
+	writeJSON(w, http.StatusOK, apiItems)
 }
 
 // ScanStream implements api.ServerInterface - SSE stream for scan progress
