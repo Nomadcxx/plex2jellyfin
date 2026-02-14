@@ -19,43 +19,41 @@ func (s *Server) GetDuplicates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to API types
-	response := api.DuplicateAnalysis{
-		Groups:           make([]api.DuplicateGroup, len(analysis.Groups)),
-		TotalFiles:       analysis.TotalFiles,
-		TotalGroups:      analysis.TotalGroups,
-		ReclaimableBytes: analysis.ReclaimableBytes,
-	}
-
+	groups := make([]api.DuplicateGroup, len(analysis.Groups))
 	for i, g := range analysis.Groups {
 		group := api.DuplicateGroup{
-			Id:               g.ID,
-			Title:            g.Title,
-			MediaType:        api.DuplicateGroupMediaType(g.MediaType),
-			Files:            make([]api.MediaFile, len(g.Files)),
-			BestFileId:       g.BestFileID,
-			ReclaimableBytes: g.ReclaimableBytes,
+			Id:               &g.ID,
+			Title:            &g.Title,
+			MediaType:        ptrDuplicateGroupMediaType(g.MediaType),
+			ReclaimableBytes: &g.ReclaimableBytes,
+		}
+		if g.BestFileID != 0 {
+			group.BestFileId = ptrInt64(g.BestFileID)
 		}
 		if g.Year != nil {
 			group.Year = g.Year
 		}
-		if g.Season != nil {
-			group.Season = g.Season
-		}
-		if g.Episode != nil {
-			group.Episode = g.Episode
-		}
 
+		files := make([]api.MediaFile, len(g.Files))
 		for j, f := range g.Files {
-			group.Files[j] = api.MediaFile{
-				Id:           f.ID,
-				Path:         f.Path,
-				Size:         f.Size,
+			files[j] = api.MediaFile{
+				Id:           &f.ID,
+				Path:         &f.Path,
+				Size:         &f.Size,
 				Resolution:   &f.Resolution,
 				SourceType:   &f.SourceType,
-				QualityScore: f.QualityScore,
+				QualityScore: &f.QualityScore,
 			}
 		}
-		response.Groups[i] = group
+		group.Files = &files
+		groups[i] = group
+	}
+
+	response := api.DuplicateAnalysis{
+		Groups:           &groups,
+		TotalFiles:       &analysis.TotalFiles,
+		TotalGroups:      &analysis.TotalGroups,
+		ReclaimableBytes: &analysis.ReclaimableBytes,
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -65,12 +63,12 @@ func (s *Server) GetDuplicates(w http.ResponseWriter, r *http.Request) {
 func (s *Server) DeleteDuplicate(w http.ResponseWriter, r *http.Request, groupId string, params api.DeleteDuplicateParams) {
 	// TODO: Implement deletion
 	writeJSON(w, http.StatusOK, api.OperationResult{
-		Success: true,
+		Success: ptrBool(true),
 		Message: ptrString("Not implemented yet"),
 	})
 }
 
-// GetScattered implements api.ServerInterface - not in spec but needed
+// GetScattered implements api.ServerInterface
 func (s *Server) GetScattered(w http.ResponseWriter, r *http.Request) {
 	analysis, err := s.service.AnalyzeScattered()
 	if err != nil {
@@ -78,24 +76,25 @@ func (s *Server) GetScattered(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := api.ScatteredAnalysis{
-		Items:      make([]api.ScatteredItem, len(analysis.Items)),
-		TotalItems: analysis.TotalItems,
-		TotalMoves: analysis.TotalMoves,
-		TotalBytes: analysis.TotalBytes,
-	}
-
+	items := make([]api.ScatteredItem, len(analysis.Items))
 	for i, item := range analysis.Items {
-		response.Items[i] = api.ScatteredItem{
-			Id:             item.ID,
-			Title:          item.Title,
+		items[i] = api.ScatteredItem{
+			Id:             &item.ID,
+			Title:          &item.Title,
 			Year:           item.Year,
-			MediaType:      item.MediaType,
-			Locations:      item.Locations,
-			TargetLocation: item.TargetLocation,
-			FilesToMove:    item.FilesToMove,
+			MediaType:      &item.MediaType,
+			Locations:      &item.Locations,
+			TargetLocation: &item.TargetLocation,
+			FilesToMove:    &item.FilesToMove,
 			BytesToMove:    &item.BytesToMove,
 		}
+	}
+
+	response := api.ScatteredAnalysis{
+		Items:      &items,
+		TotalItems: &analysis.TotalItems,
+		TotalMoves: &analysis.TotalMoves,
+		TotalBytes: &analysis.TotalBytes,
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -105,7 +104,7 @@ func (s *Server) GetScattered(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ConsolidateItem(w http.ResponseWriter, r *http.Request, itemId int64) {
 	// TODO: Implement consolidation
 	writeJSON(w, http.StatusOK, api.OperationResult{
-		Success: true,
+		Success: ptrBool(true),
 		Message: ptrString("Not implemented yet"),
 	})
 }
@@ -113,8 +112,9 @@ func (s *Server) ConsolidateItem(w http.ResponseWriter, r *http.Request, itemId 
 // StartScan implements api.ServerInterface
 func (s *Server) StartScan(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement scan trigger
+	status := api.Scanning
 	writeJSON(w, http.StatusAccepted, api.ScanStatus{
-		Status:  api.ScanStatusStatusScanning,
+		Status:  &status,
 		Message: ptrString("Scan started"),
 	})
 }
@@ -122,8 +122,9 @@ func (s *Server) StartScan(w http.ResponseWriter, r *http.Request) {
 // GetScanStatus implements api.ServerInterface
 func (s *Server) GetScanStatus(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement SSE streaming
+	status := api.Idle
 	writeJSON(w, http.StatusOK, api.ScanStatus{
-		Status: api.ScanStatusStatusIdle,
+		Status: &status,
 	})
 }
 
@@ -135,6 +136,124 @@ func (s *Server) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ActivityStream implements api.ServerInterface - SSE stream for real-time activity
+func (s *Server) ActivityStream(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement SSE streaming
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetActivity implements api.ServerInterface - Get paginated activity log
+func (s *Server) GetActivity(w http.ResponseWriter, r *http.Request, params api.GetActivityParams) {
+	// TODO: Implement activity log retrieval
+	writeJSON(w, http.StatusOK, []api.ActivityEvent{})
+}
+
+// GetAISettings implements api.ServerInterface
+func (s *Server) GetAISettings(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement AI settings retrieval
+	writeJSON(w, http.StatusOK, api.AISettings{})
+}
+
+// Login implements api.ServerInterface
+func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement authentication
+	writeJSON(w, http.StatusOK, api.AuthStatus{
+		Authenticated: ptrBool(false),
+		Enabled:       ptrBool(false),
+	})
+}
+
+// Logout implements api.ServerInterface
+func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement logout
+	writeJSON(w, http.StatusOK, api.AuthStatus{
+		Authenticated: ptrBool(false),
+		Enabled:       ptrBool(false),
+	})
+}
+
+// GetAuthStatus implements api.ServerInterface
+func (s *Server) GetAuthStatus(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement auth status check
+	writeJSON(w, http.StatusOK, api.AuthStatus{
+		Authenticated: ptrBool(false),
+		Enabled:       ptrBool(false),
+	})
+}
+
+// ListLLMProviders implements api.ServerInterface
+func (s *Server) ListLLMProviders(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement LLM providers listing
+	writeJSON(w, http.StatusOK, []api.LLMProviderInfo{})
+}
+
+// GetLLMProviderStatus implements api.ServerInterface
+func (s *Server) GetLLMProviderStatus(w http.ResponseWriter, r *http.Request, providerId string) {
+	// TODO: Implement LLM provider status check
+	writeJSON(w, http.StatusOK, api.LLMProviderStatus{
+		Online: ptrBool(false),
+	})
+}
+
+// ListMediaManagers implements api.ServerInterface
+func (s *Server) ListMediaManagers(w http.ResponseWriter, r *http.Request) {
+	managers := buildMediaManagers(s.cfg)
+	writeJSON(w, http.StatusOK, managers)
+}
+
+// GetMediaManagerQueue implements api.ServerInterface
+func (s *Server) GetMediaManagerQueue(w http.ResponseWriter, r *http.Request, managerId string, params api.GetMediaManagerQueueParams) {
+	// TODO: Implement queue retrieval
+	writeJSON(w, http.StatusOK, []api.QueueItem{})
+}
+
+// ClearQueueItem implements api.ServerInterface
+func (s *Server) ClearQueueItem(w http.ResponseWriter, r *http.Request, managerId string, itemId int64, params api.ClearQueueItemParams) {
+	// TODO: Implement queue item clearing
+	writeJSON(w, http.StatusOK, api.OperationResult{
+		Success: ptrBool(true),
+		Message: ptrString("Not implemented yet"),
+	})
+}
+
+// TriggerManagerScan implements api.ServerInterface
+func (s *Server) TriggerManagerScan(w http.ResponseWriter, r *http.Request, managerId string) {
+	// TODO: Implement manager scan trigger
+	writeJSON(w, http.StatusOK, api.OperationResult{
+		Success: ptrBool(true),
+		Message: ptrString("Not implemented yet"),
+	})
+}
+
+// GetMediaManagerStatus implements api.ServerInterface
+func (s *Server) GetMediaManagerStatus(w http.ResponseWriter, r *http.Request, managerId string) {
+	// TODO: Implement manager status check
+	writeJSON(w, http.StatusOK, api.ServiceStatus{
+		Online: ptrBool(false),
+	})
+}
+
+// ClearStuckItems implements api.ServerInterface
+func (s *Server) ClearStuckItems(w http.ResponseWriter, r *http.Request, managerId string, params api.ClearStuckItemsParams) {
+	// TODO: Implement stuck items clearing
+	writeJSON(w, http.StatusOK, api.OperationResult{
+		Success: ptrBool(true),
+		Message: ptrString("Not implemented yet"),
+	})
+}
+
+// GetStuckItems implements api.ServerInterface
+func (s *Server) GetStuckItems(w http.ResponseWriter, r *http.Request, managerId string) {
+	// TODO: Implement stuck items retrieval
+	writeJSON(w, http.StatusOK, []api.QueueItem{})
+}
+
+// ScanStream implements api.ServerInterface - SSE stream for scan progress
+func (s *Server) ScanStream(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement SSE streaming
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Helper functions
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
@@ -143,12 +262,29 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(api.Error{
-		Code:    code,
-		Message: message,
+	json.NewEncoder(w).Encode(map[string]string{
+		"code":    code,
+		"message": message,
 	})
 }
 
 func ptrString(s string) *string {
 	return &s
+}
+
+func ptrBool(b bool) *bool {
+	return &b
+}
+
+func ptrInt(i int) *int {
+	return &i
+}
+
+func ptrInt64(i int64) *int64 {
+	return &i
+}
+
+func ptrDuplicateGroupMediaType(s string) *api.DuplicateGroupMediaType {
+	t := api.DuplicateGroupMediaType(s)
+	return &t
 }
