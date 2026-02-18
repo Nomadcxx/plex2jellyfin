@@ -33,6 +33,7 @@ type Config struct {
 	Logging     LoggingConfig     `mapstructure:"logging"`
 	Permissions PermissionsConfig `mapstructure:"permissions"`
 	AI          AIConfig          `mapstructure:"ai"`
+	Password    string            `mapstructure:"password"`
 }
 
 // Helper methods for permissions resolution and parsing
@@ -446,6 +447,11 @@ max_backups = %d
 			perm += fmt.Sprintf("dir_mode = \"%s\"\n", c.Permissions.DirMode)
 		}
 		base += perm
+	}
+
+	// Append password if configured
+	if c.Password != "" {
+		base += fmt.Sprintf("\n# ============================================================================\n# AUTHENTICATION\n# Optional password to protect the web UI\n# Leave empty to disable authentication\n# ============================================================================\npassword = \"%s\"\n", c.Password)
 	}
 
 	return base

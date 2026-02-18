@@ -1,7 +1,9 @@
 package api
 
 import (
+	"net/http"
 	"os"
+	"strings"
 
 	"github.com/Nomadcxx/jellywatch"
 	"github.com/Nomadcxx/jellywatch/api"
@@ -20,6 +22,7 @@ type Server struct {
 	cfg            *config.Config
 	service        *service.CleanupService
 	activityLogger *activity.Logger
+	sessions       *SessionStore
 }
 
 // NewServer creates a new API server
@@ -31,11 +34,18 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 		activityLogger, _ = activity.NewLogger(configDir)
 	}
 
+	// Initialize session store if auth is enabled
+	var sessions *SessionStore
+	if cfg != nil && cfg.Password != "" {
+		sessions = NewSessionStore()
+	}
+
 	return &Server{
 		db:             db,
 		cfg:            cfg,
 		service:        service.NewCleanupService(db),
 		activityLogger: activityLogger,
+		sessions:       sessions,
 	}
 }
 
@@ -91,9 +101,50 @@ func (s *Server) apiRouter() *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Use(middleware.SetHeader("Content-Type", "application/json"))
+	r.Use(s.authMiddleware)
 
 	// Mount generated API routes
 	api.HandlerFromMux(s, r)
 
 	return r
+}
+
+// authMiddleware checks if authentication is required and validates session
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Public paths that don't require authentication
+		publicPaths := []string{
+			"/auth/login",
+			"/auth/logout",
+			"/auth/status",
+			"/health",
+		}
+
+		path := r.URL.Path
+
+		// Check if path is public
+		for _, prefix := range publicPaths {
+			if strings.HasSuffix(path, prefix) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// If auth is not enabled, allow all requests
+		if !s.AuthEnabled() {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check if authenticated
+		if !s.IsAuthenticated(r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "Authentication required",
+				"code":  "unauthorized",
+			})
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

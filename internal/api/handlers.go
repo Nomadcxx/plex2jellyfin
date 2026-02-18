@@ -285,33 +285,6 @@ func (s *Server) GetAISettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.AISettings{})
 }
 
-// Login implements api.ServerInterface
-func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement authentication
-	writeJSON(w, http.StatusOK, api.AuthStatus{
-		Authenticated: ptrBool(false),
-		Enabled:       ptrBool(false),
-	})
-}
-
-// Logout implements api.ServerInterface
-func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement logout
-	writeJSON(w, http.StatusOK, api.AuthStatus{
-		Authenticated: ptrBool(false),
-		Enabled:       ptrBool(false),
-	})
-}
-
-// GetAuthStatus implements api.ServerInterface
-func (s *Server) GetAuthStatus(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement auth status check
-	writeJSON(w, http.StatusOK, api.AuthStatus{
-		Authenticated: ptrBool(false),
-		Enabled:       ptrBool(false),
-	})
-}
-
 // ListLLMProviders implements api.ServerInterface
 func (s *Server) ListLLMProviders(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement LLM providers listing
