@@ -4,15 +4,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/api"
 	"github.com/Nomadcxx/jellywatch/internal/activity"
+	"github.com/Nomadcxx/jellywatch/internal/consolidate"
 	"github.com/google/uuid"
 )
 
 // Ensure Server implements the interface
 var _ api.ServerInterface = (*Server)(nil)
+
+// ScanState tracks the current scan status
+type ScanState struct {
+	mu          sync.RWMutex
+	status      string    // "idle", "scanning", "completed", "failed"
+	progress    int       // 0-100
+	message     string    // status message
+	startTime   time.Time // when the scan started
+	lastScan    time.Time // when the last scan completed
+	filesScanned int64    // number of files scanned
+}
+
+// scanState is a package-level variable to track scan status
+var scanState = &ScanState{
+	status: "idle",
+}
 
 // GetDuplicates implements api.ServerInterface
 func (s *Server) GetDuplicates(w http.ResponseWriter, r *http.Request) {
@@ -64,11 +82,36 @@ func (s *Server) GetDuplicates(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteDuplicate implements api.ServerInterface
+// Deletes a specific file from a duplicate group
 func (s *Server) DeleteDuplicate(w http.ResponseWriter, r *http.Request, groupId string, params api.DeleteDuplicateParams) {
-	// TODO: Implement deletion
+	// The fileId parameter is the file to DELETE (not keep)
+	if params.FileId == nil {
+		writeError(w, http.StatusBadRequest, "missing_param", "fileId query parameter is required")
+		return
+	}
+
+	fileID := *params.FileId
+
+	// Delete the specific file
+	err := s.service.DeleteFileByID(fileID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "delete_failed", fmt.Sprintf("Failed to delete file: %v", err))
+		return
+	}
+
+	// Log the activity
+	if s.activityLogger != nil {
+		s.activityLogger.Log(activity.Entry{
+			Action:  "duplicate_deleted",
+			Source:  fmt.Sprintf("file:%d", fileID),
+			Success: true,
+		})
+	}
+
+	message := fmt.Sprintf("File %d deleted successfully", fileID)
 	writeJSON(w, http.StatusOK, api.OperationResult{
 		Success: ptrBool(true),
-		Message: ptrString("Not implemented yet"),
+		Message: &message,
 	})
 }
 
@@ -106,16 +149,98 @@ func (s *Server) GetScattered(w http.ResponseWriter, r *http.Request) {
 
 // ConsolidateItem implements api.ServerInterface
 func (s *Server) ConsolidateItem(w http.ResponseWriter, r *http.Request, itemId int64) {
-	// TODO: Implement consolidation
-	writeJSON(w, http.StatusOK, api.OperationResult{
-		Success: ptrBool(true),
-		Message: ptrString("Not implemented yet"),
+	// Get the conflict from the database
+	conflict, err := s.db.GetConflict(itemId)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", fmt.Sprintf("Failed to get conflict: %v", err))
+		return
+	}
+	if conflict == nil {
+		writeError(w, http.StatusNotFound, "not_found", fmt.Sprintf("Conflict %d not found", itemId))
+		return
+	}
+
+	// Create consolidator
+	consolidator := consolidate.NewConsolidator(s.db, s.cfg)
+
+	// Generate plan for this conflict
+	plan, err := consolidator.GeneratePlan(conflict)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "plan_failed", fmt.Sprintf("Failed to generate consolidation plan: %v", err))
+		return
+	}
+
+	if !plan.CanProceed {
+		writeError(w, http.StatusBadRequest, "cannot_consolidate", fmt.Sprintf("Cannot consolidate: %v", plan.Reasons))
+		return
+	}
+
+	// Check for dry-run parameter in request body
+	dryRun := false
+	if r.Body != nil && r.ContentLength > 0 {
+		var body struct {
+			DryRun *bool `json:"dryRun"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.DryRun != nil {
+			dryRun = *body.DryRun
+		}
+	}
+
+	// Execute the consolidation
+	if err := consolidator.ExecutePlan(plan, dryRun); err != nil {
+		writeError(w, http.StatusInternalServerError, "consolidation_failed", fmt.Sprintf("Failed to consolidate: %v", err))
+		return
+	}
+
+	// Log the activity
+	if s.activityLogger != nil {
+		s.activityLogger.Log(activity.Entry{
+			Action:  "consolidated",
+			Source:  conflict.Title,
+			Target:  plan.TargetPath,
+			Success: true,
+		})
+	}
+
+	message := fmt.Sprintf("Consolidated %d files (%d bytes)", plan.TotalFiles, plan.TotalBytes)
+	if dryRun {
+		message = fmt.Sprintf("[DRY RUN] Would consolidate %d files (%d bytes)", plan.TotalFiles, plan.TotalBytes)
+	}
+
+	// Log the message for debugging
+	fmt.Printf("Consolidation: %s\n", message)
+
+	writeJSON(w, http.StatusOK, api.ConsolidationResult{
+		Success:    ptrBool(true),
+		FilesMoved: &plan.TotalFiles,
+		BytesMoved: &plan.TotalBytes,
 	})
 }
 
 // StartScan implements api.ServerInterface
 func (s *Server) StartScan(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement scan trigger
+	scanState.mu.Lock()
+	defer scanState.mu.Unlock()
+
+	// Check if a scan is already in progress
+	if scanState.status == "scanning" {
+		status := api.Scanning
+		writeJSON(w, http.StatusConflict, api.ScanStatus{
+			Status:  &status,
+			Message: ptrString("Scan already in progress"),
+		})
+		return
+	}
+
+	// Start a new scan in a goroutine
+	scanState.status = "scanning"
+	scanState.progress = 0
+	scanState.message = "Scan started"
+	scanState.startTime = time.Now()
+	scanState.filesScanned = 0
+
+	go s.runBackgroundScan()
+
 	status := api.Scanning
 	writeJSON(w, http.StatusAccepted, api.ScanStatus{
 		Status:  &status,
@@ -125,11 +250,75 @@ func (s *Server) StartScan(w http.ResponseWriter, r *http.Request) {
 
 // GetScanStatus implements api.ServerInterface
 func (s *Server) GetScanStatus(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement SSE streaming
-	status := api.Idle
-	writeJSON(w, http.StatusOK, api.ScanStatus{
-		Status: &status,
-	})
+	scanState.mu.RLock()
+	defer scanState.mu.RUnlock()
+
+	status := api.ScanStatusStatus(scanState.status)
+	response := api.ScanStatus{
+		Status:   &status,
+		Progress: &scanState.progress,
+		Message:  &scanState.message,
+	}
+
+	if !scanState.lastScan.IsZero() {
+		response.Message = ptrString(fmt.Sprintf("Last scan: %s", scanState.lastScan.Format(time.RFC3339)))
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+// runBackgroundScan executes the scan in a background goroutine
+func (s *Server) runBackgroundScan() {
+	defer func() {
+		scanState.mu.Lock()
+		scanState.status = "idle"
+		scanState.progress = 100
+		scanState.lastScan = time.Now()
+		scanState.mu.Unlock()
+	}()
+
+	// Detect conflicts (scattered media)
+	scanState.mu.Lock()
+	scanState.message = "Detecting scattered media..."
+	scanState.mu.Unlock()
+
+	_, err := s.db.DetectConflicts()
+	if err != nil {
+		scanState.mu.Lock()
+		scanState.status = "failed"
+		scanState.message = fmt.Sprintf("Scan failed: %v", err)
+		scanState.mu.Unlock()
+		return
+	}
+
+	scanState.mu.Lock()
+	scanState.message = "Analyzing duplicates..."
+	scanState.progress = 50
+	scanState.mu.Unlock()
+
+	// Analyze duplicates (this triggers the duplicate detection query)
+	_, err = s.service.AnalyzeDuplicates()
+	if err != nil {
+		scanState.mu.Lock()
+		scanState.status = "failed"
+		scanState.message = fmt.Sprintf("Duplicate analysis failed: %v", err)
+		scanState.mu.Unlock()
+		return
+	}
+
+	scanState.mu.Lock()
+	scanState.message = "Scan completed successfully"
+	scanState.progress = 100
+	scanState.mu.Unlock()
+
+	// Log the activity
+	if s.activityLogger != nil {
+		s.activityLogger.Log(activity.Entry{
+			Action:  "scan_completed",
+			Source:  "library",
+			Success: true,
+		})
+	}
 }
 
 // HealthCheck implements api.ServerInterface
