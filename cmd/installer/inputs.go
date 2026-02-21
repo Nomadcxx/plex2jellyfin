@@ -126,6 +126,39 @@ func (m *model) saveRadarrInputs() {
 	}
 }
 
+func (m *model) initJellyfinInputs() {
+	m.inputs = make([]textinput.Model, 2)
+
+	m.inputs[0] = textinput.New()
+	m.inputs[0].Placeholder = "http://localhost:8096"
+	m.inputs[0].Width = 40
+	m.inputs[0].CharLimit = 200
+	m.inputs[0].SetValue(m.jellyfinURL)
+	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[0].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[0].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
+
+	m.inputs[1] = textinput.New()
+	m.inputs[1].Placeholder = "API Key"
+	m.inputs[1].Width = 40
+	m.inputs[1].CharLimit = 120
+	m.inputs[1].SetValue(m.jellyfinAPIKey)
+	m.inputs[1].EchoMode = textinput.EchoPassword
+	m.inputs[1].EchoCharacter = '•'
+	m.inputs[1].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[1].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[1].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[1].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
+}
+
+func (m *model) saveJellyfinInputs() {
+	if len(m.inputs) >= 2 {
+		m.jellyfinURL = m.inputs[0].Value()
+		m.jellyfinAPIKey = m.inputs[1].Value()
+	}
+}
+
 func (m *model) initAIInputs() {
 	m.inputs = make([]textinput.Model, 1)
 
@@ -146,6 +179,11 @@ func (m *model) saveAIInputs() {
 	}
 	if m.aiModelIndex >= 0 && m.aiModelIndex < len(m.aiModels) {
 		m.aiModel = m.aiModels[m.aiModelIndex]
+	}
+	if m.aiFallbackModelIndex >= 0 && m.aiFallbackModelIndex < len(m.aiModels) {
+		m.aiFallbackModel = m.aiModels[m.aiFallbackModelIndex]
+	} else {
+		m.aiFallbackModel = ""
 	}
 }
 

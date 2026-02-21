@@ -51,7 +51,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			stepControlKeys = map[string]bool{
 				"+": true, "-": true,
 			}
-		case stepIntegrationsSonarr, stepIntegrationsRadarr:
+		case stepIntegrationsSonarr, stepIntegrationsRadarr, stepIntegrationsJellyfin:
 			stepControlKeys = map[string]bool{
 				"up": true, "down": true, "k": true, "j": true,
 				"t": true, "T": true, "s": true, "S": true,
@@ -61,7 +61,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"up": true, "down": true, "k": true, "j": true,
 				"t": true, "T": true, "s": true, "S": true,
 				"p": true, "P": true, "r": true, "R": true,
-				"e": true, "E": true, " ": true,
+				"e": true, "E": true,
+				" ": true,
 			}
 		case stepSystemService:
 			stepControlKeys = map[string]bool{
@@ -82,7 +83,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mdl := newModel.(model)
 			if len(mdl.inputs) > 0 && mdl.focusedInput < len(mdl.inputs) {
 				if mdl.step == stepPaths || mdl.step == stepIntegrationsSonarr ||
-					mdl.step == stepIntegrationsRadarr || mdl.step == stepIntegrationsAI ||
+					mdl.step == stepIntegrationsRadarr || mdl.step == stepIntegrationsJellyfin || mdl.step == stepIntegrationsAI ||
 					mdl.step == stepSystemPermissions {
 					var inputCmd tea.Cmd
 					mdl.inputs[mdl.focusedInput], inputCmd = mdl.inputs[mdl.focusedInput].Update(msg)
@@ -177,6 +178,8 @@ func (m model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSonarrKeys(key)
 	case stepIntegrationsRadarr:
 		return m.handleRadarrKeys(key)
+	case stepIntegrationsJellyfin:
+		return m.handleJellyfinKeys(key)
 	case stepIntegrationsAI:
 		return m.handleAIKeys(key)
 	case stepSystemPermissions:
@@ -295,31 +298,81 @@ func (m model) handleRadarrKeys(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) handleJellyfinKeys(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "tab":
+		return m.nextInput()
+	case "shift+tab":
+		return m.prevInput()
+	case "up", "k":
+		if m.focusedInput == 0 {
+			m.jellyfinEnabled = !m.jellyfinEnabled
+		}
+	case "down", "j":
+		if m.focusedInput == 0 {
+			m.jellyfinEnabled = !m.jellyfinEnabled
+		}
+	case "t", "T":
+		if m.jellyfinEnabled {
+			return m.testJellyfin()
+		}
+	case "s", "S":
+		return m.nextStep()
+	case "enter":
+		m.saveJellyfinInputs()
+		return m.nextStep()
+	case "esc":
+		return m.prevStep()
+	}
+	return m, nil
+}
+
 func (m model) handleAIKeys(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "tab", "shift+tab":
-		// No tab navigation needed - up/down handles everything
 		return m, nil
-	case "e", "E", " ":
-		// Toggle AI enable with 'e' or space
+	case " ":
+		if m.aiEnabled && m.aiState == aiStateReady && len(m.aiModels) > 0 {
+			idx := m.aiModelIndex
+			if idx >= 0 && idx < len(m.aiModels) {
+				selectedModel := m.aiModels[idx]
+				switch {
+				case m.aiModel == selectedModel:
+					// Deselect primary — promote fallback
+					m.aiModel = m.aiFallbackModel
+					m.aiFallbackModel = ""
+					m.aiFallbackModelIndex = -1
+				case m.aiFallbackModel == selectedModel:
+					m.aiFallbackModel = ""
+					m.aiFallbackModelIndex = -1
+				case m.aiModel == "":
+					m.aiModel = selectedModel
+				case m.aiFallbackModel == "":
+					m.aiFallbackModel = selectedModel
+					m.aiFallbackModelIndex = idx
+				}
+			}
+		} else {
+			m.aiEnabled = !m.aiEnabled
+			if m.aiEnabled {
+				return m.detectOllama()
+			}
+		}
+	case "e", "E":
 		m.aiEnabled = !m.aiEnabled
 		if m.aiEnabled {
 			return m.detectOllama()
 		}
 	case "up", "k":
-		// Navigate model list up (when AI enabled and models available)
 		if m.aiEnabled && m.aiState == aiStateReady && len(m.aiModels) > 0 {
 			if m.aiModelIndex > 0 {
 				m.aiModelIndex--
-				m.aiModel = m.aiModels[m.aiModelIndex]
 			}
 		}
 	case "down", "j":
-		// Navigate model list down (when AI enabled and models available)
 		if m.aiEnabled && m.aiState == aiStateReady && len(m.aiModels) > 0 {
 			if m.aiModelIndex < len(m.aiModels)-1 {
 				m.aiModelIndex++
-				m.aiModel = m.aiModels[m.aiModelIndex]
 			}
 		}
 	case "t", "T":
@@ -491,6 +544,8 @@ func (m *model) initInputsForStep() {
 		m.initSonarrInputs()
 	case stepIntegrationsRadarr:
 		m.initRadarrInputs()
+	case stepIntegrationsJellyfin:
+		m.initJellyfinInputs()
 	case stepIntegrationsAI:
 		m.initAIInputs()
 	case stepSystemPermissions:

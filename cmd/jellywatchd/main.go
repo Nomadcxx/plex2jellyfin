@@ -12,6 +12,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
@@ -149,6 +150,29 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "Radarr integration enabled", logging.F("url", cfg.Radarr.URL))
 	}
 
+	var jellyfinClient *jellyfin.Client
+	if cfg.Jellyfin.Enabled && cfg.Jellyfin.APIKey != "" && cfg.Jellyfin.URL != "" {
+		jellyfinClient = jellyfin.NewClient(jellyfin.Config{
+			URL:     cfg.Jellyfin.URL,
+			APIKey:  cfg.Jellyfin.APIKey,
+			Timeout: 30 * time.Second,
+		})
+		if err := jellyfinClient.Ping(); err != nil {
+			logger.Warn("daemon", "Jellyfin connection failed, disabling integration", logging.F("error", err.Error()))
+			jellyfinClient = nil
+		} else {
+			info, err := jellyfinClient.GetSystemInfo()
+			if err == nil && info != nil {
+				logger.Info("daemon", "Jellyfin integration enabled",
+					logging.F("server", info.ServerName),
+					logging.F("version", info.Version))
+			} else {
+				logger.Info("daemon", "Jellyfin integration enabled", logging.F("url", cfg.Jellyfin.URL))
+			}
+			notifyMgr.Register(notify.NewJellyfinNotifier(jellyfinClient, cfg.Jellyfin.NotifyOnImport))
+		}
+	}
+
 	// Get config directory for activity logging
 	configDir := filepath.Join(os.Getenv("HOME"), ".config", "jellywatch")
 	if cfgFile != "" {
@@ -171,6 +195,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		FileMode:        fileMode,
 		DirMode:         dirMode,
 		SonarrClient:    sonarrClient,
+		JellyfinClient:  jellyfinClient,
+		PlaybackSafety:  cfg.Jellyfin.PlaybackSafety,
 		ConfigDir:       configDir,
 	})
 	if err != nil {

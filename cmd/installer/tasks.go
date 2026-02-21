@@ -54,6 +54,8 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 		m.postScanTasks = []installTask{
 			{name: "Setup systemd", description: "Installing systemd service", execute: setupSystemd, status: statusPending},
 			{name: "Start service", description: "Starting jellywatchd", execute: startService, optional: true, status: statusPending},
+			{name: "Setup web service", description: "Installing web UI service", execute: setupWebSystemd, status: statusPending},
+			{name: "Start web service", description: "Starting jellyweb", execute: startWebService, optional: true, status: statusPending},
 		}
 	}
 
@@ -83,6 +85,7 @@ func buildBinaries(m *model) error {
 	}{
 		{[]string{"go", "build", "-o", "jellywatch", "./cmd/jellywatch"}, "jellywatch"},
 		{[]string{"go", "build", "-o", "jellywatchd", "./cmd/jellywatchd"}, "jellywatchd"},
+		{[]string{"go", "build", "-o", "jellyweb", "./cmd/jellyweb"}, "jellyweb"},
 		{[]string{"go", "build", "-o", "jellywatch-installer", "./cmd/installer"}, "installer"},
 	}
 
@@ -96,7 +99,7 @@ func buildBinaries(m *model) error {
 }
 
 func installBinaries(m *model) error {
-	binaries := []string{"jellywatch", "jellywatchd", "jellywatch-installer"}
+	binaries := []string{"jellywatch", "jellywatchd", "jellyweb", "jellywatch-installer"}
 	for _, bin := range binaries {
 		if _, err := os.Stat(bin); os.IsNotExist(err) {
 			continue
@@ -184,6 +187,18 @@ api_key = "%s"
 `, m.radarrURL, m.radarrAPIKey)
 	}
 
+	if m.jellyfinEnabled {
+		config += fmt.Sprintf(`
+[jellyfin]
+enabled = true
+url = "%s"
+api_key = "%s"
+notify_on_import = true
+playback_safety = true
+verify_after_refresh = false
+`, m.jellyfinURL, m.jellyfinAPIKey)
+	}
+
 	if m.aiEnabled && m.aiModel != "" {
 		config += fmt.Sprintf(`
 [ai]
@@ -191,6 +206,9 @@ enabled = true
 ollama_url = "%s"
 model = "%s"
 `, m.aiOllamaURL, m.aiModel)
+		if m.aiFallbackModel != "" {
+			config += fmt.Sprintf("fallback_model = \"%s\"\n", m.aiFallbackModel)
+		}
 	}
 
 	configPath := filepath.Join(jellywatchDir, "config.toml")
@@ -269,6 +287,73 @@ func startService(m *model) error {
 
 	if err := exec.Command("systemctl", "start", "jellywatchd.service").Run(); err != nil {
 		return fmt.Errorf("failed to start service")
+	}
+	return nil
+}
+
+func setupWebSystemd(m *model) error {
+	if !m.serviceEnabled {
+		return nil
+	}
+
+	// Get the actual user for SUDO_USER environment variable
+	// This ensures paths.UserConfigDir() returns the correct user's config
+	// when running as a systemd service (which doesn't set SUDO_USER)
+	actualUser := getActualUser()
+	if actualUser == "" || actualUser == "root" {
+		actualUser = "root" // fallback, though this shouldn't happen in normal install
+	}
+
+	serviceContent := fmt.Sprintf(`[Unit]
+Description=JellyWatch Web UI Server
+Documentation=https://github.com/Nomadcxx/jellywatch
+After=network.target jellywatchd.service
+Wants=jellywatchd.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=SUDO_USER=%s
+ExecStart=/usr/local/bin/jellyweb --host 0.0.0.0 --port 5522
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jellyweb
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+`, actualUser)
+
+	servicePath := "/etc/systemd/system/jellyweb.service"
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
+		return err
+	}
+
+	exec.Command("systemctl", "daemon-reload").Run()
+
+	if err := exec.Command("systemctl", "enable", "jellyweb.service").Run(); err != nil {
+		return fmt.Errorf("failed to enable web service")
+	}
+
+	return nil
+}
+
+func startWebService(m *model) error {
+	if !m.serviceEnabled || !m.serviceStartNow {
+		return nil
+	}
+
+	if err := exec.Command("systemctl", "start", "jellyweb.service").Run(); err != nil {
+		return fmt.Errorf("failed to start web service")
 	}
 	return nil
 }

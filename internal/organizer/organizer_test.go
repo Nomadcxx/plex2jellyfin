@@ -1,11 +1,16 @@
 package organizer
 
 import (
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -329,7 +334,7 @@ func TestOrganizeTVEpisode_ExistingShow(t *testing.T) {
 	// Create existing episode (must match the format the organizer expects)
 	existingEpisode := filepath.Join(seasonDir, "Silo (2023) S01E01.mkv")
 	createTestFile(t, existingEpisode, 500*1024*1024)
-	
+
 	// Verify it exists before organizing
 	assert.FileExists(t, existingEpisode, "Existing episode should exist before organizing")
 
@@ -356,8 +361,72 @@ func TestOrganizeTVEpisode_ExistingShow(t *testing.T) {
 	// Verify new episode was added
 	expectedPath := filepath.Join(seasonDir, "Silo (2023) S01E02.mkv")
 	assert.FileExists(t, expectedPath, "New episode should be added")
-	
+
 	// Note: The existing episode might be removed if the organizer thinks it's a duplicate
 	// This is actually correct behavior - the organizer removes lower quality duplicates
 	// For this test, we just verify the new episode was added correctly
+}
+
+func TestPlaybackSafetyBlocksActiveStream(t *testing.T) {
+	client := jellyfin.NewClient(jellyfin.Config{
+		URL:    "http://jellyfin.local",
+		APIKey: "k",
+		HTTPClient: &http.Client{
+			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/Sessions" {
+					return jsonResponse(http.StatusOK, `[{"Id":"s1","UserName":"alice","DeviceName":"Living Room","NowPlayingItem":{"Path":"/tmp/The.Matrix.1999.1080p.mkv"}}]`), nil
+				}
+				return jsonResponse(http.StatusNotFound, "not found"), nil
+			}),
+			Timeout: 2 * time.Second,
+		},
+	})
+	org, err := NewOrganizer([]string{t.TempDir()},
+		WithDryRun(true),
+		WithJellyfinClient(client, true),
+	)
+	require.NoError(t, err)
+
+	result, err := org.OrganizeMovie("/tmp/The.Matrix.1999.1080p.mkv", t.TempDir())
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "playback safety")
+}
+
+func TestPlaybackSafetyFailOpenWhenJellyfinUnavailable(t *testing.T) {
+	client := jellyfin.NewClient(jellyfin.Config{
+		URL:    "http://jellyfin.local",
+		APIKey: "k",
+		HTTPClient: &http.Client{
+			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return jsonResponse(http.StatusInternalServerError, "error"), nil
+			}),
+			Timeout: 2 * time.Second,
+		},
+	})
+	libraryDir := t.TempDir()
+	org, err := NewOrganizer([]string{libraryDir},
+		WithDryRun(true),
+		WithJellyfinClient(client, true),
+	)
+	require.NoError(t, err)
+
+	result, err := org.OrganizeMovie("/tmp/The.Matrix.1999.1080p.mkv", libraryDir)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Success)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func jsonResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
 }

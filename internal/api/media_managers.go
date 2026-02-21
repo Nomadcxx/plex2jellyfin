@@ -6,6 +6,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/api"
 	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 )
@@ -106,6 +107,55 @@ func (w *RadarrClientWrapper) ClearStuckItems(blocklist bool) (int, error) {
 	return w.client.ClearStuckItems(blocklist)
 }
 
+// JellyfinClientWrapper wraps Jellyfin client to implement ManagerClient.
+// Jellyfin does not expose queue-management semantics like Sonarr/Radarr,
+// so queue-related methods return empty sets.
+type JellyfinClientWrapper struct {
+	client *jellyfin.Client
+}
+
+func (w *JellyfinClientWrapper) GetSystemStatus() (string, error) {
+	info, err := w.client.GetSystemInfo()
+	if err != nil {
+		return "", err
+	}
+	return info.Version, nil
+}
+
+func (w *JellyfinClientWrapper) GetAllQueueItems() ([]QueueItemInfo, error) {
+	streams, err := w.client.GetActiveStreams()
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]QueueItemInfo, 0, len(streams))
+	for _, stream := range streams {
+		title := ""
+		if stream.NowPlayingItem != nil {
+			title = stream.NowPlayingItem.Name
+		}
+		items = append(items, QueueItemInfo{
+			ID:             0,
+			Title:          title,
+			Status:         "playing",
+			DownloadClient: stream.DeviceName,
+		})
+	}
+	return items, nil
+}
+
+func (w *JellyfinClientWrapper) GetStuckItems() ([]QueueItemInfo, error) {
+	return []QueueItemInfo{}, nil
+}
+
+func (w *JellyfinClientWrapper) RemoveFromQueue(id int, blocklist bool) error {
+	return fmt.Errorf("operation not supported by Jellyfin")
+}
+
+func (w *JellyfinClientWrapper) ClearStuckItems(blocklist bool) (int, error) {
+	return 0, fmt.Errorf("operation not supported by Jellyfin")
+}
+
 // convertSonarrQueueItems converts Sonarr queue items to unified format
 func convertSonarrQueueItems(items []sonarr.QueueItem) []QueueItemInfo {
 	result := make([]QueueItemInfo, len(items))
@@ -187,6 +237,15 @@ func getManagerClient(cfg *config.Config, managerId string) (ManagerClient, erro
 			APIKey: cfg.Radarr.APIKey,
 		})
 		return &RadarrClientWrapper{client: client}, nil
+	case "jellyfin":
+		if !cfg.Jellyfin.Enabled || cfg.Jellyfin.URL == "" || cfg.Jellyfin.APIKey == "" {
+			return nil, fmt.Errorf("jellyfin not configured")
+		}
+		client := jellyfin.NewClient(jellyfin.Config{
+			URL:    cfg.Jellyfin.URL,
+			APIKey: cfg.Jellyfin.APIKey,
+		})
+		return &JellyfinClientWrapper{client: client}, nil
 	default:
 		return nil, fmt.Errorf("unknown manager: %s", managerId)
 	}
@@ -199,6 +258,8 @@ func isManagerConfigured(cfg *config.Config, managerId string) bool {
 		return cfg.Sonarr.Enabled && cfg.Sonarr.URL != ""
 	case "radarr":
 		return cfg.Radarr.Enabled && cfg.Radarr.URL != ""
+	case "jellyfin":
+		return cfg.Jellyfin.Enabled && cfg.Jellyfin.URL != "" && cfg.Jellyfin.APIKey != ""
 	default:
 		return false
 	}

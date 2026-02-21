@@ -93,6 +93,51 @@ func testRadarrCmd(url, apiKey string) tea.Cmd {
 	}
 }
 
+func (m model) testJellyfin() (tea.Model, tea.Cmd) {
+	m.jellyfinTesting = true
+	url := m.jellyfinURL
+	apiKey := m.jellyfinAPIKey
+	if len(m.inputs) >= 2 {
+		url = m.inputs[0].Value()
+		apiKey = m.inputs[1].Value()
+	}
+	return m, testJellyfinCmd(url, apiKey)
+}
+
+func testJellyfinCmd(url, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		client := &http.Client{Timeout: 10 * time.Second}
+		req, err := http.NewRequest("GET", fmt.Sprintf("%s/System/Info", strings.TrimRight(url, "/")), nil)
+		if err != nil {
+			return apiTestResultMsg{service: "jellyfin", success: false, err: err}
+		}
+		req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token=\"%s\", Client=\"jellywatch-installer\", Device=\"installer\", DeviceId=\"installer\", Version=\"1.0.0\"`, apiKey))
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return apiTestResultMsg{service: "jellyfin", success: false, err: err}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			return apiTestResultMsg{service: "jellyfin", success: false, err: fmt.Errorf("HTTP %d", resp.StatusCode)}
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		var result struct {
+			ServerName string `json:"ServerName"`
+			Version    string `json:"Version"`
+		}
+		_ = json.Unmarshal(body, &result)
+
+		label := result.Version
+		if result.ServerName != "" && result.Version != "" {
+			label = fmt.Sprintf("%s (%s)", result.ServerName, result.Version)
+		}
+		return apiTestResultMsg{service: "jellyfin", success: true, version: label}
+	}
+}
+
 func (m model) detectOllama() (tea.Model, tea.Cmd) {
 	m.aiTesting = true
 	m.aiState = aiStateUnknown
@@ -316,6 +361,14 @@ func (m model) handleAPITestResult(msg apiTestResultMsg) (tea.Model, tea.Cmd) {
 			m.radarrVersion = msg.version
 		} else if msg.err != nil {
 			m.radarrVersion = msg.err.Error()
+		}
+	case "jellyfin":
+		m.jellyfinTesting = false
+		m.jellyfinTested = msg.success
+		if msg.success {
+			m.jellyfinVersion = msg.version
+		} else if msg.err != nil {
+			m.jellyfinVersion = msg.err.Error()
 		}
 	case "ollama":
 		m.aiTesting = false

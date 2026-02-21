@@ -65,13 +65,15 @@ func newModel(debugMode bool, logFile *os.File) model {
 		watchFolders: watchFolders,
 
 		// Default values
-		sonarrURL:    "http://localhost:8989",
-		radarrURL:    "http://localhost:7878",
-		aiOllamaURL:  "http://localhost:11434",
-		permUser:     permUser,
-		permGroup:    permGroup,
-		permFileMode: permFileMode,
-		permDirMode:  permDirMode,
+		sonarrURL:            "http://localhost:8989",
+		radarrURL:            "http://localhost:7878",
+		jellyfinURL:          "http://localhost:8096",
+		aiOllamaURL:          "http://localhost:11434",
+		aiFallbackModelIndex: -1, // no fallback by default
+		permUser:             permUser,
+		permGroup:            permGroup,
+		permFileMode:         permFileMode,
+		permDirMode:          permDirMode,
 
 		// Service defaults
 		serviceEnabled:  true,

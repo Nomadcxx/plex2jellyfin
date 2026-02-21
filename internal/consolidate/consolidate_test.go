@@ -123,12 +123,12 @@ func TestSizeFilter(t *testing.T) {
 		consolidator := &Consolidator{}
 
 		// getFilesToMove should skip small files
-		ops, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
+		result, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if len(ops) > 0 {
+		if len(result.operations) > 0 {
 			t.Error("Expected no operations for files under 100MB")
 		}
 	})
@@ -149,12 +149,12 @@ func TestSizeFilter(t *testing.T) {
 		consolidator := &Consolidator{}
 
 		// getFilesToMove should process large files
-		ops, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
+		result, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if len(ops) == 0 {
+		if len(result.operations) == 0 {
 			t.Error("Expected operations for files over 100MB")
 		}
 	})
@@ -175,12 +175,12 @@ func TestSizeFilter(t *testing.T) {
 		consolidator := &Consolidator{}
 
 		// getFilesToMove should skip files exactly at 100MB (inclusive filter)
-		ops, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
+		result, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if len(ops) > 0 {
+		if len(result.operations) > 0 {
 			t.Error("Expected no operations for files exactly 100MB")
 		}
 	})

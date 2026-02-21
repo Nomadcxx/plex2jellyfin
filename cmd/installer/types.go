@@ -18,6 +18,7 @@ const (
 	stepPaths
 	stepIntegrationsSonarr
 	stepIntegrationsRadarr
+	stepIntegrationsJellyfin
 	stepIntegrationsAI
 	stepSystemPermissions
 	stepSystemService
@@ -128,17 +129,27 @@ type model struct {
 	radarrVersion string
 	radarrTesting bool
 
+	// Jellyfin configuration
+	jellyfinEnabled bool
+	jellyfinURL     string
+	jellyfinAPIKey  string
+	jellyfinTested  bool
+	jellyfinVersion string
+	jellyfinTesting bool
+
 	// AI configuration
-	aiEnabled       bool
-	aiState         aiState
-	aiOllamaURL     string
-	aiModels        []string
-	aiModelIndex    int
-	aiModel         string
-	aiTesting       bool
-	aiTestResult    string
-	aiPromptTesting bool
-	aiPromptResult  string
+	aiEnabled            bool
+	aiState              aiState
+	aiOllamaURL          string
+	aiModels             []string
+	aiModelIndex         int
+	aiModel              string
+	aiFallbackModelIndex int // -1 = none
+	aiFallbackModel      string
+	aiTesting            bool
+	aiTestResult         string
+	aiPromptTesting      bool
+	aiPromptResult       string
 
 	// Permissions
 	permUser     string
@@ -212,7 +223,7 @@ type subTaskUpdateMsg struct {
 }
 
 type apiTestResultMsg struct {
-	service string // "sonarr", "radarr", "ollama"
+	service string // "sonarr", "radarr", "jellyfin", "ollama"
 	success bool
 	version string
 	err     error

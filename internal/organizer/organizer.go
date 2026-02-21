@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/analyzer"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/quality"
@@ -45,8 +47,14 @@ type Organizer struct {
 	fileMode       os.FileMode
 	dirMode        os.FileMode
 	sonarrClient   *sonarr.Client
+	jellyfinClient *jellyfin.Client
+	playbackSafety bool
 	db             *database.MediaDB
 	syncService    *syncsvc.SyncService
+	pluginClient   *jellyfin.PluginClient
+	pauseOnScan    bool
+	paused         bool
+	pauseMu        sync.RWMutex
 }
 
 func NewOrganizer(libraries []string, options ...func(*Organizer)) (*Organizer, error) {
@@ -143,6 +151,20 @@ func WithSonarrClient(client *sonarr.Client) func(*Organizer) {
 	}
 }
 
+func WithJellyfinClient(client *jellyfin.Client, playbackSafety bool) func(*Organizer) {
+	return func(o *Organizer) {
+		o.jellyfinClient = client
+		o.playbackSafety = playbackSafety
+	}
+}
+
+func WithPluginClient(client *jellyfin.PluginClient, pauseOnScan bool) func(*Organizer) {
+	return func(o *Organizer) {
+		o.pluginClient = client
+		o.pauseOnScan = pauseOnScan
+	}
+}
+
 // WithDatabase sets the HOLDEN database for self-learning
 func WithDatabase(db *database.MediaDB) func(*Organizer) {
 	return func(o *Organizer) {
@@ -194,7 +216,77 @@ func (o *Organizer) applyDirOwnership(path string) error {
 	return nil
 }
 
+// checkPlaybackSafety returns an error if the source path is actively being streamed.
+// Fail-open behavior: if Jellyfin cannot be reached, organization proceeds.
+func (o *Organizer) checkPlaybackSafety(sourcePath string) error {
+	if !o.playbackSafety || o.jellyfinClient == nil {
+		return nil
+	}
+
+	playing, session, err := o.jellyfinClient.IsPathBeingPlayed(sourcePath)
+	if err != nil {
+		return nil
+	}
+	if playing && session != nil {
+		return fmt.Errorf("file is being streamed by %s on %s, deferring operation", session.UserName, session.DeviceName)
+	}
+	if playing {
+		return fmt.Errorf("file is being actively streamed, deferring operation")
+	}
+	return nil
+}
+
+func (o *Organizer) Pause() {
+	o.pauseMu.Lock()
+	defer o.pauseMu.Unlock()
+	o.paused = true
+}
+
+func (o *Organizer) Resume() {
+	o.pauseMu.Lock()
+	defer o.pauseMu.Unlock()
+	o.paused = false
+}
+
+func (o *Organizer) IsPaused() bool {
+	o.pauseMu.RLock()
+	defer o.pauseMu.RUnlock()
+	return o.paused
+}
+
+func (o *Organizer) shouldWaitForScan() bool {
+	if !o.pauseOnScan || o.pluginClient == nil {
+		return false
+	}
+
+	scans, err := o.pluginClient.GetActiveScans()
+	if err != nil {
+		return false
+	}
+
+	return len(scans.Scans) > 0
+}
+
+func (o *Organizer) waitIfScanning(timeout time.Duration) error {
+	if !o.pauseOnScan || o.pluginClient == nil {
+		return nil
+	}
+
+	start := time.Now()
+	for o.shouldWaitForScan() {
+		if time.Since(start) > timeout {
+			return fmt.Errorf("timeout waiting for Jellyfin scan to complete")
+		}
+		time.Sleep(5 * time.Second)
+	}
+	return nil
+}
+
 func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*OrganizationResult, error) {
+	if err := o.checkPlaybackSafety(sourcePath); err != nil {
+		return nil, fmt.Errorf("playback safety: %w", err)
+	}
+
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
 
@@ -319,6 +411,10 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 }
 
 func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*OrganizationResult, error) {
+	if err := o.checkPlaybackSafety(sourcePath); err != nil {
+		return nil, fmt.Errorf("playback safety: %w", err)
+	}
+
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
 

@@ -84,6 +84,8 @@ func (m model) View() string {
 		mainContent = m.renderSonarr()
 	case stepIntegrationsRadarr:
 		mainContent = m.renderRadarr()
+	case stepIntegrationsJellyfin:
+		mainContent = m.renderJellyfin()
 	case stepIntegrationsAI:
 		mainContent = m.renderAI()
 	case stepSystemPermissions:
@@ -156,7 +158,7 @@ func (m model) getHelpText() string {
 		return help
 	case stepPaths:
 		return "Tab: Next field  •  +/-: Add/Remove folder  •  Enter: Continue  •  Esc: Back"
-	case stepIntegrationsSonarr, stepIntegrationsRadarr:
+	case stepIntegrationsSonarr, stepIntegrationsRadarr, stepIntegrationsJellyfin:
 		return "Tab: Next field  •  T: Test  •  S: Skip  •  Enter: Continue  •  Esc: Back"
 	case stepIntegrationsAI:
 		return "Tab: Next field  •  T: Test  •  P: Prompt  •  R: Retry  •  S: Skip  •  Esc: Back"

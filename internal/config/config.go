@@ -24,16 +24,18 @@ type PermissionsConfig struct {
 }
 
 type Config struct {
-	Watch       WatchConfig       `mapstructure:"watch"`
-	Libraries   LibrariesConfig   `mapstructure:"libraries"`
-	Daemon      DaemonConfig      `mapstructure:"daemon"`
-	Options     OptionsConfig     `mapstructure:"options"`
-	Sonarr      SonarrConfig      `mapstructure:"sonarr"`
-	Radarr      RadarrConfig      `mapstructure:"radarr"`
-	Logging     LoggingConfig     `mapstructure:"logging"`
-	Permissions PermissionsConfig `mapstructure:"permissions"`
-	AI          AIConfig          `mapstructure:"ai"`
-	Password    string            `mapstructure:"password"`
+	Watch         WatchConfig       `mapstructure:"watch"`
+	Libraries     LibrariesConfig   `mapstructure:"libraries"`
+	Daemon        DaemonConfig      `mapstructure:"daemon"`
+	Options       OptionsConfig     `mapstructure:"options"`
+	Sonarr        SonarrConfig      `mapstructure:"sonarr"`
+	Radarr        RadarrConfig      `mapstructure:"radarr"`
+	Jellyfin      JellyfinConfig    `mapstructure:"jellyfin"`
+	Logging       LoggingConfig     `mapstructure:"logging"`
+	Permissions   PermissionsConfig `mapstructure:"permissions"`
+	AI            AIConfig          `mapstructure:"ai"`
+	Password      string            `mapstructure:"password"`
+	SecureCookies bool              `mapstructure:"secure_cookies"`
 }
 
 // Helper methods for permissions resolution and parsing
@@ -136,6 +138,7 @@ type AIConfig struct {
 	Enabled              bool                 `mapstructure:"enabled"`
 	OllamaEndpoint       string               `mapstructure:"ollama_endpoint"`
 	Model                string               `mapstructure:"model"`
+	FallbackModel        string               `mapstructure:"fallback_model"`
 	ConfidenceThreshold  float64              `mapstructure:"confidence_threshold"`
 	AutoTriggerThreshold float64              `mapstructure:"auto_trigger_threshold"`
 	TimeoutSeconds       int                  `mapstructure:"timeout_seconds"`
@@ -145,6 +148,7 @@ type AIConfig struct {
 	CircuitBreaker       CircuitBreakerConfig `mapstructure:"circuit_breaker"`
 	Keepalive            KeepaliveConfig      `mapstructure:"keepalive"`
 	RetryDelay           time.Duration        `mapstructure:"retry_delay"`
+	MaxRetries           int                  `mapstructure:"max_retries"`
 }
 
 // WatchConfig contains directories to watch
@@ -187,6 +191,21 @@ type RadarrConfig struct {
 	NotifyOnImport bool   `mapstructure:"notify_on_import"`
 }
 
+type JellyfinConfig struct {
+	Enabled            bool   `mapstructure:"enabled"`
+	URL                string `mapstructure:"url"`
+	APIKey             string `mapstructure:"api_key"`
+	NotifyOnImport     bool   `mapstructure:"notify_on_import"`
+	PlaybackSafety     bool   `mapstructure:"playback_safety"`
+	VerifyAfterRefresh bool   `mapstructure:"verify_after_refresh"`
+	// Plugin settings
+	PluginEnabled          bool   `mapstructure:"plugin_enabled"`
+	PluginSharedSecret     string `mapstructure:"plugin_shared_secret"`
+	PluginAutoScan         bool   `mapstructure:"plugin_auto_scan"`
+	PluginVerifyOnStartup  bool   `mapstructure:"plugin_verify_on_startup"`
+	PluginVerifyInterval   int    `mapstructure:"plugin_verify_interval"`
+}
+
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -220,16 +239,30 @@ func DefaultConfig() *Config {
 			APIKey:         "",
 			NotifyOnImport: true,
 		},
+		Jellyfin: JellyfinConfig{
+			Enabled:               false,
+			URL:                   "",
+			APIKey:                "",
+			NotifyOnImport:        true,
+			PlaybackSafety:        true,
+			VerifyAfterRefresh:    false,
+			PluginEnabled:         false,
+			PluginSharedSecret:    "",
+			PluginAutoScan:        true,
+			PluginVerifyOnStartup: false,
+			PluginVerifyInterval:  0,
+		},
 		AI: AIConfig{
 			Enabled:              false,
 			OllamaEndpoint:       "http://localhost:11434",
 			Model:                "qwen2.5vl:7b",
 			ConfidenceThreshold:  0.8,
 			AutoTriggerThreshold: 0.6,
-			TimeoutSeconds:       5,
+			TimeoutSeconds:       30,
 			CacheEnabled:         true,
 			CloudModel:           "nemotron-3-nano:30b-cloud",
-			RetryDelay:           100 * time.Millisecond,
+			RetryDelay:           500 * time.Millisecond,
+			MaxRetries:           3,
 			CircuitBreaker: CircuitBreakerConfig{
 				FailureThreshold:     5,
 				FailureWindowSeconds: 120,
@@ -355,6 +388,37 @@ api_key = "%s"
 notify_on_import = %v
 
 # ============================================================================
+# JELLYFIN INTEGRATION
+# Optional: Trigger library refresh and playback safety checks
+# Get API key from: Jellyfin -> Dashboard -> Expert -> API Keys
+# ============================================================================
+[jellyfin]
+# Enable Jellyfin integration for library refresh and playback safety
+enabled = %v
+# Jellyfin server URL (e.g., http://localhost:8096)
+url = "%s"
+# API key from Jellyfin Dashboard > Expert > API Keys
+api_key = "%s"
+# Trigger library refresh after organizing files
+notify_on_import = %v
+# Block file moves when media is being actively streamed
+playback_safety = %v
+# Query Jellyfin after refresh to verify correct identification (Phase 2)
+verify_after_refresh = %v
+
+# JellyWatch Companion Plugin Settings (Phase 3)
+# Enable companion plugin for webhooks and verification
+plugin_enabled = %v
+# Shared secret for webhook authentication
+plugin_shared_secret = "%s"
+# Automatically trigger Jellyfin library scans after organizing
+plugin_auto_scan = %v
+# Run verification on daemon startup
+plugin_verify_on_startup = %v
+# Hours between automatic verifications (0 = disabled)
+plugin_verify_interval = %d
+
+# ============================================================================
 # DAEMON SETTINGS
 # For jellywatchd background service
 # ============================================================================
@@ -411,6 +475,17 @@ max_backups = %d
 		c.Radarr.URL,
 		c.Radarr.APIKey,
 		c.Radarr.NotifyOnImport,
+		c.Jellyfin.Enabled,
+		c.Jellyfin.URL,
+		c.Jellyfin.APIKey,
+		c.Jellyfin.NotifyOnImport,
+		c.Jellyfin.PlaybackSafety,
+		c.Jellyfin.VerifyAfterRefresh,
+		c.Jellyfin.PluginEnabled,
+		c.Jellyfin.PluginSharedSecret,
+		c.Jellyfin.PluginAutoScan,
+		c.Jellyfin.PluginVerifyOnStartup,
+		c.Jellyfin.PluginVerifyInterval,
 		c.Daemon.Enabled,
 		c.Daemon.ScanFrequency,
 		c.Daemon.HealthAddr,

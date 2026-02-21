@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/activity"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
@@ -112,6 +113,8 @@ type MediaHandlerConfig struct {
 	FileMode        os.FileMode
 	DirMode         os.FileMode
 	SonarrClient    *sonarr.Client
+	JellyfinClient  *jellyfin.Client
+	PlaybackSafety  bool
 	ConfigDir       string
 }
 
@@ -146,6 +149,9 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	if cfg.SonarrClient != nil {
 		tvOrgOpts = append(tvOrgOpts, organizer.WithSonarrClient(cfg.SonarrClient))
 	}
+	if cfg.JellyfinClient != nil {
+		tvOrgOpts = append(tvOrgOpts, organizer.WithJellyfinClient(cfg.JellyfinClient, cfg.PlaybackSafety))
+	}
 	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
 		tvOrgOpts = append(tvOrgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
 	}
@@ -159,6 +165,9 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithBackend(cfg.Backend),
+	}
+	if cfg.JellyfinClient != nil {
+		movieOrgOpts = append(movieOrgOpts, organizer.WithJellyfinClient(cfg.JellyfinClient, cfg.PlaybackSafety))
 	}
 	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
 		movieOrgOpts = append(movieOrgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))

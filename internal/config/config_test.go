@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -41,5 +42,36 @@ func TestAIConfig_CircuitBreakerDefaults(t *testing.T) {
 	}
 	if cfg.CircuitBreaker.CooldownSeconds != 30 {
 		t.Errorf("expected cooldown 30s, got %d", cfg.CircuitBreaker.CooldownSeconds)
+	}
+}
+
+func TestDefaultConfig_JellyfinDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Jellyfin.Enabled {
+		t.Error("expected jellyfin disabled by default")
+	}
+	if cfg.Jellyfin.NotifyOnImport != true {
+		t.Error("expected jellyfin notify_on_import default true")
+	}
+	if cfg.Jellyfin.PlaybackSafety != true {
+		t.Error("expected jellyfin playback_safety default true")
+	}
+	if cfg.Jellyfin.VerifyAfterRefresh {
+		t.Error("expected jellyfin verify_after_refresh default false")
+	}
+}
+
+func TestConfigToTOMLIncludesJellyfinSection(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Jellyfin.Enabled = true
+	cfg.Jellyfin.URL = "http://localhost:8096"
+	cfg.Jellyfin.APIKey = "abc123"
+
+	toml := cfg.ToTOML()
+	if !strings.Contains(toml, "[jellyfin]") {
+		t.Fatal("expected [jellyfin] section in TOML output")
+	}
+	if !strings.Contains(toml, "playback_safety = true") {
+		t.Fatal("expected playback_safety key in TOML output")
 	}
 }
