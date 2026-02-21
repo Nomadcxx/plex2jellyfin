@@ -80,3 +80,4 @@ internal/naming/testdata/
 .aider*
 .continue/
 .sisyphus/
+.worktrees/

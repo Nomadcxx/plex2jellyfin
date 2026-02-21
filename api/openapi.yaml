@@ -435,6 +435,94 @@ paths:
         '200':
           description: Logged out
 
+  # ============ JELLYFIN VERIFICATION ============
+  /jellyfin/verify:
+    get:
+      operationId: getJellyfinVerification
+      summary: Get Jellyfin verification status
+      tags: [Jellyfin]
+      responses:
+        '200':
+          description: Verification status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JellyfinVerificationStatus'
+
+  /jellyfin/verify/run:
+    post:
+      operationId: runJellyfinVerification
+      summary: Run Jellyfin verification for a library
+      tags: [Jellyfin]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                libraryId:
+                  type: string
+                libraryPath:
+                  type: string
+      responses:
+        '202':
+          description: Verification started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+
+  /jellyfin/verify/results:
+    get:
+      operationId: getJellyfinVerificationResults
+      summary: Get verification results
+      tags: [Jellyfin]
+      parameters:
+        - name: libraryId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Verification results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JellyfinVerificationResult'
+
+  /jellyfin/unidentifiable:
+    get:
+      operationId: getJellyfinUnidentifiableItems
+      summary: Get unidentifiable items from Jellyfin
+      tags: [Jellyfin]
+      parameters:
+        - name: libraryId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Unidentifiable items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UnidentifiableItem'
+
+  /jellyfin/plugin/status:
+    get:
+      operationId: getJellyfinPluginStatus
+      summary: Get JellyWatch companion plugin status
+      tags: [Jellyfin]
+      responses:
+        '200':
+          description: Plugin status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JellyfinPluginStatus'
+
   # ============ HEALTH ============
   /health:
     get:
@@ -827,5 +915,84 @@ components:
       properties:
         code:
           type: string
+        message:
+          type: string
+
+    # Jellyfin Verification
+    JellyfinVerificationStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        pluginEnabled:
+          type: boolean
+        connected:
+          type: boolean
+        lastVerification:
+          type: string
+          format: date-time
+        librariesVerified:
+          type: integer
+        totalMismatches:
+          type: integer
+
+    JellyfinVerificationResult:
+      type: object
+      properties:
+        libraryPath:
+          type: string
+        scannedCount:
+          type: integer
+        identifiedCount:
+          type: integer
+        unidentifiedCount:
+          type: integer
+        mismatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/JellyfinMismatch'
+        lastRun:
+          type: string
+          format: date-time
+
+    JellyfinMismatch:
+      type: object
+      properties:
+        path:
+          type: string
+        issue:
+          type: string
+          enum: [orphaned, missing, unidentified]
+        itemName:
+          type: string
+        itemId:
+          type: string
+
+    UnidentifiableItem:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        type:
+          type: string
+        dateAdded:
+          type: string
+          format: date-time
+
+    JellyfinPluginStatus:
+      type: object
+      properties:
+        installed:
+          type: boolean
+        version:
+          type: string
+        healthy:
+          type: boolean
+        libraries:
+          type: integer
         message:
           type: string
