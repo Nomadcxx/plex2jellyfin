@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/jellywatch_brand.png" alt="JellyWatch" width="320" />
+  <img src="assets/jellywatch_brand.png" alt="JellyWatch" width="480" />
 </div>
 
 ---
