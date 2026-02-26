@@ -1,0 +1,154 @@
+<div id="JellyWatchConfigPage" data-role="page" class="page type-interior pluginConfigurationPage jellywatchConfigurationPage">
+    <div data-role="content">
+        <form class="jellywatchConfigForm">
+            <div class="inputContainer">
+                <label class="inputLabel" for="txtJellyWatchUrl">JellyWatch URL</label>
+                <input id="txtJellyWatchUrl" is="emby-input" type="text" required />
+                <div class="fieldDescription">Example: http://localhost:3000</div>
+            </div>
+
+            <div class="inputContainer">
+                <label class="inputLabel" for="txtSharedSecret">Shared Secret</label>
+                <input id="txtSharedSecret" is="emby-input" type="password" />
+                <div class="fieldDescription">Must match JellyWatch webhook secret.</div>
+            </div>
+
+            <div class="checkboxContainer checkboxContainer-withDescription">
+                <label>
+                    <input id="chkEnableEventForwarding" is="emby-checkbox" type="checkbox" />
+                    <span>Enable Event Forwarding</span>
+                </label>
+                <div class="fieldDescription">Forward Jellyfin events to JellyWatch webhooks.</div>
+            </div>
+
+            <div class="checkboxContainer checkboxContainer-withDescription">
+                <label>
+                    <input id="chkEnableCustomEndpoints" is="emby-checkbox" type="checkbox" />
+                    <span>Enable Custom Endpoints</span>
+                </label>
+                <div class="fieldDescription">Expose `/jellywatch` integration API endpoints.</div>
+            </div>
+
+            <div class="checkboxContainer checkboxContainer-withDescription">
+                <label>
+                    <input id="chkForwardLibraryEvents" is="emby-checkbox" type="checkbox" />
+                    <span>Forward Library Events</span>
+                </label>
+                <div class="fieldDescription">Includes ItemAdded, ItemRemoved, and ItemUpdated.</div>
+            </div>
+
+            <div class="checkboxContainer checkboxContainer-withDescription">
+                <label>
+                    <input id="chkForwardPlaybackEvents" is="emby-checkbox" type="checkbox" />
+                    <span>Forward Playback Events</span>
+                </label>
+                <div class="fieldDescription">Includes PlaybackStart, PlaybackStopped, and PlaybackProgress.</div>
+            </div>
+
+            <div class="inputContainer">
+                <label class="inputLabel" for="txtRequestTimeoutSeconds">Request Timeout (seconds)</label>
+                <input id="txtRequestTimeoutSeconds" is="emby-input" type="number" min="1" step="1" />
+            </div>
+
+            <div class="inputContainer">
+                <label class="inputLabel" for="txtRetryCount">Retry Count</label>
+                <input id="txtRetryCount" is="emby-input" type="number" min="1" step="1" />
+            </div>
+
+            <div>
+                <button is="emby-button" type="submit" class="raised button-submit block">
+                    <span>Save</span>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+            var page = document.getElementById("JellyWatchConfigPage");
+            if (!page) {
+                return;
+            }
+
+            function readText(id) {
+                return page.querySelector("#" + id).value;
+            }
+
+            function writeText(id, value) {
+                page.querySelector("#" + id).value = value == null ? "" : value;
+            }
+
+            function readCheckbox(id) {
+                return !!page.querySelector("#" + id).checked;
+            }
+
+            function writeCheckbox(id, value) {
+                page.querySelector("#" + id).checked = !!value;
+            }
+
+            function toPositiveInt(value, fallbackValue) {
+                var parsed = parseInt(value, 10);
+                return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackValue;
+            }
+
+            function populate(config) {
+                writeText("txtJellyWatchUrl", config.JellyWatchUrl || "http://localhost:3000");
+                writeText("txtSharedSecret", config.SharedSecret || "");
+                writeCheckbox("chkEnableEventForwarding", config.EnableEventForwarding);
+                writeCheckbox("chkEnableCustomEndpoints", config.EnableCustomEndpoints);
+                writeCheckbox("chkForwardLibraryEvents", config.ForwardLibraryEvents);
+                writeCheckbox("chkForwardPlaybackEvents", config.ForwardPlaybackEvents);
+                writeText("txtRequestTimeoutSeconds", String(config.RequestTimeoutSeconds || 30));
+                writeText("txtRetryCount", String(config.RetryCount || 3));
+            }
+
+            function readConfig(existingConfig) {
+                existingConfig.JellyWatchUrl = readText("txtJellyWatchUrl").trim();
+                existingConfig.SharedSecret = readText("txtSharedSecret");
+                existingConfig.EnableEventForwarding = readCheckbox("chkEnableEventForwarding");
+                existingConfig.EnableCustomEndpoints = readCheckbox("chkEnableCustomEndpoints");
+                existingConfig.ForwardLibraryEvents = readCheckbox("chkForwardLibraryEvents");
+                existingConfig.ForwardPlaybackEvents = readCheckbox("chkForwardPlaybackEvents");
+                existingConfig.RequestTimeoutSeconds = toPositiveInt(readText("txtRequestTimeoutSeconds"), 30);
+                existingConfig.RetryCount = toPositiveInt(readText("txtRetryCount"), 3);
+                return existingConfig;
+            }
+
+            function loadPage() {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    populate(config || {});
+                    Dashboard.hideLoadingMsg();
+                }).catch(function (err) {
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert({
+                        title: "JellyWatch",
+                        message: "Unable to load plugin configuration: " + (err && err.message ? err.message : err)
+                    });
+                });
+            }
+
+            page.addEventListener("pageshow", loadPage);
+            loadPage();
+
+            page.querySelector(".jellywatchConfigForm").addEventListener("submit", function (event) {
+                event.preventDefault();
+                Dashboard.showLoadingMsg();
+
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    return ApiClient.updatePluginConfiguration(pluginId, readConfig(config || {}));
+                }).then(function (result) {
+                    Dashboard.processPluginConfigurationUpdateResult(result);
+                    Dashboard.hideLoadingMsg();
+                }).catch(function (err) {
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert({
+                        title: "JellyWatch",
+                        message: "Unable to save plugin configuration: " + (err && err.message ? err.message : err)
+                    });
+                });
+            });
+        })();
+    </script>
+</div>
