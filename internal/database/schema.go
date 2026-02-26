@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 11
+const currentSchemaVersion = 12
 
 // SQL migration scripts
 var migrations = []migration{
@@ -453,6 +453,23 @@ var migrations = []migration{
 			`ALTER TABLE movies ADD COLUMN radarr_synced_at DATETIME`,
 			`ALTER TABLE movies ADD COLUMN radarr_path_dirty BOOLEAN DEFAULT 0`,
 			`INSERT INTO schema_version (version) VALUES (11)`,
+		},
+	},
+	{
+		version: 12,
+		up: []string{
+			// Track Jellyfin-confirmed items keyed by file path.
+			`CREATE TABLE jellyfin_items (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				path TEXT NOT NULL UNIQUE,
+				jellyfin_item_id TEXT NOT NULL,
+				item_name TEXT,
+				item_type TEXT,
+				confirmed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`CREATE INDEX idx_jellyfin_items_item_id ON jellyfin_items(jellyfin_item_id)`,
+			`INSERT INTO schema_version (version) VALUES (12)`,
 		},
 	},
 }

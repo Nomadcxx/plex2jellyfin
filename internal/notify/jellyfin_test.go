@@ -5,100 +5,104 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func jsonResponse(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
 
-func TestJellyfinNotifierName(t *testing.T) {
-	n := NewJellyfinNotifier(nil, true)
-	if n.Name() != "jellyfin" {
-		t.Fatalf("expected name jellyfin, got %s", n.Name())
-	}
-}
+func TestJellyfinNotifierTargetedRefresh(t *testing.T) {
+	n := NewJellyfinNotifier("http://jf.local", "key", true)
 
-func TestJellyfinNotifierEnabled(t *testing.T) {
-	client := jellyfin.NewClient(jellyfin.Config{URL: "http://jellyfin.local", APIKey: "x"})
+	var calledSearch bool
+	var calledItemRefresh bool
+	var calledLibraryRefresh bool
 
-	if !NewJellyfinNotifier(client, true).Enabled() {
-		t.Fatal("expected enabled notifier")
-	}
-	if NewJellyfinNotifier(client, false).Enabled() {
-		t.Fatal("expected disabled notifier")
-	}
-	if NewJellyfinNotifier(nil, true).Enabled() {
-		t.Fatal("expected disabled notifier for nil client")
-	}
-}
+	n.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/Items"):
+			calledSearch = true
+			return jsonResponse(200, `{"Items":[{"Id":"it-1","Name":"The Matrix","Path":"/library/Movies/The Matrix (1999)/The Matrix (1999).mkv","ProductionYear":1999}]}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/Items/it-1/Refresh":
+			calledItemRefresh = true
+			return jsonResponse(204, ``), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/Library/Refresh":
+			calledLibraryRefresh = true
+			return jsonResponse(204, ``), nil
+		default:
+			return jsonResponse(404, `{}`), nil
+		}
+	})}
 
-func TestJellyfinNotifierNotify(t *testing.T) {
-	calls := 0
-	client := jellyfin.NewClient(jellyfin.Config{
-		URL:    "http://jellyfin.local",
-		APIKey: "k",
-		HTTPClient: &http.Client{
-			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.Path == "/Library/Refresh" {
-					calls++
-					return jsonResponse(http.StatusNoContent, ``), nil
-				}
-				if r.URL.Path == "/System/Info" {
-					return jsonResponse(http.StatusOK, `{"ServerName":"Jellyfin","Version":"10.10.0"}`), nil
-				}
-				return jsonResponse(http.StatusNotFound, `not found`), nil
-			}),
-			Timeout: 2 * time.Second,
-		},
+	res := n.Notify(OrganizationEvent{
+		MediaType:  MediaTypeMovie,
+		Title:      "The Matrix",
+		Year:       "1999",
+		TargetPath: "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv",
 	})
 
-	n := NewJellyfinNotifier(client, true)
-
-	movieResult := n.Notify(OrganizationEvent{MediaType: MediaTypeMovie})
-	if !movieResult.Success {
-		t.Fatalf("expected success for movie notification: %v", movieResult.Error)
+	if !res.Success {
+		t.Fatalf("expected success, got error: %v", res.Error)
 	}
-
-	tvResult := n.Notify(OrganizationEvent{MediaType: MediaTypeTVEpisode})
-	if !tvResult.Success {
-		t.Fatalf("expected success for tv notification: %v", tvResult.Error)
+	if !calledSearch || !calledItemRefresh {
+		t.Fatalf("expected search and item refresh calls")
 	}
+	if calledLibraryRefresh {
+		t.Fatalf("did not expect library refresh fallback")
+	}
+}
 
-	if calls != 2 {
-		t.Fatalf("expected 2 refresh calls, got %d", calls)
+func TestJellyfinNotifierFallsBackToLibraryRefresh(t *testing.T) {
+	n := NewJellyfinNotifier("http://jf.local", "key", true)
+
+	var calledLibraryRefresh bool
+
+	n.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/Items"):
+			return jsonResponse(200, `{"Items":[]}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/Library/Refresh":
+			calledLibraryRefresh = true
+			return jsonResponse(204, ``), nil
+		default:
+			return jsonResponse(404, `{}`), nil
+		}
+	})}
+
+	res := n.Notify(OrganizationEvent{
+		MediaType:  MediaTypeMovie,
+		Title:      "Unknown Movie",
+		TargetPath: "/library/Movies/Unknown Movie (2025)/Unknown Movie (2025).mkv",
+	})
+
+	if !res.Success {
+		t.Fatalf("expected success, got error: %v", res.Error)
+	}
+	if !calledLibraryRefresh {
+		t.Fatalf("expected library refresh fallback")
 	}
 }
 
 func TestJellyfinNotifierPing(t *testing.T) {
-	client := jellyfin.NewClient(jellyfin.Config{
-		URL:    "http://jellyfin.local",
-		APIKey: "k",
-		HTTPClient: &http.Client{
-			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.Path == "/System/Info" {
-					return jsonResponse(http.StatusOK, `{"ServerName":"Jellyfin","Version":"10.10.0"}`), nil
-				}
-				return jsonResponse(http.StatusNotFound, `not found`), nil
-			}),
-			Timeout: 2 * time.Second,
-		},
-	})
+	n := NewJellyfinNotifier("http://jf.local", "key", true)
+	n.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodGet && req.URL.Path == "/System/Info" {
+			return jsonResponse(200, `{}`), nil
+		}
+		return jsonResponse(404, `{}`), nil
+	})}
 
-	n := NewJellyfinNotifier(client, true)
 	if err := n.Ping(); err != nil {
-		t.Fatalf("expected ping success, got %v", err)
+		t.Fatalf("Ping() failed: %v", err)
 	}
 }

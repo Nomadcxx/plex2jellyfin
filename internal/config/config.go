@@ -191,6 +191,7 @@ type RadarrConfig struct {
 	NotifyOnImport bool   `mapstructure:"notify_on_import"`
 }
 
+// JellyfinConfig contains Jellyfin integration settings.
 type JellyfinConfig struct {
 	Enabled            bool   `mapstructure:"enabled"`
 	URL                string `mapstructure:"url"`
@@ -198,12 +199,13 @@ type JellyfinConfig struct {
 	NotifyOnImport     bool   `mapstructure:"notify_on_import"`
 	PlaybackSafety     bool   `mapstructure:"playback_safety"`
 	VerifyAfterRefresh bool   `mapstructure:"verify_after_refresh"`
+	WebhookSecret      string `mapstructure:"webhook_secret"`
 	// Plugin settings
-	PluginEnabled          bool   `mapstructure:"plugin_enabled"`
-	PluginSharedSecret     string `mapstructure:"plugin_shared_secret"`
-	PluginAutoScan         bool   `mapstructure:"plugin_auto_scan"`
-	PluginVerifyOnStartup  bool   `mapstructure:"plugin_verify_on_startup"`
-	PluginVerifyInterval   int    `mapstructure:"plugin_verify_interval"`
+	PluginEnabled         bool   `mapstructure:"plugin_enabled"`
+	PluginSharedSecret    string `mapstructure:"plugin_shared_secret"`
+	PluginAutoScan        bool   `mapstructure:"plugin_auto_scan"`
+	PluginVerifyOnStartup bool   `mapstructure:"plugin_verify_on_startup"`
+	PluginVerifyInterval  int    `mapstructure:"plugin_verify_interval"`
 }
 
 // DefaultConfig returns default configuration
@@ -246,6 +248,7 @@ func DefaultConfig() *Config {
 			NotifyOnImport:        true,
 			PlaybackSafety:        true,
 			VerifyAfterRefresh:    false,
+			WebhookSecret:         "",
 			PluginEnabled:         false,
 			PluginSharedSecret:    "",
 			PluginAutoScan:        true,
@@ -405,6 +408,8 @@ notify_on_import = %v
 playback_safety = %v
 # Query Jellyfin after refresh to verify correct identification (Phase 2)
 verify_after_refresh = %v
+# Shared secret for validating incoming webhooks (required when Jellyfin webhooks are enabled)
+webhook_secret = "%s"
 
 # JellyWatch Companion Plugin Settings (Phase 3)
 # Enable companion plugin for webhooks and verification
@@ -481,6 +486,7 @@ max_backups = %d
 		c.Jellyfin.NotifyOnImport,
 		c.Jellyfin.PlaybackSafety,
 		c.Jellyfin.VerifyAfterRefresh,
+		c.Jellyfin.WebhookSecret,
 		c.Jellyfin.PluginEnabled,
 		c.Jellyfin.PluginSharedSecret,
 		c.Jellyfin.PluginAutoScan,

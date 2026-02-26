@@ -7,97 +7,233 @@ import (
 	"time"
 )
 
+// Defines values for ActivityEventType.
+const (
+	DUPLICATEFOUND ActivityEventType = "DUPLICATE_FOUND"
+	ERROR          ActivityEventType = "ERROR"
+	FILEDETECTED   ActivityEventType = "FILE_DETECTED"
+	FILEORGANIZED  ActivityEventType = "FILE_ORGANIZED"
+	SYNCCOMPLETED  ActivityEventType = "SYNC_COMPLETED"
+)
+
 // Defines values for DuplicateGroupMediaType.
 const (
 	Movie  DuplicateGroupMediaType = "movie"
 	Series DuplicateGroupMediaType = "series"
 )
 
-// Defines values for ScanProgressType.
+// Defines values for LLMProviderInfoType.
 const (
-	ScanProgressTypeCompleted ScanProgressType = "completed"
-	ScanProgressTypeError     ScanProgressType = "error"
-	ScanProgressTypeProgress  ScanProgressType = "progress"
-	ScanProgressTypeStarted   ScanProgressType = "started"
+	LLMProviderInfoTypeAnthropic LLMProviderInfoType = "anthropic"
+	LLMProviderInfoTypeCustom    LLMProviderInfoType = "custom"
+	LLMProviderInfoTypeLmstudio  LLMProviderInfoType = "lmstudio"
+	LLMProviderInfoTypeOllama    LLMProviderInfoType = "ollama"
+	LLMProviderInfoTypeOpenai    LLMProviderInfoType = "openai"
+)
+
+// Defines values for MediaManagerInfoType.
+const (
+	MediaManagerInfoTypeCustom          MediaManagerInfoType = "custom"
+	MediaManagerInfoTypeMediadownloader MediaManagerInfoType = "mediadownloader"
+	MediaManagerInfoTypeRadarr          MediaManagerInfoType = "radarr"
+	MediaManagerInfoTypeSonarr          MediaManagerInfoType = "sonarr"
 )
 
 // Defines values for ScanStatusStatus.
 const (
-	ScanStatusStatusCompleted ScanStatusStatus = "completed"
-	ScanStatusStatusFailed    ScanStatusStatus = "failed"
-	ScanStatusStatusIdle      ScanStatusStatus = "idle"
-	ScanStatusStatusScanning  ScanStatusStatus = "scanning"
+	Completed ScanStatusStatus = "completed"
+	Failed    ScanStatusStatus = "failed"
+	Idle      ScanStatusStatus = "idle"
+	Scanning  ScanStatusStatus = "scanning"
 )
+
+// AISettings defines model for AISettings.
+type AISettings struct {
+	AutoApply           *bool    `json:"autoApply,omitempty"`
+	ConfidenceThreshold *float32 `json:"confidenceThreshold,omitempty"`
+	DefaultProvider     *string  `json:"defaultProvider,omitempty"`
+	Enabled             *bool    `json:"enabled,omitempty"`
+}
+
+// ActivityEvent defines model for ActivityEvent.
+type ActivityEvent struct {
+	Id        *string            `json:"id,omitempty"`
+	Message   *string            `json:"message,omitempty"`
+	Timestamp *time.Time         `json:"timestamp,omitempty"`
+	Type      *ActivityEventType `json:"type,omitempty"`
+}
+
+// ActivityEventType defines model for ActivityEvent.Type.
+type ActivityEventType string
+
+// AuthStatus defines model for AuthStatus.
+type AuthStatus struct {
+	Authenticated *bool `json:"authenticated,omitempty"`
+	Enabled       *bool `json:"enabled,omitempty"`
+}
+
+// ConsolidationResult defines model for ConsolidationResult.
+type ConsolidationResult struct {
+	BytesMoved *int64    `json:"bytesMoved,omitempty"`
+	Errors     *[]string `json:"errors,omitempty"`
+	FilesMoved *int      `json:"filesMoved,omitempty"`
+	Success    *bool     `json:"success,omitempty"`
+}
+
+// DashboardData defines model for DashboardData.
+type DashboardData struct {
+	LibraryStats   *LibraryStats          `json:"libraryStats,omitempty"`
+	LlmProvider    *LLMProviderSummary    `json:"llmProvider,omitempty"`
+	MediaManagers  *[]MediaManagerSummary `json:"mediaManagers,omitempty"`
+	RecentActivity *[]ActivityEvent       `json:"recentActivity,omitempty"`
+}
 
 // DuplicateAnalysis defines model for DuplicateAnalysis.
 type DuplicateAnalysis struct {
-	Groups           []DuplicateGroup `json:"groups"`
-	ReclaimableBytes int64            `json:"reclaimableBytes"`
-	TotalFiles       int              `json:"totalFiles"`
-	TotalGroups      int              `json:"totalGroups"`
+	Groups           *[]DuplicateGroup `json:"groups,omitempty"`
+	ReclaimableBytes *int64            `json:"reclaimableBytes,omitempty"`
+	TotalFiles       *int              `json:"totalFiles,omitempty"`
+	TotalGroups      *int              `json:"totalGroups,omitempty"`
 }
 
 // DuplicateGroup defines model for DuplicateGroup.
 type DuplicateGroup struct {
-	BestFileId       int64                   `json:"bestFileId"`
-	Episode          *int                    `json:"episode"`
-	Files            []MediaFile             `json:"files"`
-	Id               string                  `json:"id"`
-	MediaType        DuplicateGroupMediaType `json:"mediaType"`
-	ReclaimableBytes int64                   `json:"reclaimableBytes"`
-	Season           *int                    `json:"season"`
-	Title            string                  `json:"title"`
-	Year             *int                    `json:"year"`
+	BestFileId       *int64                   `json:"bestFileId,omitempty"`
+	Files            *[]MediaFile             `json:"files,omitempty"`
+	Id               *string                  `json:"id,omitempty"`
+	MediaType        *DuplicateGroupMediaType `json:"mediaType,omitempty"`
+	ReclaimableBytes *int64                   `json:"reclaimableBytes,omitempty"`
+	Title            *string                  `json:"title,omitempty"`
+	Year             *int                     `json:"year,omitempty"`
 }
 
 // DuplicateGroupMediaType defines model for DuplicateGroup.MediaType.
 type DuplicateGroupMediaType string
 
-// Error defines model for Error.
-type Error struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+// LLMCapabilities defines model for LLMCapabilities.
+type LLMCapabilities struct {
+	LocalOnly           *bool `json:"localOnly,omitempty"`
+	SupportsModelSwitch *bool `json:"supportsModelSwitch,omitempty"`
+	SupportsStreaming   *bool `json:"supportsStreaming,omitempty"`
+	SupportsVision      *bool `json:"supportsVision,omitempty"`
+}
+
+// LLMModel defines model for LLMModel.
+type LLMModel struct {
+	Id   *string `json:"id,omitempty"`
+	Name *string `json:"name,omitempty"`
+	Size *string `json:"size,omitempty"`
+}
+
+// LLMProviderInfo defines model for LLMProviderInfo.
+type LLMProviderInfo struct {
+	Capabilities *LLMCapabilities     `json:"capabilities,omitempty"`
+	CurrentModel *string              `json:"currentModel,omitempty"`
+	Enabled      *bool                `json:"enabled,omitempty"`
+	Id           *string              `json:"id,omitempty"`
+	Name         *string              `json:"name,omitempty"`
+	Type         *LLMProviderInfoType `json:"type,omitempty"`
+}
+
+// LLMProviderInfoType defines model for LLMProviderInfo.Type.
+type LLMProviderInfoType string
+
+// LLMProviderStatus defines model for LLMProviderStatus.
+type LLMProviderStatus struct {
+	Error     *string     `json:"error,omitempty"`
+	Model     *string     `json:"model,omitempty"`
+	ModelList *[]LLMModel `json:"modelList,omitempty"`
+	Online    *bool       `json:"online,omitempty"`
+}
+
+// LLMProviderSummary defines model for LLMProviderSummary.
+type LLMProviderSummary struct {
+	CurrentModel *string `json:"currentModel,omitempty"`
+	Id           *string `json:"id,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	Online       *bool   `json:"online,omitempty"`
+}
+
+// LibraryStats defines model for LibraryStats.
+type LibraryStats struct {
+	DuplicateGroups  *int   `json:"duplicateGroups,omitempty"`
+	EpisodeCount     *int   `json:"episodeCount,omitempty"`
+	MovieCount       *int   `json:"movieCount,omitempty"`
+	ReclaimableBytes *int64 `json:"reclaimableBytes,omitempty"`
+	ScatteredSeries  *int   `json:"scatteredSeries,omitempty"`
+	SeriesCount      *int   `json:"seriesCount,omitempty"`
+	TotalFiles       *int   `json:"totalFiles,omitempty"`
+	TotalSize        *int64 `json:"totalSize,omitempty"`
+}
+
+// ManagerCapabilities defines model for ManagerCapabilities.
+type ManagerCapabilities struct {
+	SupportsBulkActions *bool `json:"supportsBulkActions,omitempty"`
+	SupportsHistory     *bool `json:"supportsHistory,omitempty"`
+	SupportsPriority    *bool `json:"supportsPriority,omitempty"`
+	SupportsQualityEdit *bool `json:"supportsQualityEdit,omitempty"`
+	SupportsRetry       *bool `json:"supportsRetry,omitempty"`
 }
 
 // MediaFile defines model for MediaFile.
 type MediaFile struct {
-	Id           int64   `json:"id"`
-	Path         string  `json:"path"`
-	QualityScore int     `json:"qualityScore"`
+	Id           *int64  `json:"id,omitempty"`
+	Path         *string `json:"path,omitempty"`
+	QualityScore *int    `json:"qualityScore,omitempty"`
 	Resolution   *string `json:"resolution,omitempty"`
-	Size         int64   `json:"size"`
+	Size         *int64  `json:"size,omitempty"`
 	SourceType   *string `json:"sourceType,omitempty"`
+}
+
+// MediaManagerInfo defines model for MediaManagerInfo.
+type MediaManagerInfo struct {
+	Capabilities *ManagerCapabilities  `json:"capabilities,omitempty"`
+	Enabled      *bool                 `json:"enabled,omitempty"`
+	Id           *string               `json:"id,omitempty"`
+	Name         *string               `json:"name,omitempty"`
+	Type         *MediaManagerInfoType `json:"type,omitempty"`
+}
+
+// MediaManagerInfoType defines model for MediaManagerInfo.Type.
+type MediaManagerInfoType string
+
+// MediaManagerSummary defines model for MediaManagerSummary.
+type MediaManagerSummary struct {
+	Id         *string `json:"id,omitempty"`
+	Name       *string `json:"name,omitempty"`
+	Online     *bool   `json:"online,omitempty"`
+	QueueSize  *int    `json:"queueSize,omitempty"`
+	StuckCount *int    `json:"stuckCount,omitempty"`
+	Type       *string `json:"type,omitempty"`
 }
 
 // OperationResult defines model for OperationResult.
 type OperationResult struct {
 	BytesAffected *int64  `json:"bytesAffected,omitempty"`
-	Error         *string `json:"error,omitempty"`
 	FilesAffected *int    `json:"filesAffected,omitempty"`
 	Message       *string `json:"message,omitempty"`
-	Success       bool    `json:"success"`
+	Success       *bool   `json:"success,omitempty"`
 }
 
-// ScanProgress defines model for ScanProgress.
-type ScanProgress struct {
-	Current         *int              `json:"current,omitempty"`
-	DuplicatesFound *int              `json:"duplicatesFound,omitempty"`
-	Message         *string           `json:"message,omitempty"`
-	ScatteredFound  *int              `json:"scatteredFound,omitempty"`
-	Total           *int              `json:"total,omitempty"`
-	Type            *ScanProgressType `json:"type,omitempty"`
+// QueueItem defines model for QueueItem.
+type QueueItem struct {
+	DownloadClient *string  `json:"downloadClient,omitempty"`
+	ErrorMessage   *string  `json:"errorMessage,omitempty"`
+	Id             *int64   `json:"id,omitempty"`
+	IsStuck        *bool    `json:"isStuck,omitempty"`
+	Progress       *float32 `json:"progress,omitempty"`
+	Size           *int64   `json:"size,omitempty"`
+	SizeRemaining  *int64   `json:"sizeRemaining,omitempty"`
+	Status         *string  `json:"status,omitempty"`
+	TimeLeft       *string  `json:"timeLeft,omitempty"`
+	Title          *string  `json:"title,omitempty"`
 }
-
-// ScanProgressType defines model for ScanProgress.Type.
-type ScanProgressType string
 
 // ScanStatus defines model for ScanStatus.
 type ScanStatus struct {
-	CompletedAt *time.Time       `json:"completedAt,omitempty"`
-	Message     *string          `json:"message,omitempty"`
-	Progress    *int             `json:"progress,omitempty"`
-	StartedAt   *time.Time       `json:"startedAt,omitempty"`
-	Status      ScanStatusStatus `json:"status"`
+	Message  *string           `json:"message,omitempty"`
+	Progress *int              `json:"progress,omitempty"`
+	Status   *ScanStatusStatus `json:"status,omitempty"`
 }
 
 // ScanStatusStatus defines model for ScanStatus.Status.
@@ -105,32 +241,78 @@ type ScanStatusStatus string
 
 // ScatteredAnalysis defines model for ScatteredAnalysis.
 type ScatteredAnalysis struct {
-	Items      []ScatteredItem `json:"items"`
-	TotalBytes int64           `json:"totalBytes"`
-	TotalItems int             `json:"totalItems"`
-	TotalMoves int             `json:"totalMoves"`
+	Items      *[]ScatteredItem `json:"items,omitempty"`
+	TotalBytes *int64           `json:"totalBytes,omitempty"`
+	TotalItems *int             `json:"totalItems,omitempty"`
+	TotalMoves *int             `json:"totalMoves,omitempty"`
 }
 
 // ScatteredItem defines model for ScatteredItem.
 type ScatteredItem struct {
-	BytesToMove    *int64   `json:"bytesToMove,omitempty"`
-	FilesToMove    int      `json:"filesToMove"`
-	Id             int64    `json:"id"`
-	Locations      []string `json:"locations"`
-	MediaType      string   `json:"mediaType"`
-	TargetLocation string   `json:"targetLocation"`
-	Title          string   `json:"title"`
-	Year           *int     `json:"year"`
+	BytesToMove    *int64    `json:"bytesToMove,omitempty"`
+	FilesToMove    *int      `json:"filesToMove,omitempty"`
+	Id             *int64    `json:"id,omitempty"`
+	Locations      *[]string `json:"locations,omitempty"`
+	MediaType      *string   `json:"mediaType,omitempty"`
+	TargetLocation *string   `json:"targetLocation,omitempty"`
+	Title          *string   `json:"title,omitempty"`
+	Year           *int      `json:"year,omitempty"`
 }
 
-// InternalError defines model for InternalError.
-type InternalError = Error
+// ServiceStatus defines model for ServiceStatus.
+type ServiceStatus struct {
+	Error      *string `json:"error,omitempty"`
+	Online     *bool   `json:"online,omitempty"`
+	QueueSize  *int    `json:"queueSize,omitempty"`
+	StuckCount *int    `json:"stuckCount,omitempty"`
+	Version    *string `json:"version,omitempty"`
+}
 
-// NotFound defines model for NotFound.
-type NotFound = Error
+// GetActivityParams defines parameters for GetActivity.
+type GetActivityParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// LoginJSONBody defines parameters for Login.
+type LoginJSONBody struct {
+	Password string `json:"password"`
+}
 
 // DeleteDuplicateParams defines parameters for DeleteDuplicate.
 type DeleteDuplicateParams struct {
-	// FileId Specific file to delete (default is auto-selected inferior)
 	FileId *int64 `form:"fileId,omitempty" json:"fileId,omitempty"`
 }
+
+// GetMediaManagerQueueParams defines parameters for GetMediaManagerQueue.
+type GetMediaManagerQueueParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ClearQueueItemParams defines parameters for ClearQueueItem.
+type ClearQueueItemParams struct {
+	Blocklist *bool `form:"blocklist,omitempty" json:"blocklist,omitempty"`
+}
+
+// TriggerManagerScanJSONBody defines parameters for TriggerManagerScan.
+type TriggerManagerScanJSONBody struct {
+	Path *string `json:"path,omitempty"`
+}
+
+// ClearStuckItemsParams defines parameters for ClearStuckItems.
+type ClearStuckItemsParams struct {
+	Blocklist *bool `form:"blocklist,omitempty" json:"blocklist,omitempty"`
+}
+
+// ConsolidateItemJSONBody defines parameters for ConsolidateItem.
+type ConsolidateItemJSONBody struct {
+	DryRun *bool `json:"dryRun,omitempty"`
+}
+
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody LoginJSONBody
+
+// TriggerManagerScanJSONRequestBody defines body for TriggerManagerScan for application/json ContentType.
+type TriggerManagerScanJSONRequestBody TriggerManagerScanJSONBody
+
+// ConsolidateItemJSONRequestBody defines body for ConsolidateItem for application/json ContentType.
+type ConsolidateItemJSONRequestBody ConsolidateItemJSONBody

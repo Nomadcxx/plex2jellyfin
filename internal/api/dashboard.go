@@ -141,5 +141,24 @@ func buildMediaManagers(cfg *config.Config) []api.MediaManagerSummary {
 		addManager("jellyfin", "Jellyfin")
 	}
 
+	// Add Jellyfin if enabled
+	if cfg.Jellyfin.Enabled && cfg.Jellyfin.URL != "" && cfg.Jellyfin.APIKey != "" {
+		id := "jellyfin"
+		name := "Jellyfin"
+		managerType := "jellyfin"
+		online := false // Will be updated when actual health check is implemented
+		queueSize := 0
+		stuckCount := 0
+
+		managers = append(managers, api.MediaManagerSummary{
+			Id:         &id,
+			Name:       &name,
+			Type:       &managerType,
+			Online:     &online,
+			QueueSize:  &queueSize,
+			StuckCount: &stuckCount,
+		})
+	}
+
 	return managers
 }

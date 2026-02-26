@@ -15,13 +15,12 @@ import (
 
 // PluginClient communicates with the JellyWatch companion plugin endpoints.
 type PluginClient struct {
-	baseURL      string
-	apiKey       string
-	httpClient   *http.Client
-	sharedSecret string
-	timeout      time.Duration
-	hostname     string
-	deviceID     string
+	baseURL    string
+	apiKey     string
+	httpClient *http.Client
+	timeout    time.Duration
+	hostname   string
+	deviceID   string
 }
 
 // NewPluginClient creates a new plugin client with the given configuration.
@@ -121,7 +120,7 @@ func (pc *PluginClient) request(method, endpoint string, body io.Reader) (*http.
 			defer resp.Body.Close()
 			bodyBytes, _ := io.ReadAll(resp.Body)
 			lastErr = fmt.Errorf("API error (status %d, attempt %d/%d): %s", resp.StatusCode, attempt+1, maxRetries, string(bodyBytes))
-			
+
 			// Retry on 5xx errors
 			if resp.StatusCode >= 500 && attempt < maxRetries-1 {
 				backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second

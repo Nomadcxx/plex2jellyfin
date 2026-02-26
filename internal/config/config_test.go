@@ -59,6 +59,9 @@ func TestDefaultConfig_JellyfinDefaults(t *testing.T) {
 	if cfg.Jellyfin.VerifyAfterRefresh {
 		t.Error("expected jellyfin verify_after_refresh default false")
 	}
+	if cfg.Jellyfin.WebhookSecret != "" {
+		t.Errorf("expected jellyfin webhook_secret default empty, got %q", cfg.Jellyfin.WebhookSecret)
+	}
 }
 
 func TestConfigToTOMLIncludesJellyfinSection(t *testing.T) {
@@ -66,6 +69,8 @@ func TestConfigToTOMLIncludesJellyfinSection(t *testing.T) {
 	cfg.Jellyfin.Enabled = true
 	cfg.Jellyfin.URL = "http://localhost:8096"
 	cfg.Jellyfin.APIKey = "abc123"
+	cfg.Jellyfin.NotifyOnImport = true
+	cfg.Jellyfin.WebhookSecret = "secret-token"
 
 	toml := cfg.ToTOML()
 	if !strings.Contains(toml, "[jellyfin]") {
@@ -73,5 +78,8 @@ func TestConfigToTOMLIncludesJellyfinSection(t *testing.T) {
 	}
 	if !strings.Contains(toml, "playback_safety = true") {
 		t.Fatal("expected playback_safety key in TOML output")
+	}
+	if !strings.Contains(toml, "webhook_secret = \"secret-token\"") {
+		t.Fatal("expected webhook_secret key in TOML output")
 	}
 }

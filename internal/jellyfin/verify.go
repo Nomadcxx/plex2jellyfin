@@ -28,12 +28,12 @@ type Mismatch struct {
 
 // VerificationResult contains the results of a verification scan.
 type VerificationResult struct {
-	LibraryPath      string      `json:"library_path"`
-	ScannedCount     int         `json:"scanned_count"`
-	IdentifiedCount  int         `json:"identified_count"`
-	UnidentifiedCount int         `json:"unidentified_count"`
-	Mismatches       []Mismatch  `json:"mismatches"`
-	LastRun          time.Time   `json:"last_run"`
+	LibraryPath       string     `json:"library_path"`
+	ScannedCount      int        `json:"scanned_count"`
+	IdentifiedCount   int        `json:"identified_count"`
+	UnidentifiedCount int        `json:"unidentified_count"`
+	Mismatches        []Mismatch `json:"mismatches"`
+	LastRun           time.Time  `json:"last_run"`
 }
 
 // Verifier handles verification operations between filesystem and Jellyfin.

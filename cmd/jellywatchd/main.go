@@ -12,6 +12,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
@@ -169,10 +170,23 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			} else {
 				logger.Info("daemon", "Jellyfin integration enabled", logging.F("url", cfg.Jellyfin.URL))
 			}
-			notifyMgr.Register(notify.NewJellyfinNotifier(jellyfinClient, cfg.Jellyfin.NotifyOnImport))
+			notifyMgr.Register(notify.NewJellyfinNotifier(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, cfg.Jellyfin.NotifyOnImport))
 		}
 	}
 
+	var playbackLocks *jellyfin.PlaybackLockManager
+	var deferredQueue *jellyfin.DeferredQueue
+	if cfg.Jellyfin.PlaybackSafety {
+		playbackLocks = jellyfin.NewPlaybackLockManager()
+		deferredQueue = jellyfin.NewDeferredQueue()
+		logger.Info("daemon", "Jellyfin playback safety enabled")
+	}
+
+	db, err := database.Open()
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
 	// Get config directory for activity logging
 	configDir := filepath.Join(os.Getenv("HOME"), ".config", "jellywatch")
 	if cfgFile != "" {
@@ -197,7 +211,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		SonarrClient:    sonarrClient,
 		JellyfinClient:  jellyfinClient,
 		PlaybackSafety:  cfg.Jellyfin.PlaybackSafety,
+		Database:        db,
 		ConfigDir:       configDir,
+		PlaybackLocks:   playbackLocks,
+		DeferredQueue:   deferredQueue,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create media handler: %w", err)
@@ -226,7 +243,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		ActivityDir: filepath.Join(configDir, "activity"),
 	})
 
-	healthServer := daemon.NewServer(handler, periodicScanner, healthAddr, logger)
+	healthServer := daemon.NewServer(handler, periodicScanner, healthAddr, logger, cfg.Jellyfin.WebhookSecret)
 
 	w, err := watcher.NewWatcher(handler, false) // Daemon always processes files automatically
 	if err != nil {
