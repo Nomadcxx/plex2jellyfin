@@ -263,6 +263,8 @@ func (s *PeriodicScanner) checkArrHealth() {
 	s.lastHealthCheck = time.Now()
 	s.mu.Unlock()
 
+	var hasCritical bool
+
 	if s.sonarrClient != nil {
 		issues, err := service.CheckSonarrConfig(s.sonarrClient)
 		if err != nil {
@@ -275,6 +277,9 @@ func (s *PeriodicScanner) checkArrHealth() {
 					logging.F("expected", issue.Expected),
 					logging.F("severity", issue.Severity),
 				)
+				if issue.Severity == "critical" {
+					hasCritical = true
+				}
 			}
 		}
 	}
@@ -291,7 +296,17 @@ func (s *PeriodicScanner) checkArrHealth() {
 					logging.F("expected", issue.Expected),
 					logging.F("severity", issue.Severity),
 				)
+				if issue.Severity == "critical" {
+					hasCritical = true
+				}
 			}
 		}
+	}
+
+	if hasCritical {
+		s.mu.Lock()
+		s.healthy = false
+		s.mu.Unlock()
+		s.logger.Error("scanner", "Arr health check found critical issues — marking scanner unhealthy. Run 'jellywatch health --fix' to resolve.", nil)
 	}
 }
