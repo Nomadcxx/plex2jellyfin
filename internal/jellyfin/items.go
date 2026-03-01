@@ -63,3 +63,25 @@ func (c *Client) GetItemsByParent(parentID string) (*ItemsResponse, error) {
 	}
 	return &resp, nil
 }
+
+func (c *Client) GetOrphanedEpisodes() ([]Item, error) {
+	query := url.Values{}
+	query.Set("IncludeItemTypes", "Episode")
+	query.Set("Recursive", "true")
+	query.Set("Fields", "Path,ProviderIds,ParentId,SeriesId")
+	query.Set("Limit", "10000")
+
+	var resp ItemsResponse
+	if err := c.get("/Items?"+query.Encode(), &resp); err != nil {
+		return nil, fmt.Errorf("querying episodes: %w", err)
+	}
+
+	orphans := make([]Item, 0, len(resp.Items))
+	for _, item := range resp.Items {
+		if item.SeriesID == "" {
+			orphans = append(orphans, item)
+		}
+	}
+
+	return orphans, nil
+}
