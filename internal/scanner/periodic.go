@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/jellywatch/internal/radarr"
+	"github.com/Nomadcxx/jellywatch/internal/service"
+	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 )
 
@@ -20,6 +23,11 @@ type PeriodicScanner struct {
 	handler     watcher.Handler
 	logger      *logging.Logger
 	activityDir string
+	orphanCheck OrphanChecker
+
+	// Arr clients for health checks
+	sonarrClient *sonarr.Client
+	radarrClient *radarr.Client
 
 	// State tracking
 	mu           sync.Mutex
@@ -30,18 +38,22 @@ type PeriodicScanner struct {
 	skippedTicks int64
 
 	// Health tracking
-	healthy bool
+	healthy         bool
+	lastHealthCheck time.Time
 }
 
 // NewPeriodicScanner creates a new scanner with the given config
 func NewPeriodicScanner(cfg ScannerConfig) *PeriodicScanner {
 	return &PeriodicScanner{
-		interval:    cfg.Interval,
-		watchPaths:  cfg.WatchPaths,
-		handler:     cfg.Handler,
-		logger:      cfg.Logger,
-		activityDir: cfg.ActivityDir,
-		healthy:     true,
+		interval:     cfg.Interval,
+		watchPaths:   cfg.WatchPaths,
+		handler:      cfg.Handler,
+		logger:       cfg.Logger,
+		activityDir:  cfg.ActivityDir,
+		orphanCheck:  cfg.OrphanCheck,
+		sonarrClient: cfg.SonarrClient,
+		radarrClient: cfg.RadarrClient,
+		healthy:      true,
 	}
 }
 
@@ -150,6 +162,9 @@ func (s *PeriodicScanner) runScan() (err error) {
 			logging.F("error", reconcileErr.Error()))
 	}
 
+	s.checkOrphans()
+	s.checkArrHealth()
+
 	elapsed := time.Since(start)
 	s.logger.Info("scanner", "Periodic scan complete",
 		logging.F("duration_ms", elapsed.Milliseconds()),
@@ -159,6 +174,31 @@ func (s *PeriodicScanner) runScan() (err error) {
 		logging.F("cleaned", cleaned))
 
 	return nil
+}
+
+func (s *PeriodicScanner) checkOrphans() {
+	if s.orphanCheck == nil {
+		return
+	}
+
+	orphans, err := s.orphanCheck.GetOrphanedEpisodes()
+	if err != nil {
+		s.logger.Warn("scanner", "Orphan check failed", logging.F("error", err.Error()))
+		return
+	}
+
+	if len(orphans) == 0 {
+		return
+	}
+
+	s.logger.Warn("scanner", "Orphaned episodes detected", logging.F("count", len(orphans)))
+	for _, orphan := range orphans {
+		s.logger.Warn("scanner", "Orphaned episode",
+			logging.F("id", orphan.ID),
+			logging.F("name", orphan.Name),
+			logging.F("path", orphan.Path),
+		)
+	}
 }
 
 func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
@@ -210,4 +250,48 @@ func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
 		logging.F("errors", errors))
 
 	return processed, errors
+}
+
+// checkArrHealth checks Sonarr/Radarr configuration health and logs warnings.
+// Rate-limited to once per hour to avoid log spam.
+func (s *PeriodicScanner) checkArrHealth() {
+	s.mu.Lock()
+	if time.Since(s.lastHealthCheck) < time.Hour {
+		s.mu.Unlock()
+		return
+	}
+	s.lastHealthCheck = time.Now()
+	s.mu.Unlock()
+
+	if s.sonarrClient != nil {
+		issues, err := service.CheckSonarrConfig(s.sonarrClient)
+		if err != nil {
+			s.logger.Error("scanner", "Sonarr health check failed", err)
+		} else {
+			for _, issue := range issues {
+				s.logger.Warn("scanner", "Sonarr configuration issue",
+					logging.F("setting", issue.Setting),
+					logging.F("current", issue.Current),
+					logging.F("expected", issue.Expected),
+					logging.F("severity", issue.Severity),
+				)
+			}
+		}
+	}
+
+	if s.radarrClient != nil {
+		issues, err := service.CheckRadarrConfig(s.radarrClient)
+		if err != nil {
+			s.logger.Error("scanner", "Radarr health check failed", err)
+		} else {
+			for _, issue := range issues {
+				s.logger.Warn("scanner", "Radarr configuration issue",
+					logging.F("setting", issue.Setting),
+					logging.F("current", issue.Current),
+					logging.F("expected", issue.Expected),
+					logging.F("severity", issue.Severity),
+				)
+			}
+		}
+	}
 }

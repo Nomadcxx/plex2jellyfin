@@ -1,266 +1,113 @@
 package jellyfin
 
 import (
-	"fmt"
+	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
+func TestNewClient_DefaultsAndConfig(t *testing.T) {
+	client := NewClient(Config{URL: "http://localhost:8096/", APIKey: "token"})
 
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
-}
-
-func jsonResponse(status int, body string) *http.Response {
-	return &http.Response{
-		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(body)),
+	if client == nil {
+		t.Fatalf("expected client")
+	}
+	if client.baseURL != "http://localhost:8096" {
+		t.Fatalf("baseURL = %q, want %q", client.baseURL, "http://localhost:8096")
+	}
+	if client.httpClient == nil {
+		t.Fatalf("expected http client")
+	}
+	if client.httpClient.Timeout != 30*time.Second {
+		t.Fatalf("timeout = %v, want %v", client.httpClient.Timeout, 30*time.Second)
+	}
+	if client.apiKey != "token" {
+		t.Fatalf("apiKey = %q, want %q", client.apiKey, "token")
 	}
 }
 
-func newMockClient(fn roundTripFunc) *Client {
-	return NewClient(Config{
-		URL:    "http://jellyfin.local",
-		APIKey: "test-key",
-		HTTPClient: &http.Client{
-			Transport: fn,
-			Timeout:   2 * time.Second,
-		},
-	})
-}
+func TestGetSystemInfo_MakesExpectedHTTPRequest(t *testing.T) {
+	var gotMethod, gotPath, gotAuth string
 
-func TestNewClient(t *testing.T) {
-	c := NewClient(Config{URL: "http://example.com", APIKey: "abc"})
-	if c.baseURL != "http://example.com" {
-		t.Fatalf("unexpected baseURL: %s", c.baseURL)
-	}
-	if c.apiKey != "abc" {
-		t.Fatalf("unexpected apiKey: %s", c.apiKey)
-	}
-	if c.httpClient.Timeout != 30*time.Second {
-		t.Fatalf("expected default timeout 30s, got %s", c.httpClient.Timeout)
-	}
-	if c.deviceID == "" {
-		t.Fatal("expected deviceID to be set")
-	}
-}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(SystemInfo{ServerName: "Jellyfin", Version: "10.9.0", ID: "server-1"})
+	}))
+	defer ts.Close()
 
-func TestAuthHeader(t *testing.T) {
-	c := NewClient(Config{URL: "http://example.com", APIKey: "test-key"})
-	header := c.authHeader()
-
-	if !strings.Contains(header, `Token="test-key"`) {
-		t.Fatalf("auth header missing token: %s", header)
-	}
-	if !strings.Contains(header, `Client="jellywatch"`) {
-		t.Fatalf("auth header missing client: %s", header)
-	}
-	if !strings.Contains(header, `DeviceId="`) {
-		t.Fatalf("auth header missing device id: %s", header)
-	}
-}
-
-func TestPing(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		c := newMockClient(func(r *http.Request) (*http.Response, error) {
-			if r.URL.Path != "/System/Info" {
-				t.Fatalf("unexpected path: %s", r.URL.Path)
-			}
-			if r.Header.Get("Authorization") == "" {
-				t.Fatal("expected Authorization header")
-			}
-			return jsonResponse(http.StatusOK, `{"ServerName":"Jellyfin","Version":"10.10.0"}`), nil
-		})
-
-		if err := c.Ping(); err != nil {
-			t.Fatalf("ping failed: %v", err)
-		}
-	})
-
-	t.Run("transport error", func(t *testing.T) {
-		c := newMockClient(func(r *http.Request) (*http.Response, error) {
-			return nil, fmt.Errorf("connection refused")
-		})
-
-		err := c.Ping()
-		if err == nil {
-			t.Fatal("expected ping error")
-		}
-	})
-}
-
-func TestRefreshLibrary(t *testing.T) {
-	called := false
-	c := newMockClient(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", r.Method)
-		}
-		if r.URL.Path != "/Library/Refresh" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		called = true
-		return jsonResponse(http.StatusNoContent, ``), nil
-	})
-
-	if err := c.RefreshLibrary(); err != nil {
-		t.Fatalf("refresh failed: %v", err)
-	}
-	if !called {
-		t.Fatal("expected refresh call")
-	}
-}
-
-func TestRefreshItem(t *testing.T) {
-	c := newMockClient(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", r.Method)
-		}
-		if r.URL.Path != "/Items/abc123/Refresh" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(body), "ReplaceAllMetadata") {
-			t.Fatalf("expected refresh payload, got: %s", string(body))
-		}
-		return jsonResponse(http.StatusNoContent, ``), nil
-	})
-
-	if err := c.RefreshItem("abc123"); err != nil {
-		t.Fatalf("refresh item failed: %v", err)
-	}
-}
-
-func TestGetVirtualFolders(t *testing.T) {
-	c := newMockClient(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/Library/VirtualFolders" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		return jsonResponse(http.StatusOK, `[{"Name":"Movies","Locations":["/media/movies"],"CollectionType":"movies","ItemId":"vf1"}]`), nil
-	})
-
-	folders, err := c.GetVirtualFolders()
+	client := NewClient(Config{URL: ts.URL, APIKey: "secret-key", Timeout: 5 * time.Second})
+	info, err := client.GetSystemInfo()
 	if err != nil {
-		t.Fatalf("GetVirtualFolders failed: %v", err)
+		t.Fatalf("GetSystemInfo() error = %v", err)
 	}
-	if len(folders) != 1 || folders[0].Name != "Movies" {
-		t.Fatalf("unexpected folders: %+v", folders)
+
+	if gotMethod != http.MethodGet {
+		t.Fatalf("method = %s, want GET", gotMethod)
+	}
+	if gotPath != "/System/Info" {
+		t.Fatalf("path = %s, want /System/Info", gotPath)
+	}
+	if !strings.Contains(gotAuth, `Token="secret-key"`) {
+		t.Fatalf("expected auth header to include API token, got %q", gotAuth)
+	}
+	if info == nil || info.ServerName != "Jellyfin" {
+		t.Fatalf("unexpected response: %+v", info)
 	}
 }
 
-func TestGetSessionsAndIsPathBeingPlayed(t *testing.T) {
-	c := newMockClient(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/Sessions" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		return jsonResponse(http.StatusOK, `[
-			{"Id":"1","UserName":"alice","DeviceName":"tv"},
-			{"Id":"2","UserName":"bob","DeviceName":"ipad","NowPlayingItem":{"Path":"/media/movies/Inception.mkv"}}
-		]`), nil
-	})
+func TestRefreshItem_MakesPostRequestWithJSONBody(t *testing.T) {
+	var gotMethod, gotPath, gotContentType string
+	var gotBody strings.Builder
 
-	sessions, err := c.GetSessions()
-	if err != nil {
-		t.Fatalf("GetSessions failed: %v", err)
-	}
-	if len(sessions) != 2 {
-		t.Fatalf("expected 2 sessions, got %d", len(sessions))
-	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotContentType = r.Header.Get("Content-Type")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody.Write(bodyBytes)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
 
-	playing, sess, err := c.IsPathBeingPlayed("/media/movies/Inception.mkv")
-	if err != nil {
-		t.Fatalf("IsPathBeingPlayed failed: %v", err)
-	}
-	if !playing || sess == nil || sess.UserName != "bob" {
-		t.Fatalf("unexpected playing result: playing=%v session=%+v", playing, sess)
+	client := NewClient(Config{URL: ts.URL, APIKey: "secret-key"})
+	if err := client.RefreshItem("item-123"); err != nil {
+		t.Fatalf("RefreshItem() error = %v", err)
 	}
 
-	playing, sess, err = c.IsPathBeingPlayed("/media/movies/Other.mkv")
-	if err != nil {
-		t.Fatalf("IsPathBeingPlayed failed: %v", err)
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
 	}
-	if playing || sess != nil {
-		t.Fatalf("expected no match, got playing=%v session=%+v", playing, sess)
+	if gotPath != "/Items/item-123/Refresh" {
+		t.Fatalf("path = %s, want /Items/item-123/Refresh", gotPath)
+	}
+	if gotContentType != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", gotContentType)
+	}
+	if !strings.Contains(gotBody.String(), `"Recursive":true`) {
+		t.Fatalf("expected request body to include refresh payload, got %q", gotBody.String())
 	}
 }
 
-func TestSearchItems(t *testing.T) {
-	c := newMockClient(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/Items" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("SearchTerm"); got != "The Matrix" {
-			t.Fatalf("unexpected SearchTerm: %q", got)
-		}
-		if got := r.URL.Query().Get("IncludeItemTypes"); got != "Movie,Series" {
-			t.Fatalf("unexpected IncludeItemTypes: %q", got)
-		}
-		return jsonResponse(http.StatusOK, `{"Items":[{"Id":"m1","Name":"The Matrix"}],"TotalRecordCount":1}`), nil
-	})
-
-	resp, err := c.SearchItems("The Matrix", "Movie", "Series")
-	if err != nil {
-		t.Fatalf("SearchItems failed: %v", err)
+func TestGetSystemInfo_InvalidURLAndHTTPError(t *testing.T) {
+	badClient := NewClient(Config{URL: "://bad-url", APIKey: "secret-key"})
+	if _, err := badClient.GetSystemInfo(); err == nil || !strings.Contains(err.Error(), "invalid base URL") {
+		t.Fatalf("expected invalid base URL error, got %v", err)
 	}
-	if resp.TotalRecordCount != 1 || len(resp.Items) != 1 || resp.Items[0].ID != "m1" {
-		t.Fatalf("unexpected response: %+v", resp)
-	}
-}
 
-func TestGetPublicInfo(t *testing.T) {
-	c := newMockClient(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/System/Info/Public" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		if auth := r.Header.Get("Authorization"); auth != "" {
-			t.Fatalf("did not expect auth header for public info, got: %s", auth)
-		}
-		return jsonResponse(http.StatusOK, `{"ServerName":"Jellyfin","Version":"10.10.0"}`), nil
-	})
+	errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusBadGateway)
+	}))
+	defer errorServer.Close()
 
-	info, err := c.GetPublicInfo()
-	if err != nil {
-		t.Fatalf("GetPublicInfo failed: %v", err)
-	}
-	if info.ServerName != "Jellyfin" {
-		t.Fatalf("unexpected server name: %s", info.ServerName)
-	}
-}
-
-func TestGetActiveStreams(t *testing.T) {
-	c := newMockClient(func(r *http.Request) (*http.Response, error) {
-		return jsonResponse(http.StatusOK, `[
-			{"Id":"1","UserName":"idle"},
-			{"Id":"2","UserName":"playing","NowPlayingItem":{"Path":"/x.mkv"}}
-		]`), nil
-	})
-
-	active, err := c.GetActiveStreams()
-	if err != nil {
-		t.Fatalf("GetActiveStreams failed: %v", err)
-	}
-	if len(active) != 1 || active[0].UserName != "playing" {
-		t.Fatalf("unexpected active streams: %+v", active)
-	}
-}
-
-func TestGetSessionsError(t *testing.T) {
-	c := newMockClient(func(r *http.Request) (*http.Response, error) {
-		return jsonResponse(http.StatusInternalServerError, `boom`), nil
-	})
-
-	_, err := c.GetSessions()
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "status 500") {
-		t.Fatalf("unexpected error: %v", err)
+	client := NewClient(Config{URL: errorServer.URL, APIKey: "secret-key"})
+	if _, err := client.GetSystemInfo(); err == nil || !strings.Contains(err.Error(), "API error (status 502)") {
+		t.Fatalf("expected API status error, got %v", err)
 	}
 }

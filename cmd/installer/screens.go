@@ -282,9 +282,19 @@ func (m model) renderJellyfin() string {
 			keyPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
 		}
 		if len(m.inputs) > 1 {
-			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n\n", keyPrefix, m.inputs[1].View()))
+			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n", keyPrefix, m.inputs[1].View()))
 		} else {
-			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n\n", keyPrefix, strings.Repeat("•", len(m.jellyfinAPIKey))))
+			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n", keyPrefix, strings.Repeat("•", len(m.jellyfinAPIKey))))
+		}
+
+		secretPrefix := "  "
+		if m.focusedInput == 3 && len(m.inputs) > 2 {
+			secretPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		if len(m.inputs) > 2 {
+			b.WriteString(fmt.Sprintf("%sWebhook Secret: %s\n\n", secretPrefix, m.inputs[2].View()))
+		} else {
+			b.WriteString(fmt.Sprintf("%sWebhook Secret: %s\n\n", secretPrefix, strings.Repeat("•", len(m.webhookSecret))))
 		}
 
 		if m.jellyfinTesting {
@@ -479,6 +489,40 @@ func (m model) renderService() string {
 	return b.String()
 }
 
+func (m model) renderWebService() string {
+	var b strings.Builder
+
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Web UI Service"))
+	b.WriteString("\n\n")
+
+	enablePrefix := "  "
+	if m.focusedInput == 0 {
+		enablePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
+	b.WriteString(fmt.Sprintf("%sEnable Web UI: %s\n", enablePrefix, boolToYesNo(m.webEnabled)))
+
+	startPrefix := "  "
+	if m.focusedInput == 1 {
+		startPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
+	b.WriteString(fmt.Sprintf("%sStart now:     %s\n", startPrefix, boolToYesNo(m.webStartNow)))
+
+	portPrefix := "  "
+	if m.focusedInput == 2 {
+		portPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
+	portValue := m.webPort
+	if len(m.inputs) > 0 {
+		portValue = m.inputs[0].View()
+	}
+	b.WriteString(fmt.Sprintf("%sPort:          %s\n", portPrefix, portValue))
+
+	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
+		"If enabled, installs jellyweb systemd service and listens on the selected port"))
+
+	return b.String()
+}
+
 func (m model) renderConfirm() string {
 	var b strings.Builder
 
@@ -516,6 +560,11 @@ func (m model) renderConfirm() string {
 	b.WriteString("\nService:\n")
 	b.WriteString(fmt.Sprintf("  • Enable on boot: %s\n", boolToYesNo(m.serviceEnabled)))
 	b.WriteString(fmt.Sprintf("  • Scan frequency: %s\n", scanFrequencyOptions[m.scanFrequency]))
+	b.WriteString(fmt.Sprintf("  • Web UI enabled: %s\n", boolToYesNo(m.webEnabled)))
+	if m.webEnabled {
+		b.WriteString(fmt.Sprintf("  • Web UI port: %s\n", m.webPort))
+		b.WriteString(fmt.Sprintf("  • Web UI start now: %s\n", boolToYesNo(m.webStartNow)))
+	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Press Enter to install"))
 
@@ -785,6 +834,53 @@ func (m model) renderComplete() string {
 	b.WriteString(muted.Render("Press Enter to exit"))
 	b.WriteString("\n\n")
 	b.WriteString(muted.Italic(true).Render("you could trust sonarr/radarr... or you know.. not do that"))
+
+	return b.String()
+}
+
+func (m model) renderArrIssues() string {
+	var b strings.Builder
+
+	bold := lipgloss.NewStyle().Bold(true).Foreground(Primary)
+	warn := lipgloss.NewStyle().Bold(true).Foreground(WarningColor)
+	muted := lipgloss.NewStyle().Foreground(FgMuted)
+
+	b.WriteString(warn.Render("Sonarr/Radarr Configuration Issues"))
+	b.WriteString("\n\n")
+
+	b.WriteString(muted.Render("The following settings may conflict with JellyWatch operation:"))
+	b.WriteString("\n\n")
+
+	for _, issue := range m.arrIssues {
+		icon := "!"
+		if issue.Severity == "critical" {
+			icon = "X"
+		}
+		b.WriteString(fmt.Sprintf("  %s [%s] %s\n", icon, issue.Service, issue.Setting))
+		b.WriteString(fmt.Sprintf("      Current: %s  →  Expected: %s\n\n",
+			lipgloss.NewStyle().Foreground(ErrorColor).Render(issue.Current),
+			lipgloss.NewStyle().Foreground(Primary).Render(issue.Expected)))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(bold.Render("What would you like to do?"))
+	b.WriteString("\n\n")
+
+	// Fix option
+	prefix := "  "
+	if m.arrIssuesChoice == 0 {
+		prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
+	b.WriteString(prefix + "Fix automatically\n")
+	b.WriteString("    " + muted.Render("Update settings via API to match JellyWatch requirements") + "\n\n")
+
+	// Skip option
+	prefix = "  "
+	if m.arrIssuesChoice == 1 {
+		prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
+	b.WriteString(prefix + "Skip and continue\n")
+	b.WriteString("    " + muted.Render("Proceed without changes (may cause import conflicts)") + "\n")
 
 	return b.String()
 }

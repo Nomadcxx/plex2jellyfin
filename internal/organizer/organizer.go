@@ -55,6 +55,8 @@ type Organizer struct {
 	pauseOnScan    bool
 	paused         bool
 	pauseMu        sync.RWMutex
+	playbackLocks  *jellyfin.PlaybackLockManager
+	deferredQueue  *jellyfin.DeferredQueue
 }
 
 func NewOrganizer(libraries []string, options ...func(*Organizer)) (*Organizer, error) {
@@ -151,6 +153,7 @@ func WithSonarrClient(client *sonarr.Client) func(*Organizer) {
 	}
 }
 
+// WithJellyfinClient enables playback-safety fallback checks through the Jellyfin sessions API.
 func WithJellyfinClient(client *jellyfin.Client, playbackSafety bool) func(*Organizer) {
 	return func(o *Organizer) {
 		o.jellyfinClient = client
@@ -175,6 +178,21 @@ func WithDatabase(db *database.MediaDB) func(*Organizer) {
 func WithSyncService(svc *syncsvc.SyncService) func(*Organizer) {
 	return func(o *Organizer) {
 		o.syncService = svc
+	}
+}
+
+// WithPlaybackLockManager enables playback safety checks against webhook lock state.
+func WithPlaybackLockManager(mgr *jellyfin.PlaybackLockManager) func(*Organizer) {
+	return func(o *Organizer) {
+		o.playbackLocks = mgr
+		o.playbackSafety = mgr != nil
+	}
+}
+
+// WithDeferredQueue configures where playback-blocked operations should be enqueued.
+func WithDeferredQueue(queue *jellyfin.DeferredQueue) func(*Organizer) {
+	return func(o *Organizer) {
+		o.deferredQueue = queue
 	}
 }
 
@@ -216,24 +234,8 @@ func (o *Organizer) applyDirOwnership(path string) error {
 	return nil
 }
 
-// checkPlaybackSafety returns an error if the source path is actively being streamed.
-// Fail-open behavior: if Jellyfin cannot be reached, organization proceeds.
 func (o *Organizer) checkPlaybackSafety(sourcePath string) error {
-	if !o.playbackSafety || o.jellyfinClient == nil {
-		return nil
-	}
-
-	playing, session, err := o.jellyfinClient.IsPathBeingPlayed(sourcePath)
-	if err != nil {
-		return nil
-	}
-	if playing && session != nil {
-		return fmt.Errorf("file is being streamed by %s on %s, deferring operation", session.UserName, session.DeviceName)
-	}
-	if playing {
-		return fmt.Errorf("file is being actively streamed, deferring operation")
-	}
-	return nil
+	return o.checkPlaybackSafetyWithOp(sourcePath, "", "")
 }
 
 func (o *Organizer) Pause() {
@@ -282,11 +284,53 @@ func (o *Organizer) waitIfScanning(timeout time.Duration) error {
 	return nil
 }
 
-func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*OrganizationResult, error) {
-	if err := o.checkPlaybackSafety(sourcePath); err != nil {
-		return nil, fmt.Errorf("playback safety: %w", err)
+func (o *Organizer) checkPlaybackSafetyWithOp(sourcePath, opType, targetPath string) error {
+	if !o.playbackSafety {
+		return nil
 	}
 
+	if o.playbackLocks != nil {
+		lockedPath := sourcePath
+		locked, info := o.playbackLocks.IsLocked(sourcePath)
+		if !locked && strings.TrimSpace(targetPath) != "" {
+			if targetLocked, targetInfo := o.playbackLocks.IsLocked(targetPath); targetLocked {
+				lockedPath = targetPath
+				locked = true
+				info = targetInfo
+			}
+		}
+
+		if locked && info != nil {
+			if o.deferredQueue != nil && opType != "" {
+				o.deferredQueue.Add(lockedPath, jellyfin.DeferredOp{
+					Type:       opType,
+					SourcePath: sourcePath,
+					TargetPath: targetPath,
+					Reason:     "blocked by active playback",
+					DeferredAt: time.Now(),
+				})
+			}
+			return fmt.Errorf("file is being streamed by %s on %s (via webhook), deferring operation", info.UserName, info.DeviceName)
+		}
+	}
+
+	if o.jellyfinClient != nil {
+		playing, session, err := o.jellyfinClient.IsPathBeingPlayed(sourcePath)
+		if err != nil {
+			return nil
+		}
+		if playing && session != nil {
+			return fmt.Errorf("file is being streamed by %s on %s (via API), deferring operation", session.UserName, session.DeviceName)
+		}
+		if playing {
+			return fmt.Errorf("file is being actively streamed (via API), deferring operation")
+		}
+	}
+
+	return nil
+}
+
+func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*OrganizationResult, error) {
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
 
@@ -304,6 +348,17 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 	movieDir := filepath.Join(libraryPath, cleanName)
 	ext := filepath.Ext(sourcePath)
 	targetPath := filepath.Join(movieDir, cleanName+ext)
+
+	if err := o.checkPlaybackSafetyWithOp(sourcePath, "organize_movie", targetPath); err != nil {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			TargetPath: targetPath,
+			Skipped:    true,
+			SkipReason: err.Error(),
+			Error:      err,
+		}, nil
+	}
 
 	existingFile, existingQuality := o.findExistingMediaFile(movieDir)
 	if existingFile != "" && !o.forceOverwrite {
@@ -411,10 +466,6 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 }
 
 func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*OrganizationResult, error) {
-	if err := o.checkPlaybackSafety(sourcePath); err != nil {
-		return nil, fmt.Errorf("playback safety: %w", err)
-	}
-
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
 
@@ -438,6 +489,17 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 	ext := filepath.Ext(sourcePath)
 	episodeName := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
 	targetPath := filepath.Join(seasonDir, episodeName)
+
+	if err := o.checkPlaybackSafetyWithOp(sourcePath, "organize_tv", targetPath); err != nil {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			TargetPath: targetPath,
+			Skipped:    true,
+			SkipReason: err.Error(),
+			Error:      err,
+		}, nil
+	}
 
 	existingFile, existingQuality := o.findExistingMediaFile(seasonDir)
 	if existingFile != "" && !o.forceOverwrite {

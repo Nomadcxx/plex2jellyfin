@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/activity"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
@@ -20,22 +21,28 @@ import (
 )
 
 type MediaHandler struct {
-	tvOrganizer     *organizer.Organizer // NEW: TV-specific organizer
-	movieOrganizer  *organizer.Organizer // NEW: Movie-specific organizer
-	notifyManager   *notify.Manager
-	tvLibraries     []string
-	movieLibs       []string
-	tvWatchPaths    []string // TV watch folders for source hint
-	movieWatchPaths []string // Movie watch folders for source hint
-	debounceTime    time.Duration
-	pending         map[string]*time.Timer
-	mu              sync.Mutex
-	dryRun          bool
-	stats           *Stats
-	logger          *logging.Logger
-	sonarrClient    *sonarr.Client
-	activityLogger  *activity.Logger
+	tvOrganizer      *organizer.Organizer // NEW: TV-specific organizer
+	movieOrganizer   *organizer.Organizer // NEW: Movie-specific organizer
+	notifyManager    *notify.Manager
+	tvLibraries      []string
+	movieLibs        []string
+	tvWatchPaths     []string // TV watch folders for source hint
+	movieWatchPaths  []string // Movie watch folders for source hint
+	debounceTime     time.Duration
+	pending          map[string]*time.Timer
+	transientRetries map[string]int
+	mu               sync.Mutex
+	dryRun           bool
+	stats            *Stats
+	logger           *logging.Logger
+	sonarrClient     *sonarr.Client
+	db               *database.MediaDB
+	activityLogger   *activity.Logger
+	playbackLocks    *jellyfin.PlaybackLockManager
+	deferredQueue    *jellyfin.DeferredQueue
 }
+
+var transientRetryDelay = 2 * time.Second
 
 type Stats struct {
 	mu               sync.RWMutex
@@ -115,7 +122,10 @@ type MediaHandlerConfig struct {
 	SonarrClient    *sonarr.Client
 	JellyfinClient  *jellyfin.Client
 	PlaybackSafety  bool
+	Database        *database.MediaDB
 	ConfigDir       string
+	PlaybackLocks   *jellyfin.PlaybackLockManager
+	DeferredQueue   *jellyfin.DeferredQueue
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
@@ -145,6 +155,8 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithBackend(cfg.Backend),
+		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
+		organizer.WithDeferredQueue(cfg.DeferredQueue),
 	}
 	if cfg.SonarrClient != nil {
 		tvOrgOpts = append(tvOrgOpts, organizer.WithSonarrClient(cfg.SonarrClient))
@@ -165,6 +177,8 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithBackend(cfg.Backend),
+		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
+		organizer.WithDeferredQueue(cfg.DeferredQueue),
 	}
 	if cfg.JellyfinClient != nil {
 		movieOrgOpts = append(movieOrgOpts, organizer.WithJellyfinClient(cfg.JellyfinClient, cfg.PlaybackSafety))
@@ -178,21 +192,32 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	}
 
 	return &MediaHandler{
-		tvOrganizer:     tvOrganizer,
-		movieOrganizer:  movieOrganizer,
-		notifyManager:   cfg.NotifyManager,
-		tvLibraries:     cfg.TVLibraries,
-		movieLibs:       cfg.MovieLibs,
-		tvWatchPaths:    cfg.TVWatchPaths,
-		movieWatchPaths: cfg.MovieWatchPaths,
-		debounceTime:    cfg.DebounceTime,
-		pending:         make(map[string]*time.Timer),
-		dryRun:          cfg.DryRun,
-		stats:           NewStats(),
-		logger:          cfg.Logger,
-		sonarrClient:    cfg.SonarrClient,
-		activityLogger:  activityLogger,
+		tvOrganizer:      tvOrganizer,
+		movieOrganizer:   movieOrganizer,
+		notifyManager:    cfg.NotifyManager,
+		tvLibraries:      cfg.TVLibraries,
+		movieLibs:        cfg.MovieLibs,
+		tvWatchPaths:     cfg.TVWatchPaths,
+		movieWatchPaths:  cfg.MovieWatchPaths,
+		debounceTime:     cfg.DebounceTime,
+		pending:          make(map[string]*time.Timer),
+		transientRetries: make(map[string]int),
+		dryRun:           cfg.DryRun,
+		stats:            NewStats(),
+		logger:           cfg.Logger,
+		sonarrClient:     cfg.SonarrClient,
+		db:               cfg.Database,
+		activityLogger:   activityLogger,
+		playbackLocks:    cfg.PlaybackLocks,
+		deferredQueue:    cfg.DeferredQueue,
 	}, nil
+}
+
+func (h *MediaHandler) allWatchPaths() []string {
+	paths := make([]string, 0, len(h.tvWatchPaths)+len(h.movieWatchPaths))
+	paths = append(paths, h.tvWatchPaths...)
+	paths = append(paths, h.movieWatchPaths...)
+	return paths
 }
 
 func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
@@ -200,20 +225,53 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 		return nil
 	}
 
-	if !h.IsMediaFile(event.Path) {
+	normalizedPath, reason, action := normalizeEventPath(event.Path, h.allWatchPaths())
+	if action == ingestReject {
+		h.logger.Warn("handler", "Rejected event path", logging.F("path", event.Path), logging.F("reason", reason))
+		return nil
+	}
+	if !h.IsMediaFile(normalizedPath) {
+		return nil
+	}
+
+	if action == ingestDefer {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		if h.transientRetries[normalizedPath] >= 1 {
+			h.logger.Warn("handler", "Skipping repeated transient path retry",
+				logging.F("path", normalizedPath),
+				logging.F("reason", reason))
+			return nil
+		}
+
+		if timer, exists := h.pending[normalizedPath]; exists {
+			timer.Stop()
+			delete(h.pending, normalizedPath)
+		}
+
+		h.transientRetries[normalizedPath]++
+		h.pending[normalizedPath] = time.AfterFunc(transientRetryDelay, func() {
+			h.processFile(normalizedPath)
+		})
+
+		h.logger.Info("handler", "Deferred transient path",
+			logging.F("path", normalizedPath),
+			logging.F("reason", reason),
+			logging.F("delay", transientRetryDelay.String()))
 		return nil
 	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if timer, exists := h.pending[event.Path]; exists {
+	if timer, exists := h.pending[normalizedPath]; exists {
 		timer.Stop()
-		delete(h.pending, event.Path)
+		delete(h.pending, normalizedPath)
 	}
 
-	h.pending[event.Path] = time.AfterFunc(h.debounceTime, func() {
-		h.processFile(event.Path)
+	h.pending[normalizedPath] = time.AfterFunc(h.debounceTime, func() {
+		h.processFile(normalizedPath)
 	})
 
 	return nil
@@ -293,6 +351,7 @@ func (h *MediaHandler) processFile(path string) {
 
 	h.mu.Lock()
 	delete(h.pending, path)
+	delete(h.transientRetries, path)
 	h.mu.Unlock()
 
 	filename := filepath.Base(path)
@@ -482,6 +541,161 @@ func (h *MediaHandler) Shutdown() {
 	if h.activityLogger != nil {
 		h.activityLogger.Close()
 	}
+}
+
+func (h *MediaHandler) PlaybackLockManager() *jellyfin.PlaybackLockManager {
+	return h.playbackLocks
+}
+
+func (h *MediaHandler) DeferredQueue() *jellyfin.DeferredQueue {
+	return h.deferredQueue
+}
+
+// HandleJellyfinWebhookEvent mutates playback state from webhook events.
+func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
+	path := strings.TrimSpace(event.ItemPath)
+	switch event.NotificationType {
+	case jellyfin.EventPlaybackStart:
+		if path == "" || h.playbackLocks == nil {
+			return
+		}
+		h.playbackLocks.Lock(path, jellyfin.PlaybackInfo{
+			UserName:   event.UserName,
+			DeviceName: event.DeviceName,
+			ClientName: event.ClientName,
+			ItemID:     event.ItemID,
+			StartedAt:  time.Now(),
+		})
+		if h.logger != nil {
+			h.logger.Info("handler", "Playback lock added", logging.F("path", path), logging.F("user", event.UserName))
+		}
+	case jellyfin.EventPlaybackStop:
+		if path == "" {
+			return
+		}
+		if h.playbackLocks != nil {
+			h.playbackLocks.Unlock(path)
+		}
+		h.replayDeferredOperationsForPath(path)
+		if h.logger != nil {
+			h.logger.Info("handler", "Playback lock removed", logging.F("path", path))
+		}
+	case jellyfin.EventItemAdded:
+		itemID := strings.TrimSpace(event.ItemID)
+		if h.db != nil && path != "" && itemID != "" {
+			if err := h.db.UpsertJellyfinItem(path, itemID, event.ItemName, event.ItemType); err != nil {
+				if h.logger != nil {
+					h.logger.Warn("handler", "Failed to upsert Jellyfin item", logging.F("path", path), logging.F("item_id", itemID), logging.F("error", err.Error()))
+				}
+				return
+			}
+		}
+		if h.logger != nil {
+			h.logger.Info("handler", "Jellyfin item added", logging.F("path", path), logging.F("item_id", itemID), logging.F("name", event.ItemName), logging.F("type", event.ItemType))
+		}
+	case jellyfin.EventTaskCompleted:
+		if h.logger != nil {
+			h.logger.Info("handler", "Jellyfin task completed", logging.F("task", event.TaskName), logging.F("item", event.ItemName))
+		}
+		h.logJellyfinActivity("jellyfin_task_completed", event.TaskName, event.ItemName, true, "")
+		if h.db != nil && h.activityLogger != nil {
+			h.runJellyfinVerificationPass()
+		}
+	case jellyfin.EventLibraryChanged:
+		if h.logger != nil {
+			h.logger.Info("handler", "Jellyfin library changed", logging.F("server", event.ServerName), logging.F("item", event.ItemName))
+		}
+		h.logJellyfinActivity("jellyfin_library_changed", event.ServerName, event.ItemName, true, "")
+	}
+}
+
+func (h *MediaHandler) logJellyfinActivity(action, source, target string, success bool, errMsg string) {
+	if h.activityLogger == nil {
+		return
+	}
+
+	entry := activity.Entry{
+		Action:    action,
+		Source:    source,
+		Target:    target,
+		MediaType: "jellyfin",
+		Success:   success,
+	}
+	if errMsg != "" {
+		entry.Error = errMsg
+	}
+	if err := h.activityLogger.Log(entry); err != nil && h.logger != nil {
+		h.logger.Warn("handler", "Failed to log Jellyfin activity", logging.F("error", err.Error()))
+	}
+}
+
+func (h *MediaHandler) runJellyfinVerificationPass() {
+	if h == nil || h.db == nil || h.activityLogger == nil {
+		return
+	}
+
+	entries, err := h.activityLogger.GetRecentEntries(200)
+	if err != nil {
+		h.logJellyfinActivity("jellyfin_verification_summary", "read_activity", "", false, err.Error())
+		return
+	}
+
+	cutoff := time.Now().Add(-24 * time.Hour)
+	checked := 0
+	mismatches := 0
+
+	for _, entry := range entries {
+		if entry.Action != "organize" || !entry.Success || strings.TrimSpace(entry.Target) == "" {
+			continue
+		}
+		if !entry.Timestamp.IsZero() && entry.Timestamp.Before(cutoff) {
+			continue
+		}
+
+		checked++
+		item, err := h.db.GetJellyfinItemByPath(entry.Target)
+		if err != nil || item == nil {
+			mismatches++
+			h.logJellyfinActivity("jellyfin_verification_mismatch", entry.Target, entry.ParsedTitle, false, "path not confirmed in jellyfin")
+			continue
+		}
+	}
+
+	h.logJellyfinActivity(
+		"jellyfin_verification_summary",
+		fmt.Sprintf("checked=%d", checked),
+		fmt.Sprintf("mismatches=%d", mismatches),
+		mismatches == 0,
+		"",
+	)
+}
+
+func (h *MediaHandler) replayDeferredOperationsForPath(path string) {
+	if h.deferredQueue == nil {
+		return
+	}
+	ops := h.deferredQueue.RemoveForPath(path)
+	for _, op := range ops {
+		h.replayDeferredOperation(op)
+	}
+}
+
+func (h *MediaHandler) replayDeferredOperation(op jellyfin.DeferredOp) {
+	if strings.TrimSpace(op.SourcePath) == "" {
+		return
+	}
+	// Replay requires a fully initialized handler pipeline.
+	if h.logger == nil || h.tvOrganizer == nil || h.movieOrganizer == nil {
+		return
+	}
+	if h.logger != nil {
+		h.logger.Info("handler", "Replaying deferred operation",
+			logging.F("type", op.Type),
+			logging.F("source", op.SourcePath),
+			logging.F("target", op.TargetPath))
+	}
+	// Re-run through the regular process pipeline so classification and notifications stay consistent.
+	go h.processFile(op.SourcePath)
 }
 
 func (h *MediaHandler) PruneActivityLogs(days int) error {

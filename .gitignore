@@ -3,6 +3,8 @@
 /jellywatchd
 /installer
 /installer-test
+/jellyweb
+bin/
 
 # Test binary
 *.test
@@ -86,3 +88,12 @@ internal/naming/testdata/
 .continue/
 .sisyphus/
 .worktrees/
+
+# Frontend build artifacts
+web/node_modules/
+web/.next/
+web/out/
+web/dist/
+
+# Backups
+*.bak

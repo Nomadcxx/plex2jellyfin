@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newMockSonarrServer(t *testing.T) *httptest.Server {
@@ -22,6 +25,12 @@ func newMockSonarrServer(t *testing.T) *httptest.Server {
 				ID:                  1,
 				RenameEpisodes:      false,
 				ReplaceIllegalChars: true,
+			})
+		case "/api/v3/config/downloadClient", "/api/v3/config/downloadClient/1":
+			json.NewEncoder(w).Encode(DownloadClientConfig{
+				ID:                              1,
+				EnableCompletedDownloadHandling: true,
+				AutoRedownloadFailed:            true,
 			})
 		case "/api/v3/rootfolder":
 			json.NewEncoder(w).Encode([]RootFolder{
@@ -163,4 +172,51 @@ func TestDeleteRootFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+}
+
+func TestGetDownloadClientConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/config/downloadClient" && r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(DownloadClientConfig{
+				ID:                              1,
+				EnableCompletedDownloadHandling: true,
+				AutoRedownloadFailed:            true,
+			})
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{URL: server.URL, APIKey: "test"})
+	cfg, err := client.GetDownloadClientConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.EnableCompletedDownloadHandling)
+	assert.True(t, cfg.AutoRedownloadFailed)
+	assert.Equal(t, int64(1), cfg.ID)
+}
+
+func TestUpdateDownloadClientConfig(t *testing.T) {
+	var received DownloadClientConfig
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/config/downloadClient/1" && r.Method == http.MethodPut {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewDecoder(r.Body).Decode(&received)
+			json.NewEncoder(w).Encode(received)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{URL: server.URL, APIKey: "test"})
+	cfg := DownloadClientConfig{
+		ID:                              1,
+		EnableCompletedDownloadHandling: false,
+		AutoRedownloadFailed:            true,
+	}
+	result, err := client.UpdateDownloadClientConfig(cfg)
+	require.NoError(t, err)
+	assert.False(t, result.EnableCompletedDownloadHandling)
 }

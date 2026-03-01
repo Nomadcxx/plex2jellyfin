@@ -2,24 +2,29 @@ package daemon
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/scanner"
 )
 
 type Server struct {
-	httpServer *http.Server
-	handler    *MediaHandler
-	scanner    *scanner.PeriodicScanner
-	startTime  time.Time
-	mu         sync.RWMutex
-	healthy    bool
-	logger     *logging.Logger
+	httpServer    *http.Server
+	handler       *MediaHandler
+	scanner       *scanner.PeriodicScanner
+	startTime     time.Time
+	mu            sync.RWMutex
+	healthy       bool
+	logger        *logging.Logger
+	webhookSecret string
 }
 
 type HealthResponse struct {
@@ -40,16 +45,17 @@ type MetricsResponse struct {
 	LastProcessed    string  `json:"last_processed,omitempty"`
 }
 
-func NewServer(handler *MediaHandler, periodicScanner *scanner.PeriodicScanner, addr string, logger *logging.Logger) *Server {
+func NewServer(handler *MediaHandler, periodicScanner *scanner.PeriodicScanner, addr string, logger *logging.Logger, webhookSecret string) *Server {
 	if logger == nil {
 		logger = logging.Nop()
 	}
 	s := &Server{
-		handler:   handler,
-		scanner:   periodicScanner,
-		startTime: time.Now(),
-		healthy:   true,
-		logger:    logger,
+		handler:       handler,
+		scanner:       periodicScanner,
+		startTime:     time.Now(),
+		healthy:       true,
+		logger:        logger,
+		webhookSecret: strings.TrimSpace(webhookSecret),
 	}
 
 	mux := http.NewServeMux()
@@ -58,6 +64,7 @@ func NewServer(handler *MediaHandler, periodicScanner *scanner.PeriodicScanner, 
 	mux.HandleFunc("/ready", s.handleReady)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/stats", s.handleMetrics)
+	mux.HandleFunc("/api/v1/webhooks/jellyfin", s.handleJellyfinWebhook)
 
 	s.httpServer = &http.Server{
 		Addr:         addr,
@@ -160,4 +167,48 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleJellyfinWebhook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.validateWebhookSecret(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	var event jellyfin.WebhookEvent
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	if s.handler != nil {
+		s.handler.HandleJellyfinWebhookEvent(event)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) validateWebhookSecret(r *http.Request) bool {
+	if s.webhookSecret == "" {
+		return isLoopbackRequest(r)
+	}
+	provided := strings.TrimSpace(r.Header.Get("X-Jellywatch-Webhook-Secret"))
+	if provided == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(s.webhookSecret)) == 1
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

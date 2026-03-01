@@ -68,6 +68,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			stepControlKeys = map[string]bool{
 				"up": true, "down": true, "k": true, "j": true,
 			}
+		case stepSystemWeb:
+			stepControlKeys = map[string]bool{
+				"up": true, "down": true, "k": true, "j": true,
+				"e": true, "E": true,
+			}
 		case stepConfirm, stepComplete:
 			stepControlKeys = map[string]bool{
 				"q": true,
@@ -81,13 +86,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		isControlKey := universalControlKeys[key] || stepControlKeys[key]
 		if !isControlKey {
 			mdl := newModel.(model)
-			if len(mdl.inputs) > 0 && mdl.focusedInput < len(mdl.inputs) {
-				if mdl.step == stepPaths || mdl.step == stepIntegrationsSonarr ||
-					mdl.step == stepIntegrationsRadarr || mdl.step == stepIntegrationsJellyfin || mdl.step == stepIntegrationsAI ||
-					mdl.step == stepSystemPermissions {
+			if len(mdl.inputs) > 0 {
+				if mdl.step == stepSystemWeb && mdl.focusedInput == 2 {
 					var inputCmd tea.Cmd
-					mdl.inputs[mdl.focusedInput], inputCmd = mdl.inputs[mdl.focusedInput].Update(msg)
+					mdl.inputs[0], inputCmd = mdl.inputs[0].Update(msg)
 					return mdl, inputCmd
+				}
+				if mdl.step == stepIntegrationsJellyfin {
+					inputIdx := mdl.focusedInput - 1
+					if inputIdx >= 0 && inputIdx < len(mdl.inputs) {
+						var inputCmd tea.Cmd
+						mdl.inputs[inputIdx], inputCmd = mdl.inputs[inputIdx].Update(msg)
+						return mdl, inputCmd
+					}
+				}
+				if mdl.focusedInput < len(mdl.inputs) {
+					if mdl.step == stepPaths || mdl.step == stepIntegrationsSonarr ||
+						mdl.step == stepIntegrationsRadarr || mdl.step == stepIntegrationsAI ||
+						mdl.step == stepSystemPermissions {
+						var inputCmd tea.Cmd
+						mdl.inputs[mdl.focusedInput], inputCmd = mdl.inputs[mdl.focusedInput].Update(msg)
+						return mdl, inputCmd
+					}
 				}
 			}
 		}
@@ -139,6 +159,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.step = stepComplete
 		return m, nil
+
+	case arrIssuesMsg:
+		if msg.err != nil {
+			m.errors = append(m.errors, msg.err.Error())
+		}
+		if len(msg.issues) > 0 {
+			m.arrIssues = msg.issues
+			m.step = stepArrIssues
+			m.arrIssuesChoice = 0
+			return m, nil
+		}
+		// No issues found, proceed to scan
+		m.step = stepScanning
+		return m, m.runInitialScan()
+
+	case arrFixMsg:
+		// After fixing, proceed to scan
+		m.arrIssues = nil
+		m.step = stepScanning
+		return m, m.runInitialScan()
 	}
 
 	if len(m.inputs) > 0 && m.focusedInput < len(m.inputs) {
@@ -186,10 +226,14 @@ func (m model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePermissionsKeys(key)
 	case stepSystemService:
 		return m.handleServiceKeys(key)
+	case stepSystemWeb:
+		return m.handleWebServiceKeys(key)
 	case stepConfirm:
 		return m.handleConfirmKeys(key)
 	case stepUninstallConfirm:
 		return m.handleUninstallConfirmKeys(key)
+	case stepArrIssues:
+		return m.handleArrIssuesKeys(key)
 	case stepComplete:
 		return m.handleCompleteKeys(key)
 	}
@@ -301,9 +345,9 @@ func (m model) handleRadarrKeys(key string) (tea.Model, tea.Cmd) {
 func (m model) handleJellyfinKeys(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "tab":
-		return m.nextInput()
+		return m.nextJellyfinInput()
 	case "shift+tab":
-		return m.prevInput()
+		return m.prevJellyfinInput()
 	case "up", "k":
 		if m.focusedInput == 0 {
 			m.jellyfinEnabled = !m.jellyfinEnabled
@@ -449,12 +493,72 @@ func (m model) handleServiceKeys(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) handleWebServiceKeys(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "tab":
+		m.focusedInput = (m.focusedInput + 1) % 3
+	case "shift+tab":
+		m.focusedInput = (m.focusedInput + 2) % 3
+	case "up", "k":
+		switch m.focusedInput {
+		case 0:
+			m.webEnabled = !m.webEnabled
+		case 1:
+			m.webStartNow = !m.webStartNow
+		}
+	case "down", "j":
+		switch m.focusedInput {
+		case 0:
+			m.webEnabled = !m.webEnabled
+		case 1:
+			m.webStartNow = !m.webStartNow
+		}
+	case "e", "E":
+		m.webEnabled = !m.webEnabled
+	case "enter":
+		m.saveWebInputs()
+		return m.nextStep()
+	case "esc":
+		return m.prevStep()
+	}
+	return m, nil
+}
+
 func (m model) handleConfirmKeys(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "enter":
 		return m.startInstallation()
 	case "esc":
 		return m.prevStep()
+	}
+	return m, nil
+}
+
+func (m model) handleArrIssuesKeys(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		if m.arrIssuesChoice > 0 {
+			m.arrIssuesChoice--
+		}
+	case "down", "j":
+		if m.arrIssuesChoice < 1 {
+			m.arrIssuesChoice++
+		}
+	case "f", "F":
+		// Fix issues
+		return m, m.fixArrSettings()
+	case "s", "S":
+		// Skip / proceed without fixing
+		m.step = stepScanning
+		return m, m.runInitialScan()
+	case "enter":
+		if m.arrIssuesChoice == 0 {
+			// Fix
+			return m, m.fixArrSettings()
+		}
+		// Skip
+		m.step = stepScanning
+		return m, m.runInitialScan()
 	}
 	return m, nil
 }
@@ -518,6 +622,40 @@ func (m model) prevInput() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) nextJellyfinInput() (tea.Model, tea.Cmd) {
+	total := len(m.inputs) + 1 // include "Enable" as focusable row 0
+	if total <= 1 {
+		return m, nil
+	}
+	oldInputIdx := m.focusedInput - 1
+	if oldInputIdx >= 0 && oldInputIdx < len(m.inputs) {
+		m.inputs[oldInputIdx].Blur()
+	}
+	m.focusedInput = (m.focusedInput + 1) % total
+	newInputIdx := m.focusedInput - 1
+	if newInputIdx >= 0 && newInputIdx < len(m.inputs) {
+		m.inputs[newInputIdx].Focus()
+	}
+	return m, nil
+}
+
+func (m model) prevJellyfinInput() (tea.Model, tea.Cmd) {
+	total := len(m.inputs) + 1 // include "Enable" as focusable row 0
+	if total <= 1 {
+		return m, nil
+	}
+	oldInputIdx := m.focusedInput - 1
+	if oldInputIdx >= 0 && oldInputIdx < len(m.inputs) {
+		m.inputs[oldInputIdx].Blur()
+	}
+	m.focusedInput = (m.focusedInput + total - 1) % total
+	newInputIdx := m.focusedInput - 1
+	if newInputIdx >= 0 && newInputIdx < len(m.inputs) {
+		m.inputs[newInputIdx].Focus()
+	}
+	return m, nil
+}
+
 func (m model) nextStep() (tea.Model, tea.Cmd) {
 	m.step++
 	m.focusedInput = 0
@@ -550,6 +688,8 @@ func (m *model) initInputsForStep() {
 		m.initAIInputs()
 	case stepSystemPermissions:
 		m.initPermissionsInputs()
+	case stepSystemWeb:
+		m.initWebInputs()
 	}
 
 	if len(m.inputs) > 0 {

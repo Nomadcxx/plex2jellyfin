@@ -76,6 +76,7 @@ Features:
 	rootCmd.AddCommand(newSonarrCmd())
 	rootCmd.AddCommand(newRadarrCmd())
 	rootCmd.AddCommand(newWatchCmd())
+	rootCmd.AddCommand(newOrphansCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newDatabaseCmd())
@@ -85,6 +86,8 @@ Features:
 	rootCmd.AddCommand(newAuditCmd())
 	rootCmd.AddCommand(newMigrateCmd())
 	rootCmd.AddCommand(newCleanupCmd())
+	rootCmd.AddCommand(newOrphansCmd())
+	rootCmd.AddCommand(newHealthCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

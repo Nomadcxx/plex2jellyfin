@@ -10,6 +10,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/activity"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -23,6 +24,8 @@ type Server struct {
 	service        *service.CleanupService
 	activityLogger *activity.Logger
 	sessions       *SessionStore
+	playbackLocks  *jellyfin.PlaybackLockManager
+	deferredQueue  *jellyfin.DeferredQueue
 }
 
 // NewServer creates a new API server
@@ -46,6 +49,8 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 		service:        service.NewCleanupService(db),
 		activityLogger: activityLogger,
 		sessions:       sessions,
+		playbackLocks:  jellyfin.NewPlaybackLockManager(),
+		deferredQueue:  jellyfin.NewDeferredQueue(),
 	}
 }
 
@@ -103,6 +108,9 @@ func (s *Server) apiRouter() *chi.Mux {
 	r.Use(middleware.SetHeader("Content-Type", "application/json"))
 	r.Use(s.authMiddleware)
 
+	// Webhooks are intentionally mounted outside generated OpenAPI handlers.
+	r.Post("/webhooks/jellyfin", s.HandleJellyfinWebhook)
+
 	// Mount generated API routes
 	api.HandlerFromMux(s, r)
 
@@ -118,6 +126,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			"/auth/logout",
 			"/auth/status",
 			"/health",
+			"/webhooks/jellyfin",
 		}
 
 		path := r.URL.Path

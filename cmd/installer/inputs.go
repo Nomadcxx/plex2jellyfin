@@ -127,7 +127,7 @@ func (m *model) saveRadarrInputs() {
 }
 
 func (m *model) initJellyfinInputs() {
-	m.inputs = make([]textinput.Model, 2)
+	m.inputs = make([]textinput.Model, 3)
 
 	m.inputs[0] = textinput.New()
 	m.inputs[0].Placeholder = "http://localhost:8096"
@@ -150,12 +150,27 @@ func (m *model) initJellyfinInputs() {
 	m.inputs[1].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
 	m.inputs[1].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
 	m.inputs[1].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
+
+	m.inputs[2] = textinput.New()
+	m.inputs[2].Placeholder = "Auto-generated if empty"
+	m.inputs[2].Width = 40
+	m.inputs[2].CharLimit = 128
+	m.inputs[2].SetValue(m.webhookSecret)
+	m.inputs[2].EchoMode = textinput.EchoPassword
+	m.inputs[2].EchoCharacter = '•'
+	m.inputs[2].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[2].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[2].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[2].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
 }
 
 func (m *model) saveJellyfinInputs() {
 	if len(m.inputs) >= 2 {
 		m.jellyfinURL = m.inputs[0].Value()
 		m.jellyfinAPIKey = m.inputs[1].Value()
+	}
+	if len(m.inputs) >= 3 {
+		m.webhookSecret = m.inputs[2].Value()
 	}
 }
 
@@ -237,6 +252,26 @@ func (m *model) savePermissionsInputs() {
 		m.permGroup = m.inputs[1].Value()
 		m.permFileMode = m.inputs[2].Value()
 		m.permDirMode = m.inputs[3].Value()
+	}
+}
+
+func (m *model) initWebInputs() {
+	m.inputs = make([]textinput.Model, 1)
+
+	m.inputs[0] = textinput.New()
+	m.inputs[0].Placeholder = "5522"
+	m.inputs[0].Width = 10
+	m.inputs[0].CharLimit = 5
+	m.inputs[0].SetValue(m.webPort)
+	m.inputs[0].PromptStyle = lipgloss.NewStyle().Foreground(Secondary).Background(BgBase)
+	m.inputs[0].TextStyle = lipgloss.NewStyle().Foreground(FgPrimary).Background(BgBase)
+	m.inputs[0].PlaceholderStyle = lipgloss.NewStyle().Foreground(FgMuted).Background(BgBase)
+	m.inputs[0].Cursor.Style = lipgloss.NewStyle().Foreground(Primary).Background(BgBase)
+}
+
+func (m *model) saveWebInputs() {
+	if len(m.inputs) >= 1 {
+		m.webPort = m.inputs[0].Value()
 	}
 }
 

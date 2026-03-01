@@ -13,6 +13,27 @@ import (
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Get paginated activity log
+	// (GET /activity)
+	GetActivity(w http.ResponseWriter, r *http.Request, params GetActivityParams)
+	// SSE stream for real-time activity
+	// (GET /activity/stream)
+	ActivityStream(w http.ResponseWriter, r *http.Request)
+	// Get current AI settings
+	// (GET /ai/settings)
+	GetAISettings(w http.ResponseWriter, r *http.Request)
+	// Authenticate with password
+	// (POST /auth/login)
+	Login(w http.ResponseWriter, r *http.Request)
+	// Clear session cookie
+	// (POST /auth/logout)
+	Logout(w http.ResponseWriter, r *http.Request)
+	// Check if auth is enabled and current state
+	// (GET /auth/status)
+	GetAuthStatus(w http.ResponseWriter, r *http.Request)
+	// Get dashboard aggregate data
+	// (GET /dashboard)
+	GetDashboard(w http.ResponseWriter, r *http.Request)
 	// Get duplicate analysis
 	// (GET /duplicates)
 	GetDuplicates(w http.ResponseWriter, r *http.Request)
@@ -22,12 +43,42 @@ type ServerInterface interface {
 	// Health check endpoint
 	// (GET /health)
 	HealthCheck(w http.ResponseWriter, r *http.Request)
+	// List configured LLM providers
+	// (GET /llm-providers)
+	ListLLMProviders(w http.ResponseWriter, r *http.Request)
+	// Get provider health and model
+	// (GET /llm-providers/{providerId}/status)
+	GetLLMProviderStatus(w http.ResponseWriter, r *http.Request, providerId string)
+	// List all configured media managers
+	// (GET /media-managers)
+	ListMediaManagers(w http.ResponseWriter, r *http.Request)
+	// Get download queue
+	// (GET /media-managers/{managerId}/queue)
+	GetMediaManagerQueue(w http.ResponseWriter, r *http.Request, managerId string, params GetMediaManagerQueueParams)
+	// Clear item from queue
+	// (DELETE /media-managers/{managerId}/queue/{itemId})
+	ClearQueueItem(w http.ResponseWriter, r *http.Request, managerId string, itemId int64, params ClearQueueItemParams)
+	// Trigger import scan
+	// (POST /media-managers/{managerId}/scan)
+	TriggerManagerScan(w http.ResponseWriter, r *http.Request, managerId string)
+	// Get service health and stats
+	// (GET /media-managers/{managerId}/status)
+	GetMediaManagerStatus(w http.ResponseWriter, r *http.Request, managerId string)
+	// Clear all stuck items
+	// (DELETE /media-managers/{managerId}/stuck)
+	ClearStuckItems(w http.ResponseWriter, r *http.Request, managerId string, params ClearStuckItemsParams)
+	// Get stuck queue items
+	// (GET /media-managers/{managerId}/stuck)
+	GetStuckItems(w http.ResponseWriter, r *http.Request, managerId string)
 	// Trigger library scan
 	// (POST /scan)
 	StartScan(w http.ResponseWriter, r *http.Request)
-	// Get scan status with SSE for progress
+	// Get scan status
 	// (GET /scan/status)
 	GetScanStatus(w http.ResponseWriter, r *http.Request)
+	// SSE stream for scan progress
+	// (GET /scan/stream)
+	ScanStream(w http.ResponseWriter, r *http.Request)
 	// Get scattered media analysis
 	// (GET /scattered)
 	GetScattered(w http.ResponseWriter, r *http.Request)
@@ -39,6 +90,48 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// Get paginated activity log
+// (GET /activity)
+func (_ Unimplemented) GetActivity(w http.ResponseWriter, r *http.Request, params GetActivityParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SSE stream for real-time activity
+// (GET /activity/stream)
+func (_ Unimplemented) ActivityStream(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get current AI settings
+// (GET /ai/settings)
+func (_ Unimplemented) GetAISettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Authenticate with password
+// (POST /auth/login)
+func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Clear session cookie
+// (POST /auth/logout)
+func (_ Unimplemented) Logout(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Check if auth is enabled and current state
+// (GET /auth/status)
+func (_ Unimplemented) GetAuthStatus(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get dashboard aggregate data
+// (GET /dashboard)
+func (_ Unimplemented) GetDashboard(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Get duplicate analysis
 // (GET /duplicates)
@@ -58,15 +151,75 @@ func (_ Unimplemented) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List configured LLM providers
+// (GET /llm-providers)
+func (_ Unimplemented) ListLLMProviders(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get provider health and model
+// (GET /llm-providers/{providerId}/status)
+func (_ Unimplemented) GetLLMProviderStatus(w http.ResponseWriter, r *http.Request, providerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List all configured media managers
+// (GET /media-managers)
+func (_ Unimplemented) ListMediaManagers(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get download queue
+// (GET /media-managers/{managerId}/queue)
+func (_ Unimplemented) GetMediaManagerQueue(w http.ResponseWriter, r *http.Request, managerId string, params GetMediaManagerQueueParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Clear item from queue
+// (DELETE /media-managers/{managerId}/queue/{itemId})
+func (_ Unimplemented) ClearQueueItem(w http.ResponseWriter, r *http.Request, managerId string, itemId int64, params ClearQueueItemParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Trigger import scan
+// (POST /media-managers/{managerId}/scan)
+func (_ Unimplemented) TriggerManagerScan(w http.ResponseWriter, r *http.Request, managerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get service health and stats
+// (GET /media-managers/{managerId}/status)
+func (_ Unimplemented) GetMediaManagerStatus(w http.ResponseWriter, r *http.Request, managerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Clear all stuck items
+// (DELETE /media-managers/{managerId}/stuck)
+func (_ Unimplemented) ClearStuckItems(w http.ResponseWriter, r *http.Request, managerId string, params ClearStuckItemsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get stuck queue items
+// (GET /media-managers/{managerId}/stuck)
+func (_ Unimplemented) GetStuckItems(w http.ResponseWriter, r *http.Request, managerId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Trigger library scan
 // (POST /scan)
 func (_ Unimplemented) StartScan(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Get scan status with SSE for progress
+// Get scan status
 // (GET /scan/status)
 func (_ Unimplemented) GetScanStatus(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SSE stream for scan progress
+// (GET /scan/stream)
+func (_ Unimplemented) ScanStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -90,6 +243,117 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// GetActivity operation middleware
+func (siw *ServerInterfaceWrapper) GetActivity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetActivityParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetActivity(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ActivityStream operation middleware
+func (siw *ServerInterfaceWrapper) ActivityStream(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ActivityStream(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAISettings operation middleware
+func (siw *ServerInterfaceWrapper) GetAISettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAISettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Login operation middleware
+func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Login(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuthStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetAuthStatus(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuthStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetDashboard(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDashboard(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetDuplicates operation middleware
 func (siw *ServerInterfaceWrapper) GetDuplicates(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +419,251 @@ func (siw *ServerInterfaceWrapper) HealthCheck(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// ListLLMProviders operation middleware
+func (siw *ServerInterfaceWrapper) ListLLMProviders(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLLMProviders(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLLMProviderStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetLLMProviderStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "providerId" -------------
+	var providerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "providerId", chi.URLParam(r, "providerId"), &providerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "providerId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLLMProviderStatus(w, r, providerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMediaManagers operation middleware
+func (siw *ServerInterfaceWrapper) ListMediaManagers(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMediaManagers(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMediaManagerQueue operation middleware
+func (siw *ServerInterfaceWrapper) GetMediaManagerQueue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "managerId" -------------
+	var managerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "managerId", chi.URLParam(r, "managerId"), &managerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "managerId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMediaManagerQueueParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMediaManagerQueue(w, r, managerId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClearQueueItem operation middleware
+func (siw *ServerInterfaceWrapper) ClearQueueItem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "managerId" -------------
+	var managerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "managerId", chi.URLParam(r, "managerId"), &managerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "managerId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "itemId" -------------
+	var itemId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "itemId", chi.URLParam(r, "itemId"), &itemId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "itemId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ClearQueueItemParams
+
+	// ------------- Optional query parameter "blocklist" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "blocklist", r.URL.Query(), &params.Blocklist)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "blocklist", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClearQueueItem(w, r, managerId, itemId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TriggerManagerScan operation middleware
+func (siw *ServerInterfaceWrapper) TriggerManagerScan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "managerId" -------------
+	var managerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "managerId", chi.URLParam(r, "managerId"), &managerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "managerId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TriggerManagerScan(w, r, managerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMediaManagerStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetMediaManagerStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "managerId" -------------
+	var managerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "managerId", chi.URLParam(r, "managerId"), &managerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "managerId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMediaManagerStatus(w, r, managerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClearStuckItems operation middleware
+func (siw *ServerInterfaceWrapper) ClearStuckItems(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "managerId" -------------
+	var managerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "managerId", chi.URLParam(r, "managerId"), &managerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "managerId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ClearStuckItemsParams
+
+	// ------------- Optional query parameter "blocklist" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "blocklist", r.URL.Query(), &params.Blocklist)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "blocklist", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClearStuckItems(w, r, managerId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetStuckItems operation middleware
+func (siw *ServerInterfaceWrapper) GetStuckItems(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "managerId" -------------
+	var managerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "managerId", chi.URLParam(r, "managerId"), &managerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "managerId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStuckItems(w, r, managerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartScan operation middleware
 func (siw *ServerInterfaceWrapper) StartScan(w http.ResponseWriter, r *http.Request) {
 
@@ -174,6 +683,20 @@ func (siw *ServerInterfaceWrapper) GetScanStatus(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetScanStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScanStream operation middleware
+func (siw *ServerInterfaceWrapper) ScanStream(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScanStream(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -336,6 +859,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/activity", wrapper.GetActivity)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/activity/stream", wrapper.ActivityStream)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/ai/settings", wrapper.GetAISettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/login", wrapper.Login)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/auth/logout", wrapper.Logout)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/auth/status", wrapper.GetAuthStatus)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/dashboard", wrapper.GetDashboard)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/duplicates", wrapper.GetDuplicates)
 	})
 	r.Group(func(r chi.Router) {
@@ -345,10 +889,40 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/health", wrapper.HealthCheck)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/llm-providers", wrapper.ListLLMProviders)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/llm-providers/{providerId}/status", wrapper.GetLLMProviderStatus)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/media-managers", wrapper.ListMediaManagers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/media-managers/{managerId}/queue", wrapper.GetMediaManagerQueue)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/media-managers/{managerId}/queue/{itemId}", wrapper.ClearQueueItem)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/media-managers/{managerId}/scan", wrapper.TriggerManagerScan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/media-managers/{managerId}/status", wrapper.GetMediaManagerStatus)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/media-managers/{managerId}/stuck", wrapper.ClearStuckItems)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/media-managers/{managerId}/stuck", wrapper.GetStuckItems)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/scan", wrapper.StartScan)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/scan/status", wrapper.GetScanStatus)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/scan/stream", wrapper.ScanStream)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/scattered", wrapper.GetScattered)
