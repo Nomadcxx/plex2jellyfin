@@ -1,12 +1,12 @@
 {
   "category": "General",
-  "changelog": "Initial release with custom API endpoints and event forwarding",
+  "changelog": "Fix MissingMethodException crash on Jellyfin 10.11.x - use IMediaSourceManager for media streams",
   "description": "Companion plugin for JellyWatch media organizer - provides custom endpoints and event forwarding",
   "guid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "name": "JellyWatch",
   "overview": "Custom Jellyfin plugin that provides richer webhooks and API endpoints for the JellyWatch media organizer",
   "owner": "Nomadcxx",
-  "targetAbi": "10.10.0.0",
-  "version": "1.0.0",
+  "targetAbi": "10.11.0.0",
+  "version": "1.1.0",
   "checksum": ""
 }

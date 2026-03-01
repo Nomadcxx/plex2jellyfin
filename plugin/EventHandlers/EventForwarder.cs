@@ -17,6 +17,7 @@ public class EventForwarder : IHostedService, IDisposable
     private readonly ILibraryManager _libraryManager;
     private readonly ISessionManager _sessionManager;
     private readonly ITaskManager _taskManager;
+    private readonly IMediaSourceManager _mediaSourceManager;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<EventForwarder> _logger;
 
@@ -27,12 +28,14 @@ public class EventForwarder : IHostedService, IDisposable
         ILibraryManager libraryManager,
         ISessionManager sessionManager,
         ITaskManager taskManager,
+        IMediaSourceManager mediaSourceManager,
         IHttpClientFactory httpClientFactory,
         ILogger<EventForwarder> logger)
     {
         _libraryManager = libraryManager;
         _sessionManager = sessionManager;
         _taskManager = taskManager;
+        _mediaSourceManager = mediaSourceManager;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
@@ -135,8 +138,19 @@ public class EventForwarder : IHostedService, IDisposable
         return JellyWatchPlugin.Instance?.Configuration?.EnableEventForwarding == true;
     }
 
-    private static object BuildItemPayload(BaseItem item)
+    private object BuildItemPayload(BaseItem item)
     {
+        var hasSubtitles = false;
+        try
+        {
+            var streams = _mediaSourceManager.GetMediaStreams(item.Id);
+            hasSubtitles = streams.Any(s => s.Type == MediaStreamType.Subtitle);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not retrieve media streams for {ItemName}", item.Name);
+        }
+
         return new
         {
             EventType = "ItemChanged",
@@ -151,7 +165,7 @@ public class EventForwarder : IHostedService, IDisposable
                 IsIdentified = item.ProviderIds.Count > 0,
                 LibraryName = item.GetParent()?.Name,
                 ParentId = item.ParentId.ToString(),
-                HasSubtitles = item.GetMediaStreams().Any(s => s.Type == MediaStreamType.Subtitle),
+                HasSubtitles = hasSubtitles,
                 PrimaryImagePath = item.GetImagePath(ImageType.Primary),
                 DateCreated = item.DateCreated.ToString("O"),
                 DateModified = item.DateModified.ToString("O")

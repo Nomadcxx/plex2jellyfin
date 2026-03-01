@@ -6,19 +6,17 @@
     <Nullable>enable</Nullable>
     <AssemblyName>JellyWatch.Plugin</AssemblyName>
     <RootNamespace>JellyWatch.Plugin</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>Nomadcxx</Authors>
     <Description>Companion plugin for JellyWatch media organizer</Description>
     <PackageProjectUrl>https://github.com/Nomadcxx/jellywatch-plugin</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jellyfin.Controller" Version="10.10.0" />
-    <PackageReference Include="Jellyfin.Model" Version="10.10.0" />
-    <PackageReference Include="Jellyfin.Data" Version="10.10.0" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Jellyfin.Controller" Version="10.11.6" />
+    <PackageReference Include="Jellyfin.Model" Version="10.11.6" />
+    <PackageReference Include="Jellyfin.Data" Version="10.11.6" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.11" />
   </ItemGroup>
 
   <ItemGroup>
