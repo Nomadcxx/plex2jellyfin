@@ -22,10 +22,12 @@ const (
 	stepIntegrationsAI
 	stepSystemPermissions
 	stepSystemService
+	stepSystemWeb
 	stepConfirm
 	stepUninstallConfirm // Confirm uninstall and choose to delete config/db
 	stepInstalling
-	stepScanning // Library scan with progress
+	stepArrIssues // Show arr configuration issues and offer to fix
+	stepScanning  // Library scan with progress
 	stepComplete
 )
 
@@ -133,6 +135,7 @@ type model struct {
 	jellyfinEnabled bool
 	jellyfinURL     string
 	jellyfinAPIKey  string
+	webhookSecret   string
 	jellyfinTested  bool
 	jellyfinVersion string
 	jellyfinTesting bool
@@ -161,6 +164,9 @@ type model struct {
 	serviceEnabled  bool
 	serviceStartNow bool
 	scanFrequency   int // 0=5m, 1=10m, 2=30m, 3=hourly, 4=daily
+	webEnabled      bool
+	webStartNow     bool
+	webPort         string
 
 	// Installation detection
 	existingDBDetected bool
@@ -180,8 +186,21 @@ type model struct {
 	scanStats    *ScanStats
 	scanCancel   context.CancelFunc
 
+	// Arr configuration issues
+	arrIssues       []ArrIssue
+	arrIssuesChoice int // 0=fix, 1=skip
+
 	// Timing config
 	inputDelay time.Duration
+}
+
+// ArrIssue represents a configuration issue found in Sonarr/Radarr.
+type ArrIssue struct {
+	Service  string // "sonarr", "radarr"
+	Setting  string // "enableCompletedDownloadHandling", "renameEpisodes", etc.
+	Current  string
+	Expected string
+	Severity string // "critical", "warning"
 }
 
 // ScanProgress tracks library scanning progress
@@ -256,6 +275,16 @@ type scanCompleteMsg struct {
 	result *ScanResult
 	stats  *ScanStats
 	err    error
+}
+
+type arrIssuesMsg struct {
+	issues []ArrIssue
+	err    error
+}
+
+type arrFixMsg struct {
+	fixed int
+	err   error
 }
 
 // Scan frequency options

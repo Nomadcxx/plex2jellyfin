@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -50,7 +51,7 @@ func (s *Server) validateWebhookSecret(r *http.Request) bool {
 	}
 	expected := strings.TrimSpace(s.cfg.Jellyfin.WebhookSecret)
 	if expected == "" {
-		return false
+		return isLoopbackRequest(r)
 	}
 
 	provided := strings.TrimSpace(r.Header.Get("X-Jellywatch-Webhook-Secret"))
@@ -58,6 +59,15 @@ func (s *Server) validateWebhookSecret(r *http.Request) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Server) handlePlaybackStart(event jellyfin.WebhookEvent) {

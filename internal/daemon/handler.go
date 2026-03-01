@@ -21,25 +21,28 @@ import (
 )
 
 type MediaHandler struct {
-	tvOrganizer     *organizer.Organizer // NEW: TV-specific organizer
-	movieOrganizer  *organizer.Organizer // NEW: Movie-specific organizer
-	notifyManager   *notify.Manager
-	tvLibraries     []string
-	movieLibs       []string
-	tvWatchPaths    []string // TV watch folders for source hint
-	movieWatchPaths []string // Movie watch folders for source hint
-	debounceTime    time.Duration
-	pending         map[string]*time.Timer
-	mu              sync.Mutex
-	dryRun          bool
-	stats           *Stats
-	logger          *logging.Logger
-	sonarrClient    *sonarr.Client
-	db              *database.MediaDB
-	activityLogger  *activity.Logger
-	playbackLocks   *jellyfin.PlaybackLockManager
-	deferredQueue   *jellyfin.DeferredQueue
+	tvOrganizer      *organizer.Organizer // NEW: TV-specific organizer
+	movieOrganizer   *organizer.Organizer // NEW: Movie-specific organizer
+	notifyManager    *notify.Manager
+	tvLibraries      []string
+	movieLibs        []string
+	tvWatchPaths     []string // TV watch folders for source hint
+	movieWatchPaths  []string // Movie watch folders for source hint
+	debounceTime     time.Duration
+	pending          map[string]*time.Timer
+	transientRetries map[string]int
+	mu               sync.Mutex
+	dryRun           bool
+	stats            *Stats
+	logger           *logging.Logger
+	sonarrClient     *sonarr.Client
+	db               *database.MediaDB
+	activityLogger   *activity.Logger
+	playbackLocks    *jellyfin.PlaybackLockManager
+	deferredQueue    *jellyfin.DeferredQueue
 }
+
+var transientRetryDelay = 2 * time.Second
 
 type Stats struct {
 	mu               sync.RWMutex
@@ -189,24 +192,32 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	}
 
 	return &MediaHandler{
-		tvOrganizer:     tvOrganizer,
-		movieOrganizer:  movieOrganizer,
-		notifyManager:   cfg.NotifyManager,
-		tvLibraries:     cfg.TVLibraries,
-		movieLibs:       cfg.MovieLibs,
-		tvWatchPaths:    cfg.TVWatchPaths,
-		movieWatchPaths: cfg.MovieWatchPaths,
-		debounceTime:    cfg.DebounceTime,
-		pending:         make(map[string]*time.Timer),
-		dryRun:          cfg.DryRun,
-		stats:           NewStats(),
-		logger:          cfg.Logger,
-		sonarrClient:    cfg.SonarrClient,
-		db:              cfg.Database,
-		activityLogger:  activityLogger,
-		playbackLocks:   cfg.PlaybackLocks,
-		deferredQueue:   cfg.DeferredQueue,
+		tvOrganizer:      tvOrganizer,
+		movieOrganizer:   movieOrganizer,
+		notifyManager:    cfg.NotifyManager,
+		tvLibraries:      cfg.TVLibraries,
+		movieLibs:        cfg.MovieLibs,
+		tvWatchPaths:     cfg.TVWatchPaths,
+		movieWatchPaths:  cfg.MovieWatchPaths,
+		debounceTime:     cfg.DebounceTime,
+		pending:          make(map[string]*time.Timer),
+		transientRetries: make(map[string]int),
+		dryRun:           cfg.DryRun,
+		stats:            NewStats(),
+		logger:           cfg.Logger,
+		sonarrClient:     cfg.SonarrClient,
+		db:               cfg.Database,
+		activityLogger:   activityLogger,
+		playbackLocks:    cfg.PlaybackLocks,
+		deferredQueue:    cfg.DeferredQueue,
 	}, nil
+}
+
+func (h *MediaHandler) allWatchPaths() []string {
+	paths := make([]string, 0, len(h.tvWatchPaths)+len(h.movieWatchPaths))
+	paths = append(paths, h.tvWatchPaths...)
+	paths = append(paths, h.movieWatchPaths...)
+	return paths
 }
 
 func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
@@ -214,20 +225,53 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 		return nil
 	}
 
-	if !h.IsMediaFile(event.Path) {
+	normalizedPath, reason, action := normalizeEventPath(event.Path, h.allWatchPaths())
+	if action == ingestReject {
+		h.logger.Warn("handler", "Rejected event path", logging.F("path", event.Path), logging.F("reason", reason))
+		return nil
+	}
+	if !h.IsMediaFile(normalizedPath) {
+		return nil
+	}
+
+	if action == ingestDefer {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		if h.transientRetries[normalizedPath] >= 1 {
+			h.logger.Warn("handler", "Skipping repeated transient path retry",
+				logging.F("path", normalizedPath),
+				logging.F("reason", reason))
+			return nil
+		}
+
+		if timer, exists := h.pending[normalizedPath]; exists {
+			timer.Stop()
+			delete(h.pending, normalizedPath)
+		}
+
+		h.transientRetries[normalizedPath]++
+		h.pending[normalizedPath] = time.AfterFunc(transientRetryDelay, func() {
+			h.processFile(normalizedPath)
+		})
+
+		h.logger.Info("handler", "Deferred transient path",
+			logging.F("path", normalizedPath),
+			logging.F("reason", reason),
+			logging.F("delay", transientRetryDelay.String()))
 		return nil
 	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if timer, exists := h.pending[event.Path]; exists {
+	if timer, exists := h.pending[normalizedPath]; exists {
 		timer.Stop()
-		delete(h.pending, event.Path)
+		delete(h.pending, normalizedPath)
 	}
 
-	h.pending[event.Path] = time.AfterFunc(h.debounceTime, func() {
-		h.processFile(event.Path)
+	h.pending[normalizedPath] = time.AfterFunc(h.debounceTime, func() {
+		h.processFile(normalizedPath)
 	})
 
 	return nil
@@ -307,6 +351,7 @@ func (h *MediaHandler) processFile(path string) {
 
 	h.mu.Lock()
 	delete(h.pending, path)
+	delete(h.transientRetries, path)
 	h.mu.Unlock()
 
 	filename := filepath.Base(path)

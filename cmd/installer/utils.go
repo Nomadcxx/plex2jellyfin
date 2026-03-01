@@ -130,6 +130,61 @@ func runCommand(name string, cmd *exec.Cmd, logFile *os.File) error {
 	return nil
 }
 
+// resolveInstallerProjectRoot finds the jellywatch source root for build/install tasks.
+func resolveInstallerProjectRoot() (string, error) {
+	cwd, _ := os.Getwd()
+	exe, _ := os.Executable()
+	return resolveProjectRoot(cwd, exe)
+}
+
+// resolveProjectRoot resolves project root from cwd and executable location.
+func resolveProjectRoot(cwd, execPath string) (string, error) {
+	candidates := []string{}
+	if strings.TrimSpace(cwd) != "" {
+		candidates = append(candidates, cwd)
+	}
+	if strings.TrimSpace(execPath) != "" {
+		exeDir := filepath.Dir(execPath)
+		candidates = append(candidates, exeDir, filepath.Dir(exeDir))
+	}
+
+	seen := map[string]bool{}
+	for _, c := range candidates {
+		clean := filepath.Clean(c)
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		if root, ok := findProjectRoot(clean); ok {
+			return root, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not locate jellywatch source root (run installer from repository root)")
+}
+
+func findProjectRoot(start string) (string, bool) {
+	if strings.TrimSpace(start) == "" {
+		return "", false
+	}
+	dir := filepath.Clean(start)
+	for {
+		if fileExists(filepath.Join(dir, "go.mod")) && fileExists(filepath.Join(dir, "cmd", "jellywatch", "main.go")) {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // splitPaths splits comma-separated paths and trims whitespace
 func splitPaths(paths string) []string {
 	if strings.TrimSpace(paths) == "" {

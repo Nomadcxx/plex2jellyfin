@@ -200,6 +200,38 @@ func TestServerJellyfinWebhookSecretValidation(t *testing.T) {
 	}
 }
 
+func TestServerJellyfinWebhookSecretValidation_EmptySecretLoopbackAllowed(t *testing.T) {
+	handler := &MediaHandler{
+		playbackLocks: jellyfin.NewPlaybackLockManager(),
+		deferredQueue: jellyfin.NewDeferredQueue(),
+	}
+	server := NewServer(handler, nil, ":0", nil, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"PlaybackStart","ItemPath":"/x.mkv"}`))
+	req.RemoteAddr = "127.0.0.1:9999"
+	w := httptest.NewRecorder()
+	server.handleJellyfinWebhook(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for loopback request when webhook secret is empty, got %d", w.Code)
+	}
+}
+
+func TestServerJellyfinWebhookSecretValidation_EmptySecretNonLoopbackDenied(t *testing.T) {
+	handler := &MediaHandler{
+		playbackLocks: jellyfin.NewPlaybackLockManager(),
+		deferredQueue: jellyfin.NewDeferredQueue(),
+	}
+	server := NewServer(handler, nil, ":0", nil, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"PlaybackStart","ItemPath":"/x.mkv"}`))
+	req.RemoteAddr = "192.168.1.10:9999"
+	w := httptest.NewRecorder()
+	server.handleJellyfinWebhook(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for non-loopback request when webhook secret is empty, got %d", w.Code)
+	}
+}
+
 func TestServerJellyfinWebhookPlaybackStartStop(t *testing.T) {
 	handler := &MediaHandler{
 		playbackLocks: jellyfin.NewPlaybackLockManager(),

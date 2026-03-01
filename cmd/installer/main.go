@@ -79,6 +79,9 @@ func newModel(debugMode bool, logFile *os.File) model {
 		serviceEnabled:  true,
 		serviceStartNow: true,
 		scanFrequency:   0, // Every 5 minutes
+		webEnabled:      true,
+		webStartNow:     true,
+		webPort:         "5522",
 
 		// Existing install detection
 		existingDBDetected: existingDB,
@@ -129,6 +132,8 @@ func main() {
 		logFile = nil
 	}
 	if logFile != nil {
+		// Make diagnostics readable even when installer runs as root.
+		_ = os.Chmod(logFile.Name(), 0644)
 		defer logFile.Close()
 		logFile.WriteString(fmt.Sprintf("=== JellyWatch Installer Log ===\n"))
 		logFile.WriteString(fmt.Sprintf("Started: %s\n", time.Now().Format("2006-01-02 15:04:05")))

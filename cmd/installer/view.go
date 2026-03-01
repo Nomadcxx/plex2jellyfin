@@ -92,12 +92,16 @@ func (m model) View() string {
 		mainContent = m.renderPermissions()
 	case stepSystemService:
 		mainContent = m.renderService()
+	case stepSystemWeb:
+		mainContent = m.renderWebService()
 	case stepConfirm:
 		mainContent = m.renderConfirm()
 	case stepUninstallConfirm:
 		mainContent = m.renderUninstallConfirm()
 	case stepInstalling:
 		mainContent = m.renderInstalling()
+	case stepArrIssues:
+		mainContent = m.renderArrIssues()
 	case stepScanning:
 		mainContent = m.renderScanning()
 	case stepComplete:
@@ -166,12 +170,16 @@ func (m model) getHelpText() string {
 		return "Tab: Next field  •  Enter: Continue  •  Esc: Back"
 	case stepSystemService:
 		return "Tab: Next option  •  ↑/↓: Change value  •  Enter: Continue  •  Esc: Back"
+	case stepSystemWeb:
+		return "Tab: Next option  •  ↑/↓: Toggle  •  Enter: Continue  •  Esc: Back"
 	case stepConfirm:
 		return "Enter: Install  •  Esc: Back"
 	case stepUninstallConfirm:
 		return "↑/↓: Navigate  •  Enter: Uninstall  •  Esc: Back"
 	case stepInstalling:
 		return "Please wait..."
+	case stepArrIssues:
+		return "↑/↓: Navigate  •  F: Fix issues  •  S: Skip  •  Enter: Continue"
 	case stepScanning:
 		return "Scanning libraries..."
 	case stepComplete:

@@ -241,6 +241,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		Handler:     handler,
 		Logger:      logger,
 		ActivityDir: filepath.Join(configDir, "activity"),
+		OrphanCheck: jellyfinClient,
 	})
 
 	healthServer := daemon.NewServer(handler, periodicScanner, healthAddr, logger, cfg.Jellyfin.WebhookSecret)

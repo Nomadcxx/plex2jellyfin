@@ -178,6 +178,46 @@ func TestWebhookSecretValidation(t *testing.T) {
 	}
 }
 
+func TestWebhookSecretValidation_EmptySecretLoopbackAllowed(t *testing.T) {
+	s := &Server{
+		cfg: &config.Config{
+			Jellyfin: config.JellyfinConfig{
+				WebhookSecret: "",
+			},
+		},
+		playbackLocks: jellyfin.NewPlaybackLockManager(),
+		deferredQueue: jellyfin.NewDeferredQueue(),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"PlaybackStart","ItemPath":"/x.mkv"}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	w := httptest.NewRecorder()
+	s.HandleJellyfinWebhook(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for loopback request when webhook secret is empty, got %d", w.Code)
+	}
+}
+
+func TestWebhookSecretValidation_EmptySecretNonLoopbackDenied(t *testing.T) {
+	s := &Server{
+		cfg: &config.Config{
+			Jellyfin: config.JellyfinConfig{
+				WebhookSecret: "",
+			},
+		},
+		playbackLocks: jellyfin.NewPlaybackLockManager(),
+		deferredQueue: jellyfin.NewDeferredQueue(),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"PlaybackStart","ItemPath":"/x.mkv"}`))
+	req.RemoteAddr = "192.168.1.50:12345"
+	w := httptest.NewRecorder()
+	s.HandleJellyfinWebhook(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for non-loopback request when webhook secret is empty, got %d", w.Code)
+	}
+}
+
 func TestAuthMiddlewareWebhookPublicPath(t *testing.T) {
 	server := &Server{
 		cfg:      &config.Config{Password: "secret"},
@@ -194,5 +234,33 @@ func TestAuthMiddlewareWebhookPublicPath(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected webhook path to bypass auth, got %d", w.Code)
+	}
+}
+
+func TestWebhookAuth_FullFlowWithGeneratedSecret(t *testing.T) {
+	secret, err := config.GenerateWebhookSecret()
+	if err != nil {
+		t.Fatalf("GenerateWebhookSecret() failed: %v", err)
+	}
+
+	s := &Server{
+		cfg: &config.Config{
+			Jellyfin: config.JellyfinConfig{WebhookSecret: secret},
+		},
+		playbackLocks: jellyfin.NewPlaybackLockManager(),
+		deferredQueue: jellyfin.NewDeferredQueue(),
+	}
+
+	body := `{"NotificationType":"PlaybackStart","ItemPath":"/library/TV/The Pitt/The Pitt S02E08.mkv"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Jellywatch-Webhook-Secret", secret)
+	req.RemoteAddr = "10.0.0.50:54321"
+
+	w := httptest.NewRecorder()
+	s.HandleJellyfinWebhook(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 with valid generated secret, got %d", w.Code)
 	}
 }

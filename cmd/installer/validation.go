@@ -111,7 +111,7 @@ func testJellyfinCmd(url, apiKey string) tea.Cmd {
 		if err != nil {
 			return apiTestResultMsg{service: "jellyfin", success: false, err: err}
 		}
-		req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token=\"%s\", Client=\"jellywatch-installer\", Device=\"installer\", DeviceId=\"installer\", Version=\"1.0.0\"`, apiKey))
+		req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token="%s", Client="jellywatch-installer", Device="installer", DeviceId="installer", Version="1.0.0"`, apiKey))
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -443,8 +443,13 @@ func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd) {
 
 	m.currentTaskIndex++
 	if m.currentTaskIndex >= len(m.tasks) {
-		// If install mode (not uninstall) and we have libraries, scan BEFORE systemd setup
+		// If install mode (not uninstall) and we have libraries, validate arr settings then scan
 		if !m.uninstallMode && !m.updateMode && (m.tvLibraryPaths != "" || m.movieLibraryPaths != "") && len(m.postScanTasks) > 0 {
+			// Check if Sonarr or Radarr is configured - validate their settings
+			if m.sonarrEnabled || m.radarrEnabled {
+				return m, m.validateArrSettings()
+			}
+			// No arr services configured, proceed directly to scan
 			m.step = stepScanning
 			return m, tea.Batch(m.spinner.Tick, m.runInitialScan())
 		}

@@ -4,8 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/library"
+	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/jellywatch/internal/watcher"
 )
 
 func TestMediaHandler_SeparateLibraries(t *testing.T) {
@@ -145,4 +148,106 @@ func findExistingShowDirForTest(t *testing.T, selector *library.Selector, librar
 	}
 
 	return ""
+}
+
+func TestHandleFileEventRejectsInvalidPath(t *testing.T) {
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{"/tv/lib"},
+		MovieLibs:       []string{"/movie/lib"},
+		TVWatchPaths:    []string{"/watch/tv"},
+		MovieWatchPaths: []string{"/watch/movies"},
+		DebounceTime:    time.Hour,
+		Logger:          logging.Nop(),
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	err = handler.HandleFileEvent(watcher.FileEvent{
+		Type: watcher.EventCreate,
+		Path: "/movie.mkv",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := len(handler.pending); got != 0 {
+		t.Fatalf("expected no pending timers for invalid path, got %d", got)
+	}
+}
+
+func TestHandleFileEventDebouncesOnNormalizedPath(t *testing.T) {
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{"/tv/lib"},
+		MovieLibs:       []string{"/movie/lib"},
+		TVWatchPaths:    []string{"/watch/tv"},
+		MovieWatchPaths: []string{"/watch/movies"},
+		DebounceTime:    time.Hour,
+		Logger:          logging.Nop(),
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	err = handler.HandleFileEvent(watcher.FileEvent{
+		Type: watcher.EventCreate,
+		Path: "/watch/movies/./movie.mkv",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	err = handler.HandleFileEvent(watcher.FileEvent{
+		Type: watcher.EventWrite,
+		Path: "/watch/movies/movie.mkv",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := len(handler.pending); got != 1 {
+		t.Fatalf("expected one pending timer, got %d", got)
+	}
+	if _, exists := handler.pending["/watch/movies/movie.mkv"]; !exists {
+		t.Fatalf("expected normalized path key in pending map")
+	}
+}
+
+func TestHandleFileEventDefersTransientUnpackOnce(t *testing.T) {
+	prevDelay := transientRetryDelay
+	transientRetryDelay = time.Hour
+	defer func() {
+		transientRetryDelay = prevDelay
+	}()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{"/tv/lib"},
+		MovieLibs:       []string{"/movie/lib"},
+		TVWatchPaths:    []string{"/watch/tv"},
+		MovieWatchPaths: []string{"/watch/movies"},
+		DebounceTime:    time.Hour,
+		Logger:          logging.Nop(),
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	event := watcher.FileEvent{
+		Type: watcher.EventCreate,
+		Path: "/watch/tv/_UNPACK_abc/show.mkv",
+	}
+	if err := handler.HandleFileEvent(event); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := handler.HandleFileEvent(event); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := handler.transientRetries["/watch/tv/_UNPACK_abc/show.mkv"]; got != 1 {
+		t.Fatalf("expected one transient retry, got %d", got)
+	}
+	if got := len(handler.pending); got != 1 {
+		t.Fatalf("expected one pending timer, got %d", got)
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -194,11 +195,20 @@ func (s *Server) handleJellyfinWebhook(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) validateWebhookSecret(r *http.Request) bool {
 	if s.webhookSecret == "" {
-		return false
+		return isLoopbackRequest(r)
 	}
 	provided := strings.TrimSpace(r.Header.Get("X-Jellywatch-Webhook-Secret"))
 	if provided == "" {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(s.webhookSecret)) == 1
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
