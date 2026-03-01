@@ -2,6 +2,14 @@ package sonarr
 
 import "fmt"
 
+// DownloadClientConfig represents Sonarr's download client configuration.
+type DownloadClientConfig struct {
+	ID                              int64  `json:"id"`
+	EnableCompletedDownloadHandling bool   `json:"enableCompletedDownloadHandling"`
+	AutoRedownloadFailed            bool   `json:"autoRedownloadFailed"`
+	DownloadClientWorkingFolders    string `json:"downloadClientWorkingFolders"`
+}
+
 type MediaManagementConfig struct {
 	ID                                        int    `json:"id"`
 	AutoUnmonitorPreviouslyDownloadedEpisodes bool   `json:"autoUnmonitorPreviouslyDownloadedEpisodes"`
@@ -114,4 +122,22 @@ func (c *Client) GetRootFolders() ([]RootFolder, error) {
 // DeleteRootFolder removes a root folder from Sonarr by ID
 func (c *Client) DeleteRootFolder(id int) error {
 	return c.delete(fmt.Sprintf("/api/v3/rootfolder/%d", id))
+}
+
+// GetDownloadClientConfig retrieves download client configuration.
+func (c *Client) GetDownloadClientConfig() (*DownloadClientConfig, error) {
+	var cfg DownloadClientConfig
+	if err := c.get("/api/v3/config/downloadClient", &cfg); err != nil {
+		return nil, fmt.Errorf("getting download client config: %w", err)
+	}
+	return &cfg, nil
+}
+
+// UpdateDownloadClientConfig updates download client configuration.
+func (c *Client) UpdateDownloadClientConfig(cfg DownloadClientConfig) (*DownloadClientConfig, error) {
+	var result DownloadClientConfig
+	if err := c.put(fmt.Sprintf("/api/v3/config/downloadClient/%d", cfg.ID), cfg, &result); err != nil {
+		return nil, fmt.Errorf("updating download client config: %w", err)
+	}
+	return &result, nil
 }
