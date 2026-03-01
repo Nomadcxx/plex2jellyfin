@@ -62,11 +62,11 @@ func TestCheckPlaybackSafetyFallbackToAPI(t *testing.T) {
 		URL:    "http://jellyfin.local",
 		APIKey: "k",
 		HTTPClient: &http.Client{
-			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			Transport: psRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path == "/Sessions" {
-					return jsonResponse(http.StatusOK, `[{"Id":"s1","UserName":"alice","DeviceName":"Living Room","NowPlayingItem":{"Path":"`+sourcePath+`"}}]`), nil
+					return psJSONResponse(http.StatusOK, `[{"Id":"s1","UserName":"alice","DeviceName":"Living Room","NowPlayingItem":{"Path":"`+sourcePath+`"}}]`), nil
 				}
-				return jsonResponse(http.StatusNotFound, "not found"), nil
+				return psJSONResponse(http.StatusNotFound, "not found"), nil
 			}),
 			Timeout: 2 * time.Second,
 		},
@@ -91,8 +91,8 @@ func TestCheckPlaybackSafetyFallbackAPIFailOpen(t *testing.T) {
 		URL:    "http://jellyfin.local",
 		APIKey: "k",
 		HTTPClient: &http.Client{
-			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				return jsonResponse(http.StatusInternalServerError, "error"), nil
+			Transport: psRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return psJSONResponse(http.StatusInternalServerError, "error"), nil
 			}),
 			Timeout: 2 * time.Second,
 		},
@@ -188,13 +188,13 @@ func TestOrganizeMovieTargetPathLockedQueuesDeferredOperation(t *testing.T) {
 	}
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
+type psRoundTripFunc func(*http.Request) (*http.Response, error)
 
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+func (f psRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
 }
 
-func jsonResponse(status int, body string) *http.Response {
+func psJSONResponse(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},

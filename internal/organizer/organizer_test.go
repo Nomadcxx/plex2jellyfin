@@ -388,9 +388,10 @@ func TestPlaybackSafetyBlocksActiveStream(t *testing.T) {
 	require.NoError(t, err)
 
 	result, err := org.OrganizeMovie("/tmp/The.Matrix.1999.1080p.mkv", t.TempDir())
-	require.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "playback safety")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Skipped)
+	assert.Contains(t, result.SkipReason, "via API")
 }
 
 func TestPlaybackSafetyFailOpenWhenJellyfinUnavailable(t *testing.T) {
