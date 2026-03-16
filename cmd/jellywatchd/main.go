@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
 	"github.com/Nomadcxx/jellywatch/internal/database"
@@ -193,6 +194,22 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		configDir = filepath.Dir(cfgFile)
 	}
 
+	// Create AI matcher for daemon enhancement if enabled
+	var aiMatcher *ai.Matcher
+	if cfg.AI.Enabled {
+		var matcherErr error
+		aiMatcher, matcherErr = ai.NewMatcher(cfg.AI)
+		if matcherErr != nil {
+			logger.Warn("daemon", "AI matcher initialization failed, daemon will use regex only",
+				logging.F("error", matcherErr.Error()))
+		} else {
+			logger.Info("daemon", "AI enhancement enabled",
+				logging.F("model", cfg.AI.Model),
+				logging.F("hourly_limit", cfg.AI.HourlyLimit),
+				logging.F("daily_limit", cfg.AI.DailyLimit))
+		}
+	}
+
 	handler, err := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
 		TVLibraries:     cfg.Libraries.TV,
 		MovieLibs:       cfg.Libraries.Movies,
@@ -215,6 +232,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		ConfigDir:       configDir,
 		PlaybackLocks:   playbackLocks,
 		DeferredQueue:   deferredQueue,
+		AIEnabled:       cfg.AI.Enabled && aiMatcher != nil,
+		AIMatcher:       aiMatcher,
+		AIConfig:        cfg.AI,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create media handler: %w", err)
@@ -273,6 +293,28 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Start AI enhancement ticker
+	if cfg.AI.Enabled && aiMatcher != nil {
+		interval := time.Duration(cfg.AI.EnhancementIntervalSeconds) * time.Second
+		if interval == 0 {
+			interval = 30 * time.Second
+		}
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					handler.ProcessPendingAI()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		logger.Info("daemon", "AI enhancement ticker started",
+			logging.F("interval", interval.String()))
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
