@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
@@ -249,5 +250,62 @@ func TestHandleFileEventDefersTransientUnpackOnce(t *testing.T) {
 	}
 	if got := len(handler.pending); got != 1 {
 		t.Fatalf("expected one pending timer, got %d", got)
+	}
+}
+
+func TestProcessFile_FastLaneHighConfidence(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+
+	srcFile := filepath.Join(watchDir, "Breaking.Bad.S01E01.1080p.mkv")
+	os.WriteFile(srcFile, []byte("test"), 0644)
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       false, // AI disabled = always fast lane
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	handler.processFile(srcFile)
+
+	if len(handler.pendingAI) != 0 {
+		t.Errorf("expected no pending AI items for high-confidence file, got %d", len(handler.pendingAI))
+	}
+}
+
+func TestProcessFile_SlowLaneLowConfidence(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+
+	// obfuscated filename → low confidence
+	srcFile := filepath.Join(watchDir, "abc123def456.mkv")
+	os.WriteFile(srcFile, []byte("test"), 0644)
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{},
+		MovieWatchPaths: []string{watchDir},
+		Logger:          logging.Nop(),
+		AIEnabled:       true,
+		AIConfig:        config.AIConfig{AutoTriggerThreshold: 0.6},
+		ConfigDir:       t.TempDir(),
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	handler.processFile(srcFile)
+
+	if len(handler.pendingAI) != 1 {
+		t.Errorf("expected 1 pending AI item for low-confidence file, got %d", len(handler.pendingAI))
 	}
 }

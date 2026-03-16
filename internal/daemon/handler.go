@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/activity"
+	"github.com/Nomadcxx/jellywatch/internal/ai"
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
@@ -40,6 +42,24 @@ type MediaHandler struct {
 	activityLogger   *activity.Logger
 	playbackLocks    *jellyfin.PlaybackLockManager
 	deferredQueue    *jellyfin.DeferredQueue
+	pendingAI        map[string]*PendingItem
+	pendingAICap     int
+	aiMatcher        *ai.Matcher
+	aiConfig         config.AIConfig
+	aiRateLimiter    *AIRateLimiter
+	enhanceLogger    *EnhanceLogger
+	aiEnabled        bool
+}
+
+type PendingItem struct {
+	Path       string
+	Filename   string
+	TVInfo     *naming.TVShowInfo
+	MovieInfo  *naming.MovieInfo
+	MediaType  string
+	Confidence float64
+	QueuedAt   time.Time
+	TargetLib  string
 }
 
 var transientRetryDelay = 2 * time.Second
@@ -126,6 +146,9 @@ type MediaHandlerConfig struct {
 	ConfigDir       string
 	PlaybackLocks   *jellyfin.PlaybackLockManager
 	DeferredQueue   *jellyfin.DeferredQueue
+	AIEnabled       bool
+	AIMatcher       *ai.Matcher
+	AIConfig        config.AIConfig
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
@@ -148,6 +171,13 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		} else {
 			cfg.Logger.Info("handler", "Activity logger initialized", logging.F("log_dir", activityLogger.GetLogDir()))
 		}
+	}
+
+	var enhanceLog *EnhanceLogger
+	var rateLimiter *AIRateLimiter
+	if cfg.AIEnabled && cfg.ConfigDir != "" {
+		enhanceLog = NewEnhanceLogger(cfg.ConfigDir)
+		rateLimiter = NewAIRateLimiter(cfg.AIConfig.HourlyLimit, cfg.AIConfig.DailyLimit)
 	}
 
 	// Create TV-specific organizer
@@ -210,6 +240,13 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		activityLogger:   activityLogger,
 		playbackLocks:    cfg.PlaybackLocks,
 		deferredQueue:    cfg.DeferredQueue,
+		pendingAI:        make(map[string]*PendingItem),
+		pendingAICap:     100,
+		aiMatcher:        cfg.AIMatcher,
+		aiConfig:         cfg.AIConfig,
+		aiRateLimiter:    rateLimiter,
+		enhanceLogger:    enhanceLog,
+		aiEnabled:        cfg.AIEnabled,
 	}, nil
 }
 
@@ -387,13 +424,20 @@ func (h *MediaHandler) processFile(path string) {
 		}
 		mediaType = notify.MediaTypeTVEpisode
 
-		if tvInfo, err := naming.ParseTVShowName(path); err == nil {
+		tvInfo, parseErr := naming.ParseTVShowFromPath(path)
+		if parseErr == nil {
 			parsedTitle = tvInfo.Title
 			if tvInfo.Year != "" {
 				year := 0
 				if _, err := fmt.Sscanf(tvInfo.Year, "%d", &year); err == nil {
 					parsedYear = &year
 				}
+			}
+
+			confidence := naming.CalculateTitleConfidence(tvInfo.Title, filename)
+			if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
+				h.queueForAI(path, filename, tvInfo, nil, "tv", confidence, "")
+				return
 			}
 		}
 
@@ -418,13 +462,20 @@ func (h *MediaHandler) processFile(path string) {
 		targetLib = h.movieLibs[0]
 		mediaType = notify.MediaTypeMovie
 
-		if movieInfo, err := naming.ParseMovieName(path); err == nil {
+		movieInfo, parseErr := naming.ParseMovieFromPath(path)
+		if parseErr == nil {
 			parsedTitle = movieInfo.Title
 			if movieInfo.Year != "" {
 				year := 0
 				if _, err := fmt.Sscanf(movieInfo.Year, "%d", &year); err == nil {
 					parsedYear = &year
 				}
+			}
+
+			confidence := naming.CalculateTitleConfidence(movieInfo.Title, filename)
+			if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
+				h.queueForAI(path, filename, nil, movieInfo, "movie", confidence, targetLib)
+				return
 			}
 		}
 
@@ -473,6 +524,59 @@ func (h *MediaHandler) processFile(path string) {
 
 	// Log activity entry after notifications
 	h.logEntry(result, mediaType, parsedTitle, parsedYear, parseMethod, aiConfidence, duration, sonarrNotified, radarrNotified)
+}
+
+func (h *MediaHandler) queueForAI(path, filename string, tvInfo *naming.TVShowInfo, movieInfo *naming.MovieInfo, mediaType string, confidence float64, targetLib string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if len(h.pendingAI) >= h.pendingAICap {
+		h.logger.Warn("handler", "Pending AI cap reached, using regex fallback",
+			logging.F("filename", filename))
+		if h.enhanceLogger != nil {
+			h.enhanceLogger.Log(EnhanceLogEntry{
+				Action:     "pending_cap_reached",
+				File:       filename,
+				Confidence: confidence,
+			})
+		}
+		return
+	}
+
+	h.pendingAI[path] = &PendingItem{
+		Path:       path,
+		Filename:   filename,
+		TVInfo:     tvInfo,
+		MovieInfo:  movieInfo,
+		MediaType:  mediaType,
+		Confidence: confidence,
+		QueuedAt:   time.Now(),
+		TargetLib:  targetLib,
+	}
+
+	h.logger.Info("handler", "Queued for AI enhancement",
+		logging.F("filename", filename),
+		logging.F("confidence", confidence))
+
+	if h.enhanceLogger != nil {
+		h.enhanceLogger.Log(EnhanceLogEntry{
+			Action:     "queued_for_ai",
+			File:       filename,
+			RegexTitle: h.getParsedTitle(tvInfo, movieInfo),
+			Confidence: confidence,
+			MediaType:  mediaType,
+		})
+	}
+}
+
+func (h *MediaHandler) getParsedTitle(tvInfo *naming.TVShowInfo, movieInfo *naming.MovieInfo) string {
+	if tvInfo != nil {
+		return tvInfo.Title
+	}
+	if movieInfo != nil {
+		return movieInfo.Title
+	}
+	return ""
 }
 
 func (h *MediaHandler) sendNotificationsWithTracking(result *organizer.OrganizationResult, mediaType notify.MediaType) (sonarrNotified, radarrNotified bool) {
