@@ -149,6 +149,9 @@ type AIConfig struct {
 	Keepalive            KeepaliveConfig      `mapstructure:"keepalive"`
 	RetryDelay           time.Duration        `mapstructure:"retry_delay"`
 	MaxRetries           int                  `mapstructure:"max_retries"`
+	HourlyLimit                int           `mapstructure:"hourly_limit"`
+	DailyLimit                 int           `mapstructure:"daily_limit"`
+	EnhancementIntervalSeconds int           `mapstructure:"enhancement_interval_seconds"`
 }
 
 // WatchConfig contains directories to watch
@@ -266,6 +269,9 @@ func DefaultConfig() *Config {
 			CloudModel:           "nemotron-3-nano:30b-cloud",
 			RetryDelay:           500 * time.Millisecond,
 			MaxRetries:           3,
+			HourlyLimit:                10,
+			DailyLimit:                 50,
+			EnhancementIntervalSeconds: 30,
 			CircuitBreaker: CircuitBreakerConfig{
 				FailureThreshold:     5,
 				FailureWindowSeconds: 120,
@@ -458,6 +464,9 @@ auto_trigger_threshold = %.2f
 timeout_seconds = %d
 cache_enabled = %v
 cloud_model = "%s"
+hourly_limit = %d
+daily_limit = %d
+enhancement_interval_seconds = %d
 
 # ============================================================================
 # LOGGING
@@ -506,6 +515,9 @@ max_backups = %d
 		c.AI.TimeoutSeconds,
 		c.AI.CacheEnabled,
 		c.AI.CloudModel,
+		c.AI.HourlyLimit,
+		c.AI.DailyLimit,
+		c.AI.EnhancementIntervalSeconds,
 		c.Logging.Level,
 		c.Logging.File,
 		c.Logging.MaxSizeMB,
@@ -569,6 +581,9 @@ func DefaultAIConfig() AIConfig {
 		TimeoutSeconds:       5,
 		CacheEnabled:         true,
 		RetryDelay:           100 * time.Millisecond,
+		HourlyLimit:                10,
+		DailyLimit:                 50,
+		EnhancementIntervalSeconds: 30,
 		CircuitBreaker: CircuitBreakerConfig{
 			FailureThreshold:     5,
 			FailureWindowSeconds: 120,
