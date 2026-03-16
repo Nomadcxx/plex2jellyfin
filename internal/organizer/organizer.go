@@ -465,6 +465,132 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 	}, nil
 }
 
+func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movie naming.MovieInfo) (*OrganizationResult, error) {
+	filename := filepath.Base(sourcePath)
+	sourceQuality := quality.Parse(filename)
+
+	cleanName := naming.NormalizeMovieName(movie.Title, movie.Year)
+	movieDir := filepath.Join(libraryPath, cleanName)
+	ext := filepath.Ext(sourcePath)
+	targetPath := filepath.Join(movieDir, cleanName+ext)
+
+	if err := o.checkPlaybackSafetyWithOp(sourcePath, "organize_movie", targetPath); err != nil {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			TargetPath: targetPath,
+			Skipped:    true,
+			SkipReason: err.Error(),
+			Error:      err,
+		}, nil
+	}
+
+	existingFile, existingQuality := o.findExistingMediaFile(movieDir)
+	if existingFile != "" && !o.forceOverwrite {
+		if !sourceQuality.IsBetterThan(existingQuality) {
+			return &OrganizationResult{
+				Success:         false,
+				SourcePath:      sourcePath,
+				TargetPath:      existingFile,
+				Skipped:         true,
+				SkipReason:      fmt.Sprintf("existing file has equal or better quality (%s vs %s)", existingQuality.String(), sourceQuality.String()),
+				SourceQuality:   sourceQuality,
+				ExistingQuality: existingQuality,
+			}, nil
+		}
+	}
+
+	if err := os.MkdirAll(movieDir, 0755); err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("unable to create directory: %w", err),
+		}, nil
+	}
+
+	if err := o.applyDirOwnership(movieDir); err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("unable to set directory permissions: %w", err),
+		}, nil
+	}
+
+	if o.dryRun {
+		return &OrganizationResult{
+			Success:         true,
+			SourcePath:      sourcePath,
+			TargetPath:      targetPath,
+			SourceQuality:   sourceQuality,
+			ExistingQuality: existingQuality,
+		}, nil
+	}
+
+	if existingFile != "" && existingFile != targetPath {
+		os.Remove(existingFile)
+	}
+
+	opts := o.buildTransferOptions()
+
+	var err error
+	var result *transfer.TransferResult
+	if o.keepSource {
+		result, err = o.transferer.Copy(sourcePath, targetPath, opts)
+	} else {
+		result, err = o.transferer.Move(sourcePath, targetPath, opts)
+	}
+
+	if err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			BytesCopied:   result.BytesCopied,
+			Duration:      result.Duration,
+			Attempts:      result.Attempts,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("transfer failed: %w", err),
+		}, nil
+	}
+
+	// HOLDEN Phase 3: Self-learning - update database with organized movie
+	if o.db != nil {
+		yearInt := 0
+		if movie.Year != "" {
+			fmt.Sscanf(movie.Year, "%d", &yearInt)
+		}
+		movieRecord := &database.Movie{
+			Title:          movie.Title,
+			Year:           yearInt,
+			CanonicalPath:  movieDir,
+			LibraryRoot:    libraryPath,
+			Source:         "jellywatch",
+			SourcePriority: 100,
+		}
+		_, _ = o.db.UpsertMovie(movieRecord)
+
+		if o.syncService != nil {
+			o.db.SetMovieDirty(movieRecord.ID)
+			o.syncService.QueueSync("movie", movieRecord.ID)
+		}
+	}
+
+	return &OrganizationResult{
+		Success:         true,
+		SourcePath:      sourcePath,
+		TargetPath:      targetPath,
+		BytesCopied:     result.BytesCopied,
+		Duration:        result.Duration,
+		Attempts:        result.Attempts,
+		SourceQuality:   sourceQuality,
+		ExistingQuality: existingQuality,
+	}, nil
+}
+
 func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*OrganizationResult, error) {
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
@@ -564,6 +690,151 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 
 	opts := o.buildTransferOptions()
 
+	var result *transfer.TransferResult
+	if o.keepSource {
+		result, err = o.transferer.Copy(sourcePath, targetPath, opts)
+	} else {
+		result, err = o.transferer.Move(sourcePath, targetPath, opts)
+	}
+
+	if err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			BytesCopied:   result.BytesCopied,
+			Duration:      result.Duration,
+			Attempts:      result.Attempts,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("transfer failed: %w", err),
+		}, nil
+	}
+
+	// HOLDEN Phase 3: Self-learning - update database with organized TV show
+	if o.db != nil {
+		yearInt := 0
+		if tv.Year != "" {
+			fmt.Sscanf(tv.Year, "%d", &yearInt)
+		}
+		seriesRecord := &database.Series{
+			Title:          tv.Title,
+			Year:           yearInt,
+			CanonicalPath:  showDir,
+			LibraryRoot:    libraryPath,
+			Source:         "jellywatch",
+			SourcePriority: 100,
+			EpisodeCount:   0,
+		}
+		_, _ = o.db.UpsertSeries(seriesRecord)
+
+		if o.syncService != nil {
+			o.db.SetSeriesDirty(seriesRecord.ID)
+			o.syncService.QueueSync("series", seriesRecord.ID)
+		}
+	}
+
+	return &OrganizationResult{
+		Success:         true,
+		SourcePath:      sourcePath,
+		TargetPath:      targetPath,
+		BytesCopied:     result.BytesCopied,
+		Duration:        result.Duration,
+		Attempts:        result.Attempts,
+		SourceQuality:   sourceQuality,
+		ExistingQuality: existingQuality,
+	}, nil
+}
+
+func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv naming.TVShowInfo) (*OrganizationResult, error) {
+	filename := filepath.Base(sourcePath)
+	sourceQuality := quality.Parse(filename)
+
+	showDir := findExistingShowDir(libraryPath, tv.Title)
+	if showDir == "" {
+		showName := naming.NormalizeTVShowName(tv.Title, tv.Year)
+		showDir = filepath.Join(libraryPath, showName)
+	}
+
+	seasonDir := filepath.Join(showDir, naming.FormatSeasonFolder(tv.Season))
+	ext := filepath.Ext(sourcePath)
+	episodeName := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
+	targetPath := filepath.Join(seasonDir, episodeName)
+
+	if err := o.checkPlaybackSafetyWithOp(sourcePath, "organize_tv", targetPath); err != nil {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			TargetPath: targetPath,
+			Skipped:    true,
+			SkipReason: err.Error(),
+			Error:      err,
+		}, nil
+	}
+
+	existingFile, existingQuality := o.findExistingMediaFile(seasonDir)
+	if existingFile != "" && !o.forceOverwrite {
+		existingBase := filepath.Base(existingFile)
+		targetBase := filepath.Base(targetPath)
+		sameEpisode := strings.HasPrefix(existingBase, strings.TrimSuffix(targetBase, ext))
+		if sameEpisode && !sourceQuality.IsBetterThan(existingQuality) {
+			return &OrganizationResult{
+				Success:         false,
+				SourcePath:      sourcePath,
+				TargetPath:      existingFile,
+				Skipped:         true,
+				SkipReason:      fmt.Sprintf("existing file has equal or better quality (%s vs %s)", existingQuality.String(), sourceQuality.String()),
+				SourceQuality:   sourceQuality,
+				ExistingQuality: existingQuality,
+			}, nil
+		}
+	}
+
+	if err := os.MkdirAll(seasonDir, 0755); err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("unable to create directories: %w", err),
+		}, nil
+	}
+
+	if err := o.applyDirOwnership(showDir); err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("unable to set show directory permissions: %w", err),
+		}, nil
+	}
+	if err := o.applyDirOwnership(seasonDir); err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("unable to set season directory permissions: %w", err),
+		}, nil
+	}
+
+	if o.dryRun {
+		return &OrganizationResult{
+			Success:         true,
+			SourcePath:      sourcePath,
+			TargetPath:      targetPath,
+			SourceQuality:   sourceQuality,
+			ExistingQuality: existingQuality,
+		}, nil
+	}
+
+	if existingFile != "" && existingFile != targetPath {
+		os.Remove(existingFile)
+	}
+
+	opts := o.buildTransferOptions()
+
+	var err error
 	var result *transfer.TransferResult
 	if o.keepSource {
 		result, err = o.transferer.Copy(sourcePath, targetPath, opts)

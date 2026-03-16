@@ -11,6 +11,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -430,4 +431,46 @@ func jsonResponse(status int, body string) *http.Response {
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
+}
+
+func TestOrganizeMovieWithParsed_Basic(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	testFile := filepath.Join(sourceDir, "unrecognizable.mkv")
+	createTestFile(t, testFile, 100*1024*1024) // 100MB
+
+	org, err := NewOrganizer([]string{libraryDir},
+		WithDryRun(true),
+		WithBackend(transfer.BackendRsync),
+	)
+	require.NoError(t, err)
+
+	movie := naming.MovieInfo{Title: "The Matrix", Year: "1999"}
+	result, err := org.OrganizeMovieWithParsed(testFile, libraryDir, movie)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Equal(t, filepath.Join(libraryDir, "The Matrix (1999)", "The Matrix (1999).mkv"), result.TargetPath)
+}
+
+func TestOrganizeTVWithParsed_Basic(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	testFile := filepath.Join(sourceDir, "unrecognizable.s01e02.mkv")
+	createTestFile(t, testFile, 100*1024*1024)
+
+	org, err := NewOrganizer([]string{libraryDir},
+		WithDryRun(true),
+		WithBackend(transfer.BackendRsync),
+	)
+	require.NoError(t, err)
+
+	tv := naming.TVShowInfo{Title: "The Office", Year: "2005", Season: 1, Episode: 2}
+	result, err := org.OrganizeTVWithParsed(testFile, libraryDir, tv)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	// target should be in Season 01 folder
+	assert.Contains(t, result.TargetPath, "Season 01")
+	assert.Contains(t, result.TargetPath, "The Office")
 }
