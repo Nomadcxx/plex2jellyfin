@@ -309,3 +309,64 @@ func TestProcessFile_SlowLaneLowConfidence(t *testing.T) {
 		t.Errorf("expected 1 pending AI item for low-confidence file, got %d", len(handler.pendingAI))
 	}
 }
+
+func TestProcessPendingAI_ExpiresOldItems(t *testing.T) {
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{"/tv"},
+		MovieLibs:       []string{"/movie"},
+		TVWatchPaths:    []string{"/watch/tv"},
+		MovieWatchPaths: []string{"/watch/movies"},
+		Logger:          logging.Nop(),
+		AIEnabled:       true,
+		AIConfig:        config.AIConfig{AutoTriggerThreshold: 0.6},
+		ConfigDir:       t.TempDir(),
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	// Add an expired pending item
+	handler.pendingAI["/old/file.mkv"] = &PendingItem{
+		Path:      "/old/file.mkv",
+		Filename:  "file.mkv",
+		MediaType: "movie",
+		QueuedAt:  time.Now().Add(-25 * time.Hour), // 25 hours ago
+	}
+
+	handler.ProcessPendingAI()
+
+	if len(handler.pendingAI) != 0 {
+		t.Errorf("expected expired item to be removed, got %d pending", len(handler.pendingAI))
+	}
+}
+
+func TestProcessPendingAI_SkipsMissingFiles(t *testing.T) {
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{"/tv"},
+		MovieLibs:       []string{"/movie"},
+		TVWatchPaths:    []string{"/watch/tv"},
+		MovieWatchPaths: []string{"/watch/movies"},
+		Logger:          logging.Nop(),
+		AIEnabled:       true,
+		AIConfig:        config.AIConfig{AutoTriggerThreshold: 0.6},
+		ConfigDir:       t.TempDir(),
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	handler.pendingAI["/nonexistent/file.mkv"] = &PendingItem{
+		Path:      "/nonexistent/file.mkv",
+		Filename:  "file.mkv",
+		MediaType: "movie",
+		QueuedAt:  time.Now(),
+	}
+
+	handler.ProcessPendingAI()
+
+	if len(handler.pendingAI) != 0 {
+		t.Errorf("expected missing file to be removed, got %d pending", len(handler.pendingAI))
+	}
+}

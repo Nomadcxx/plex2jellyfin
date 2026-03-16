@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -800,6 +801,204 @@ func (h *MediaHandler) replayDeferredOperation(op jellyfin.DeferredOp) {
 	}
 	// Re-run through the regular process pipeline so classification and notifications stay consistent.
 	go h.processFile(op.SourcePath)
+}
+
+func (h *MediaHandler) ProcessPendingAI() {
+	h.mu.Lock()
+	items := make([]*PendingItem, 0, len(h.pendingAI))
+	for _, item := range h.pendingAI {
+		items = append(items, item)
+	}
+	h.mu.Unlock()
+
+	now := time.Now()
+	expiry := 24 * time.Hour
+
+	for _, item := range items {
+		// Expire old items
+		if now.Sub(item.QueuedAt) > expiry {
+			h.logger.Info("handler", "Expiring old pending AI item",
+				logging.F("filename", item.Filename))
+			if h.enhanceLogger != nil {
+				h.enhanceLogger.Log(EnhanceLogEntry{
+					Action: "expired",
+					File:   item.Filename,
+					Reason: "pending > 24h",
+				})
+			}
+			h.mu.Lock()
+			delete(h.pendingAI, item.Path)
+			h.mu.Unlock()
+			continue
+		}
+
+		// Check file still exists
+		if _, err := os.Stat(item.Path); os.IsNotExist(err) {
+			h.logger.Info("handler", "Pending file no longer exists",
+				logging.F("filename", item.Filename))
+			if h.enhanceLogger != nil {
+				h.enhanceLogger.Log(EnhanceLogEntry{
+					Action: "expired",
+					File:   item.Filename,
+					Reason: "file deleted",
+				})
+			}
+			h.mu.Lock()
+			delete(h.pendingAI, item.Path)
+			h.mu.Unlock()
+			continue
+		}
+
+		// Check rate limit
+		if h.aiRateLimiter != nil && !h.aiRateLimiter.Allow() {
+			if h.enhanceLogger != nil {
+				hourly, daily := h.aiRateLimiter.Stats()
+				h.enhanceLogger.Log(EnhanceLogEntry{
+					Action:       "rate_limited",
+					PendingCount: len(h.pendingAI),
+					HourlyUsed:   hourly,
+					DailyUsed:    daily,
+				})
+			}
+			return // Stop processing this tick
+		}
+
+		// No AI matcher available
+		if h.aiMatcher == nil {
+			continue
+		}
+
+		ctx := context.Background()
+		aiResult, err := h.aiMatcher.ParseWithRetry(ctx, item.Filename)
+		if h.aiRateLimiter != nil {
+			h.aiRateLimiter.Record()
+		}
+
+		if err != nil {
+			h.logger.Warn("handler", "AI enhancement failed",
+				logging.F("filename", item.Filename),
+				logging.F("error", err.Error()))
+			h.mu.Lock()
+			delete(h.pendingAI, item.Path)
+			h.mu.Unlock()
+			continue
+		}
+
+		// Classify the change
+		regexTitle := h.getParsedTitle(item.TVInfo, item.MovieInfo)
+		regexYear := ""
+		if item.TVInfo != nil {
+			regexYear = item.TVInfo.Year
+		} else if item.MovieInfo != nil {
+			regexYear = item.MovieInfo.Year
+		}
+		aiYear := ""
+		if aiResult.Year != nil && aiResult.Year.Int() != nil {
+			aiYear = fmt.Sprintf("%d", *aiResult.Year.Int())
+		}
+
+		classification := ClassifyChange(regexTitle, aiResult.Title, regexYear, aiYear, item.MediaType, aiResult.Type)
+
+		if classification.Safe && aiResult.Confidence >= classification.MinConfidence {
+			h.applyAIResult(item, aiResult)
+			if h.enhanceLogger != nil {
+				h.enhanceLogger.Log(EnhanceLogEntry{
+					Action:       "ai_enhanced",
+					File:         item.Filename,
+					RegexTitle:   regexTitle,
+					AITitle:      aiResult.Title,
+					AIConfidence: aiResult.Confidence,
+					Category:     string(classification.Category),
+					AutoApplied:  true,
+					MediaType:    item.MediaType,
+				})
+			}
+		} else {
+			reason := "risky change"
+			if classification.Safe && aiResult.Confidence < classification.MinConfidence {
+				reason = fmt.Sprintf("confidence %.2f below threshold %.2f", aiResult.Confidence, classification.MinConfidence)
+			}
+			if h.enhanceLogger != nil {
+				h.enhanceLogger.Log(EnhanceLogEntry{
+					Action:       "flagged_for_review",
+					File:         item.Filename,
+					RegexTitle:   regexTitle,
+					AITitle:      aiResult.Title,
+					AIConfidence: aiResult.Confidence,
+					Category:     string(classification.Category),
+					Reason:       reason,
+					MediaType:    item.MediaType,
+				})
+			}
+			h.logger.Info("handler", "AI enhancement flagged for review",
+				logging.F("filename", item.Filename),
+				logging.F("category", string(classification.Category)),
+				logging.F("reason", reason))
+		}
+
+		h.mu.Lock()
+		delete(h.pendingAI, item.Path)
+		h.mu.Unlock()
+	}
+}
+
+func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
+	var result *organizer.OrganizationResult
+	var err error
+
+	if item.MediaType == "tv" {
+		tvInfo := naming.TVShowInfo{
+			Title: aiResult.Title,
+		}
+		if aiResult.Year != nil && aiResult.Year.Int() != nil {
+			tvInfo.Year = fmt.Sprintf("%d", *aiResult.Year.Int())
+		}
+		if aiResult.Season != nil && aiResult.Season.Int() != nil {
+			tvInfo.Season = *aiResult.Season.Int()
+		} else if item.TVInfo != nil {
+			tvInfo.Season = item.TVInfo.Season
+		}
+		if len(aiResult.Episodes) > 0 {
+			tvInfo.Episode = aiResult.Episodes[0]
+		} else if item.TVInfo != nil {
+			tvInfo.Episode = item.TVInfo.Episode
+		}
+
+		// Determine target library (TV auto-selection uses first TV library)
+		targetLib := ""
+		if len(h.tvLibraries) > 0 {
+			targetLib = h.tvLibraries[0]
+		}
+
+		result, err = h.tvOrganizer.OrganizeTVWithParsed(item.Path, targetLib, tvInfo)
+	} else {
+		movieInfo := naming.MovieInfo{
+			Title: aiResult.Title,
+		}
+		if aiResult.Year != nil && aiResult.Year.Int() != nil {
+			movieInfo.Year = fmt.Sprintf("%d", *aiResult.Year.Int())
+		}
+
+		result, err = h.movieOrganizer.OrganizeMovieWithParsed(item.Path, item.TargetLib, movieInfo)
+	}
+
+	if err != nil {
+		h.logger.Error("handler", "AI-enhanced organization failed", err,
+			logging.F("filename", item.Filename))
+		h.stats.RecordError()
+		return
+	}
+
+	if result != nil && result.Success {
+		h.logger.Info("handler", "AI-enhanced organization successful",
+			logging.F("filename", item.Filename),
+			logging.F("target", result.TargetPath))
+		if item.MediaType == "movie" {
+			h.stats.RecordMovie(result.BytesCopied)
+		} else {
+			h.stats.RecordTV(result.BytesCopied)
+		}
+	}
 }
 
 func (h *MediaHandler) PruneActivityLogs(days int) error {
