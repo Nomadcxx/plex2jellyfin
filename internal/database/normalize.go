@@ -33,6 +33,27 @@ func NormalizeTitle(title string) string {
 	return title
 }
 
+// NormalizeForMatch normalizes a title for directory matching.
+// Lowercases, removes ALL punctuation and whitespace so that
+// punctuation-variant titles compare equal.
+// Use this when comparing a parsed title against existing directory names.
+// "Chip 'n Dale Rescue Rangers (2022)" -> "chipndalerescuerangers2022"
+// "Chip n Dale Rescue Rangers" -> "chipndalerescuerangers"
+func NormalizeForMatch(title string) string {
+	// Lowercase
+	title = strings.ToLower(title)
+
+	// Remove common separators and punctuation — same set as NormalizeTitle
+	replacer := strings.NewReplacer(
+		" ", "", ".", "", "-", "", "_", "",
+		"'", "", "\u2019", "", ":", "", "&", "", "*", "",
+		",", "", "!", "", "?", "",
+		"(", "", ")", "",
+		"[", "", "]", "",
+	)
+	return replacer.Replace(title)
+}
+
 // ExtractYear attempts to extract a year from a title string
 // "For All Mankind (2019)" -> 2019
 // "Fallout" -> 0
