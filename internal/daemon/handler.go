@@ -529,6 +529,7 @@ func (h *MediaHandler) processFile(path string) {
 
 		// Send notifications and track results
 		sonarrNotified, radarrNotified = h.sendNotificationsWithTracking(result, mediaType)
+		h.cleanupSourceDir(path)
 	} else if result.Skipped {
 		h.logger.Info("handler", "Skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
 	} else {
@@ -1083,6 +1084,7 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 		} else {
 			h.stats.RecordTV(result.BytesCopied)
 		}
+		h.cleanupSourceDir(item.Path)
 	}
 }
 
