@@ -74,3 +74,34 @@ func ExtractYear(title string) int {
 func StripYear(title string) string {
 	return yearSuffixPattern.ReplaceAllString(title, "")
 }
+
+var bareYearPattern = regexp.MustCompile(`\b((?:19|20)\d{2})\b`)
+var resolutionPattern = regexp.MustCompile(`(?i)\b\d{3,4}[pi]\b`)
+
+// ExtractYearFlexible extracts a year from a title string, trying parenthesized
+// format first "(YYYY)", then falling back to bare years "YYYY".
+// Skips resolution numbers like 1080p, 720p.
+// "Pandora (2019)" -> 2019
+// "pandora 2019" -> 2019
+// "Fallout" -> 0
+func ExtractYearFlexible(title string) int {
+	// Try parenthesized first (most reliable)
+	if year := ExtractYear(title); year != 0 {
+		return year
+	}
+
+	// Strip resolution markers to avoid matching 1080, 720, etc.
+	clean := resolutionPattern.ReplaceAllString(title, "")
+
+	// Find all bare years, return the last valid one
+	matches := bareYearPattern.FindAllStringSubmatch(clean, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		var year int
+		fmt.Sscanf(matches[i][1], "%d", &year)
+		if year >= 1900 && year <= 2100 {
+			return year
+		}
+	}
+
+	return 0
+}

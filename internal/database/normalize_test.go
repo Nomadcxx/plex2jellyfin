@@ -54,3 +54,30 @@ func TestNormalizeForMatch_EquivalenceGroups(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractYearFlexible(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected int
+	}{
+		{"parenthesized", "Pandora (2019)", 2019},
+		{"bare year", "pandora 2019", 2019},
+		{"no year", "Fallout", 0},
+		{"year in middle", "2001 A Space Odyssey", 2001},
+		{"resolution not year", "show 1080p", 0},
+		{"resolution not year 720", "show 720p", 0},
+		{"multiple years takes last", "Blade Runner 2049 (2017)", 2017},
+		{"bare multiple takes last valid", "show 1984 2019", 2019},
+		{"too old", "show 1800", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractYearFlexible(tt.input)
+			if got != tt.expected {
+				t.Errorf("ExtractYearFlexible(%q) = %d, want %d", tt.input, got, tt.expected)
+			}
+		})
+	}
+}

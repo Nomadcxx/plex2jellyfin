@@ -237,7 +237,7 @@ func parseMovieDir(dirName string) (title string, year int) {
 
 // parseMediaDir is a helper that extracts title and year from any media directory
 func parseMediaDir(dirName string) (title string, year int) {
-	year = database.ExtractYear(dirName)
+	year = database.ExtractYearFlexible(dirName)
 	if year > 0 {
 		title = database.StripYear(dirName)
 		title = strings.TrimSpace(title)
