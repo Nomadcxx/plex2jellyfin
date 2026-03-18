@@ -10,6 +10,8 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMediaHandler_SeparateLibraries(t *testing.T) {
@@ -214,6 +216,33 @@ func TestHandleFileEventDebouncesOnNormalizedPath(t *testing.T) {
 	}
 }
 
+func TestProcessFile_SkipsUnpackPaths(t *testing.T) {
+	tmpLib := t.TempDir()
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{tmpLib},
+		MovieWatchPaths: []string{tmpLib},
+		Logger:          logging.Nop(),
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	// Path still inside an _UNPACK_ folder — should be silently skipped
+	unpackPath := filepath.Join(tmpLib, "_UNPACK_Show.S01E01.1080p.WEB.mkv", "Show.S01E01.1080p.WEB.mkv")
+	handler.processFile(unpackPath)
+
+	snap := handler.stats.Snapshot()
+	if snap.Errors > 0 {
+		t.Errorf("processFile recorded %d errors for _UNPACK_ path — should skip without error", snap.Errors)
+	}
+	if snap.TVProcessed > 0 || snap.MoviesProcessed > 0 {
+		t.Errorf("processFile should not have processed an _UNPACK_ path")
+	}
+}
+
 func TestHandleFileEventDefersTransientUnpackOnce(t *testing.T) {
 	prevDelay := transientRetryDelay
 	transientRetryDelay = time.Hour
@@ -369,4 +398,173 @@ func TestProcessPendingAI_SkipsMissingFiles(t *testing.T) {
 	if len(handler.pendingAI) != 0 {
 		t.Errorf("expected missing file to be removed, got %d pending", len(handler.pendingAI))
 	}
+}
+
+func makeHandler(t *testing.T, watchRoots []string) *MediaHandler {
+	t.Helper()
+	return &MediaHandler{
+		tvWatchPaths:    watchRoots,
+		movieWatchPaths: watchRoots,
+		logger:          logging.Nop(),
+	}
+}
+
+func TestCleanupSourceDir_SimpleMovie(t *testing.T) {
+	root := t.TempDir()
+	dlDir := filepath.Join(root, "Movie.Name.2025.1080p-GROUP")
+	require.NoError(t, os.MkdirAll(dlDir, 0755))
+
+	junk := filepath.Join(dlDir, "abc123.txt")
+	require.NoError(t, os.WriteFile(junk, []byte("nzb"), 0644))
+
+	movedFile := filepath.Join(dlDir, "movie.mkv")
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(movedFile)
+
+	_, err := os.Stat(dlDir)
+	assert.True(t, os.IsNotExist(err), "download dir should be removed")
+
+	_, err = os.Stat(root)
+	assert.NoError(t, err, "watch root must not be removed")
+}
+
+func TestCleanupSourceDir_SourceStillExists_NoCleanup(t *testing.T) {
+	root := t.TempDir()
+	dlDir := filepath.Join(root, "Movie.Name.2025.1080p-GROUP")
+	require.NoError(t, os.MkdirAll(dlDir, 0755))
+
+	videoFile := filepath.Join(dlDir, "movie.mkv")
+	require.NoError(t, os.WriteFile(videoFile, []byte("data"), 0644))
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(videoFile)
+
+	_, err := os.Stat(dlDir)
+	assert.NoError(t, err, "download dir must remain when source still exists")
+}
+
+func TestCleanupSourceDir_FileDirectlyInWatchRoot_NoCleanup(t *testing.T) {
+	root := t.TempDir()
+	movedFile := filepath.Join(root, "movie.mkv")
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(movedFile)
+
+	_, err := os.Stat(root)
+	assert.NoError(t, err, "watch root must not be removed")
+}
+
+func TestCleanupSourceDir_SeasonPackRemainingEpisodes(t *testing.T) {
+	root := t.TempDir()
+	packDir := filepath.Join(root, "Show.S01-S04.1080p")
+	s1 := filepath.Join(packDir, "Season 1")
+	s2 := filepath.Join(packDir, "Season 2")
+	require.NoError(t, os.MkdirAll(s1, 0755))
+	require.NoError(t, os.MkdirAll(s2, 0755))
+
+	pending := filepath.Join(s2, "Show.S02E01.mkv")
+	require.NoError(t, os.WriteFile(pending, []byte("data"), 0644))
+
+	movedFile := filepath.Join(s1, "Show.S01E02.mkv")
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(movedFile)
+
+	_, err := os.Stat(s1)
+	assert.True(t, os.IsNotExist(err), "empty Season 1 should be removed")
+
+	_, err = os.Stat(packDir)
+	assert.NoError(t, err, "pack dir must remain while Season 2 has pending video")
+}
+
+func TestCleanupSourceDir_LastEpisodeSeasonPack_FullCleanup(t *testing.T) {
+	root := t.TempDir()
+	packDir := filepath.Join(root, "Show.S01.1080p")
+	s1 := filepath.Join(packDir, "Season 1")
+	require.NoError(t, os.MkdirAll(s1, 0755))
+
+	junk := filepath.Join(packDir, "nzb_marker.txt")
+	require.NoError(t, os.WriteFile(junk, []byte("x"), 0644))
+
+	movedFile := filepath.Join(s1, "Show.S01E01.mkv")
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(movedFile)
+
+	_, err := os.Stat(s1)
+	assert.True(t, os.IsNotExist(err), "Season 1 should be removed")
+	_, err = os.Stat(packDir)
+	assert.True(t, os.IsNotExist(err), "pack dir should be removed (only junk remained)")
+
+	_, err = os.Stat(root)
+	assert.NoError(t, err)
+}
+
+func TestContainsVideoFilesRecursive(t *testing.T) {
+	root := t.TempDir()
+	subDir := filepath.Join(root, "sub")
+	require.NoError(t, os.MkdirAll(subDir, 0755))
+
+	h := makeHandler(t, []string{})
+
+	assert.False(t, h.containsVideoFilesRecursive(root))
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "marker.txt"), []byte("x"), 0644))
+	assert.False(t, h.containsVideoFilesRecursive(root))
+
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "ep.mkv"), []byte("x"), 0644))
+	assert.True(t, h.containsVideoFilesRecursive(root))
+}
+
+func TestCleanupSourceDir_SubtitlesTreatedAsJunk(t *testing.T) {
+	root := t.TempDir()
+	dlDir := filepath.Join(root, "Movie.2025.1080p-GROUP")
+	require.NoError(t, os.MkdirAll(dlDir, 0755))
+
+	subFile := filepath.Join(dlDir, "movie.en.srt")
+	require.NoError(t, os.WriteFile(subFile, []byte("subtitles"), 0644))
+
+	movedFile := filepath.Join(dlDir, "movie.mkv")
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(movedFile)
+
+	_, err := os.Stat(dlDir)
+	assert.True(t, os.IsNotExist(err), "dir with only .srt should be cleaned up")
+}
+
+func TestCleanupSourceDir_RemoveAllError_ContinuesUpward(t *testing.T) {
+	root := t.TempDir()
+	protectedDir := filepath.Join(root, "protected")
+	childDir := filepath.Join(protectedDir, "child")
+	require.NoError(t, os.MkdirAll(childDir, 0755))
+
+	require.NoError(t, os.Chmod(protectedDir, 0555))
+	defer os.Chmod(protectedDir, 0755)
+
+	movedFile := filepath.Join(childDir, "video.mkv")
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(movedFile)
+
+	_, err := os.Stat(root)
+	assert.NoError(t, err, "root must still exist")
+}
+
+func TestCleanupSourceDir_WatchRootWithTrailingSlash(t *testing.T) {
+	root := t.TempDir()
+	dlDir := filepath.Join(root, "Movie.2025.1080p-GROUP")
+	require.NoError(t, os.MkdirAll(dlDir, 0755))
+
+	junk := filepath.Join(dlDir, "marker.txt")
+	require.NoError(t, os.WriteFile(junk, []byte("x"), 0644))
+
+	movedFile := filepath.Join(dlDir, "movie.mkv")
+
+	h := makeHandler(t, []string{root + string(os.PathSeparator)})
+	h.cleanupSourceDir(movedFile)
+
+	_, err := os.Stat(dlDir)
+	assert.True(t, os.IsNotExist(err), "download dir should be removed even with trailing slash in watch root")
 }

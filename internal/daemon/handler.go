@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -385,6 +386,18 @@ func (h *MediaHandler) getSourceHint(path string) naming.SourceHint {
 }
 
 func (h *MediaHandler) processFile(path string) {
+	// Skip files still inside Sabnzbd's _UNPACK_ staging folder.
+	// After extraction, Sabnzbd renames the folder and the watcher/scanner picks up the real path.
+	if strings.Contains(path, string(os.PathSeparator)+"_UNPACK_") {
+		h.logger.Info("handler", "Skipping _UNPACK_ path — extraction still in progress",
+			logging.F("path", path))
+		h.mu.Lock()
+		delete(h.pending, path)
+		delete(h.transientRetries, path)
+		h.mu.Unlock()
+		return
+	}
+
 	startTime := time.Now()
 
 	h.mu.Lock()
@@ -624,6 +637,78 @@ func (h *MediaHandler) IsMediaFile(path string) bool {
 		".mpg": true, ".mpeg": true, ".m2ts": true, ".ts": true,
 	}
 	return mediaExts[ext]
+}
+
+// containsVideoFilesRecursive reports whether dir or any of its descendants
+// contains at least one file recognised by IsMediaFile.
+// Short-circuits on the first match via fs.SkipAll.
+func (h *MediaHandler) containsVideoFilesRecursive(dir string) bool {
+	found := false
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() && h.IsMediaFile(path) {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+// cleanupSourceDir removes the source download directory after a successful move,
+// walking up parent directories until it reaches a watch root.
+//
+// Gate: if sourcePath still exists the source was preserved (keepSource, dry-run),
+// so cleanup is skipped entirely.
+//
+// At each level it checks whether any video files remain; if none do, the whole
+// directory tree at that level is removed via os.RemoveAll (clearing junk files,
+// SABnzbd markers, empty subdirs, etc.). Concurrent RemoveAll on the same path is
+// safe — os.RemoveAll returns nil for non-existent paths.
+func (h *MediaHandler) cleanupSourceDir(sourcePath string) {
+	// Gate: source still present means keepSource or dry-run — do nothing.
+	if _, err := os.Stat(sourcePath); err == nil {
+		return
+	}
+
+	// Build a set of watch roots for O(1) boundary checks.
+	// filepath.Clean strips trailing slashes, matching normalizeEventPath behaviour.
+	rootSet := make(map[string]struct{})
+	for _, p := range h.tvWatchPaths {
+		rootSet[filepath.Clean(p)] = struct{}{}
+	}
+	for _, p := range h.movieWatchPaths {
+		rootSet[filepath.Clean(p)] = struct{}{}
+	}
+
+	dir := filepath.Dir(sourcePath)
+	for {
+		clean := filepath.Clean(dir)
+		if _, isRoot := rootSet[clean]; isRoot {
+			return // never remove a watch root
+		}
+
+		if h.containsVideoFilesRecursive(dir) {
+			return // more episodes pending — leave directory alone
+		}
+
+		if err := os.RemoveAll(dir); err != nil {
+			h.logger.Warn("handler", "Failed to remove source directory",
+				logging.F("dir", dir), logging.F("error", err.Error()))
+			// Continue walking up — a permission error on one level
+			// should not prevent cleanup of parent directories.
+		} else {
+			h.logger.Info("handler", "Cleaned up source directory", logging.F("dir", dir))
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return // filesystem root reached — stop
+		}
+		dir = parent
+	}
 }
 
 func (h *MediaHandler) Stats() StatsSnapshot {
