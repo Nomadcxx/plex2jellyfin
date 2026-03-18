@@ -474,3 +474,52 @@ func TestOrganizeTVWithParsed_Basic(t *testing.T) {
 	assert.Contains(t, result.TargetPath, "Season 01")
 	assert.Contains(t, result.TargetPath, "The Office")
 }
+
+func TestFindExistingShowDir_PunctuationVariants(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create directory with apostrophe
+	os.MkdirAll(filepath.Join(tmpDir, "Chip 'n Dale Rescue Rangers (2022)"), 0755)
+	// Create directory with colon
+	os.MkdirAll(filepath.Join(tmpDir, "Law & Order: SVU (1999)"), 0755)
+	// Create directory with exclamation
+	os.MkdirAll(filepath.Join(tmpDir, "American Dad! (2005)"), 0755)
+
+	tests := []struct {
+		name      string
+		title     string
+		expectDir string
+	}{
+		{
+			name:      "apostrophe in dir but not in title",
+			title:     "Chip n Dale Rescue Rangers",
+			expectDir: "Chip 'n Dale Rescue Rangers (2022)",
+		},
+		{
+			name:      "colon and ampersand variants",
+			title:     "Law & Order SVU",
+			expectDir: "Law & Order: SVU (1999)",
+		},
+		{
+			name:      "exclamation in dir but not in title",
+			title:     "American Dad",
+			expectDir: "American Dad! (2005)",
+		},
+		{
+			name:      "no match returns empty",
+			title:     "Nonexistent Show",
+			expectDir: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := findExistingShowDir(tmpDir, tt.title)
+			if tt.expectDir == "" {
+				assert.Empty(t, result)
+			} else {
+				assert.Equal(t, filepath.Join(tmpDir, tt.expectDir), result)
+			}
+		})
+	}
+}

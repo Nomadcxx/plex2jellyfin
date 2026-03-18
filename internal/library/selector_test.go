@@ -110,3 +110,39 @@ func TestFindExistingShowDir(t *testing.T) {
 		})
 	}
 }
+
+func TestFindExistingShowDir_PunctuationVariants(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create directories with punctuation
+	os.MkdirAll(filepath.Join(tmpDir, "Chip 'n Dale Rescue Rangers (2022)"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "American Dad! (2005)"), 0755)
+
+	s := &Selector{}
+
+	tests := []struct {
+		name      string
+		showName  string
+		year      string
+		expectHit bool
+	}{
+		{"apostrophe mismatch", "Chip n Dale Rescue Rangers", "2022", true},
+		{"exclamation mismatch", "American Dad", "2005", true},
+		{"no match", "Nonexistent Show", "2020", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := s.findExistingShowDir(tmpDir, tt.showName, tt.year)
+			if tt.expectHit {
+				if result == "" {
+					t.Errorf("expected to find show dir for %q, got empty", tt.showName)
+				}
+			} else {
+				if result != "" {
+					t.Errorf("expected no match for %q, got %q", tt.showName, result)
+				}
+			}
+		})
+	}
+}

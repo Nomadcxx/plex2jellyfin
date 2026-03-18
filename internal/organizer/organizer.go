@@ -966,7 +966,7 @@ func findExistingShowDir(libraryPath, showTitle string) string {
 		return ""
 	}
 
-	titleLower := strings.ToLower(showTitle)
+	normalizedTitle := database.NormalizeForMatch(showTitle)
 	yearPattern := regexp.MustCompile(`\s*\(\d{4}\)\s*$`)
 
 	for _, entry := range entries {
@@ -975,14 +975,15 @@ func findExistingShowDir(libraryPath, showTitle string) string {
 		}
 
 		dirName := entry.Name()
-		dirNameLower := strings.ToLower(dirName)
 
-		if dirNameLower == titleLower {
+		// Try exact case-insensitive match first (fast path)
+		if strings.EqualFold(dirName, showTitle) {
 			return filepath.Join(libraryPath, dirName)
 		}
 
+		// Strip year from directory name, then normalize and compare
 		baseName := yearPattern.ReplaceAllString(dirName, "")
-		if strings.ToLower(baseName) == titleLower {
+		if database.NormalizeForMatch(baseName) == normalizedTitle {
 			return filepath.Join(libraryPath, dirName)
 		}
 	}

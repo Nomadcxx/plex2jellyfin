@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -415,7 +416,8 @@ func min(a, b int) int {
 // findExistingShowDir searches for an existing show directory in the library
 // Returns the full path to the show directory if found, empty string otherwise
 func (s *Selector) findExistingShowDir(library, showName, year string) string {
-	normalizedTitle := strings.ToLower(strings.ReplaceAll(showName, " ", ""))
+	normalizedTitle := database.NormalizeForMatch(showName)
+	yearPattern := regexp.MustCompile(`\s*\(\d{4}\)\s*$`)
 
 	entries, err := filepath.Glob(filepath.Join(library, "*"))
 	if err != nil {
@@ -424,14 +426,11 @@ func (s *Selector) findExistingShowDir(library, showName, year string) string {
 
 	for _, entry := range entries {
 		dirName := filepath.Base(entry)
-		normalizedDir := strings.ToLower(strings.ReplaceAll(dirName, " ", ""))
-		normalizedDir = strings.ReplaceAll(normalizedDir, "(", "")
-		normalizedDir = strings.ReplaceAll(normalizedDir, ")", "")
+		// Strip year from directory name, then normalize and compare
+		baseName := yearPattern.ReplaceAllString(dirName, "")
+		normalizedDir := database.NormalizeForMatch(baseName)
 
-		// Check if it's the show directory (exact match or with year)
-		if normalizedDir == normalizedTitle ||
-			normalizedDir == normalizedTitle+year ||
-			strings.HasPrefix(normalizedDir, normalizedTitle+"(") {
+		if normalizedDir == normalizedTitle {
 			return entry
 		}
 	}
