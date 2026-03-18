@@ -611,7 +611,10 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 		showDir = filepath.Join(libraryPath, showName)
 	}
 
-	seasonDir := filepath.Join(showDir, naming.FormatSeasonFolder(tv.Season))
+	seasonDir := findExistingSeasonDir(showDir, tv.Season)
+	if seasonDir == "" {
+		seasonDir = filepath.Join(showDir, naming.FormatSeasonFolder(tv.Season))
+	}
 	ext := filepath.Ext(sourcePath)
 	episodeName := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
 	targetPath := filepath.Join(seasonDir, episodeName)
@@ -755,7 +758,10 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		showDir = filepath.Join(libraryPath, showName)
 	}
 
-	seasonDir := filepath.Join(showDir, naming.FormatSeasonFolder(tv.Season))
+	seasonDir := findExistingSeasonDir(showDir, tv.Season)
+	if seasonDir == "" {
+		seasonDir = filepath.Join(showDir, naming.FormatSeasonFolder(tv.Season))
+	}
 	ext := filepath.Ext(sourcePath)
 	episodeName := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
 	targetPath := filepath.Join(seasonDir, episodeName)
@@ -1104,4 +1110,37 @@ func (o *Organizer) getFilePaths(files []analyzer.FileInfo) []string {
 		paths[i] = f.Name
 	}
 	return paths
+}
+
+// findExistingSeasonDir looks for an existing season directory in the show folder,
+// matching both padded ("Season 01") and non-padded ("Season 1") formats.
+// Returns the full path to the existing directory, or empty string if none found.
+func findExistingSeasonDir(showDir string, season int) string {
+	entries, err := os.ReadDir(showDir)
+	if err != nil {
+		return ""
+	}
+
+	seasonPrefix := "season "
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		dirName := entry.Name()
+		dirLower := strings.ToLower(dirName)
+
+		if !strings.HasPrefix(dirLower, seasonPrefix) {
+			continue
+		}
+
+		numStr := strings.TrimSpace(dirLower[len(seasonPrefix):])
+		var num int
+		if _, err := fmt.Sscanf(numStr, "%d", &num); err == nil && num == season {
+			return filepath.Join(showDir, dirName)
+		}
+	}
+
+	return ""
 }

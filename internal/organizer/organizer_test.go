@@ -523,3 +523,54 @@ func TestFindExistingShowDir_PunctuationVariants(t *testing.T) {
 		})
 	}
 }
+
+func TestFindExistingSeasonDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create various season folder formats
+	os.MkdirAll(filepath.Join(tmpDir, "Season 1"), 0755)    // non-padded
+	os.MkdirAll(filepath.Join(tmpDir, "Season 02"), 0755)   // correctly padded
+	os.MkdirAll(filepath.Join(tmpDir, "Season 10"), 0755) // two digits
+
+	tests := []struct {
+		name      string
+		showDir   string
+		season    int
+		expectDir string
+	}{
+		{
+			name:      "finds non-padded Season 1 when looking for season 1",
+			showDir:   tmpDir,
+			season:    1,
+			expectDir: filepath.Join(tmpDir, "Season 1"),
+		},
+		{
+			name:      "finds padded Season 02 when looking for season 2",
+			showDir:   tmpDir,
+			season:    2,
+			expectDir: filepath.Join(tmpDir, "Season 02"),
+		},
+		{
+			name:      "finds Season 10 when looking for season 10",
+			showDir:   tmpDir,
+			season:    10,
+			expectDir: filepath.Join(tmpDir, "Season 10"),
+		},
+		{
+			name:      "returns empty for non-existent season",
+			showDir:   tmpDir,
+			season:    5,
+			expectDir: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := findExistingSeasonDir(tt.showDir, tt.season)
+			if result != tt.expectDir {
+				t.Errorf("findExistingSeasonDir(%q, %d) = %q, want %q",
+					tt.showDir, tt.season, result, tt.expectDir)
+			}
+		})
+	}
+}
