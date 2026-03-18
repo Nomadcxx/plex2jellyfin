@@ -3,6 +3,7 @@ package naming
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -150,6 +151,35 @@ func TestIsTVEpisodeFromPath_SourceHint(t *testing.T) {
 			got := IsTVEpisodeFromPath(tt.path, tt.hint)
 			if got != tt.want {
 				t.Errorf("IsTVEpisodeFromPath(%q, %v) = %v, want %v", tt.path, tt.hint, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStripReleaseMarkers_PreservesShortTitleWords(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"preserves Pitt", "The Pitt", "The Pitt"},
+		{"preserves Hope", "Raising Hope", "Raising Hope"},
+		{"preserves Deed", "No Good Deed", "No Good Deed"},
+		{"preserves Rome", "Rome", "Rome"},
+		{"still strips known groups", "The Pitt RARBG", "The Pitt"},
+		{"still strips quality markers", "The Pitt 720p", "The Pitt"},
+		{"still strips bracketed groups", "The Pitt [FLUX]", "The Pitt"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := strings.TrimSpace(stripReleaseMarkers(tt.input))
+			// Collapse multiple spaces
+			for strings.Contains(got, "  ") {
+				got = strings.ReplaceAll(got, "  ", " ")
+			}
+			if got != tt.expected {
+				t.Errorf("stripReleaseMarkers(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
 	}

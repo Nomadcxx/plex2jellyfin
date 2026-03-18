@@ -51,7 +51,8 @@ func init() {
 		`\[.*?\]`,
 		`\b(8bit|10bit|12bit)\b`,
 		// Note: release group suffix (-SPARKS, -postbot) handled separately in stripReleaseMarkers
-		`\b[A-Z]{2,5}\d*$`,
+        // REMOVED: `\b[A-Z]{2,5}\d*$` - too broad, strips last word of short titles (e.g., "Pitt" from "The Pitt")
+        // Release groups are already handled by the explicit group list above and releaseGroupSuffix regex
 	}
 
 	releasePatterns = make([]*regexp.Regexp, 0, len(patterns))
