@@ -1,0 +1,24 @@
+[Unit]
+Description=JellyWatch Web UI Server
+Documentation=https://github.com/Nomadcxx/jellywatch
+After=network.target jellywatchd.service
+Wants=jellywatchd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/jellyweb --host 0.0.0.0 --port 5522
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jellyweb
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
