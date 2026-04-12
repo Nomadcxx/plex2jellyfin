@@ -183,13 +183,8 @@ func TestCheckEpisode_NonCompliantFile(t *testing.T) {
 				IssueWrongSeasonFolder,
 			},
 		},
-		{
-			name: "Missing year",
-			path: "/media/TV/Silo/Season 01/Silo S01E01.mkv",
-			expectedIssues: []string{
-				IssueMissingYear,
-			},
-		},
+		// NOTE: Missing year is no longer a compliance issue for TV shows
+		// (Jellyfin recommends but does not require year in TV show folders)
 		{
 			name: "Wrong show folder",
 			path: "/media/TV/Wrong Folder/Season 01/Silo (2023) S01E01.mkv",

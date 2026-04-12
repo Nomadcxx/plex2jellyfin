@@ -141,7 +141,7 @@ func writeConfig(m *model) error {
 	}
 
 	jellywatchDir := filepath.Join(configDir, "jellywatch")
-	if err := os.MkdirAll(jellywatchDir, 0755); err != nil {
+	if err := os.MkdirAll(jellywatchDir, 0700); err != nil {
 		return err
 	}
 
@@ -151,7 +151,7 @@ func writeConfig(m *model) error {
 	}
 
 	configPath := filepath.Join(jellywatchDir, "config.toml")
-	if err := os.WriteFile(configPath, []byte(configStr), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configStr), 0600); err != nil {
 		return err
 	}
 
@@ -162,7 +162,9 @@ func writeConfig(m *model) error {
 		if m.permGroup != "" {
 			group = m.permGroup
 		}
-		exec.Command("chown", "-R", actualUser+":"+group, jellywatchDir).Run()
+		if err := exec.Command("chown", "-R", actualUser+":"+group, jellywatchDir).Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to chown config dir %s: %v\n", jellywatchDir, err)
+		}
 	}
 
 	return nil
@@ -308,7 +310,7 @@ WantedBy=multi-user.target
 `, actualUser)
 
 	servicePath := "/etc/systemd/system/jellywatchd.service"
-	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0600); err != nil {
 		return err
 	}
 
@@ -348,7 +350,7 @@ func setupWebSystemd(m *model) error {
 	serviceContent := buildWebServiceUnit(actualUser, normalizedWebPort(m.webPort))
 
 	servicePath := "/etc/systemd/system/jellyweb.service"
-	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0600); err != nil {
 		return err
 	}
 
@@ -427,8 +429,12 @@ func stopDaemon(m *model) error {
 }
 
 func disableService(m *model) error {
+	exec.Command("systemctl", "stop", "jellywatchd.service").Run()
 	exec.Command("systemctl", "disable", "jellywatchd.service").Run()
 	os.Remove("/etc/systemd/system/jellywatchd.service")
+	exec.Command("systemctl", "stop", "jellyweb.service").Run()
+	exec.Command("systemctl", "disable", "jellyweb.service").Run()
+	os.Remove("/etc/systemd/system/jellyweb.service")
 	exec.Command("systemctl", "daemon-reload").Run()
 	return nil
 }
@@ -437,6 +443,7 @@ func removeBinaries(m *model) error {
 	binaries := []string{
 		"/usr/local/bin/jellywatch",
 		"/usr/local/bin/jellywatchd",
+		"/usr/local/bin/jellyweb",
 		"/usr/local/bin/jellywatch-installer",
 	}
 	for _, bin := range binaries {
@@ -571,7 +578,9 @@ func (m model) runInitialScan() tea.Cmd {
 			}
 
 			ownership := actualUser + ":" + group
-			exec.Command("chown", "-R", ownership, jellywatchDir).Run()
+			if err := exec.Command("chown", "-R", ownership, jellywatchDir).Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to chown database dir %s: %v\n", jellywatchDir, err)
+			}
 		}
 
 		if err != nil {

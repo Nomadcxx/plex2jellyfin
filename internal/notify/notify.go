@@ -46,6 +46,7 @@ type OrganizationEvent struct {
 type NotifyResult struct {
 	Service   string
 	Success   bool
+	Skipped   bool // True when notifier was not applicable (e.g. Radarr for TV content)
 	CommandID int
 	Error     error
 	Duration  time.Duration
@@ -122,7 +123,9 @@ func (m *Manager) notifySync(notifiers []Notifier, event OrganizationEvent) []*N
 		result := n.Notify(event)
 		results = append(results, result)
 
-		if result.Success {
+		if result.Skipped {
+			log.Printf("[%s] Notification skipped (wrong media type)", n.Name())
+		} else if result.Success {
 			log.Printf("[%s] Notification sent successfully (command ID: %d)", n.Name(), result.CommandID)
 		} else {
 			log.Printf("[%s] Notification failed: %v", n.Name(), result.Error)
@@ -150,7 +153,9 @@ func (m *Manager) notifyAsync(notifiers []Notifier, event OrganizationEvent) {
 				}
 			}
 
-			if result.Success {
+			if result.Skipped {
+				log.Printf("[%s] Notification skipped (wrong media type)", notifier.Name())
+			} else if result.Success {
 				log.Printf("[%s] Notification sent successfully (command ID: %d)", notifier.Name(), result.CommandID)
 			} else {
 				log.Printf("[%s] Notification failed: %v", notifier.Name(), result.Error)

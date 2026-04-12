@@ -26,6 +26,7 @@ check-frontend:
 build: check-frontend
 	go build -o bin/jellywatchd ./cmd/jellywatchd
 	go build -o bin/jellywatch ./cmd/jellywatch
+	go build -o bin/jellyweb ./cmd/jellyweb
 
 dev:
 	go run ./cmd/jellywatchd --health-addr=:8686 &

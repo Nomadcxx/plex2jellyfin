@@ -31,16 +31,26 @@ type Session struct {
 type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
+	stopCh   chan struct{}
+	once     sync.Once
 }
 
 // NewSessionStore creates a new session store
 func NewSessionStore() *SessionStore {
 	store := &SessionStore{
 		sessions: make(map[string]*Session),
+		stopCh:   make(chan struct{}),
 	}
 	// Start cleanup goroutine
 	go store.cleanupExpiredSessions()
 	return store
+}
+
+// Close stops the cleanup goroutine
+func (s *SessionStore) Close() {
+	s.once.Do(func() {
+		close(s.stopCh)
+	})
 }
 
 // Create creates a new session and returns the token
@@ -89,15 +99,20 @@ func (s *SessionStore) cleanupExpiredSessions() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		s.mu.Lock()
-		now := time.Now()
-		for token, session := range s.sessions {
-			if now.After(session.ExpiresAt) {
-				delete(s.sessions, token)
+	for {
+		select {
+		case <-ticker.C:
+			s.mu.Lock()
+			now := time.Now()
+			for token, session := range s.sessions {
+				if now.After(session.ExpiresAt) {
+					delete(s.sessions, token)
+				}
 			}
+			s.mu.Unlock()
+		case <-s.stopCh:
+			return
 		}
-		s.mu.Unlock()
 	}
 }
 
@@ -136,6 +151,17 @@ func (s *Server) IsAuthenticated(r *http.Request) bool {
 	return valid
 }
 
+// isSecureRequest checks if the request came over HTTPS (directly or via proxy)
+func isSecureRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if r.Header.Get("X-Forwarded-Proto") == "https" {
+		return true
+	}
+	return false
+}
+
 // Login implements api.ServerInterface
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
@@ -166,10 +192,8 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create session
-	if s.sessions == nil {
-		s.sessions = NewSessionStore()
-	}
+	// Create session (race-safe lazy initialization)
+	s.ensureSessionStore()
 
 	token := s.sessions.Create()
 
@@ -179,7 +203,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(SessionDuration.Seconds()),
 	})
@@ -202,7 +226,7 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1, // Delete cookie
 	})

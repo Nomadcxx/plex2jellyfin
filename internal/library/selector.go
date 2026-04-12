@@ -271,35 +271,71 @@ func (s *Selector) resolveMultipleLocations(showName, year string, fileSize int6
 	}, nil
 }
 
-// selectForNewShow chooses a library for a show that doesn't exist anywhere yet
+// selectForNewShow chooses a library for a show that doesn't exist anywhere yet.
+// Uses weighted scoring: free space (40%) + show count balance (60%) to prevent
+// concentration on a single volume (e.g., STORAGE5 holding 3x more than others).
 func (s *Selector) selectForNewShow(showName, year string, fileSize int64) (*SelectionResult, error) {
-	// For new shows, check Sonarr's root folders preference
-	if s.cache != nil {
-		// TODO: Could query Sonarr's root folders API to get preferred location
-		// For now, fall through to space-based selection
+	type candidate struct {
+		library   string
+		available int64
+		showCount int
 	}
 
-	// Pick library with most available space
-	var best *SelectionResult
+	var candidates []candidate
 	for _, lib := range s.libraries {
 		available, err := getAvailableSpace(lib)
 		if err != nil || available < fileSize {
 			continue
 		}
-		if best == nil || available > best.Available {
-			best = &SelectionResult{
-				Library:   lib,
-				Reason:    fmt.Sprintf("New show, most space available (%d GB)", available/(1024*1024*1024)),
-				Available: available,
-			}
-		}
+		count := s.countMediaItems(lib, false)
+		candidates = append(candidates, candidate{
+			library:   lib,
+			available: available,
+			showCount: count,
+		})
 	}
 
-	if best == nil {
+	if len(candidates) == 0 {
 		return nil, fmt.Errorf("no suitable library with sufficient space for new show")
 	}
 
-	return best, nil
+	// Find min show count for scoring
+	minShows := candidates[0].showCount
+	maxSpace := candidates[0].available
+	for _, c := range candidates[1:] {
+		if c.showCount < minShows {
+			minShows = c.showCount
+		}
+		if c.available > maxSpace {
+			maxSpace = c.available
+		}
+	}
+
+	// Score each candidate: prefer volumes with fewer shows AND adequate space
+	var best *candidate
+	bestScore := -1.0
+	for i := range candidates {
+		c := &candidates[i]
+		// Space score: 0.0 to 1.0 (fraction of max available)
+		spaceScore := float64(c.available) / float64(maxSpace)
+		// Balance score: 0.0 to 1.0 (inverse of show count relative to minimum)
+		balanceScore := 1.0
+		if c.showCount > 0 {
+			balanceScore = float64(minShows+1) / float64(c.showCount+1)
+		}
+		// Weighted: balance matters more to prevent lopsided distribution
+		score := spaceScore*0.4 + balanceScore*0.6
+		if score > bestScore {
+			bestScore = score
+			best = c
+		}
+	}
+
+	return &SelectionResult{
+		Library:   best.library,
+		Reason:    fmt.Sprintf("New show, balanced selection (%d GB free, %d shows)", best.available/(1024*1024*1024), best.showCount),
+		Available: best.available,
+	}, nil
 }
 
 func (s *Selector) scoreLibrary(library, title, year string, fileSize int64, isMovie bool) int {

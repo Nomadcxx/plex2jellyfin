@@ -216,15 +216,25 @@ func (e *Executor) executeMove(ctx context.Context, plan *ConsolidationPlan) err
 		return fmt.Errorf("failed to get file from database: %w", err)
 	}
 
+	if file == nil {
+		// File not in DB — nothing to update
+		return nil
+	}
+
 	// Delete old entry
 	if err := e.db.DeleteMediaFile(plan.SourcePath); err != nil {
 		return fmt.Errorf("failed to delete old database entry: %w", err)
 	}
 
-	// Add new entry
+	// Add new entry with updated path
 	file.Path = plan.TargetPath
 	if err := e.db.UpsertMediaFile(file); err != nil {
 		return fmt.Errorf("failed to insert new database entry: %w", err)
+	}
+
+	// Verify file exists at new path
+	if _, err := os.Stat(plan.TargetPath); err != nil {
+		e.Printf("Warning: post-move verification failed for %s: %v\n", plan.TargetPath, err)
 	}
 
 	if plan.ConflictID > 0 {
@@ -270,6 +280,9 @@ func (e *Executor) executeRename(ctx context.Context, plan *ConsolidationPlan) e
 	file, err := e.db.GetMediaFile(plan.SourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to get file from database: %w", err)
+	}
+	if file == nil {
+		return fmt.Errorf("media file not found in database for rename: %s", plan.SourcePath)
 	}
 
 	// Delete old entry

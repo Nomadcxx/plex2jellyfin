@@ -41,7 +41,7 @@ func (n *SonarrNotifier) Notify(event OrganizationEvent) *NotifyResult {
 	}
 
 	if event.MediaType != MediaTypeTVEpisode {
-		result.Success = true
+		result.Skipped = true
 		result.Duration = time.Since(start)
 		return result
 	}

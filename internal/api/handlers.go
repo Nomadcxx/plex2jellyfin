@@ -335,7 +335,7 @@ func (s *Server) ActivityStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
 
 	// Flush helper
 	flusher, ok := w.(http.Flusher)
@@ -693,17 +693,22 @@ func (s *Server) GetStuckItems(w http.ResponseWriter, r *http.Request, managerId
 
 // ScanStream implements api.ServerInterface - SSE stream for scan progress
 func (s *Server) ScanStream(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement SSE streaming
-	w.WriteHeader(http.StatusNotImplemented)
+	writeJSON(w, http.StatusNotImplemented, map[string]string{
+		"error": "SSE scan streaming not yet implemented",
+	})
 }
 
 // Helper functions
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{
 		"code":    code,

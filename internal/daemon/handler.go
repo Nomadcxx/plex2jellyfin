@@ -54,14 +54,39 @@ type MediaHandler struct {
 }
 
 type PendingItem struct {
-	Path       string
-	Filename   string
-	TVInfo     *naming.TVShowInfo
-	MovieInfo  *naming.MovieInfo
-	MediaType  string
-	Confidence float64
-	QueuedAt   time.Time
-	TargetLib  string
+	Path          string
+	Filename      string
+	TVInfo        *naming.TVShowInfo
+	MovieInfo     *naming.MovieInfo
+	MediaType     string
+	Confidence    float64
+	QueuedAt      time.Time
+	TargetLib     string
+	AttemptCount  int
+	LastAttemptAt time.Time
+	Blacklisted   bool
+}
+
+const maxAIRetryAttempts = 10
+
+// aiRetryBackoff returns the backoff duration for a given attempt count.
+// Schedule: 30s, 60s, 2m, 5m, 15m, 30m, then 30m for all subsequent.
+func aiRetryBackoff(attempt int) time.Duration {
+	backoffs := []time.Duration{
+		30 * time.Second,
+		60 * time.Second,
+		2 * time.Minute,
+		5 * time.Minute,
+		15 * time.Minute,
+		30 * time.Minute,
+	}
+	if attempt <= 0 {
+		return backoffs[0]
+	}
+	if attempt > len(backoffs) {
+		return backoffs[len(backoffs)-1]
+	}
+	return backoffs[attempt-1]
 }
 
 var transientRetryDelay = 2 * time.Second
@@ -420,6 +445,7 @@ func (h *MediaHandler) processFile(path string) {
 
 	var parsedTitle string
 	var parsedYear *int
+	var parsedSeason, parsedEpisode int
 	parseMethod := activity.MethodRegex
 	aiConfidence := 0.0
 
@@ -441,6 +467,8 @@ func (h *MediaHandler) processFile(path string) {
 		tvInfo, parseErr := naming.ParseTVShowFromPath(path)
 		if parseErr == nil {
 			parsedTitle = tvInfo.Title
+			parsedSeason = tvInfo.Season
+			parsedEpisode = tvInfo.Episode
 			if tvInfo.Year != "" {
 				year := 0
 				if _, err := fmt.Sscanf(tvInfo.Year, "%d", &year); err == nil {
@@ -528,7 +556,11 @@ func (h *MediaHandler) processFile(path string) {
 		}
 
 		// Send notifications and track results
-		sonarrNotified, radarrNotified = h.sendNotificationsWithTracking(result, mediaType)
+		yearStr := ""
+		if parsedYear != nil {
+			yearStr = fmt.Sprintf("%d", *parsedYear)
+		}
+		sonarrNotified, radarrNotified = h.sendNotificationsWithTracking(result, mediaType, parsedTitle, yearStr, parsedSeason, parsedEpisode)
 		h.cleanupSourceDir(path)
 	} else if result.Skipped {
 		h.logger.Info("handler", "Skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
@@ -544,6 +576,13 @@ func (h *MediaHandler) processFile(path string) {
 func (h *MediaHandler) queueForAI(path, filename string, tvInfo *naming.TVShowInfo, movieInfo *naming.MovieInfo, mediaType string, confidence float64, targetLib string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	// Don't re-queue blacklisted items
+	if existing, ok := h.pendingAI[path]; ok && existing.Blacklisted {
+		h.logger.Info("handler", "Skipping blacklisted AI item",
+			logging.F("filename", filename))
+		return
+	}
 
 	if len(h.pendingAI) >= h.pendingAICap {
 		h.logger.Warn("handler", "Pending AI cap reached, using regex fallback",
@@ -594,7 +633,7 @@ func (h *MediaHandler) getParsedTitle(tvInfo *naming.TVShowInfo, movieInfo *nami
 	return ""
 }
 
-func (h *MediaHandler) sendNotificationsWithTracking(result *organizer.OrganizationResult, mediaType notify.MediaType) (sonarrNotified, radarrNotified bool) {
+func (h *MediaHandler) sendNotificationsWithTracking(result *organizer.OrganizationResult, mediaType notify.MediaType, title, year string, season, episode int) (sonarrNotified, radarrNotified bool) {
 	if h.notifyManager == nil {
 		return false, false
 	}
@@ -604,6 +643,10 @@ func (h *MediaHandler) sendNotificationsWithTracking(result *organizer.Organizat
 		SourcePath:  result.SourcePath,
 		TargetPath:  result.TargetPath,
 		TargetDir:   filepath.Dir(result.TargetPath),
+		Title:       title,
+		Year:        year,
+		Season:      season,
+		Episode:     episode,
 		BytesCopied: result.BytesCopied,
 		Duration:    result.Duration,
 	}
@@ -889,7 +932,7 @@ func (h *MediaHandler) replayDeferredOperation(op jellyfin.DeferredOp) {
 	go h.processFile(op.SourcePath)
 }
 
-func (h *MediaHandler) ProcessPendingAI() {
+func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 	h.mu.Lock()
 	items := make([]*PendingItem, 0, len(h.pendingAI))
 	for _, item := range h.pendingAI {
@@ -935,13 +978,29 @@ func (h *MediaHandler) ProcessPendingAI() {
 			continue
 		}
 
+		// Skip blacklisted items
+		if item.Blacklisted {
+			continue
+		}
+
+		// Exponential backoff: skip items that haven't waited long enough since last attempt
+		if item.AttemptCount > 0 {
+			backoff := aiRetryBackoff(item.AttemptCount)
+			if now.Sub(item.LastAttemptAt) < backoff {
+				continue
+			}
+		}
+
 		// Check rate limit
 		if h.aiRateLimiter != nil && !h.aiRateLimiter.Allow() {
 			if h.enhanceLogger != nil {
+				h.mu.Lock()
+				pendingCount := len(h.pendingAI)
+				h.mu.Unlock()
 				hourly, daily := h.aiRateLimiter.Stats()
 				h.enhanceLogger.Log(EnhanceLogEntry{
 					Action:       "rate_limited",
-					PendingCount: len(h.pendingAI),
+					PendingCount: pendingCount,
 					HourlyUsed:   hourly,
 					DailyUsed:    daily,
 				})
@@ -954,19 +1013,43 @@ func (h *MediaHandler) ProcessPendingAI() {
 			continue
 		}
 
-		ctx := context.Background()
 		aiResult, err := h.aiMatcher.ParseWithRetry(ctx, item.Filename)
 		if h.aiRateLimiter != nil {
 			h.aiRateLimiter.Record()
 		}
 
 		if err != nil {
-			h.logger.Warn("handler", "AI enhancement failed",
-				logging.F("filename", item.Filename),
-				logging.F("error", err.Error()))
-			h.mu.Lock()
-			delete(h.pendingAI, item.Path)
-			h.mu.Unlock()
+			item.AttemptCount++
+			item.LastAttemptAt = time.Now()
+
+			if item.AttemptCount >= maxAIRetryAttempts {
+				item.Blacklisted = true
+				h.logger.Warn("handler", "AI enhancement permanently blacklisted after max retries",
+					logging.F("filename", item.Filename),
+					logging.F("attempts", item.AttemptCount))
+				if h.enhanceLogger != nil {
+					h.enhanceLogger.Log(EnhanceLogEntry{
+						Action: "permanently_blacklisted",
+						File:   item.Filename,
+						Reason: fmt.Sprintf("failed %d attempts", item.AttemptCount),
+					})
+				}
+				h.mu.Lock()
+				delete(h.pendingAI, item.Path)
+				h.mu.Unlock()
+			} else {
+				h.logger.Warn("handler", "AI enhancement failed, will retry with backoff",
+					logging.F("filename", item.Filename),
+					logging.F("attempt", item.AttemptCount),
+					logging.F("error", err.Error()))
+				if h.enhanceLogger != nil {
+					h.enhanceLogger.Log(EnhanceLogEntry{
+						Action: "ai_retry_scheduled",
+						File:   item.Filename,
+						Reason: fmt.Sprintf("attempt %d failed: %s", item.AttemptCount, err.Error()),
+					})
+				}
+			}
 			continue
 		}
 
@@ -1084,6 +1167,49 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 		} else {
 			h.stats.RecordTV(result.BytesCopied)
 		}
+
+		// Send notifications for AI-enhanced moves (was previously missing)
+		var mediaType notify.MediaType
+		var season, episode int
+		yearStr := ""
+		if item.MediaType == "tv" {
+			mediaType = notify.MediaTypeTVEpisode
+			if aiResult.Season != nil && aiResult.Season.Int() != nil {
+				season = *aiResult.Season.Int()
+			}
+			if len(aiResult.Episodes) > 0 {
+				episode = aiResult.Episodes[0]
+			}
+		} else {
+			mediaType = notify.MediaTypeMovie
+		}
+		if aiResult.Year != nil && aiResult.Year.Int() != nil {
+			yearStr = fmt.Sprintf("%d", *aiResult.Year.Int())
+		}
+		h.sendNotificationsWithTracking(result, mediaType, aiResult.Title, yearStr, season, episode)
+
+		// Record AI improvement in tracking table
+		if h.db != nil {
+			now := time.Now()
+			imp := &database.AIImprovement{
+				RequestID:   fmt.Sprintf("ai-%s-%d", filepath.Base(item.Path), now.UnixNano()),
+				Filename:    item.Filename,
+				AITitle:     &aiResult.Title,
+				AIType:      &item.MediaType,
+				AIConfidence: &aiResult.Confidence,
+				Status:      "completed",
+				Attempts:    item.AttemptCount,
+				CompletedAt: &now,
+			}
+			if aiResult.Year != nil && aiResult.Year.Int() != nil {
+				imp.AIYear = aiResult.Year.Int()
+			}
+			if err := h.db.UpsertAIImprovement(imp); err != nil {
+				h.logger.Error("handler", "failed to record AI improvement", err,
+					logging.F("filename", item.Filename))
+			}
+		}
+
 		h.cleanupSourceDir(item.Path)
 	}
 }

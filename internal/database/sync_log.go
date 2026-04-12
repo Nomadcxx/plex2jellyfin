@@ -55,6 +55,27 @@ func (m *MediaDB) CompleteSyncLog(id int64, status string, processed, added, upd
 	return err
 }
 
+// RecoverStuckSyncLogs marks stale "running" entries as failed.
+// Call on startup and periodically to prevent permanently stuck entries.
+func (m *MediaDB) RecoverStuckSyncLogs(maxAge time.Duration) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	result, err := m.db.Exec(`
+		UPDATE sync_log SET
+			status = 'failed',
+			completed_at = ?,
+			error_message = 'recovered: stale entry exceeded max age'
+		WHERE status = 'running' AND started_at < ?`,
+		time.Now(), cutoff,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // GetRecentSyncLogs returns the N most recent sync logs
 func (m *MediaDB) GetRecentSyncLogs(limit int) ([]*SyncLog, error) {
 	m.mu.RLock()

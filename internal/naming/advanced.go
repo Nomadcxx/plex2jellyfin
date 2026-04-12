@@ -435,9 +435,17 @@ func stripOrphanedReleaseGroups(name string) string {
 
 		// If the last word is in the known groups, remove it
 		// BUT: Only if it's NOT a simple title-cased English word
+		// AND: Never strip if the word is a known media title
 		// This prevents removing English words like "Elixir", "Action", "Storm" which happen
 		// to also be release group names, while catching release groups with weird casing
+		if IsKnownMediaTitle(lastLower) {
+			break
+		}
 		if IsKnownReleaseGroup(lastLower) {
+			// Never strip down to 1 word or less
+			if len(words) <= 2 {
+				break
+			}
 			// Strip if:
 			// - ALL CAPS (likely a release group tag like "RARBG", "YIFY")
 			// - very short (1-3 chars, like "AA", "ML", "HD") - but NOT common words (checked above)
@@ -478,9 +486,13 @@ func stripOrphanedReleaseGroups(name string) string {
 		// Remove if last token is short uppercase or contains letter+digit mix
 		// BUT: Don't remove single letters (like "P" in "The Elixir P") - too aggressive
 		// Only remove if length 2-4 uppercase OR contains letter+digit mix
+		// AND: Never strip known media titles via heuristic either
 		cond1 := hasUpper && !hasLower && len(last) >= 2 && len(last) <= 4
 		cond2 := hasLetter && hasDigit
-		if cond1 || cond2 {
+		if (cond1 || cond2) && !IsKnownMediaTitle(lastLower) {
+			if len(words) <= 2 {
+				break
+			}
 			words = words[:len(words)-1]
 			continue
 		}
@@ -666,7 +678,9 @@ func CleanMovieName(name string) string {
 	}
 
 	// Strip release group info (handles dots, resolution, codecs, etc.)
-	name = StripReleaseGroup(name)
+	if !IsKnownMediaTitle(strings.ToLower(name)) {
+		name = StripReleaseGroup(name)
+	}
 
 	// Remove only the specific release year (preserves years in titles like "2049")
 	name = removeSpecificYear(name, year)

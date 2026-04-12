@@ -40,6 +40,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	// Start watching in a goroutine
 	errChan := make(chan error, 1)
@@ -54,6 +55,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return d.Stop()
 
 	case err := <-errChan:
+		d.watcher.Close()
 		return fmt.Errorf("watcher error: %w", err)
 
 	case <-ctx.Done():
@@ -86,6 +88,7 @@ func (d *Daemon) Run(interval time.Duration) error {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	for {
 		select {

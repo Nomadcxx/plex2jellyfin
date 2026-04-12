@@ -39,8 +39,9 @@ func CalculateTitleConfidence(title, originalFilename string) float64 {
 	if hasResolutionInTitle(title) {
 		confidence -= 0.4
 	}
-	if !strings.Contains(title, " ") && len(title) > 3 {
-		confidence -= 0.3 // Single word (but not short abbreviations)
+	// Single-word penalty: reduced from -0.3 to -0.1, and skip for known media titles
+	if !strings.Contains(title, " ") && len(title) > 3 && !IsKnownMediaTitle(title) {
+		confidence -= 0.1
 	}
 	if hasReleaseMarkers(originalFilename) {
 		confidence -= 0.1
@@ -51,8 +52,20 @@ func CalculateTitleConfidence(title, originalFilename string) float64 {
 		confidence += 0.1
 	}
 
+	// Floor: well-formed SxxExx filenames should never score below 0.5
+	if isTVPattern(originalFilename) && confidence < 0.5 {
+		confidence = 0.5
+	}
+
 	return clamp(confidence, 0.0, 1.0)
 }
+
+// isTVPattern checks if filename has a valid SxxExx pattern
+func isTVPattern(filename string) bool {
+	return tvPatternForConfidence.MatchString(filename)
+}
+
+var tvPatternForConfidence = regexp.MustCompile(`(?i)S\d{1,2}E\d{1,2}`)
 
 // hasDuplicateYear detects patterns like "Matrix (2001) (2001)" or "Movie 2020 2020"
 // Does NOT flag cases like "2001 A Space Odyssey (2001)" where year is part of title

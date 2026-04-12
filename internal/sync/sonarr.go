@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 const sonarrSourcePriority = 25
 
 // SyncFromSonarr imports series data from Sonarr API
-func (s *SyncService) SyncFromSonarr(ctx context.Context) error {
+func (s *SyncService) SyncFromSonarr(ctx context.Context) (retErr error) {
 	s.logger.Info("syncing from Sonarr")
 
 	logID, err := s.db.StartSyncLog("sonarr")
@@ -19,13 +20,25 @@ func (s *SyncService) SyncFromSonarr(ctx context.Context) error {
 		return err
 	}
 
-	// Get all series from Sonarr with timeout
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Recover from panics to avoid leaving sync_log stuck in "running"
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("panic in SyncFromSonarr: %v", r)
+			if err := s.db.CompleteSyncLog(logID, "failed", 0, 0, 0, retErr.Error()); err != nil {
+				s.logger.Error("sync", "Failed to complete sync log after panic", err)
+			}
+		}
+	}()
+
+	// Timeout: large libraries need several minutes to upsert all items
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	series, err := s.sonarr.GetAllSeries()
 	if err != nil {
-		s.db.CompleteSyncLog(logID, "failed", 0, 0, 0, err.Error())
+		if logErr := s.db.CompleteSyncLog(logID, "failed", 0, 0, 0, err.Error()); logErr != nil {
+			s.logger.Error("sync", "Failed to complete sync log", logErr)
+		}
 		return err
 	}
 
@@ -34,7 +47,9 @@ func (s *SyncService) SyncFromSonarr(ctx context.Context) error {
 	for _, show := range series {
 		select {
 		case <-ctx.Done():
-			s.db.CompleteSyncLog(logID, "failed", processed, added, updated, "context cancelled")
+			if logErr := s.db.CompleteSyncLog(logID, "failed", processed, added, updated, "context cancelled"); logErr != nil {
+				s.logger.Error("sync", "Failed to complete sync log", logErr)
+			}
 			return ctx.Err()
 		default:
 		}
@@ -82,7 +97,9 @@ func (s *SyncService) SyncFromSonarr(ctx context.Context) error {
 		}
 	}
 
-	s.db.CompleteSyncLog(logID, "success", processed, added, updated, "")
+	if logErr := s.db.CompleteSyncLog(logID, "success", processed, added, updated, ""); logErr != nil {
+		s.logger.Error("sync", "Failed to complete sync log", logErr)
+	}
 	s.logger.Info("sonarr sync completed", "processed", processed, "added", added, "updated", updated)
 
 	return nil

@@ -28,18 +28,14 @@ func (s *CleanupService) DeleteFileByID(fileID int64) error {
 		return fmt.Errorf("file not found: %d", fileID)
 	}
 
-	// Delete from database first
-	if err := s.db.DeleteMediaFileByID(fileID); err != nil {
-		return fmt.Errorf("failed to delete file from database: %w", err)
+	// Delete from filesystem first — if this fails, DB stays consistent
+	if err := os.Remove(file.Path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete file from filesystem: %w", err)
 	}
 
-	// Delete from filesystem
-	if err := os.Remove(file.Path); err != nil {
-		// Log but don't fail - the database record is already gone
-		// The file might have been moved or deleted already
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("failed to delete file from filesystem: %w", err)
-		}
+	// Now remove from database
+	if err := s.db.DeleteMediaFileByID(fileID); err != nil {
+		return fmt.Errorf("failed to delete file from database (filesystem already deleted): %w", err)
 	}
 
 	return nil

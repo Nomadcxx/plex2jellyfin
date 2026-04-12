@@ -568,3 +568,113 @@ func (m *MediaDB) GetLowConfidenceFiles(threshold float64, limit int) ([]*MediaF
 
 	return files, rows.Err()
 }
+
+// AICoverageStats holds per-volume AI parse coverage statistics
+type AICoverageStats struct {
+LibraryRoot  string
+TotalFiles   int
+AIParsed     int
+RegexParsed  int
+FolderParsed int
+TotalSize    int64
+AIParsedSize int64
+}
+
+// GetAICoverageStats returns AI parse coverage statistics grouped by library root
+func (m *MediaDB) GetAICoverageStats() ([]AICoverageStats, error) {
+m.mu.RLock()
+defer m.mu.RUnlock()
+
+query := `
+SELECT
+library_root,
+COUNT(*) as total_files,
+SUM(CASE WHEN parse_method = 'ai' THEN 1 ELSE 0 END) as ai_parsed,
+SUM(CASE WHEN parse_method = 'regex' THEN 1 ELSE 0 END) as regex_parsed,
+SUM(CASE WHEN parse_method = 'folder' THEN 1 ELSE 0 END) as folder_parsed,
+COALESCE(SUM(size), 0) as total_size,
+COALESCE(SUM(CASE WHEN parse_method = 'ai' THEN size ELSE 0 END), 0) as ai_parsed_size
+FROM media_files
+WHERE library_root != ''
+GROUP BY library_root
+ORDER BY total_files DESC
+`
+
+rows, err := m.db.Query(query)
+if err != nil {
+return nil, fmt.Errorf("failed to query AI coverage stats: %w", err)
+}
+defer rows.Close()
+
+var stats []AICoverageStats
+for rows.Next() {
+var s AICoverageStats
+if err := rows.Scan(&s.LibraryRoot, &s.TotalFiles, &s.AIParsed, &s.RegexParsed, &s.FolderParsed, &s.TotalSize, &s.AIParsedSize); err != nil {
+return nil, fmt.Errorf("failed to scan coverage stats: %w", err)
+}
+stats = append(stats, s)
+}
+
+return stats, rows.Err()
+}
+
+// GetFilesNeverAIParsed returns files that have never been processed by AI, optionally filtered by library root
+func (m *MediaDB) GetFilesNeverAIParsed(libraryRoot string, limit int) ([]*MediaFile, error) {
+m.mu.RLock()
+defer m.mu.RUnlock()
+
+query := `
+SELECT
+id, path, size, modified_at,
+media_type, parent_movie_id, parent_series_id, parent_episode_id,
+normalized_title, year, season, episode,
+resolution, source_type, codec, audio_format, quality_score,
+confidence, parse_method, needs_review,
+is_jellyfin_compliant, compliance_issues,
+source, source_priority, library_root,
+created_at, updated_at
+FROM media_files
+WHERE (parse_method IS NULL OR parse_method != 'ai')
+`
+
+args := []interface{}{}
+if libraryRoot != "" {
+query += " AND library_root = ?"
+args = append(args, libraryRoot)
+}
+query += " ORDER BY confidence ASC LIMIT ?"
+args = append(args, limit)
+
+rows, err := m.db.Query(query, args...)
+if err != nil {
+return nil, fmt.Errorf("failed to query files never AI parsed: %w", err)
+}
+defer rows.Close()
+
+var files []*MediaFile
+for rows.Next() {
+var file MediaFile
+var complianceJSON string
+err := rows.Scan(
+&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
+&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
+&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
+&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
+&file.Confidence, &file.ParseMethod, &file.NeedsReview,
+&file.IsJellyfinCompliant, &complianceJSON,
+&file.Source, &file.SourcePriority, &file.LibraryRoot,
+&file.CreatedAt, &file.UpdatedAt,
+)
+if err != nil {
+return nil, fmt.Errorf("failed to scan media file: %w", err)
+}
+if complianceJSON != "" {
+if err := json.Unmarshal([]byte(complianceJSON), &file.ComplianceIssues); err != nil {
+return nil, fmt.Errorf("failed to unmarshal compliance issues: %w", err)
+}
+}
+files = append(files, &file)
+}
+
+return files, rows.Err()
+}

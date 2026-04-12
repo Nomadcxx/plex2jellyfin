@@ -62,7 +62,7 @@ func ClassifyChange(regexTitle, aiTitle, regexYear, aiYear, regexMediaType, aiMe
 			return ChangeClassification{Category: ChangeYearCorrected, Safe: false, MinConfidence: 0.90}
 		}
 		if regexYear != "" && aiYear == "" {
-			return ChangeClassification{Category: ChangeYearRemoved, Safe: false, MinConfidence: 0}
+			return ChangeClassification{Category: ChangeYearRemoved, Safe: false, MinConfidence: 0.95}
 		}
 	}
 

@@ -41,7 +41,7 @@ func (n *RadarrNotifier) Notify(event OrganizationEvent) *NotifyResult {
 	}
 
 	if event.MediaType != MediaTypeMovie {
-		result.Success = true
+		result.Skipped = true
 		result.Duration = time.Since(start)
 		return result
 	}

@@ -188,6 +188,14 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
+
+	// Recover any sync_log entries stuck in "running" from previous crashes
+	if recovered, err := db.RecoverStuckSyncLogs(1 * time.Hour); err != nil {
+		logger.Warn("daemon", "Failed to recover stuck sync logs", logging.F("error", err.Error()))
+	} else if recovered > 0 {
+		logger.Info("daemon", "Recovered stuck sync log entries", logging.F("count", recovered))
+	}
+
 	// Get config directory for activity logging
 	configDir := filepath.Join(os.Getenv("HOME"), ".config", "jellywatch")
 	if cfgFile != "" {
@@ -306,7 +314,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			for {
 				select {
 				case <-ticker.C:
-					handler.ProcessPendingAI()
+					handler.ProcessPendingAI(ctx)
 				case <-ctx.Done():
 					return
 				}

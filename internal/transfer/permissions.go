@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -25,8 +26,9 @@ func ApplyPermissions(path string, opts TransferOptions) error {
 		}
 		if err := os.Chown(path, uid, gid); err != nil {
 			if os.Geteuid() != 0 {
-				return fmt.Errorf("chown failed (not running as root): target uid=%d gid=%d, current euid=%d: %w",
-					uid, gid, os.Geteuid(), err)
+				log.Printf("[permissions] warning: chown skipped for %s (not running as root, euid=%d): target uid=%d gid=%d",
+					path, os.Geteuid(), uid, gid)
+				return nil
 			}
 			return fmt.Errorf("chown failed: %w", err)
 		}

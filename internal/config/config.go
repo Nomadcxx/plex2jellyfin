@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -327,12 +328,20 @@ func (c *Config) Save() error {
 	}
 
 	configDir := filepath.Dir(configFile)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("unable to create config dir: %w", err)
 	}
 
 	content := c.ToTOML()
-	return os.WriteFile(configFile, []byte(content), 0644)
+	if err := os.WriteFile(configFile, []byte(content), 0600); err != nil {
+		return err
+	}
+
+	// Tighten permissions on existing config dir and file in case they were created with looser perms
+	os.Chmod(configDir, 0700)
+	os.Chmod(configFile, 0600)
+
+	return nil
 }
 
 func ConfigPath() (string, error) {
@@ -565,6 +574,7 @@ func formatStringSlice(s []string) string {
 func GetDatabasePath() string {
 	dbPath, err := paths.DatabasePath()
 	if err != nil {
+		log.Printf("[config] warning: could not determine database path, falling back to ./media.db: %v", err)
 		return "./media.db"
 	}
 	return dbPath

@@ -210,19 +210,58 @@ func FormatTVEpisodeFilename(title, year string, season, episode int, ext string
 	return fmt.Sprintf("%s S%02dE%02d.%s", title, season, episode, ext)
 }
 
-// releaseGroupSuffix matches release group tags at end of filename like "-SPARKS", "-postbot", "-SM737"
+// knownReleaseGroups is an exhaustive list of common release groups
+// used to safely strip only known groups instead of greedy -Word$ patterns
+var knownReleaseGroups = map[string]bool{
+	"sparks": true, "postbot": true, "sm737": true, "flux": true, "ethel": true,
+	"kitsune": true, "ntb": true, "cmrg": true, "fgt": true, "rarbg": true,
+	"yts": true, "yify": true, "evo": true, "ion10": true, "tigole": true,
+	"geckos": true, "stuttershit": true, "sadpanda": true, "grym": true,
+	"demand": true, "nogrp": true, "mzabi": true, "hone": true, "cakes": true,
+	"sujaidr": true, "ggez": true, "ggwp": true, "tbs": true, "lol": true,
+	"dimension": true, "asap": true, "immerse": true, "avs": true, "savvy": true,
+	"memento": true, "megusta": true, "fleet": true, "mtb": true, "deflate": true,
+	"morpheus": true, "aac": true, "pahe": true, "rocketman": true, "nuked": true,
+	"strife": true, "phoenix": true, "ghosts": true, "edith": true, "sonarr": true,
+	"scene": true, "monkee": true, "ctl": true, "kings": true, "lazy": true,
+	"pcok": true, "playready": true, "decibel": true, "epsilon": true,
+	"sigma": true, "tepes": true, "truffle": true, "nero": true, "group": true,
+	"amiable": true, "markii": true, "tabular": true, "tabularía": true, "tabularasa": true,
+}
+
+// qualityMarkerDetect detects if a string contains codec/quality markers,
+// indicating that any trailing -Word is almost certainly a release group
+var qualityMarkerDetect = regexp.MustCompile(`(?i)(x264|x265|h264|h265|hevc|avc|bluray|blu-ray|bdrip|remux|web-dl|webdl|webrip|\d{3,4}p|4k|uhd)`)
+
+// releaseGroupSuffix matches release group tags at end of filename like "-SPARKS", "-postbot"
 var releaseGroupSuffix = regexp.MustCompile(`(?i)-[A-Za-z0-9]+$`)
 
 func stripReleaseMarkers(s string) string {
-	// First, strip trailing release group suffix BEFORE replacing hyphens
-	// This catches patterns like "-SPARKS", "-postbot", "-SM737", etc.
-	// Keep stripping until no more match (handles chained groups like "-SPARKS-postbot")
+	// Phase 1: Strip known release group suffixes (safe — always strip these)
 	for {
-		newS := releaseGroupSuffix.ReplaceAllString(s, "")
-		if newS == s {
+		idx := strings.LastIndex(s, "-")
+		if idx < 0 || idx == len(s)-1 {
 			break
 		}
-		s = newS
+		candidate := strings.ToLower(s[idx+1:])
+		if knownReleaseGroups[candidate] {
+			s = s[:idx]
+		} else {
+			break
+		}
+	}
+
+	// Phase 2: If quality/codec markers are present, any remaining -Word$ suffix
+	// is almost certainly a release group, so strip it too.
+	// This is safe because titles like "Doctor-Who" won't have codec markers after them.
+	if qualityMarkerDetect.MatchString(s) {
+		for {
+			newS := releaseGroupSuffix.ReplaceAllString(s, "")
+			if newS == s {
+				break
+			}
+			s = newS
+		}
 	}
 
 	// Now replace separators with spaces

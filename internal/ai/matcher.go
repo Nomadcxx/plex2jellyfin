@@ -225,6 +225,25 @@ func (m *Matcher) parseWithModel(ctx context.Context, filename, model string) (*
 		return nil, fmt.Errorf("failed to parse AI response: %w (response: %s)", err, genResp.Response)
 	}
 
+	// Validate confidence bounds
+	if result.Confidence < 0 {
+		result.Confidence = 0
+	} else if result.Confidence > 1 {
+		result.Confidence = 1
+	}
+
+	// Validate season/episode bounds
+	if result.Season != nil && result.Season.Value != nil && *result.Season.Value < 0 {
+		return nil, fmt.Errorf("AI returned negative season: %d", *result.Season.Value)
+	}
+	if result.Episodes != nil {
+		for _, ep := range result.Episodes {
+			if ep < 0 {
+				return nil, fmt.Errorf("AI returned negative episode: %d", ep)
+			}
+		}
+	}
+
 	// Log latency for debugging
 	if os.Getenv("DEBUG_AI") == "1" {
 		fmt.Printf("[AI] Parsed '%s' in %v with %.2f confidence\n", filename, latency, result.Confidence)

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -363,7 +364,7 @@ func TestProcessPendingAI_ExpiresOldItems(t *testing.T) {
 		QueuedAt:  time.Now().Add(-25 * time.Hour), // 25 hours ago
 	}
 
-	handler.ProcessPendingAI()
+	handler.ProcessPendingAI(context.Background())
 
 	if len(handler.pendingAI) != 0 {
 		t.Errorf("expected expired item to be removed, got %d pending", len(handler.pendingAI))
@@ -393,7 +394,7 @@ func TestProcessPendingAI_SkipsMissingFiles(t *testing.T) {
 		QueuedAt:  time.Now(),
 	}
 
-	handler.ProcessPendingAI()
+	handler.ProcessPendingAI(context.Background())
 
 	if len(handler.pendingAI) != 0 {
 		t.Errorf("expected missing file to be removed, got %d pending", len(handler.pendingAI))

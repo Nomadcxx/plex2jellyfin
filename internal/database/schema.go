@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 12
+const currentSchemaVersion = 13
 
 // SQL migration scripts
 var migrations = []migration{
@@ -470,6 +470,13 @@ var migrations = []migration{
 			)`,
 			`CREATE INDEX idx_jellyfin_items_item_id ON jellyfin_items(jellyfin_item_id)`,
 			`INSERT INTO schema_version (version) VALUES (12)`,
+		},
+	},
+	{
+		version: 13,
+		up: []string{
+			`CREATE INDEX IF NOT EXISTS idx_media_files_parse_method ON media_files(parse_method)`,
+			`INSERT INTO schema_version (version) VALUES (13)`,
 		},
 	},
 }

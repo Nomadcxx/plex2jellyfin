@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,13 +15,23 @@ const filesystemSourcePriority = 50
 
 // SyncFromFilesystem scans library directories and updates the database
 // Returns the scan result including AI statistics
-func (s *SyncService) SyncFromFilesystem(ctx context.Context) (*scanner.ScanResult, error) {
+func (s *SyncService) SyncFromFilesystem(ctx context.Context) (result *scanner.ScanResult, retErr error) {
 	s.logger.Info("syncing from filesystem")
 
 	logID, err := s.db.StartSyncLog("filesystem")
 	if err != nil {
 		return nil, err
 	}
+
+	// Recover from panics to avoid leaving sync_log stuck in "running"
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("panic in SyncFromFilesystem: %v", r)
+			if err := s.db.CompleteSyncLog(logID, "failed", 0, 0, 0, retErr.Error()); err != nil {
+				s.logger.Error("sync", "Failed to complete sync log after panic", err)
+			}
+		}
+	}()
 
 	// Create file scanner for file-level scanning (Phase 4: CONDOR system)
 	var fileScanner *scanner.FileScanner
@@ -32,7 +43,7 @@ func (s *SyncService) SyncFromFilesystem(ctx context.Context) (*scanner.ScanResu
 
 	// Scan files into media_files table
 	s.logger.Info("scanning files into media_files table")
-	result, err := fileScanner.ScanLibraries(ctx, s.tvLibraries, s.movieLibraries)
+	result, err = fileScanner.ScanLibraries(ctx, s.tvLibraries, s.movieLibraries)
 	if err != nil {
 		s.logger.Warn("file scanner completed with errors", "errors", len(result.Errors))
 		for _, scanErr := range result.Errors {
@@ -54,7 +65,9 @@ func (s *SyncService) SyncFromFilesystem(ctx context.Context) (*scanner.ScanResu
 	for _, lib := range s.tvLibraries {
 		select {
 		case <-ctx.Done():
-			s.db.CompleteSyncLog(logID, "failed", processed, added, updated, "context cancelled")
+			if logErr := s.db.CompleteSyncLog(logID, "failed", processed, added, updated, "context cancelled"); logErr != nil {
+				s.logger.Error("sync", "Failed to complete sync log", logErr)
+			}
 			return result, ctx.Err()
 		default:
 		}
@@ -73,7 +86,9 @@ func (s *SyncService) SyncFromFilesystem(ctx context.Context) (*scanner.ScanResu
 	for _, lib := range s.movieLibraries {
 		select {
 		case <-ctx.Done():
-			s.db.CompleteSyncLog(logID, "failed", processed, added, updated, "context cancelled")
+			if logErr := s.db.CompleteSyncLog(logID, "failed", processed, added, updated, "context cancelled"); logErr != nil {
+				s.logger.Error("sync", "Failed to complete sync log", logErr)
+			}
 			return result, ctx.Err()
 		default:
 		}
@@ -88,7 +103,9 @@ func (s *SyncService) SyncFromFilesystem(ctx context.Context) (*scanner.ScanResu
 		updated += u
 	}
 
-	s.db.CompleteSyncLog(logID, "success", processed, added, updated, "")
+	if logErr := s.db.CompleteSyncLog(logID, "success", processed, added, updated, ""); logErr != nil {
+		s.logger.Error("sync", "Failed to complete sync log", logErr)
+	}
 	s.logger.Info("filesystem sync completed", "processed", processed, "added", added, "updated", updated)
 
 	return result, nil

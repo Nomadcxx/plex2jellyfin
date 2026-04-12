@@ -2,6 +2,7 @@ package organizer
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -406,7 +407,9 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 	}
 
 	if existingFile != "" && existingFile != targetPath {
-		os.Remove(existingFile)
+		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
+		}
 	}
 
 	opts := o.buildTransferOptions()
@@ -531,7 +534,9 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 	}
 
 	if existingFile != "" && existingFile != targetPath {
-		os.Remove(existingFile)
+		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
+		}
 	}
 
 	opts := o.buildTransferOptions()
@@ -688,7 +693,9 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 	}
 
 	if existingFile != "" && existingFile != targetPath {
-		os.Remove(existingFile)
+		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
+		}
 	}
 
 	opts := o.buildTransferOptions()
@@ -835,7 +842,9 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 	}
 
 	if existingFile != "" && existingFile != targetPath {
-		os.Remove(existingFile)
+		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
+		}
 	}
 
 	opts := o.buildTransferOptions()

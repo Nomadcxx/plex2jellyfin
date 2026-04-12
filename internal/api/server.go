@@ -2,8 +2,8 @@ package api
 
 import (
 	"net/http"
-	"os"
 	"strings"
+	"sync"
 
 	"github.com/Nomadcxx/jellywatch"
 	"github.com/Nomadcxx/jellywatch/api"
@@ -11,6 +11,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -24,6 +25,7 @@ type Server struct {
 	service        *service.CleanupService
 	activityLogger *activity.Logger
 	sessions       *SessionStore
+	sessionOnce    sync.Once
 	playbackLocks  *jellyfin.PlaybackLockManager
 	deferredQueue  *jellyfin.DeferredQueue
 }
@@ -54,23 +56,25 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 	}
 }
 
-// getConfigDir returns the config directory path
-func getConfigDir() (string, error) {
-	// Use the paths package to get the config directory
-	homeDir, err := getHomeDir()
-	if err != nil {
-		return "", err
+// Close releases server resources (stops SessionStore cleanup goroutine, etc.)
+func (s *Server) Close() {
+	if s.sessions != nil {
+		s.sessions.Close()
 	}
-	return homeDir + "/.config/jellywatch", nil
 }
 
-// getHomeDir returns the user's home directory
-func getHomeDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return home, nil
+// ensureSessionStore initializes the session store exactly once (race-safe).
+func (s *Server) ensureSessionStore() {
+	s.sessionOnce.Do(func() {
+		if s.sessions == nil {
+			s.sessions = NewSessionStore()
+		}
+	})
+}
+
+// getConfigDir returns the config directory path using sudo-aware paths package
+func getConfigDir() (string, error) {
+	return paths.JellyWatchDir()
 }
 
 // Handler returns the HTTP handler with CORS, API routes, and static file serving

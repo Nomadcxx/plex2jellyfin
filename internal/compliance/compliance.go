@@ -147,9 +147,10 @@ func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: season folder must be zero-padded (Season 01, not Season 1)", IssueInvalidPadding))
 	}
 
-	// Check year format
+	// Check year format — for TV shows, missing year is informational, not a compliance failure.
+	// Jellyfin recommends but does not require year in TV show folders.
 	if tv.Year == "" {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: missing year", IssueMissingYear))
+		// Don't add as a compliance issue — year is optional for TV
 	} else if !naming.HasYearInParentheses(filename) {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: year must be in format (YYYY)", IssueInvalidYearFormat))
 	}
