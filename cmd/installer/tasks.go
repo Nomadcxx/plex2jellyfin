@@ -46,7 +46,18 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 				status:      statusPending,
 			})
 		}
+	} else if m.updateMode {
+		// Update mode: rebuild binaries and restart services, preserve config
+		m.tasks = []installTask{
+			{name: "Check privileges", description: "Checking root access", execute: checkPrivileges, status: statusPending},
+			{name: "Check dependencies", description: "Verifying Go installation", execute: checkDependencies, status: statusPending},
+			{name: "Stop services", description: "Stopping running services", execute: stopRunningServices, status: statusPending},
+			{name: "Build binaries", description: "Building jellywatch and jellywatchd", execute: buildBinaries, status: statusPending},
+			{name: "Install binaries", description: "Installing to /usr/local/bin", execute: installBinaries, status: statusPending},
+			{name: "Start services", description: "Restarting services", execute: restartServices, status: statusPending},
+		}
 	} else {
+		// Fresh install: full wizard flow
 		m.tasks = []installTask{
 			{name: "Check privileges", description: "Checking root access", execute: checkPrivileges, status: statusPending},
 			{name: "Check dependencies", description: "Verifying Go installation", execute: checkDependencies, status: statusPending},
@@ -421,6 +432,40 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 `, actualUser, port)
+}
+
+// stopRunningServices stops jellywatchd and jellyweb before an update
+func stopRunningServices(m *model) error {
+	// Track what was running so we can restart only those
+	m.daemonWasRunning = exec.Command("systemctl", "is-active", "--quiet", "jellywatchd.service").Run() == nil
+	m.webEnabled = exec.Command("systemctl", "is-active", "--quiet", "jellyweb.service").Run() == nil
+
+	if m.daemonWasRunning {
+		if err := exec.Command("systemctl", "stop", "jellywatchd.service").Run(); err != nil {
+			return fmt.Errorf("failed to stop jellywatchd: %w", err)
+		}
+	}
+	if m.webEnabled {
+		if err := exec.Command("systemctl", "stop", "jellyweb.service").Run(); err != nil {
+			return fmt.Errorf("failed to stop jellyweb: %w", err)
+		}
+	}
+	return nil
+}
+
+// restartServices restarts services that were running before the update
+func restartServices(m *model) error {
+	if m.daemonWasRunning {
+		if err := exec.Command("systemctl", "start", "jellywatchd.service").Run(); err != nil {
+			return fmt.Errorf("failed to start jellywatchd: %w", err)
+		}
+	}
+	if m.webEnabled {
+		if err := exec.Command("systemctl", "start", "jellyweb.service").Run(); err != nil {
+			return fmt.Errorf("failed to start jellyweb: %w", err)
+		}
+	}
+	return nil
 }
 
 func stopDaemon(m *model) error {

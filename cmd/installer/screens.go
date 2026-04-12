@@ -751,6 +751,18 @@ func (m model) renderComplete() string {
 	cmd := lipgloss.NewStyle().Foreground(Secondary)
 	border := lipgloss.NewStyle().Foreground(FgMuted)
 
+	if m.updateMode {
+		b.WriteString(bold.Render("Update complete"))
+		b.WriteString("\n\n")
+		b.WriteString(muted.Render("Binaries updated and services restarted. Configuration preserved."))
+		b.WriteString("\n\n")
+		b.WriteString(muted.Render("Logs:  ") + cmd.Render("journalctl -u jellywatchd -f") + "\n")
+		b.WriteString(muted.Render("Web:   ") + cmd.Render("http://localhost:5522") + "\n")
+		b.WriteString("\n")
+		b.WriteString(muted.Render("Press Enter to exit"))
+		return b.String()
+	}
+
 	b.WriteString(bold.Render("Installation complete"))
 	b.WriteString("\n\n")
 
