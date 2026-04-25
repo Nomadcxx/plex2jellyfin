@@ -15,6 +15,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/jellywatch/internal/labeling"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
@@ -64,6 +65,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		File:       cfg.Logging.File,
 		MaxSizeMB:  cfg.Logging.MaxSizeMB,
 		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAgeDays: cfg.Logging.MaxAgeDays,
+		Compress:   cfg.Logging.Compress,
 	}
 	logger, err := logging.New(logCfg)
 	if err != nil {
@@ -77,6 +80,22 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	if len(watchPaths) == 0 {
 		return fmt.Errorf("no watch directories configured")
+	}
+
+	// Warn if any watch path overlaps with a library path — this causes the
+	// watcher to recursively monitor the entire library, generating massive
+	// event volume and memory usage.
+	allLibPaths := append(cfg.Libraries.Movies, cfg.Libraries.TV...)
+	for _, wp := range watchPaths {
+		wpClean := filepath.Clean(wp)
+		for _, lp := range allLibPaths {
+			lpClean := filepath.Clean(lp)
+			if wpClean == lpClean || strings.HasPrefix(wpClean, lpClean+string(filepath.Separator)) || strings.HasPrefix(lpClean, wpClean+string(filepath.Separator)) {
+				logger.Warn("daemon", "DANGEROUS: watch path overlaps with library path — this will cause excessive memory and CPU usage",
+					logging.F("watch_path", wp),
+					logging.F("library_path", lp))
+			}
+		}
 	}
 
 	notifyMgr := notify.NewManager(true)
@@ -322,6 +341,43 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		}()
 		logger.Info("daemon", "AI enhancement ticker started",
 			logging.F("interval", interval.String()))
+	}
+
+	// Start parse-decision labeler ticker (requires both Jellyfin and DB).
+	if jellyfinClient != nil && db != nil {
+		fetcher := labeling.JellyfinNameFetcher(func(itemID string) (string, error) {
+			item, err := jellyfinClient.GetItem(itemID)
+			if err != nil {
+				return "", err
+			}
+			return item.Name, nil
+		})
+		labeler := labeling.NewRunner(db, fetcher)
+		go func() {
+			// Short initial delay so the daemon starts up before the first run.
+			select {
+			case <-time.After(30 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+			ticker := time.NewTicker(15 * time.Minute)
+			defer ticker.Stop()
+			if err := labeler.RunOnce(); err != nil {
+				logger.Warn("daemon", "Parse-decision labeler error", logging.F("error", err.Error()))
+			}
+			for {
+				select {
+				case <-ticker.C:
+					if err := labeler.RunOnce(); err != nil {
+						logger.Warn("daemon", "Parse-decision labeler error", logging.F("error", err.Error()))
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		logger.Info("daemon", "Parse-decision labeler ticker started",
+			logging.F("interval", "15m"))
 	}
 
 	sigChan := make(chan os.Signal, 1)
