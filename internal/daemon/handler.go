@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -35,6 +36,7 @@ type MediaHandler struct {
 	debounceTime     time.Duration
 	pending          map[string]*time.Timer
 	transientRetries map[string]int
+	transientWarned  map[string]bool
 	mu               sync.Mutex
 	dryRun           bool
 	stats            *Stats
@@ -47,10 +49,26 @@ type MediaHandler struct {
 	pendingAI        map[string]*PendingItem
 	pendingAICap     int
 	aiMatcher        *ai.Matcher
+	aiCache          *ai.Cache
 	aiConfig         config.AIConfig
 	aiRateLimiter    *AIRateLimiter
 	enhanceLogger    *EnhanceLogger
 	aiEnabled        bool
+	// loggedErrors dedupes repeat ERROR emissions for the same (path, error)
+	// pair across retry scans within a process lifetime. Cleared only on
+	// restart — intentional: first retry after daemon restart re-logs once.
+	loggedErrors map[string]struct{}
+	// lastAIPermanentKey dedupes the AI-fallback WARN when the same permanent
+	// error (e.g. Ollama 403 subscription) repeats. First occurrence logs
+	// WARN; subsequent identical errors log at INFO until the key changes.
+	lastAIPermanentKey string
+	// aiBudgetWarned tracks whether an 80%-budget warning has already been
+	// emitted for the current hour/day window. Reset when the window rolls.
+	aiBudgetWarnedHour bool
+	aiBudgetWarnedDay  bool
+	// targetHealthState remembers the last known healthy/unhealthy state per
+	// target library so we only log on transitions, not every check.
+	targetHealthState map[string]bool
 }
 
 type PendingItem struct {
@@ -207,6 +225,15 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		rateLimiter = NewAIRateLimiter(cfg.AIConfig.HourlyLimit, cfg.AIConfig.DailyLimit)
 	}
 
+	// Wire an AI cache into the daemon path so duplicate filenames during
+	// bulk imports don't each cost an Ollama round-trip. Previously only
+	// the scanner's AIHelper used the cache; daemon events always hit
+	// upstream.
+	var aiCache *ai.Cache
+	if cfg.AIEnabled && cfg.AIConfig.CacheEnabled && cfg.Database != nil {
+		aiCache = ai.NewCache(cfg.Database.DB())
+	}
+
 	// Create TV-specific organizer
 	tvOrgOpts := []func(*organizer.Organizer){
 		organizer.WithDryRun(cfg.DryRun),
@@ -259,6 +286,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		debounceTime:     cfg.DebounceTime,
 		pending:          make(map[string]*time.Timer),
 		transientRetries: make(map[string]int),
+		transientWarned:  make(map[string]bool),
 		dryRun:           cfg.DryRun,
 		stats:            NewStats(),
 		logger:           cfg.Logger,
@@ -270,10 +298,13 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		pendingAI:        make(map[string]*PendingItem),
 		pendingAICap:     100,
 		aiMatcher:        cfg.AIMatcher,
+		aiCache:          aiCache,
 		aiConfig:         cfg.AIConfig,
 		aiRateLimiter:    rateLimiter,
 		enhanceLogger:    enhanceLog,
-		aiEnabled:        cfg.AIEnabled,
+		aiEnabled:         cfg.AIEnabled,
+		loggedErrors:      make(map[string]struct{}),
+		targetHealthState: make(map[string]bool),
 	}, nil
 }
 
@@ -298,14 +329,34 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 		return nil
 	}
 
+	// Skip files that are already inside a library directory. This guards
+	// against misconfigured watch paths that overlap with library paths,
+	// which would otherwise cause every library file to be re-processed.
+	if h.isInsideLibrary(normalizedPath) {
+		return nil
+	}
+
 	if action == ingestDefer {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 
 		if h.transientRetries[normalizedPath] >= 1 {
-			h.logger.Warn("handler", "Skipping repeated transient path retry",
-				logging.F("path", normalizedPath),
-				logging.F("reason", reason))
+			// First skip → WARN once; subsequent skips → DEBUG so a SABnzbd
+			// unpack producing dozens of fsnotify events for the same
+			// in-progress file doesn't flood the log. We use a separate
+			// "warned-once" set rather than incrementing transientRetries,
+			// because the counter has different semantics (it caps at 1
+			// to bound the work the handler does, not the logging).
+			if !h.transientWarned[normalizedPath] {
+				h.logger.Warn("handler", "Skipping repeated transient path retry",
+					logging.F("path", normalizedPath),
+					logging.F("reason", reason))
+				h.transientWarned[normalizedPath] = true
+			} else {
+				h.logger.Debug("handler", "Skipping repeated transient path retry",
+					logging.F("path", normalizedPath),
+					logging.F("reason", reason))
+			}
 			return nil
 		}
 
@@ -384,11 +435,67 @@ func (h *MediaHandler) logEntry(
 
 	if !result.Success && result.Error != nil {
 		entry.Error = result.Error.Error()
+		if errors.Is(result.Error, naming.ErrParseFailed) {
+			entry.Deterministic = true
+			if result.SourcePath != "" {
+				if st, serr := os.Stat(result.SourcePath); serr == nil {
+					entry.SourceMtime = st.ModTime().Unix()
+				}
+			}
+		}
 	}
 
 	if err := h.activityLogger.Log(entry); err != nil {
 		h.logger.Warn("handler", "Failed to log activity", logging.F("error", err.Error()))
 	}
+}
+
+// emitAIBudgetWarnings fires WARN once per window when hourly or daily AI
+// budget crosses 80% of cap, and resets the latch when usage drops back
+// below the threshold (e.g. window rollover). Avoids per-call log spam while
+// still surfacing budget pressure to operators.
+func (h *MediaHandler) emitAIBudgetWarnings(hUsed, hCap, dUsed, dCap int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if hCap > 0 {
+		ratio := float64(hUsed) / float64(hCap)
+		if ratio >= 0.8 && !h.aiBudgetWarnedHour {
+			h.logger.Warn("handler", "AI hourly budget ≥80%",
+				logging.F("used", hUsed),
+				logging.F("cap", hCap))
+			h.aiBudgetWarnedHour = true
+		} else if ratio < 0.8 && h.aiBudgetWarnedHour {
+			h.aiBudgetWarnedHour = false
+		}
+	}
+	if dCap > 0 {
+		ratio := float64(dUsed) / float64(dCap)
+		if ratio >= 0.8 && !h.aiBudgetWarnedDay {
+			h.logger.Warn("handler", "AI daily budget ≥80%",
+				logging.F("used", dUsed),
+				logging.F("cap", dCap))
+			h.aiBudgetWarnedDay = true
+		} else if ratio < 0.8 && h.aiBudgetWarnedDay {
+			h.aiBudgetWarnedDay = false
+		}
+	}
+}
+
+// shouldLogError returns true if (path, errMsg) hasn't been logged in this
+// process lifetime, and records it. Used to suppress repeat ERROR spam from
+// retry loops hammering a deterministically-unparseable file.
+func (h *MediaHandler) shouldLogError(path, errMsg string) bool {
+	if h.loggedErrors == nil {
+		return true
+	}
+	key := path + "\x00" + errMsg
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, seen := h.loggedErrors[key]; seen {
+		return false
+	}
+	h.loggedErrors[key] = struct{}{}
+	return true
 }
 
 // getSourceHint determines if a path is under a configured TV or Movie watch folder
@@ -408,6 +515,23 @@ func (h *MediaHandler) getSourceHint(path string) naming.SourceHint {
 	}
 
 	return naming.SourceUnknown
+}
+
+// isInsideLibrary returns true if the file path resides within any configured
+// library directory. Used to skip re-processing files that are already
+// organized when watch paths accidentally overlap with library paths.
+func (h *MediaHandler) isInsideLibrary(path string) bool {
+	for _, lib := range h.tvLibraries {
+		if strings.HasPrefix(path, filepath.Clean(lib)+string(filepath.Separator)) {
+			return true
+		}
+	}
+	for _, lib := range h.movieLibs {
+		if strings.HasPrefix(path, filepath.Clean(lib)+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *MediaHandler) processFile(path string) {
@@ -477,9 +601,14 @@ func (h *MediaHandler) processFile(path string) {
 			}
 
 			confidence := naming.CalculateTitleConfidence(tvInfo.Title, filename)
-			if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
+			if h.shouldQueueForAI(path, filename, tvInfo, nil, confidence) {
 				h.queueForAI(path, filename, tvInfo, nil, "tv", confidence, "")
 				return
+			}
+			if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
+				h.logger.Info("handler", "AI enhancement skipped for deterministic TV parse",
+					logging.F("filename", filename),
+					logging.F("confidence", confidence))
 			}
 		}
 
@@ -515,9 +644,14 @@ func (h *MediaHandler) processFile(path string) {
 			}
 
 			confidence := naming.CalculateTitleConfidence(movieInfo.Title, filename)
-			if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
+			if h.shouldQueueForAI(path, filename, nil, movieInfo, confidence) {
 				h.queueForAI(path, filename, nil, movieInfo, "movie", confidence, targetLib)
 				return
+			}
+			if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
+				h.logger.Info("handler", "AI enhancement skipped for deterministic movie parse",
+					logging.F("filename", filename),
+					logging.F("confidence", confidence))
 			}
 		}
 
@@ -536,7 +670,9 @@ func (h *MediaHandler) processFile(path string) {
 	radarrNotified := false
 
 	if err != nil {
-		h.logger.Error("handler", "Organization failed", err, logging.F("filename", filename))
+		if h.shouldLogError(path, err.Error()) {
+			h.logger.Error("handler", "Organization failed", err, logging.F("filename", filename))
+		}
 		h.stats.RecordError()
 		h.logEntry(result, mediaType, parsedTitle, parsedYear, parseMethod, aiConfidence, duration, sonarrNotified, radarrNotified)
 		return
@@ -565,12 +701,45 @@ func (h *MediaHandler) processFile(path string) {
 	} else if result.Skipped {
 		h.logger.Info("handler", "Skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
 	} else {
-		h.logger.Error("handler", "Organization failed", result.Error, logging.F("filename", filename))
+		errMsg := ""
+		if result.Error != nil {
+			errMsg = result.Error.Error()
+		}
+		if h.shouldLogError(path, errMsg) {
+			h.logger.Error("handler", "Organization failed", result.Error, logging.F("filename", filename))
+		}
 		h.stats.RecordError()
 	}
 
 	// Log activity entry after notifications
 	h.logEntry(result, mediaType, parsedTitle, parsedYear, parseMethod, aiConfidence, duration, sonarrNotified, radarrNotified)
+}
+
+func (h *MediaHandler) shouldQueueForAI(path, filename string, tvInfo *naming.TVShowInfo, movieInfo *naming.MovieInfo, confidence float64) bool {
+	if !h.aiEnabled || confidence >= h.aiConfig.AutoTriggerThreshold {
+		return false
+	}
+	if hasDeterministicTVEpisodeIdentity(path, tvInfo) {
+		return false
+	}
+	if hasDeterministicMovieIdentity(filename, movieInfo) {
+		return false
+	}
+	return true
+}
+
+func hasDeterministicTVEpisodeIdentity(path string, tvInfo *naming.TVShowInfo) bool {
+	if tvInfo == nil || strings.TrimSpace(tvInfo.Title) == "" || tvInfo.Season <= 0 || tvInfo.Episode <= 0 {
+		return false
+	}
+	return naming.IsTVEpisodeFromPath(path, naming.SourceUnknown)
+}
+
+func hasDeterministicMovieIdentity(filename string, movieInfo *naming.MovieInfo) bool {
+	if movieInfo == nil || strings.TrimSpace(movieInfo.Title) == "" || movieInfo.Year == "" {
+		return false
+	}
+	return !naming.IsObfuscatedFilename(filename)
 }
 
 func (h *MediaHandler) queueForAI(path, filename string, tvInfo *naming.TVShowInfo, movieInfo *naming.MovieInfo, mediaType string, confidence float64, targetLib string) {
@@ -666,11 +835,40 @@ func (h *MediaHandler) sendNotificationsWithTracking(result *organizer.Organizat
 
 func (h *MediaHandler) checkTargetHealth(targetLib string) bool {
 	err := transfer.CheckDiskHealthForTransfer("", targetLib, 5*time.Second, 0)
-	if err != nil {
+	healthy := err == nil
+	h.recordTargetHealth(targetLib, healthy, err)
+	if !healthy {
 		h.logger.Warn("handler", "Health check failed", logging.F("target", targetLib), logging.F("error", err.Error()))
-		return false
 	}
-	return true
+	return healthy
+}
+
+// recordTargetHealth logs a WARN (unhealthy→healthy) or INFO (healthy after
+// failure) when a target library's health flips. Suppresses per-check noise
+// while surfacing actionable state transitions.
+func (h *MediaHandler) recordTargetHealth(target string, healthy bool, err error) {
+	if target == "" {
+		return
+	}
+	h.mu.Lock()
+	prev, seen := h.targetHealthState[target]
+	h.targetHealthState[target] = healthy
+	h.mu.Unlock()
+	if seen && prev == healthy {
+		return
+	}
+	if !healthy {
+		reason := ""
+		if err != nil {
+			reason = err.Error()
+		}
+		h.logger.Warn("handler", "Target library became unhealthy",
+			logging.F("target", target),
+			logging.F("reason", reason))
+	} else if seen {
+		h.logger.Info("handler", "Target library recovered",
+			logging.F("target", target))
+	}
 }
 
 func (h *MediaHandler) IsMediaFile(path string) bool {
@@ -701,16 +899,58 @@ func (h *MediaHandler) containsVideoFilesRecursive(dir string) bool {
 	return found
 }
 
+// removeNonVideoContents walks dir and removes every non-media file and
+// then every empty descendant directory. Returns (removed, kept) — "kept"
+// is the count of media files encountered, i.e. files we refused to
+// delete. A caller seeing kept > 0 must abort the cleanup: new content
+// arrived between the initial containsVideoFilesRecursive check and now.
+// This closes the TOCTOU window that a naive os.RemoveAll would expose.
+func (h *MediaHandler) removeNonVideoContents(dir string) (removed, kept int) {
+	// Delete leaves first (post-order) so that empty directories can be
+	// removed after their contents are gone.
+	type entry struct {
+		path  string
+		isDir bool
+	}
+	var all []entry
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || path == dir {
+			return nil
+		}
+		all = append(all, entry{path: path, isDir: d.IsDir()})
+		return nil
+	})
+	// Process deepest paths first by length (approximate post-order).
+	for i := len(all) - 1; i >= 0; i-- {
+		e := all[i]
+		if e.isDir {
+			if err := os.Remove(e.path); err != nil && !os.IsNotExist(err) {
+				// Non-empty directory — an un-removable media file lives
+				// inside; let the caller see kept>0 and abort.
+			}
+			continue
+		}
+		if h.IsMediaFile(e.path) {
+			kept++
+			continue
+		}
+		if err := os.Remove(e.path); err == nil {
+			removed++
+		}
+	}
+	return removed, kept
+}
+
 // cleanupSourceDir removes the source download directory after a successful move,
 // walking up parent directories until it reaches a watch root.
 //
 // Gate: if sourcePath still exists the source was preserved (keepSource, dry-run),
 // so cleanup is skipped entirely.
 //
-// At each level it checks whether any video files remain; if none do, the whole
-// directory tree at that level is removed via os.RemoveAll (clearing junk files,
-// SABnzbd markers, empty subdirs, etc.). Concurrent RemoveAll on the same path is
-// safe — os.RemoveAll returns nil for non-existent paths.
+// For the starting release directory only, organizer.PurgeNonAllowed is called to
+// strip junk files while preserving allowed video and subtitle extensions. Parent
+// directories are only removed if they are already empty; junk in parents is never
+// touched to avoid interfering with other concurrent downloads.
 func (h *MediaHandler) cleanupSourceDir(sourcePath string) {
 	// Gate: source still present means keepSource or dry-run — do nothing.
 	if _, err := os.Stat(sourcePath); err == nil {
@@ -728,24 +968,37 @@ func (h *MediaHandler) cleanupSourceDir(sourcePath string) {
 	}
 
 	dir := filepath.Dir(sourcePath)
+	firstDir := true
 	for {
 		clean := filepath.Clean(dir)
 		if _, isRoot := rootSet[clean]; isRoot {
 			return // never remove a watch root
 		}
 
-		if h.containsVideoFilesRecursive(dir) {
-			return // more episodes pending — leave directory alone
+		if firstDir {
+			// Purge only disallowed files from the starting release directory.
+			// Subtitle and video files are preserved by the allowlist.
+			if err := organizer.PurgeNonAllowed(dir); err != nil {
+				h.logger.Warn("handler", "Allowlist purge failed",
+					logging.F("dir", dir), logging.F("error", err.Error()))
+			}
+			firstDir = false
 		}
 
-		if err := os.RemoveAll(dir); err != nil {
-			h.logger.Warn("handler", "Failed to remove source directory",
-				logging.F("dir", dir), logging.F("error", err.Error()))
-			// Continue walking up — a permission error on one level
-			// should not prevent cleanup of parent directories.
-		} else {
-			h.logger.Info("handler", "Cleaned up source directory", logging.F("dir", dir))
+		if h.containsVideoFilesRecursive(dir) {
+			return // media file present — leave directory alone
 		}
+
+		// os.Remove only succeeds on an empty directory; if any allowed file
+		// (subtitle, video sibling) or unexpected content remains, we stop.
+		if err := os.Remove(dir); err != nil {
+			if !os.IsNotExist(err) {
+				h.logger.Info("handler", "Directory not empty, stopping cleanup",
+					logging.F("dir", dir))
+			}
+			return
+		}
+		h.logger.Info("handler", "Cleaned up source directory", logging.F("dir", dir))
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -935,18 +1188,39 @@ func (h *MediaHandler) replayDeferredOperation(op jellyfin.DeferredOp) {
 func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 	h.mu.Lock()
 	items := make([]*PendingItem, 0, len(h.pendingAI))
+	var blacklistedCount int
+	var oldestQueuedAt time.Time
 	for _, item := range h.pendingAI {
 		items = append(items, item)
+		if item.Blacklisted {
+			blacklistedCount++
+		}
+		if oldestQueuedAt.IsZero() || item.QueuedAt.Before(oldestQueuedAt) {
+			oldestQueuedAt = item.QueuedAt
+		}
 	}
 	h.mu.Unlock()
+
+	// Snapshot the queue so operators can catch memory leaks (the audit
+	// flagged blacklisted items never being evicted — this surfaces that).
+	if len(items) > 0 {
+		oldestAge := time.Duration(0)
+		if !oldestQueuedAt.IsZero() {
+			oldestAge = time.Since(oldestQueuedAt).Round(time.Second)
+		}
+		h.logger.Info("handler", "AI queue snapshot",
+			logging.F("pending", len(items)),
+			logging.F("blacklisted", blacklistedCount),
+			logging.F("oldest_age", oldestAge.String()))
+	}
 
 	now := time.Now()
 	expiry := 24 * time.Hour
 
 	for _, item := range items {
-		// Expire old items
+		// Expire old items — fall back to regex result rather than abandoning the file
 		if now.Sub(item.QueuedAt) > expiry {
-			h.logger.Info("handler", "Expiring old pending AI item",
+			h.logger.Info("handler", "AI enhancement timed out after 24h, falling back to regex",
 				logging.F("filename", item.Filename))
 			if h.enhanceLogger != nil {
 				h.enhanceLogger.Log(EnhanceLogEntry{
@@ -958,6 +1232,7 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 			h.mu.Lock()
 			delete(h.pendingAI, item.Path)
 			h.mu.Unlock()
+			h.organizeWithRegexFallback(item)
 			continue
 		}
 
@@ -978,9 +1253,17 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 			continue
 		}
 
-		// Skip blacklisted items
+		// Skip blacklisted items, but expire them after 24h so that if
+		// upstream (Ollama subscription, network, etc.) recovers we get
+		// another attempt rather than leaking the item in memory forever.
 		if item.Blacklisted {
-			continue
+			if now.Sub(item.LastAttemptAt) < 24*time.Hour {
+				continue
+			}
+			item.Blacklisted = false
+			item.AttemptCount = 0
+			h.logger.Info("handler", "Un-blacklisting AI item for retry after cooldown",
+				logging.F("filename", item.Filename))
 		}
 
 		// Exponential backoff: skip items that haven't waited long enough since last attempt
@@ -1013,30 +1296,89 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 			continue
 		}
 
-		aiResult, err := h.aiMatcher.ParseWithRetry(ctx, item.Filename)
-		if h.aiRateLimiter != nil {
-			h.aiRateLimiter.Record()
+		// Cache check before upstream call — avoids re-parsing identical
+		// filenames (common with bulk imports / re-queued items) and saves
+		// rate-limiter budget. Cache keys use NormalizeInput so minor case
+		// or spacing differences don't cause misses.
+		var aiResult *ai.Result
+		var err error
+		var fromCache bool
+		if h.aiCache != nil {
+			normalized := ai.NormalizeInput(item.Filename)
+			if cached, cerr := h.aiCache.Get(normalized, item.MediaType, h.aiConfig.Model); cerr == nil && cached != nil {
+				aiResult = cached
+				fromCache = true
+				h.logger.Debug("handler", "AI cache hit",
+					logging.F("filename", item.Filename))
+			}
+		}
+		if !fromCache {
+			aiResult, err = h.aiMatcher.ParseWithRetry(ctx, item.Filename)
+		}
+
+		// Check for permanent error first — those don't consume AI budget.
+		var httpErr *ai.HTTPError
+		permanent := err != nil && errors.As(err, &httpErr) && httpErr.IsPermanent()
+
+		// Only count successful calls against the budget. The earlier logic
+		// recorded every non-permanent attempt, so a burst of transient
+		// failures could exhaust the daily cap without a single useful
+		// result. Permanent errors are free (by design); other failures are
+		// also free now — they'll retry under backoff.
+		if h.aiRateLimiter != nil && err == nil {
+			hUsed, hCap, dUsed, dCap := h.aiRateLimiter.RecordAndReport()
+			h.logger.Debug("handler", "AI budget consumed",
+				logging.F("filename", item.Filename),
+				logging.F("hourly", fmt.Sprintf("%d/%d", hUsed, hCap)),
+				logging.F("daily", fmt.Sprintf("%d/%d", dUsed, dCap)))
+			h.emitAIBudgetWarnings(hUsed, hCap, dUsed, dCap)
+		} else if permanent {
+			h.logger.Debug("handler", "AI budget skipped (permanent error)",
+				logging.F("filename", item.Filename),
+				logging.F("status", httpErr.StatusCode))
 		}
 
 		if err != nil {
 			item.AttemptCount++
 			item.LastAttemptAt = time.Now()
 
-			if item.AttemptCount >= maxAIRetryAttempts {
+			if permanent || item.AttemptCount >= maxAIRetryAttempts {
 				item.Blacklisted = true
-				h.logger.Warn("handler", "AI enhancement permanently blacklisted after max retries",
-					logging.F("filename", item.Filename),
-					logging.F("attempts", item.AttemptCount))
+				reason := fmt.Sprintf("failed %d attempts", item.AttemptCount)
+				permanentKey := ""
+				if permanent {
+					reason = fmt.Sprintf("permanent error (HTTP %d): %s", httpErr.StatusCode, httpErr.Body)
+					permanentKey = fmt.Sprintf("%d:%s", httpErr.StatusCode, httpErr.Body)
+				}
+				// First time we've seen this permanent error → WARN. Repeats
+				// from the same subscription/quota/auth state → INFO so the
+				// fallback stays visible without flooding the log.
+				h.mu.Lock()
+				firstOccurrence := permanentKey == "" || permanentKey != h.lastAIPermanentKey
+				if permanentKey != "" {
+					h.lastAIPermanentKey = permanentKey
+				}
+				h.mu.Unlock()
+				if firstOccurrence {
+					h.logger.Warn("handler", "AI enhancement unavailable, falling back to regex",
+						logging.F("filename", item.Filename),
+						logging.F("reason", reason))
+				} else {
+					h.logger.Info("handler", "AI enhancement unavailable (repeat), falling back to regex",
+						logging.F("filename", item.Filename),
+						logging.F("reason", reason))
+				}
 				if h.enhanceLogger != nil {
 					h.enhanceLogger.Log(EnhanceLogEntry{
 						Action: "permanently_blacklisted",
 						File:   item.Filename,
-						Reason: fmt.Sprintf("failed %d attempts", item.AttemptCount),
+						Reason: reason,
 					})
 				}
 				h.mu.Lock()
 				delete(h.pendingAI, item.Path)
 				h.mu.Unlock()
+				h.organizeWithRegexFallback(item)
 			} else {
 				h.logger.Warn("handler", "AI enhancement failed, will retry with backoff",
 					logging.F("filename", item.Filename),
@@ -1051,6 +1393,13 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 				}
 			}
 			continue
+		}
+
+		// Cache successful upstream results so re-queued identical
+		// filenames skip the network round-trip next time.
+		if !fromCache && h.aiCache != nil {
+			normalized := ai.NormalizeInput(item.Filename)
+			_ = h.aiCache.Put(normalized, item.MediaType, h.aiConfig.Model, aiResult, 0)
 		}
 
 		// Classify the change
@@ -1088,7 +1437,7 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 				reason = fmt.Sprintf("confidence %.2f below threshold %.2f", aiResult.Confidence, classification.MinConfidence)
 			}
 			if h.enhanceLogger != nil {
-				h.enhanceLogger.Log(EnhanceLogEntry{
+				entry := EnhanceLogEntry{
 					Action:       "flagged_for_review",
 					File:         item.Filename,
 					RegexTitle:   regexTitle,
@@ -1097,7 +1446,20 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 					Category:     string(classification.Category),
 					Reason:       reason,
 					MediaType:    item.MediaType,
-				})
+					SourcePath:   item.Path,
+					TargetLib:    item.TargetLib,
+				}
+				if aiResult.Year != nil {
+					entry.AIYear = aiResult.Year.Int()
+				}
+				if aiResult.Season != nil {
+					entry.AISeason = aiResult.Season.Int()
+				}
+				if len(aiResult.Episodes) > 0 {
+					ep := aiResult.Episodes[0]
+					entry.AIEpisode = &ep
+				}
+				h.enhanceLogger.Log(entry)
 			}
 			h.logger.Info("handler", "AI enhancement flagged for review",
 				logging.F("filename", item.Filename),
@@ -1186,20 +1548,29 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 		if aiResult.Year != nil && aiResult.Year.Int() != nil {
 			yearStr = fmt.Sprintf("%d", *aiResult.Year.Int())
 		}
-		h.sendNotificationsWithTracking(result, mediaType, aiResult.Title, yearStr, season, episode)
+		sonarrNotified, radarrNotified := h.sendNotificationsWithTracking(result, mediaType, aiResult.Title, yearStr, season, episode)
+
+		// Activity-log the AI-enhanced move so operators can see what actually
+		// ran via the AI path (previously only the regex path wrote entries).
+		var parsedYear *int
+		if aiResult.Year != nil && aiResult.Year.Int() != nil {
+			y := *aiResult.Year.Int()
+			parsedYear = &y
+		}
+		h.logEntry(result, mediaType, aiResult.Title, parsedYear, activity.MethodAI, aiResult.Confidence, time.Since(item.QueuedAt), sonarrNotified, radarrNotified)
 
 		// Record AI improvement in tracking table
 		if h.db != nil {
 			now := time.Now()
 			imp := &database.AIImprovement{
-				RequestID:   fmt.Sprintf("ai-%s-%d", filepath.Base(item.Path), now.UnixNano()),
-				Filename:    item.Filename,
-				AITitle:     &aiResult.Title,
-				AIType:      &item.MediaType,
+				RequestID:    fmt.Sprintf("ai-%s-%d", filepath.Base(item.Path), now.UnixNano()),
+				Filename:     item.Filename,
+				AITitle:      &aiResult.Title,
+				AIType:       &item.MediaType,
 				AIConfidence: &aiResult.Confidence,
-				Status:      "completed",
-				Attempts:    item.AttemptCount,
-				CompletedAt: &now,
+				Status:       "completed",
+				Attempts:     item.AttemptCount,
+				CompletedAt:  &now,
 			}
 			if aiResult.Year != nil && aiResult.Year.Int() != nil {
 				imp.AIYear = aiResult.Year.Int()
@@ -1212,6 +1583,127 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 
 		h.cleanupSourceDir(item.Path)
 	}
+}
+
+// organizeWithRegexFallback runs the standard regex+Sonarr organize path for
+// an item whose AI enhancement failed or was abandoned. The item's regex parse
+// was already below the AI auto-trigger threshold, so this is the best-effort
+// path when AI is unavailable — better than leaving files stuck indefinitely.
+func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
+	if item == nil || item.Path == "" {
+		return
+	}
+	if _, err := os.Stat(item.Path); os.IsNotExist(err) {
+		return
+	}
+
+	startTime := time.Now()
+	filename := item.Filename
+
+	var result *organizer.OrganizationResult
+	var err error
+	var mediaType notify.MediaType
+	var parsedTitle string
+	var parsedYear *int
+	var parsedSeason, parsedEpisode int
+
+	if item.MediaType == "tv" {
+		mediaType = notify.MediaTypeTVEpisode
+		if item.TVInfo != nil {
+			parsedTitle = item.TVInfo.Title
+			parsedSeason = item.TVInfo.Season
+			parsedEpisode = item.TVInfo.Episode
+			if item.TVInfo.Year != "" {
+				year := 0
+				if _, e := fmt.Sscanf(item.TVInfo.Year, "%d", &year); e == nil {
+					parsedYear = &year
+				}
+			}
+		}
+		result, err = h.tvOrganizer.OrganizeTVEpisodeAuto(item.Path, func(p string) (int64, error) {
+			info, statErr := os.Stat(p)
+			if statErr != nil {
+				return 0, statErr
+			}
+			return info.Size(), nil
+		})
+	} else {
+		mediaType = notify.MediaTypeMovie
+		if item.MovieInfo != nil {
+			parsedTitle = item.MovieInfo.Title
+			if item.MovieInfo.Year != "" {
+				year := 0
+				if _, e := fmt.Sscanf(item.MovieInfo.Year, "%d", &year); e == nil {
+					parsedYear = &year
+				}
+			}
+		}
+		targetLib := item.TargetLib
+		if targetLib == "" && len(h.movieLibs) > 0 {
+			targetLib = h.movieLibs[0]
+		}
+		if targetLib == "" {
+			h.logger.Warn("handler", "No movie libraries configured for fallback", logging.F("filename", filename))
+			h.stats.RecordError()
+			h.logEntry(&organizer.OrganizationResult{
+				Success:    false,
+				SourcePath: item.Path,
+				Error:      fmt.Errorf("no movie libraries configured"),
+			}, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, time.Since(startTime), false, false)
+			return
+		}
+		if !h.checkTargetHealth(targetLib) {
+			h.logger.Warn("handler", "Target library unhealthy, deferring fallback",
+				logging.F("filename", filename), logging.F("target", targetLib))
+			h.stats.RecordError()
+			h.logEntry(&organizer.OrganizationResult{
+				Success:    false,
+				SourcePath: item.Path,
+				Skipped:    true,
+				SkipReason: "target library unhealthy",
+				Error:      fmt.Errorf("target library unhealthy: %s", targetLib),
+			}, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, time.Since(startTime), false, false)
+			return
+		}
+		result, err = h.movieOrganizer.OrganizeMovie(item.Path, targetLib)
+	}
+
+	duration := time.Since(startTime)
+	sonarrNotified := false
+	radarrNotified := false
+
+	if err != nil {
+		h.logger.Error("handler", "Regex-fallback organization failed", err, logging.F("filename", filename))
+		h.stats.RecordError()
+		h.logEntry(result, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, duration, sonarrNotified, radarrNotified)
+		return
+	}
+
+	if result != nil && result.Success {
+		h.logger.Info("handler", "Regex-fallback organized successfully",
+			logging.F("source", filepath.Base(result.SourcePath)),
+			logging.F("target", result.TargetPath),
+			logging.F("size_mb", float64(result.BytesCopied)/(1024*1024)),
+			logging.F("duration", result.Duration.String()))
+		if mediaType == notify.MediaTypeMovie {
+			h.stats.RecordMovie(result.BytesCopied)
+		} else {
+			h.stats.RecordTV(result.BytesCopied)
+		}
+		yearStr := ""
+		if parsedYear != nil {
+			yearStr = fmt.Sprintf("%d", *parsedYear)
+		}
+		sonarrNotified, radarrNotified = h.sendNotificationsWithTracking(result, mediaType, parsedTitle, yearStr, parsedSeason, parsedEpisode)
+		h.cleanupSourceDir(item.Path)
+	} else if result != nil && result.Skipped {
+		h.logger.Info("handler", "Regex-fallback skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
+	} else if result != nil && result.Error != nil {
+		h.logger.Error("handler", "Regex-fallback organization failed", result.Error, logging.F("filename", filename))
+		h.stats.RecordError()
+	}
+
+	h.logEntry(result, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, duration, sonarrNotified, radarrNotified)
 }
 
 func (h *MediaHandler) PruneActivityLogs(days int) error {

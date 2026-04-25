@@ -340,6 +340,113 @@ func TestProcessFile_SlowLaneLowConfidence(t *testing.T) {
 	}
 }
 
+func TestProcessFile_DeterministicTVBypassesAI(t *testing.T) {
+	tests := []struct {
+		name    string
+		folder  string
+		file    string
+		wantDir string
+	}{
+		{
+			name:    "absolute episode",
+			folder:  "One.Piece.EP1156.Episode.1156.1080p.NF.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub",
+			file:    "One.Piece.EP1156.Episode.1156.1080p.NF.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub.mkv",
+			wantDir: "One Piece/Season 01",
+		},
+		{
+			name:    "date based episode",
+			folder:  "The.Daily.Show.2026.04.20.Annalena.Baerbock.1080p.WEB.h264-EDITH",
+			file:    "The.Daily.Show.2026.04.20.Annalena.Baerbock.1080p.WEB.h264-EDITH.mkv",
+			wantDir: "The Daily Show/Season 2026",
+		},
+		{
+			name:    "known title colliding with release group",
+			folder:  "BEEF.S01E01.1080p.WEB.h264-ETHEL",
+			file:    "BEEF.S01E01.1080p.WEB.h264-ETHEL.mkv",
+			wantDir: "BEEF/Season 01",
+		},
+		{
+			name:    "obfuscated file in deterministic release folder",
+			folder:  "BEEF.S01E02.1080p.WEB.h264-ETHEL",
+			file:    "q1reIwWo3oVx97qiPp0731Eglz7WFVn8.mkv",
+			wantDir: "BEEF/Season 01",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpLib := t.TempDir()
+			watchDir := t.TempDir()
+			releaseDir := filepath.Join(watchDir, tt.folder)
+			if err := os.MkdirAll(releaseDir, 0755); err != nil {
+				t.Fatalf("failed to create release dir: %v", err)
+			}
+			srcFile := filepath.Join(releaseDir, tt.file)
+			if err := os.WriteFile(srcFile, []byte("test"), 0644); err != nil {
+				t.Fatalf("failed to create source file: %v", err)
+			}
+
+			cfg := MediaHandlerConfig{
+				TVLibraries:     []string{tmpLib},
+				MovieLibs:       []string{tmpLib},
+				TVWatchPaths:    []string{watchDir},
+				MovieWatchPaths: []string{},
+				Logger:          logging.Nop(),
+				AIEnabled:       true,
+				AIConfig:        config.AIConfig{AutoTriggerThreshold: 0.95},
+				ConfigDir:       t.TempDir(),
+			}
+			handler, err := NewMediaHandler(cfg)
+			if err != nil {
+				t.Fatalf("failed to create handler: %v", err)
+			}
+
+			handler.processFile(srcFile)
+
+			if len(handler.pendingAI) != 0 {
+				t.Fatalf("expected deterministic TV parse to bypass AI, got %d pending items", len(handler.pendingAI))
+			}
+			if _, err := os.Stat(filepath.Join(tmpLib, filepath.FromSlash(tt.wantDir))); err != nil {
+				t.Fatalf("expected organized target dir %q: %v", tt.wantDir, err)
+			}
+		})
+	}
+}
+
+func TestProcessFile_DeterministicMovieWithYearBypassesAI(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+
+	srcFile := filepath.Join(watchDir, "Dune.Part.Two.2024.1080p.WEB-DL.x264-GROUP.mkv")
+	if err := os.WriteFile(srcFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("failed to create source file: %v", err)
+	}
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{},
+		MovieWatchPaths: []string{watchDir},
+		Logger:          logging.Nop(),
+		AIEnabled:       true,
+		AIConfig:        config.AIConfig{AutoTriggerThreshold: 0.95},
+		ConfigDir:       t.TempDir(),
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	handler.processFile(srcFile)
+
+	if len(handler.pendingAI) != 0 {
+		t.Fatalf("expected deterministic movie parse to bypass AI, got %d pending items", len(handler.pendingAI))
+	}
+	if _, err := os.Stat(filepath.Join(tmpLib, "Dune Part Two (2024)")); err != nil {
+		t.Fatalf("expected organized movie dir: %v", err)
+	}
+}
+
 func TestProcessPendingAI_ExpiresOldItems(t *testing.T) {
 	cfg := MediaHandlerConfig{
 		TVLibraries:     []string{"/tv"},
@@ -493,10 +600,14 @@ func TestCleanupSourceDir_LastEpisodeSeasonPack_FullCleanup(t *testing.T) {
 	h := makeHandler(t, []string{root})
 	h.cleanupSourceDir(movedFile)
 
+	// Starting release dir (s1) is purged and removed.
 	_, err := os.Stat(s1)
 	assert.True(t, os.IsNotExist(err), "Season 1 should be removed")
+
+	// Parent packDir has junk but is not purged (allowlist only applies to starting dir).
+	// os.Remove fails on non-empty packDir, so it is preserved.
 	_, err = os.Stat(packDir)
-	assert.True(t, os.IsNotExist(err), "pack dir should be removed (only junk remained)")
+	assert.NoError(t, err, "pack dir should be preserved — junk in parents is not purged")
 
 	_, err = os.Stat(root)
 	assert.NoError(t, err)
@@ -519,6 +630,8 @@ func TestContainsVideoFilesRecursive(t *testing.T) {
 }
 
 func TestCleanupSourceDir_SubtitlesTreatedAsJunk(t *testing.T) {
+	// Old name preserved for reference; behavior changed: subtitles are now preserved
+	// by PurgeNonAllowed so a directory with only subtitle leftovers is NOT removed.
 	root := t.TempDir()
 	dlDir := filepath.Join(root, "Movie.2025.1080p-GROUP")
 	require.NoError(t, os.MkdirAll(dlDir, 0755))
@@ -532,7 +645,9 @@ func TestCleanupSourceDir_SubtitlesTreatedAsJunk(t *testing.T) {
 	h.cleanupSourceDir(movedFile)
 
 	_, err := os.Stat(dlDir)
-	assert.True(t, os.IsNotExist(err), "dir with only .srt should be cleaned up")
+	assert.NoError(t, err, "dir with subtitle leftovers should be preserved by allowlist")
+	_, err = os.Stat(subFile)
+	assert.NoError(t, err, "subtitle file must survive")
 }
 
 func TestCleanupSourceDir_RemoveAllError_ContinuesUpward(t *testing.T) {
@@ -568,4 +683,99 @@ func TestCleanupSourceDir_WatchRootWithTrailingSlash(t *testing.T) {
 
 	_, err := os.Stat(dlDir)
 	assert.True(t, os.IsNotExist(err), "download dir should be removed even with trailing slash in watch root")
+}
+
+// --- Task 3.2: allowlist cleanup tests ---
+
+// TestCleanupAllowlist_JunkRemoved verifies that junk files in the starting
+// release directory are removed by PurgeNonAllowed after a successful move.
+func TestCleanupAllowlist_JunkRemoved(t *testing.T) {
+	root := t.TempDir()
+	dlDir := filepath.Join(root, "Movie.2025.1080p-GROUP")
+	require.NoError(t, os.MkdirAll(dlDir, 0755))
+
+	junk := filepath.Join(dlDir, "www.yts.mx.jpg")
+	require.NoError(t, os.WriteFile(junk, []byte("x"), 0644))
+	nfo := filepath.Join(dlDir, "info.nfo")
+	require.NoError(t, os.WriteFile(nfo, []byte("x"), 0644))
+
+	movedFile := filepath.Join(dlDir, "movie.mkv") // source already moved away
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(movedFile)
+
+	_, err := os.Stat(dlDir)
+	assert.True(t, os.IsNotExist(err), "dir should be removed once junk is purged and it is empty")
+}
+
+// TestCleanupAllowlist_SourceStillExists_NoCleanup re-validates the source-present
+// gate remains intact when using PurgeNonAllowed.
+func TestCleanupAllowlist_SourceStillExists_NoCleanup(t *testing.T) {
+	root := t.TempDir()
+	dlDir := filepath.Join(root, "Movie.2025.1080p-GROUP")
+	require.NoError(t, os.MkdirAll(dlDir, 0755))
+
+	videoFile := filepath.Join(dlDir, "movie.mkv")
+	require.NoError(t, os.WriteFile(videoFile, []byte("data"), 0644))
+
+	junk := filepath.Join(dlDir, "info.nfo")
+	require.NoError(t, os.WriteFile(junk, []byte("x"), 0644))
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(videoFile)
+
+	_, err := os.Stat(dlDir)
+	assert.NoError(t, err, "dir must remain when source file still exists")
+	_, err = os.Stat(junk)
+	assert.NoError(t, err, "junk must not be touched when source present")
+}
+
+// TestCleanupAllowlist_VideoRemains verifies that when another video remains in
+// the release directory after purge, the directory is not removed.
+func TestCleanupAllowlist_VideoRemains(t *testing.T) {
+	root := t.TempDir()
+	dlDir := filepath.Join(root, "Show.S01.1080p-GROUP")
+	require.NoError(t, os.MkdirAll(dlDir, 0755))
+
+	// A sibling episode still present.
+	sibling := filepath.Join(dlDir, "Show.S01E02.mkv")
+	require.NoError(t, os.WriteFile(sibling, []byte("data"), 0644))
+
+	movedFile := filepath.Join(dlDir, "Show.S01E01.mkv")
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(movedFile)
+
+	_, err := os.Stat(dlDir)
+	assert.NoError(t, err, "release dir must remain while sibling video is present")
+	_, err = os.Stat(sibling)
+	assert.NoError(t, err, "sibling video must not be removed")
+}
+
+// TestCleanupAllowlist_ParentNotPurged verifies that junk in a parent directory
+// is never removed; only the starting release directory receives PurgeNonAllowed.
+func TestCleanupAllowlist_ParentNotPurged(t *testing.T) {
+	root := t.TempDir()
+	packDir := filepath.Join(root, "Show.Complete.Series.1080p")
+	startingDir := filepath.Join(packDir, "Season.01")
+	require.NoError(t, os.MkdirAll(startingDir, 0755))
+
+	// Junk lives in the parent, not in the starting dir.
+	parentJunk := filepath.Join(packDir, "rarbg.com.txt")
+	require.NoError(t, os.WriteFile(parentJunk, []byte("x"), 0644))
+
+	movedFile := filepath.Join(startingDir, "Show.S01E01.mkv")
+
+	h := makeHandler(t, []string{root})
+	h.cleanupSourceDir(movedFile)
+
+	// Starting dir is empty → removed.
+	_, err := os.Stat(startingDir)
+	assert.True(t, os.IsNotExist(err), "empty starting dir should be removed")
+
+	// Parent contains junk but is NOT purged → os.Remove fails → parent preserved.
+	_, err = os.Stat(packDir)
+	assert.NoError(t, err, "parent with junk must not be purged")
+	_, err = os.Stat(parentJunk)
+	assert.NoError(t, err, "junk in parent must survive")
 }
