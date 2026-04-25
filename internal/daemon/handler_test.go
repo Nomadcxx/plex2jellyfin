@@ -9,6 +9,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
@@ -916,4 +917,101 @@ func TestRegexFallback_WritesParseDecision(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, d)
 	assert.NotEmpty(t, d.OrganizeOutcome, "organize_outcome should be set after fallback organize")
+}
+
+func TestHandleJellyfinWebhookEvent_ItemAddedUpdatesParseDecision(t *testing.T) {
+dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+db, err := database.OpenPath(dbPath)
+require.NoError(t, err)
+defer db.Close()
+
+targetPath := "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv"
+now := time.Now().UTC()
+id, err := db.InsertDecision(database.ParseDecision{
+SourcePath:      "/downloads/the.matrix.1999.mkv",
+SourceFilename:  "the.matrix.1999.mkv",
+EventAt:         now,
+TargetPath:      targetPath,
+OrganizeOutcome: "success",
+})
+require.NoError(t, err)
+
+handler := &MediaHandler{
+db:            db,
+playbackLocks: jellyfin.NewPlaybackLockManager(),
+deferredQueue: jellyfin.NewDeferredQueue(),
+}
+
+event := jellyfin.WebhookEvent{
+NotificationType: jellyfin.EventItemAdded,
+ItemID:           "jf-item-001",
+ItemPath:         targetPath,
+ItemName:         "The Matrix",
+ItemType:         "Movie",
+ProviderImdb:     "tt0133093",
+ProviderTmdb:     "603",
+}
+
+handler.HandleJellyfinWebhookEvent(event)
+
+dec, err := db.GetDecision(id)
+require.NoError(t, err)
+require.NotNil(t, dec)
+assert.Equal(t, "jf-item-001", dec.JellyfinItemID)
+assert.Equal(t, "tt0133093", dec.JellyfinImdbID)
+assert.Equal(t, "603", dec.JellyfinTmdbID)
+assert.NotNil(t, dec.JellyfinResolvedAt)
+}
+
+func TestHandleJellyfinWebhookEvent_ItemAddedSkipsResolved(t *testing.T) {
+dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+db, err := database.OpenPath(dbPath)
+require.NoError(t, err)
+defer db.Close()
+
+targetPath := "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv"
+now := time.Now().UTC().Add(-1 * time.Hour)
+resolvedAt := now
+resolvedID, err := db.InsertDecision(database.ParseDecision{
+SourcePath:         "/downloads/old.mkv",
+SourceFilename:     "old.mkv",
+EventAt:            now,
+TargetPath:         targetPath,
+OrganizeOutcome:    "success",
+JellyfinItemID:     "old-jf-id",
+JellyfinResolvedAt: &resolvedAt,
+})
+require.NoError(t, err)
+
+unresolvedID, err := db.InsertDecision(database.ParseDecision{
+SourcePath:      "/downloads/the.matrix.1999.mkv",
+SourceFilename:  "the.matrix.1999.mkv",
+EventAt:         time.Now().UTC(),
+TargetPath:      targetPath,
+OrganizeOutcome: "success",
+})
+require.NoError(t, err)
+
+handler := &MediaHandler{
+db:            db,
+playbackLocks: jellyfin.NewPlaybackLockManager(),
+deferredQueue: jellyfin.NewDeferredQueue(),
+}
+
+handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
+NotificationType: jellyfin.EventItemAdded,
+ItemID:           "new-jf-id",
+ItemPath:         targetPath,
+ItemName:         "The Matrix",
+ItemType:         "Movie",
+})
+
+resolved, err := db.GetDecision(resolvedID)
+require.NoError(t, err)
+assert.Equal(t, "old-jf-id", resolved.JellyfinItemID, "resolved row must not be touched")
+
+updated, err := db.GetDecision(unresolvedID)
+require.NoError(t, err)
+assert.Equal(t, "new-jf-id", updated.JellyfinItemID)
+assert.NotNil(t, updated.JellyfinResolvedAt)
 }

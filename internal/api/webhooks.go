@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/activity"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 )
 
@@ -111,6 +112,20 @@ func (s *Server) handleItemAdded(event jellyfin.WebhookEvent) {
 		if err := s.db.UpsertJellyfinItem(path, itemID, event.ItemName, event.ItemType); err != nil {
 			s.logJellyfinActivity("jellyfin_item_added", path, event.ItemName, false, err.Error())
 			return
+		}
+		if dec, err := s.db.GetUnresolvedDecisionByTargetPath(path); err == nil && dec != nil {
+			now := time.Now().UTC()
+			if updateErr := s.db.UpdateOutcome(dec.ID, database.OutcomeUpdate{
+				JellyfinItemID:     itemID,
+				JellyfinImdbID:     event.ProviderImdb,
+				JellyfinTmdbID:     event.ProviderTmdb,
+				JellyfinTvdbID:     event.ProviderTvdb,
+				JellyfinResolvedAt: &now,
+			}); updateErr != nil {
+				s.logJellyfinActivity("jellyfin_decision_resolve", path, event.ItemName, false, updateErr.Error())
+			}
+		} else if err != nil {
+			s.logJellyfinActivity("jellyfin_decision_resolve", path, event.ItemName, false, err.Error())
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
@@ -312,5 +313,61 @@ t.Errorf("expected ItemName=The Matrix, got %s", event.ItemName)
 }
 if event.ItemType != "Movie" {
 t.Errorf("expected ItemType=Movie, got %s", event.ItemType)
+}
+}
+
+func TestHandleItemAdded_UpdatesParseDecision(t *testing.T) {
+dbPath := filepath.Join(t.TempDir(), "api-decision.db")
+db, err := database.OpenPath(dbPath)
+if err != nil {
+t.Fatalf("OpenPath: %v", err)
+}
+defer db.Close()
+
+targetPath := "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv"
+id, err := db.InsertDecision(database.ParseDecision{
+SourcePath:      "/downloads/the.matrix.1999.mkv",
+SourceFilename:  "the.matrix.1999.mkv",
+EventAt:         time.Now().UTC(),
+TargetPath:      targetPath,
+OrganizeOutcome: "success",
+})
+if err != nil {
+t.Fatalf("InsertDecision: %v", err)
+}
+
+s := &Server{
+cfg: &config.Config{
+Jellyfin: config.JellyfinConfig{WebhookSecret: "test-secret"},
+},
+db:            db,
+playbackLocks: jellyfin.NewPlaybackLockManager(),
+deferredQueue: jellyfin.NewDeferredQueue(),
+}
+
+payload := []byte(`{"NotificationType":"ItemAdded","ItemPath":"` + targetPath + `","ItemId":"jf-api-1","Name":"The Matrix","ItemType":"Movie","Provider_imdb":"tt0133093","Provider_tmdb":"603"}`)
+req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewReader(payload))
+req.Header.Set("X-Jellywatch-Webhook-Secret", "test-secret")
+w := httptest.NewRecorder()
+s.HandleJellyfinWebhook(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d", w.Code)
+}
+
+dec, err := db.GetDecision(id)
+if err != nil {
+t.Fatalf("GetDecision: %v", err)
+}
+if dec.JellyfinItemID != "jf-api-1" {
+t.Fatalf("expected JellyfinItemID=jf-api-1, got %q", dec.JellyfinItemID)
+}
+if dec.JellyfinImdbID != "tt0133093" {
+t.Fatalf("expected JellyfinImdbID=tt0133093, got %q", dec.JellyfinImdbID)
+}
+if dec.JellyfinTmdbID != "603" {
+t.Fatalf("expected JellyfinTmdbID=603, got %q", dec.JellyfinTmdbID)
+}
+if dec.JellyfinResolvedAt == nil {
+t.Fatalf("expected JellyfinResolvedAt to be set")
 }
 }

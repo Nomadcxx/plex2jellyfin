@@ -1144,6 +1144,24 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 				}
 				return
 			}
+			if dec, err := h.db.GetUnresolvedDecisionByTargetPath(path); err != nil {
+				if h.logger != nil {
+					h.logger.Warn("handler", "Failed to query parse decision for path", logging.F("path", path), logging.F("error", err.Error()))
+				}
+			} else if dec != nil {
+				now := time.Now().UTC()
+				if updateErr := h.db.UpdateOutcome(dec.ID, database.OutcomeUpdate{
+					JellyfinItemID:     itemID,
+					JellyfinImdbID:     event.ProviderImdb,
+					JellyfinTmdbID:     event.ProviderTmdb,
+					JellyfinTvdbID:     event.ProviderTvdb,
+					JellyfinResolvedAt: &now,
+				}); updateErr != nil {
+					if h.logger != nil {
+						h.logger.Warn("handler", "Failed to update parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", updateErr.Error()))
+					}
+				}
+			}
 		}
 		if h.logger != nil {
 			h.logger.Info("handler", "Jellyfin item added", logging.F("path", path), logging.F("item_id", itemID), logging.F("name", event.ItemName), logging.F("type", event.ItemType))
