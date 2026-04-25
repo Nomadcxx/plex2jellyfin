@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -263,4 +264,53 @@ func TestWebhookAuth_FullFlowWithGeneratedSecret(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 with valid generated secret, got %d", w.Code)
 	}
+}
+
+func TestWebhookFlatPayload(t *testing.T) {
+var event jellyfin.WebhookEvent
+payload := `{"NotificationType":"ItemAdded","ItemId":"flat-id","ItemPath":"/flat/path.mkv","Provider_imdb":"tt0133093"}`
+if err := json.Unmarshal([]byte(payload), &event); err != nil {
+t.Fatalf("failed to decode flat payload: %v", err)
+}
+if event.NotificationType != jellyfin.EventItemAdded {
+t.Errorf("expected NotificationType=%s, got %s", jellyfin.EventItemAdded, event.NotificationType)
+}
+if event.ItemID != "flat-id" {
+t.Errorf("expected ItemID=flat-id, got %s", event.ItemID)
+}
+if event.ItemPath != "/flat/path.mkv" {
+t.Errorf("expected ItemPath=/flat/path.mkv, got %s", event.ItemPath)
+}
+if event.ProviderImdb != "tt0133093" {
+t.Errorf("expected ProviderImdb=tt0133093, got %s", event.ProviderImdb)
+}
+}
+
+func TestWebhookNestedPayload(t *testing.T) {
+var event jellyfin.WebhookEvent
+payload := `{"eventType":"ItemAdded","timestamp":"2025-01-01T00:00:00Z","payload":{"item":{"id":"abc-nested-id","path":"/media/Movies/The Matrix.mkv","name":"The Matrix","type":"Movie","providerIds":{"Imdb":"tt0133093","Tmdb":"603","Tvdb":""}}}}`
+if err := json.Unmarshal([]byte(payload), &event); err != nil {
+t.Fatalf("failed to decode nested payload: %v", err)
+}
+if event.NotificationType != jellyfin.EventItemAdded {
+t.Errorf("expected NotificationType=%s, got %s", jellyfin.EventItemAdded, event.NotificationType)
+}
+if event.ItemID != "abc-nested-id" {
+t.Errorf("expected ItemID=abc-nested-id, got %s", event.ItemID)
+}
+if event.ItemPath != "/media/Movies/The Matrix.mkv" {
+t.Errorf("expected ItemPath, got %s", event.ItemPath)
+}
+if event.ProviderImdb != "tt0133093" {
+t.Errorf("expected ProviderImdb=tt0133093, got %s", event.ProviderImdb)
+}
+if event.ProviderTmdb != "603" {
+t.Errorf("expected ProviderTmdb=603, got %s", event.ProviderTmdb)
+}
+if event.ItemName != "The Matrix" {
+t.Errorf("expected ItemName=The Matrix, got %s", event.ItemName)
+}
+if event.ItemType != "Movie" {
+t.Errorf("expected ItemType=Movie, got %s", event.ItemType)
+}
 }
