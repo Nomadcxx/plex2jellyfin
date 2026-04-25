@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
@@ -791,4 +792,128 @@ func TestObfuscatedFileHandling(t *testing.T) {
 	assert.Equal(t, 2, info.Season)
 	assert.Equal(t, 7, info.Episode)
 	assert.NotEmpty(t, tokens, "verbose call should return stripped tokens from folder name")
+}
+
+func TestProcessFile_WritesParseDecision(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+
+	srcFile := filepath.Join(watchDir, "Breaking.Bad.S01E01.1080p.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0644))
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       false,
+		Database:        db,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	handler.processFile(srcFile)
+
+	rows, err := db.QueryDecisions(database.QueryFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	d := rows[0]
+	assert.Equal(t, srcFile, d.SourcePath)
+	assert.Equal(t, "Breaking.Bad.S01E01.1080p.mkv", d.SourceFilename)
+	assert.NotEmpty(t, d.ParseMethod)
+	assert.Equal(t, "Breaking Bad", d.ParsedTitle)
+	assert.NotEmpty(t, d.OrganizeOutcome)
+}
+
+func TestAIItemHasParseDecisionID(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+
+	// obfuscated movie filename → low confidence → queued for AI
+	srcFile := filepath.Join(watchDir, "abc123def456xyz789.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0644))
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{},
+		MovieWatchPaths: []string{watchDir},
+		Logger:          logging.Nop(),
+		AIEnabled:       true,
+		AIConfig:        config.AIConfig{AutoTriggerThreshold: 0.6},
+		ConfigDir:       t.TempDir(),
+		Database:        db,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	handler.processFile(srcFile)
+
+	require.Len(t, handler.pendingAI, 1)
+	var item *PendingItem
+	for _, v := range handler.pendingAI {
+		item = v
+		break
+	}
+	assert.NotZero(t, item.ParseDecisionID, "PendingItem should carry ParseDecisionID for AI path")
+}
+
+func TestRegexFallback_WritesParseDecision(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+
+	srcFile := filepath.Join(watchDir, "Breaking.Bad.S01E01.1080p.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0644))
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:     srcFile,
+		SourceFilename: "Breaking.Bad.S01E01.1080p.mkv",
+		EventAt:        time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	tvInfo := &naming.TVShowInfo{Title: "Breaking Bad", Season: 1, Episode: 1}
+	item := &PendingItem{
+		Path:            srcFile,
+		Filename:        "Breaking.Bad.S01E01.1080p.mkv",
+		MediaType:       "tv",
+		TVInfo:          tvInfo,
+		ParseDecisionID: id,
+	}
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       false,
+		Database:        db,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	handler.organizeWithRegexFallback(item)
+
+	d, err := db.GetDecision(id)
+	require.NoError(t, err)
+	require.NotNil(t, d)
+	assert.NotEmpty(t, d.OrganizeOutcome, "organize_outcome should be set after fallback organize")
 }

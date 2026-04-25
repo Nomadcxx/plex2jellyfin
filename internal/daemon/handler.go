@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -72,17 +73,18 @@ type MediaHandler struct {
 }
 
 type PendingItem struct {
-	Path          string
-	Filename      string
-	TVInfo        *naming.TVShowInfo
-	MovieInfo     *naming.MovieInfo
-	MediaType     string
-	Confidence    float64
-	QueuedAt      time.Time
-	TargetLib     string
-	AttemptCount  int
-	LastAttemptAt time.Time
-	Blacklisted   bool
+	Path            string
+	Filename        string
+	TVInfo          *naming.TVShowInfo
+	MovieInfo       *naming.MovieInfo
+	MediaType       string
+	Confidence      float64
+	QueuedAt        time.Time
+	TargetLib       string
+	AttemptCount    int
+	LastAttemptAt   time.Time
+	Blacklisted     bool
+	ParseDecisionID int64
 }
 
 const maxAIRetryAttempts = 10
@@ -581,6 +583,27 @@ func (h *MediaHandler) processFile(path string) {
 	sourceHint := h.getSourceHint(path)
 	isTVEpisode := naming.IsTVEpisodeFromPath(path, sourceHint)
 
+	// Insert one parse decision row per debounced processing attempt.
+	var decisionID int64
+	if h.db != nil {
+		mediaTypeGuessed := "movie"
+		if isTVEpisode {
+			mediaTypeGuessed = "tv"
+		}
+		var insertErr error
+		decisionID, insertErr = h.db.InsertDecision(database.ParseDecision{
+			SourcePath:       path,
+			SourceFilename:   filepath.Base(path),
+			EventAt:          time.Now().UTC(),
+			MediaTypeGuessed: mediaTypeGuessed,
+		})
+		if insertErr != nil {
+			h.logger.Warn("handler", "failed to insert parse decision",
+				logging.F("filename", filename),
+				logging.F("error", insertErr.Error()))
+		}
+	}
+
 	if isTVEpisode {
 		if len(h.tvLibraries) == 0 {
 			h.logger.Warn("handler", "No TV libraries configured, skipping", logging.F("filename", filename))
@@ -588,7 +611,7 @@ func (h *MediaHandler) processFile(path string) {
 		}
 		mediaType = notify.MediaTypeTVEpisode
 
-		tvInfo, parseErr := naming.ParseTVShowFromPath(path)
+		tvInfo, strippedTokens, parseErr := naming.ParseTVShowFromPathVerbose(path)
 		if parseErr == nil {
 			parsedTitle = tvInfo.Title
 			parsedSeason = tvInfo.Season
@@ -600,9 +623,34 @@ func (h *MediaHandler) processFile(path string) {
 				}
 			}
 
+			if h.db != nil && decisionID != 0 {
+				u := database.ParseUpdate{
+					ParseMethod:      string(activity.MethodRegex),
+					ParsedTitle:      tvInfo.Title,
+					ParsedYear:       parsedYear,
+					MediaTypeGuessed: "tv",
+				}
+				if tvInfo.Season != 0 {
+					s := tvInfo.Season
+					u.ParsedSeason = &s
+				}
+				if tvInfo.Episode != 0 {
+					e := tvInfo.Episode
+					u.ParsedEpisode = &e
+				}
+				if b, jerr := json.Marshal(strippedTokens); jerr == nil {
+					u.ParserStrippedTokens = string(b)
+				}
+				if updateErr := h.db.UpdateParse(decisionID, u); updateErr != nil {
+					h.logger.Warn("handler", "failed to update parse decision",
+						logging.F("filename", filename),
+						logging.F("error", updateErr.Error()))
+				}
+			}
+
 			confidence := naming.CalculateTitleConfidence(tvInfo.Title, filename)
 			if h.shouldQueueForAI(path, filename, tvInfo, nil, confidence) {
-				h.queueForAI(path, filename, tvInfo, nil, "tv", confidence, "")
+				h.queueForAI(path, filename, tvInfo, nil, "tv", confidence, "", decisionID)
 				return
 			}
 			if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
@@ -633,7 +681,7 @@ func (h *MediaHandler) processFile(path string) {
 		targetLib = h.movieLibs[0]
 		mediaType = notify.MediaTypeMovie
 
-		movieInfo, parseErr := naming.ParseMovieFromPath(path)
+		movieInfo, strippedTokens, parseErr := naming.ParseMovieFromPathVerbose(path)
 		if parseErr == nil {
 			parsedTitle = movieInfo.Title
 			if movieInfo.Year != "" {
@@ -643,9 +691,26 @@ func (h *MediaHandler) processFile(path string) {
 				}
 			}
 
+			if h.db != nil && decisionID != 0 {
+				u := database.ParseUpdate{
+					ParseMethod:      string(activity.MethodRegex),
+					ParsedTitle:      movieInfo.Title,
+					ParsedYear:       parsedYear,
+					MediaTypeGuessed: "movie",
+				}
+				if b, jerr := json.Marshal(strippedTokens); jerr == nil {
+					u.ParserStrippedTokens = string(b)
+				}
+				if updateErr := h.db.UpdateParse(decisionID, u); updateErr != nil {
+					h.logger.Warn("handler", "failed to update parse decision",
+						logging.F("filename", filename),
+						logging.F("error", updateErr.Error()))
+				}
+			}
+
 			confidence := naming.CalculateTitleConfidence(movieInfo.Title, filename)
 			if h.shouldQueueForAI(path, filename, nil, movieInfo, confidence) {
-				h.queueForAI(path, filename, nil, movieInfo, "movie", confidence, targetLib)
+				h.queueForAI(path, filename, nil, movieInfo, "movie", confidence, targetLib, decisionID)
 				return
 			}
 			if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
@@ -664,6 +729,8 @@ func (h *MediaHandler) processFile(path string) {
 	}
 
 	duration := time.Since(startTime)
+
+	h.updateDecisionOrganize(decisionID, result, err)
 
 	// Track notification results
 	sonarrNotified := false
@@ -742,7 +809,7 @@ func hasDeterministicMovieIdentity(filename string, movieInfo *naming.MovieInfo)
 	return !naming.IsObfuscatedFilename(filename)
 }
 
-func (h *MediaHandler) queueForAI(path, filename string, tvInfo *naming.TVShowInfo, movieInfo *naming.MovieInfo, mediaType string, confidence float64, targetLib string) {
+func (h *MediaHandler) queueForAI(path, filename string, tvInfo *naming.TVShowInfo, movieInfo *naming.MovieInfo, mediaType string, confidence float64, targetLib string, decisionID int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -767,14 +834,15 @@ func (h *MediaHandler) queueForAI(path, filename string, tvInfo *naming.TVShowIn
 	}
 
 	h.pendingAI[path] = &PendingItem{
-		Path:       path,
-		Filename:   filename,
-		TVInfo:     tvInfo,
-		MovieInfo:  movieInfo,
-		MediaType:  mediaType,
-		Confidence: confidence,
-		QueuedAt:   time.Now(),
-		TargetLib:  targetLib,
+		Path:            path,
+		Filename:        filename,
+		TVInfo:          tvInfo,
+		MovieInfo:       movieInfo,
+		MediaType:       mediaType,
+		Confidence:      confidence,
+		QueuedAt:        time.Now(),
+		TargetLib:       targetLib,
+		ParseDecisionID: decisionID,
 	}
 
 	h.logger.Info("handler", "Queued for AI enhancement",
@@ -1473,6 +1541,47 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 	}
 }
 
+// updateDecisionOrganize updates the organize columns of a parse decision row.
+// It is a no-op when the DB is not configured or the decision ID is zero.
+func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.OrganizationResult, err error) {
+	if h.db == nil || id == 0 {
+		return
+	}
+
+	u := database.OrganizeUpdate{}
+	now := time.Now().UTC()
+
+	switch {
+	case err != nil:
+		u.OrganizeOutcome = "failed"
+		u.OrganizeError = err.Error()
+	case result == nil:
+		u.OrganizeOutcome = "failed"
+		u.OrganizeError = "nil result"
+	case result.Success:
+		u.OrganizeOutcome = "success"
+		u.TargetPath = result.TargetPath
+		u.TargetAt = &now
+	case result.Skipped:
+		u.OrganizeOutcome = "skipped"
+		u.TargetPath = result.TargetPath
+		if result.TargetPath != "" {
+			u.TargetAt = &now
+		}
+	default:
+		u.OrganizeOutcome = "failed"
+		if result.Error != nil {
+			u.OrganizeError = result.Error.Error()
+		}
+	}
+
+	if updateErr := h.db.UpdateOrganize(id, u); updateErr != nil {
+		h.logger.Warn("handler", "failed to update parse decision organize columns",
+			logging.F("decision_id", id),
+			logging.F("error", updateErr.Error()))
+	}
+}
+
 func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 	var result *organizer.OrganizationResult
 	var err error
@@ -1512,6 +1621,33 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 
 		result, err = h.movieOrganizer.OrganizeMovieWithParsed(item.Path, item.TargetLib, movieInfo)
 	}
+
+	if h.db != nil && item.ParseDecisionID != 0 {
+		u := database.ParseUpdate{
+			ParseMethod:      string(activity.MethodAI),
+			ParsedTitle:      aiResult.Title,
+			MediaTypeGuessed: item.MediaType,
+		}
+		if aiResult.Year != nil && aiResult.Year.Int() != nil {
+			y := *aiResult.Year.Int()
+			u.ParsedYear = &y
+		}
+		if aiResult.Season != nil && aiResult.Season.Int() != nil {
+			s := *aiResult.Season.Int()
+			u.ParsedSeason = &s
+		}
+		if len(aiResult.Episodes) > 0 {
+			e := aiResult.Episodes[0]
+			u.ParsedEpisode = &e
+		}
+		if updateErr := h.db.UpdateParse(item.ParseDecisionID, u); updateErr != nil {
+			h.logger.Warn("handler", "failed to update parse decision",
+				logging.F("filename", item.Filename),
+				logging.F("error", updateErr.Error()))
+		}
+	}
+
+	h.updateDecisionOrganize(item.ParseDecisionID, result, err)
 
 	if err != nil {
 		h.logger.Error("handler", "AI-enhanced organization failed", err,
@@ -1671,6 +1807,8 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 	duration := time.Since(startTime)
 	sonarrNotified := false
 	radarrNotified := false
+
+	h.updateDecisionOrganize(item.ParseDecisionID, result, err)
 
 	if err != nil {
 		h.logger.Error("handler", "Regex-fallback organization failed", err, logging.F("filename", filename))
