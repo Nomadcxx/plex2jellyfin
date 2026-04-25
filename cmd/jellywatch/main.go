@@ -89,6 +89,7 @@ Features:
 	rootCmd.AddCommand(newOrphansCmd())
 	rootCmd.AddCommand(newHealthCmd())
 	rootCmd.AddCommand(newReviewCmd())
+	rootCmd.AddCommand(newParsesCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
