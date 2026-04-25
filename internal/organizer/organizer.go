@@ -621,7 +621,7 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 		seasonDir = filepath.Join(showDir, naming.FormatSeasonFolder(tv.Season))
 	}
 	ext := filepath.Ext(sourcePath)
-	episodeName := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
+	episodeName := naming.FormatTVEpisodeFilenameFromInfo(tv, ext[1:])
 	targetPath := filepath.Join(seasonDir, episodeName)
 
 	if err := o.checkPlaybackSafetyWithOp(sourcePath, "organize_tv", targetPath); err != nil {
@@ -635,12 +635,14 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 		}, nil
 	}
 
-	existingFile, existingQuality := o.findExistingMediaFile(seasonDir)
-	if existingFile != "" && !o.forceOverwrite {
-		existingBase := filepath.Base(existingFile)
-		targetBase := filepath.Base(targetPath)
-		sameEpisode := strings.HasPrefix(existingBase, strings.TrimSuffix(targetBase, ext))
-		if sameEpisode && !sourceQuality.IsBetterThan(existingQuality) {
+	existingFile, existingFound := FindEpisodeFile(seasonDir, tv.Season, tv.Episode)
+	var existingQuality *quality.QualityInfo
+	if existingFound {
+		existingQuality = quality.Parse(filepath.Base(existingFile))
+	}
+
+	if existingFound && !o.forceOverwrite {
+		if !sourceQuality.IsBetterThan(existingQuality) {
 			return &OrganizationResult{
 				Success:         false,
 				SourcePath:      sourcePath,
@@ -651,6 +653,10 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 				ExistingQuality: existingQuality,
 			}, nil
 		}
+		// same episode, source is better quality — fall through to overwrite
+	}
+	if !existingFound {
+		existingFile = ""
 	}
 
 	if err := os.MkdirAll(seasonDir, 0755); err != nil {
@@ -770,7 +776,7 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		seasonDir = filepath.Join(showDir, naming.FormatSeasonFolder(tv.Season))
 	}
 	ext := filepath.Ext(sourcePath)
-	episodeName := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
+	episodeName := naming.FormatTVEpisodeFilenameFromInfo(&tv, ext[1:])
 	targetPath := filepath.Join(seasonDir, episodeName)
 
 	if err := o.checkPlaybackSafetyWithOp(sourcePath, "organize_tv", targetPath); err != nil {
@@ -784,12 +790,14 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		}, nil
 	}
 
-	existingFile, existingQuality := o.findExistingMediaFile(seasonDir)
-	if existingFile != "" && !o.forceOverwrite {
-		existingBase := filepath.Base(existingFile)
-		targetBase := filepath.Base(targetPath)
-		sameEpisode := strings.HasPrefix(existingBase, strings.TrimSuffix(targetBase, ext))
-		if sameEpisode && !sourceQuality.IsBetterThan(existingQuality) {
+	existingFile, existingFound := FindEpisodeFile(seasonDir, tv.Season, tv.Episode)
+	var existingQuality *quality.QualityInfo
+	if existingFound {
+		existingQuality = quality.Parse(filepath.Base(existingFile))
+	}
+
+	if existingFound && !o.forceOverwrite {
+		if !sourceQuality.IsBetterThan(existingQuality) {
 			return &OrganizationResult{
 				Success:         false,
 				SourcePath:      sourcePath,
@@ -800,6 +808,10 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 				ExistingQuality: existingQuality,
 			}, nil
 		}
+		// same episode, source is better quality — fall through to overwrite
+	}
+	if !existingFound {
+		existingFile = ""
 	}
 
 	if err := os.MkdirAll(seasonDir, 0755); err != nil {
@@ -932,6 +944,10 @@ func (o *Organizer) OrganizeTVEpisodeAuto(sourcePath string, getFileSize func(st
 			Error:      fmt.Errorf("unable to select library: %w", err),
 		}, nil
 	}
+
+	// Surface the selector's reasoning so "why did this land on STORAGE3
+	// instead of STORAGE5" is answerable from the logs alone.
+	log.Printf("[organizer] tv library selected: title=%q lib=%s reason=%s", tv.Title, selection.Library, selection.Reason)
 
 	return o.OrganizeTVEpisode(sourcePath, selection.Library)
 }
@@ -1084,9 +1100,51 @@ func (o *Organizer) OrganizeFolder(folderPath, libraryPath string, keepExtras bo
 	return result, nil
 }
 
+// languageSuffixes lists subtitle language/flag suffixes to strip when matching
+// subtitle stems against the video stem.
+var languageSuffixes = []string{
+	".forced", ".sdh", ".hi",
+	".eng", ".en", ".fra", ".fre", ".ger", ".deu", ".spa", ".por", ".ita",
+	".rus", ".pol", ".chi", ".jpn", ".kor", ".ara", ".ces", ".cze", ".nld",
+	".dut", ".swe", ".nor", ".dan", ".fin", ".tur", ".hun", ".heb", ".ron",
+}
+
+// subtitleMatchesVideo reports whether a subtitle file (identified by its base
+// name without extension) corresponds to the given video stem. One language or
+// flag suffix is stripped before the case-insensitive comparison.
+func subtitleMatchesVideo(subName, videoStem string) bool {
+	subExt := strings.ToLower(filepath.Ext(subName))
+	_ = subExt
+	subStem := subName[:len(subName)-len(filepath.Ext(subName))]
+	lower := strings.ToLower(subStem)
+	videoLower := strings.ToLower(videoStem)
+
+	if lower == videoLower {
+		return true
+	}
+	for _, suf := range languageSuffixes {
+		if strings.HasSuffix(lower, suf) {
+			trimmed := lower[:len(lower)-len(suf)]
+			if trimmed == videoLower {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (o *Organizer) copySubtitles(analysis *analyzer.FolderAnalysis, targetDir string) []string {
+	if analysis.MainMediaFile == nil {
+		return nil
+	}
+	videoName := analysis.MainMediaFile.Name
+	videoStem := videoName[:len(videoName)-len(filepath.Ext(videoName))]
+
 	var copied []string
 	for _, sub := range analysis.SubtitleFiles {
+		if !subtitleMatchesVideo(sub.Name, videoStem) {
+			continue
+		}
 		targetPath := filepath.Join(targetDir, sub.Name)
 		opts := transfer.TransferOptions{
 			Timeout:       30 * time.Second,
@@ -1098,6 +1156,8 @@ func (o *Organizer) copySubtitles(analysis *analyzer.FolderAnalysis, targetDir s
 		_, err := o.transferer.Copy(sub.Path, targetPath, opts)
 		if err == nil {
 			copied = append(copied, sub.Name)
+		} else {
+			log.Printf("[organizer] subtitle copy failed: src=%s dst=%s err=%v", sub.Path, targetPath, err)
 		}
 	}
 	return copied

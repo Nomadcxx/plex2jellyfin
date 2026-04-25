@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/analyzer"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
@@ -572,5 +573,229 @@ func TestFindExistingSeasonDir(t *testing.T) {
 					tt.showDir, tt.season, result, tt.expectDir)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 2.2: canonical episode-key dedup tests
+// ---------------------------------------------------------------------------
+
+// setupTVOrganizer creates an Organizer with no database dependency.
+func setupTVOrganizer(t *testing.T, opts ...func(*Organizer)) *Organizer {
+	t.Helper()
+	org, err := NewOrganizer([]string{t.TempDir()},
+		WithBackend(transfer.BackendRsync),
+	)
+	require.NoError(t, err)
+	for _, o := range opts {
+		o(org)
+	}
+	return org
+}
+
+// TestOrganizeTVEpisode_Dedup_DifferentNameSameKey verifies that an existing
+// file whose name does NOT share the canonical prefix (e.g. downloaded under a
+// different show-name format) is still recognised as the same episode by its
+// S/E key, so a lower-quality incoming file is skipped.
+//
+// The old prefix-based check (strings.HasPrefix) fails here because
+// "Show.S01E03.BluRay.mkv" does not start with "Silo (2023) S01E03".
+func TestOrganizeTVEpisode_Dedup_DifferentNameSameKey(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	showDir := filepath.Join(libraryDir, "Silo (2023)")
+	seasonDir := filepath.Join(showDir, "Season 01")
+	require.NoError(t, os.MkdirAll(seasonDir, 0755))
+
+	// Existing file uses a non-canonical naming convention — no show title.
+	// The prefix check will NOT recognise this as the same episode.
+	// Use BluRay so it outscores any incoming file with unknown/WEB source.
+	existing := filepath.Join(seasonDir, "Show.S01E03.1080p.BluRay.mkv")
+	createTestFile(t, existing, 2*1024*1024*1024)
+
+	// Incoming: same key, lower quality (720p WEB-DL scores below 1080p BluRay).
+	incoming := filepath.Join(sourceDir, "Silo.2023.S01E03.720p.WEB-DL.mkv")
+	createTestFile(t, incoming, 500*1024*1024)
+
+	org := setupTVOrganizer(t)
+	result, err := org.OrganizeTVEpisode(incoming, libraryDir)
+	require.NoError(t, err)
+	assert.True(t, result.Skipped, "lower-quality same-key episode must be skipped; got SkipReason=%q err=%v", result.SkipReason, result.Error)
+	assert.FileExists(t, existing, "existing higher-quality file must not be removed")
+}
+
+// TestOrganizeTVEpisode_Dedup_SubtitleNotCounted verifies that a .srt file
+// with the same episode key is not treated as an existing video file.
+func TestOrganizeTVEpisode_Dedup_SubtitleNotCounted(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	showDir := filepath.Join(libraryDir, "Silo (2023)")
+	seasonDir := filepath.Join(showDir, "Season 01")
+	require.NoError(t, os.MkdirAll(seasonDir, 0755))
+
+	// Only a subtitle — no video file.
+	srt := filepath.Join(seasonDir, "Silo (2023) S01E04.en.srt")
+	require.NoError(t, os.WriteFile(srt, []byte("1\n00:00:01 --> 00:00:02\nHello\n"), 0644))
+
+	incoming := filepath.Join(sourceDir, "Silo.2023.S01E04.1080p.WEB-DL.mkv")
+	createTestFile(t, incoming, 500*1024*1024)
+
+	org := setupTVOrganizer(t, WithDryRun(true))
+	result, err := org.OrganizeTVEpisode(incoming, libraryDir)
+	require.NoError(t, err)
+	assert.True(t, result.Success, "organizer must succeed when only subtitle exists: %v", result.Error)
+	assert.False(t, result.Skipped, "must not skip because of subtitle-only match")
+}
+
+// TestOrganizeTVWithParsed_Dedup_DifferentNameSameKey is the equivalent test
+// for OrganizeTVWithParsed. Existing file name breaks the prefix check.
+func TestOrganizeTVWithParsed_Dedup_DifferentNameSameKey(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	showDir := filepath.Join(libraryDir, "Breaking Bad (2008)")
+	seasonDir := filepath.Join(showDir, "Season 02")
+	require.NoError(t, os.MkdirAll(seasonDir, 0755))
+
+	// Non-canonical filename: prefix check won't match "Breaking Bad (2008) S02E05".
+	existing := filepath.Join(seasonDir, "BB.S02E05.1080p.BluRay.mkv")
+	createTestFile(t, existing, 2*1024*1024*1024)
+
+	incoming := filepath.Join(sourceDir, "Breaking.Bad.S02E05.720p.mkv")
+	createTestFile(t, incoming, 500*1024*1024)
+
+	org := setupTVOrganizer(t)
+	tv := naming.TVShowInfo{Title: "Breaking Bad", Year: "2008", Season: 2, Episode: 5}
+	result, err := org.OrganizeTVWithParsed(incoming, libraryDir, tv)
+	require.NoError(t, err)
+	assert.True(t, result.Skipped, "lower-quality same-key episode must be skipped; got SkipReason=%q err=%v", result.SkipReason, result.Error)
+	assert.FileExists(t, existing, "existing higher-quality file must not be removed")
+}
+
+// TestOrganizeTVEpisode_ForceOverwrite_RemovesOldFile checks that with
+// forceOverwrite=true the same-episode file (even with a different name) is
+// removed and the new file is organised successfully. Crucially, an unrelated
+// episode in the same season must NOT be removed.
+func TestOrganizeTVEpisode_ForceOverwrite_RemovesOldFile(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	showDir := filepath.Join(libraryDir, "Silo (2023)")
+	seasonDir := filepath.Join(showDir, "Season 01")
+	require.NoError(t, os.MkdirAll(seasonDir, 0755))
+
+	// Same episode, non-canonical name (breaks prefix check).
+	oldSameEp := filepath.Join(seasonDir, "Silo.S01E06.OLD.mkv")
+	createTestFile(t, oldSameEp, 1*1024*1024)
+
+	// Unrelated episode — must survive.
+	unrelated := filepath.Join(seasonDir, "Silo (2023) S01E01.mkv")
+	createTestFile(t, unrelated, 1*1024*1024)
+
+	incoming := filepath.Join(sourceDir, "Silo.2023.S01E06.2160p.UHD.mkv")
+	createTestFile(t, incoming, 2*1024*1024)
+
+	org := setupTVOrganizer(t, WithForceOverwrite(true))
+	result, err := org.OrganizeTVEpisode(incoming, libraryDir)
+	require.NoError(t, err)
+	require.True(t, result.Success, "force-overwrite organize must succeed: %v", result.Error)
+	assert.NoFileExists(t, oldSameEp, "old same-episode file must be removed on force overwrite")
+	assert.FileExists(t, unrelated, "unrelated episode must not be removed")
+}
+
+// TestOrganizeTVEpisode_DateBased checks that a date-based episode is
+// deduplicated when the naming parser yields a non-zero season/episode key,
+// and does not accidentally remove an existing date-keyed file.
+func TestOrganizeTVEpisode_DateBased(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	// naming.ParseTVShowName maps "2021.03.15" → season=2021, episode=315.
+	showDir := filepath.Join(libraryDir, "Late Night Show")
+	seasonDir := filepath.Join(showDir, "Season 2021")
+	require.NoError(t, os.MkdirAll(seasonDir, 0755))
+
+	// Existing file whose name the prefix check cannot match against an incoming
+	// "Late Night Show 2021-03-15.mkv" target.
+	existing := filepath.Join(seasonDir, "LateNight.2021.03.15.1080p.mkv")
+	createTestFile(t, existing, 1*1024*1024*1024)
+
+	incoming := filepath.Join(sourceDir, "Late.Night.Show.2021.03.15.720p.mkv")
+	createTestFile(t, incoming, 500*1024*1024)
+
+	org := setupTVOrganizer(t)
+	result, err := org.OrganizeTVEpisode(incoming, libraryDir)
+	require.NoError(t, err)
+	assert.True(t, result.Skipped, "lower-quality date-based duplicate must be skipped; SkipReason=%q err=%v", result.SkipReason, result.Error)
+	assert.FileExists(t, existing, "existing date-based episode must not be removed by dedup")
+}
+
+// ---------------------------------------------------------------------------
+// Task 3.3: stem-matching subtitle copy tests
+// ---------------------------------------------------------------------------
+
+// TestCopySubtitles_OnlyStemMatching verifies that copySubtitles copies only
+// subtitle files whose stem matches the video file stem (after stripping one
+// language/flag suffix such as .eng, .en, .forced, .sdh).
+func TestCopySubtitles_OnlyStemMatching(t *testing.T) {
+	sourceDir, targetDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	// Create subtitle files in the source directory.
+	subtitles := []struct {
+		name   string
+		copied bool
+	}{
+		{"Show.S01E01.srt", true},         // exact stem match
+		{"Show.S01E01.eng.srt", true},     // stem match after stripping language suffix
+		{"Show.S01E01.en.srt", true},      // stem match after stripping short lang suffix
+		{"Show.S01E01.forced.srt", true},  // stem match after stripping flag suffix
+		{"OtherShow.S01E01.srt", false},   // different show — must not be copied
+		{"random.srt", false},             // no relation to video — must not be copied
+	}
+
+	var subFiles []analyzer.FileInfo
+	for _, s := range subtitles {
+		p := filepath.Join(sourceDir, s.name)
+		require.NoError(t, os.WriteFile(p, []byte("sub"), 0644))
+		subFiles = append(subFiles, analyzer.FileInfo{Path: p, Name: s.name})
+	}
+
+	// Build a minimal FolderAnalysis with the matching video file.
+	analysis := &analyzer.FolderAnalysis{
+		MainMediaFile: &analyzer.FileInfo{
+			Path: filepath.Join(sourceDir, "Show.S01E01.mkv"),
+			Name: "Show.S01E01.mkv",
+		},
+		SubtitleFiles: subFiles,
+	}
+
+	org, err := NewOrganizer([]string{targetDir}, WithBackend(transfer.BackendNative))
+	require.NoError(t, err)
+
+	copied := org.copySubtitles(analysis, targetDir)
+
+	for _, s := range subtitles {
+		_, err := os.Stat(filepath.Join(targetDir, s.name))
+		if s.copied {
+			assert.NoError(t, err, "%s should have been copied", s.name)
+		} else {
+			assert.True(t, os.IsNotExist(err), "%s should NOT have been copied", s.name)
+		}
+	}
+
+	// Verify return value lists only the copied names.
+	copiedSet := make(map[string]bool, len(copied))
+	for _, n := range copied {
+		copiedSet[n] = true
+	}
+	for _, s := range subtitles {
+		if s.copied {
+			assert.True(t, copiedSet[s.name], "%s should be in copied list", s.name)
+		} else {
+			assert.False(t, copiedSet[s.name], "%s should not be in copied list", s.name)
+		}
 	}
 }
