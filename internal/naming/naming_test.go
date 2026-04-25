@@ -1,6 +1,7 @@
 package naming
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -53,14 +54,17 @@ func TestParseTVShowName(t *testing.T) {
 		name       string
 		input      string
 		wantTitle  string
+		wantYear   string
 		wantSeason int
 		wantEp     int
+		wantDate   string
 		wantErr    bool
 	}{
 		{
 			name:       "Standard format",
 			input:      "Breaking Bad S01E01.mkv",
 			wantTitle:  "Breaking Bad",
+			wantYear:   "",
 			wantSeason: 1,
 			wantEp:     1,
 			wantErr:    false,
@@ -69,8 +73,28 @@ func TestParseTVShowName(t *testing.T) {
 			name:       "With release markers",
 			input:      "Breaking.Bad.S01E01.1080p.WEB-DL.x264.mkv",
 			wantTitle:  "Breaking Bad",
+			wantYear:   "",
 			wantSeason: 1,
 			wantEp:     1,
+			wantErr:    false,
+		},
+		{
+			name:       "Date-based daily show episode",
+			input:      "The.Daily.Show.2026.04.20.Annalena.Baerbock.1080p.WEB.h264-EDITH.mkv",
+			wantTitle:  "The Daily Show",
+			wantYear:   "",
+			wantSeason: 2026,
+			wantEp:     420,
+			wantDate:   "2026-04-20",
+			wantErr:    false,
+		},
+		{
+			name:       "Absolute EP numbering",
+			input:      "One.Piece.EP1156.Episode.1156.1080p.NF.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub.mkv",
+			wantTitle:  "One Piece",
+			wantYear:   "",
+			wantSeason: 1,
+			wantEp:     1156,
 			wantErr:    false,
 		},
 	}
@@ -85,13 +109,34 @@ func TestParseTVShowName(t *testing.T) {
 			if got.Title != tt.wantTitle {
 				t.Errorf("ParseTVShowName() title = %v, want %v", got.Title, tt.wantTitle)
 			}
+			if got.Year != tt.wantYear {
+				t.Errorf("ParseTVShowName() year = %v, want %v", got.Year, tt.wantYear)
+			}
 			if got.Season != tt.wantSeason {
 				t.Errorf("ParseTVShowName() season = %v, want %v", got.Season, tt.wantSeason)
 			}
 			if got.Episode != tt.wantEp {
 				t.Errorf("ParseTVShowName() episode = %v, want %v", got.Episode, tt.wantEp)
 			}
+			if got.EpisodeDate != tt.wantDate {
+				t.Errorf("ParseTVShowName() episode date = %v, want %v", got.EpisodeDate, tt.wantDate)
+			}
 		})
+	}
+}
+
+func TestFormatTVEpisodeFilenameFromInfo_DateBased(t *testing.T) {
+	info := &TVShowInfo{
+		Title:       "The Daily Show",
+		Season:      2026,
+		Episode:     420,
+		EpisodeDate: "2026-04-20",
+	}
+
+	got := FormatTVEpisodeFilenameFromInfo(info, "mkv")
+	want := "The Daily Show 2026-04-20.mkv"
+	if got != want {
+		t.Errorf("FormatTVEpisodeFilenameFromInfo() = %q, want %q", got, want)
 	}
 }
 
@@ -109,6 +154,7 @@ func TestIsTVEpisodeFilename_DatePatterns(t *testing.T) {
 		// Standard patterns still work
 		{"Show.S01E05.mkv", true},
 		{"Show.1x05.mkv", true},
+		{"One.Piece.EP1156.Episode.1156.1080p.NF.WEB-DL.mkv", true},
 
 		// Movies - should not be TV
 		{"Movie.Name.2026.1080p.mkv", false},
@@ -122,6 +168,29 @@ func TestIsTVEpisodeFilename_DatePatterns(t *testing.T) {
 				t.Errorf("IsTVEpisodeFilename(%q) = %v, want %v", tt.filename, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseTVShowFromPath_AbsoluteEpisodeNotObfuscated(t *testing.T) {
+	path := "/mnt/NVME3/Sabnzbd/complete/tv/One.Piece.EP1157.Episode.1157.1080p.CR.WEB-DL.JPN.AAC2.0.H.264.ESub-ToonsHub/One.Piece.EP1157.Episode.1157.1080p.CR.WEB-DL.JPN.AAC2.0.H.264.ESub-ToonsHub.mkv"
+	filename := filepath.Base(path)
+
+	if IsObfuscatedFilename(filename) {
+		t.Fatalf("IsObfuscatedFilename(%q) = true, want false", filename)
+	}
+
+	got, err := ParseTVShowFromPath(path)
+	if err != nil {
+		t.Fatalf("ParseTVShowFromPath() unexpected error: %v", err)
+	}
+	if got.Title != "One Piece" {
+		t.Errorf("ParseTVShowFromPath() title = %q, want %q", got.Title, "One Piece")
+	}
+	if got.Season != 1 {
+		t.Errorf("ParseTVShowFromPath() season = %d, want 1", got.Season)
+	}
+	if got.Episode != 1157 {
+		t.Errorf("ParseTVShowFromPath() episode = %d, want 1157", got.Episode)
 	}
 }
 
@@ -182,5 +251,155 @@ func TestStripReleaseMarkers_PreservesShortTitleWords(t *testing.T) {
 				t.Errorf("stripReleaseMarkers(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
+	}
+}
+
+// TestParseFailures_WrapErrParseFailed verifies that every parse-failure
+// return path wraps ErrParseFailed, so callers can classify the failure as
+// deterministic via errors.Is — this gates the log-spam fix in the handler
+// and the retry-skip logic in the scanner.
+func TestParseFailures_WrapErrParseFailed(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"ParseMovieName empty", mustErr(ParseMovieName("....mkv"))},
+		{"ParseTVShowName no episode", mustErr(ParseTVShowName("random.garbage.no.episode.mkv"))},
+		{"ParseTVShowFromPath obfuscated no markers", mustErr(ParseTVShowFromPath("/tmp/abcdef1234567890abcdef1234567890.mkv"))},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !errors.Is(c.err, ErrParseFailed) {
+				t.Errorf("error %q does not wrap ErrParseFailed", c.err)
+			}
+		})
+	}
+}
+
+func mustErr[T any](_ *T, err error) error {
+	return err
+}
+
+func TestParseTVShowNameVerbose(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantTitle   string
+		wantSeason  int
+		wantEp      int
+		wantTokens  []string // subset that must be present
+	}{
+		{
+			name:       "common release markers",
+			input:      "Breaking.Bad.S01E01.1080p.WEB-DL.DDP5.1.H.264-FLUX.mkv",
+			wantTitle:  "Breaking Bad",
+			wantSeason: 1,
+			wantEp:     1,
+			wantTokens: []string{"1080p", "WEB-DL", "FLUX"},
+		},
+		{
+			name:       "bluray release",
+			input:      "Show.S02E03.2160p.BluRay.x265-GROUP.mkv",
+			wantTitle:  "Show",
+			wantSeason: 2,
+			wantEp:     3,
+			wantTokens: []string{"2160p", "BluRay"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info, tokens, err := ParseTVShowNameVerbose(tt.input)
+			if err != nil {
+				t.Fatalf("ParseTVShowNameVerbose() unexpected error: %v", err)
+			}
+			if info.Title != tt.wantTitle {
+				t.Errorf("title = %q, want %q", info.Title, tt.wantTitle)
+			}
+			if info.Season != tt.wantSeason {
+				t.Errorf("season = %d, want %d", info.Season, tt.wantSeason)
+			}
+			if info.Episode != tt.wantEp {
+				t.Errorf("episode = %d, want %d", info.Episode, tt.wantEp)
+			}
+			for _, want := range tt.wantTokens {
+				found := false
+				for _, tok := range tokens {
+					if strings.EqualFold(tok, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected token %q in stripped tokens %v", want, tokens)
+				}
+			}
+		})
+	}
+}
+
+func TestParseMovieNameVerbose(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantTitle  string
+		wantYear   string
+		wantTokens []string
+	}{
+		{
+			name:       "common release markers",
+			input:      "Dune.Part.Two.2024.1080p.BluRay.x264-GROUP.mkv",
+			wantTitle:  "Dune Part Two",
+			wantYear:   "2024",
+			wantTokens: []string{"1080p", "BluRay"},
+		},
+		{
+			name:       "web-dl release",
+			input:      "Inception.2010.2160p.WEB-DL.HDR.DTS-SPARKS.mkv",
+			wantTitle:  "Inception",
+			wantYear:   "2010",
+			wantTokens: []string{"2160p", "WEB-DL", "SPARKS"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info, tokens, err := ParseMovieNameVerbose(tt.input)
+			if err != nil {
+				t.Fatalf("ParseMovieNameVerbose() unexpected error: %v", err)
+			}
+			if info.Title != tt.wantTitle {
+				t.Errorf("title = %q, want %q", info.Title, tt.wantTitle)
+			}
+			if info.Year != tt.wantYear {
+				t.Errorf("year = %q, want %q", info.Year, tt.wantYear)
+			}
+			for _, want := range tt.wantTokens {
+				found := false
+				for _, tok := range tokens {
+					if strings.EqualFold(tok, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected token %q in stripped tokens %v", want, tokens)
+				}
+			}
+		})
+	}
+}
+
+func TestOriginalFunctionsStillCompile(t *testing.T) {
+	_, err := ParseTVShowName("Show.S01E01.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ParseMovieName("Movie.2024.mkv")
+	if err != nil {
+		t.Fatal(err)
 	}
 }

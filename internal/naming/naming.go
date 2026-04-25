@@ -1,6 +1,7 @@
 package naming
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -8,16 +9,23 @@ import (
 	"strings"
 )
 
+// ErrParseFailed is returned when filename/path parsing cannot extract the
+// information needed for organization (e.g. no episode markers, no title).
+// Retry loops treat failures wrapping this sentinel as deterministic — not
+// worth re-attempting until the source file changes.
+var ErrParseFailed = errors.New("parse failed")
+
 type MovieInfo struct {
 	Title string
 	Year  string
 }
 
 type TVShowInfo struct {
-	Title   string
-	Year    string
-	Season  int
-	Episode int
+	Title       string
+	Year        string
+	Season      int
+	Episode     int
+	EpisodeDate string
 }
 
 var (
@@ -25,8 +33,9 @@ var (
 	yearParenRegex = regexp.MustCompile(`\((\d{4})\)`)
 	episodeSERegex = regexp.MustCompile(`[Ss](\d{1,2})[Ee](\d{1,2})`)
 	episodeXRegex  = regexp.MustCompile(`(\d{1,2})x(\d{1,2})`)
+	episodeEPRegex = regexp.MustCompile(`(?i)\bEP[.\-_ ]?(\d{2,5})\b`)
 	// Date-based episode pattern: YYYY.MM.DD, YYYY-MM-DD, YYYY_MM_DD
-	episodeDateRegex = regexp.MustCompile(`(19|20)\d{2}[.\-_](0[1-9]|1[0-2])[.\-_](0[1-9]|[12]\d|3[01])`)
+	episodeDateRegex = regexp.MustCompile(`\b((19|20)\d{2})[.\-_](0[1-9]|1[0-2])[.\-_](0[1-9]|[12]\d|3[01])\b`)
 	releasePatterns  []*regexp.Regexp
 )
 
@@ -51,8 +60,8 @@ func init() {
 		`\[.*?\]`,
 		`\b(8bit|10bit|12bit)\b`,
 		// Note: release group suffix (-SPARKS, -postbot) handled separately in stripReleaseMarkers
-        // REMOVED: `\b[A-Z]{2,5}\d*$` - too broad, strips last word of short titles (e.g., "Pitt" from "The Pitt")
-        // Release groups are already handled by the explicit group list above and releaseGroupSuffix regex
+		// REMOVED: `\b[A-Z]{2,5}\d*$` - too broad, strips last word of short titles (e.g., "Pitt" from "The Pitt")
+		// Release groups are already handled by the explicit group list above and releaseGroupSuffix regex
 	}
 
 	releasePatterns = make([]*regexp.Regexp, 0, len(patterns))
@@ -68,22 +77,7 @@ func IsMovieFilename(filename string) bool {
 func IsTVEpisodeFilename(filename string) bool {
 	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
 
-	// Standard SxxExx pattern
-	if episodeSERegex.MatchString(baseName) {
-		return true
-	}
-
-	// NxN pattern
-	if episodeXRegex.MatchString(baseName) {
-		return true
-	}
-
-	// Date-based pattern (daily shows like The Daily Show, Colbert, SNL)
-	if episodeDateRegex.MatchString(baseName) {
-		return true
-	}
-
-	return false
+	return findEpisodeMatch(baseName).found
 }
 
 func HasYearInParentheses(filename string) bool {
@@ -91,17 +85,27 @@ func HasYearInParentheses(filename string) bool {
 }
 
 func ParseMovieName(filename string) (*MovieInfo, error) {
-	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	info, _, err := ParseMovieNameVerbose(filename)
+	return info, err
+}
 
+// ParseMovieNameVerbose parses a movie filename and also returns the release
+// metadata tokens (quality, codec, release group, etc.) that were stripped.
+func ParseMovieNameVerbose(filename string) (*MovieInfo, []string, error) {
+	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	tokens := collectStrippedTokens(baseName)
+	info, err := parseMovieFromBaseName(baseName)
+	return info, tokens, err
+}
+
+func parseMovieFromBaseName(baseName string) (*MovieInfo, error) {
 	info, err := parseMovieSimple(baseName)
 	if err != nil {
 		return parseMovieAdvanced(baseName)
 	}
-
 	if IsGarbageTitle(info.Title) {
 		return parseMovieAdvanced(baseName)
 	}
-
 	return info, nil
 }
 
@@ -118,7 +122,7 @@ func parseMovieSimple(baseName string) (*MovieInfo, error) {
 	cleaned = strings.TrimSpace(cleaned)
 
 	if cleaned == "" {
-		return nil, fmt.Errorf("could not extract movie title from: %s", baseName)
+		return nil, fmt.Errorf("%w: could not extract movie title from: %s", ErrParseFailed, baseName)
 	}
 
 	return &MovieInfo{
@@ -130,7 +134,7 @@ func parseMovieSimple(baseName string) (*MovieInfo, error) {
 func parseMovieAdvanced(baseName string) (*MovieInfo, error) {
 	cleaned := CleanMovieName(baseName)
 	if cleaned == "" {
-		return nil, fmt.Errorf("could not extract movie title from: %s", baseName)
+		return nil, fmt.Errorf("%w: could not extract movie title from: %s", ErrParseFailed, baseName)
 	}
 
 	year := ExtractYearAdvanced(baseName)
@@ -147,18 +151,33 @@ func parseMovieAdvanced(baseName string) (*MovieInfo, error) {
 }
 
 func ParseTVShowName(filename string) (*TVShowInfo, error) {
-	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	info, _, err := ParseTVShowNameVerbose(filename)
+	return info, err
+}
 
-	season, episode, found := extractEpisodeInfo(baseName)
-	if !found {
-		return nil, fmt.Errorf("no episode information found in: %s", filename)
+// ParseTVShowNameVerbose parses a TV episode filename and also returns the
+// release metadata tokens (quality, codec, release group, etc.) that were stripped.
+func ParseTVShowNameVerbose(filename string) (*TVShowInfo, []string, error) {
+	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	tokens := collectStrippedTokens(baseName)
+	info, err := parseTVShowFromBaseName(baseName, filename)
+	return info, tokens, err
+}
+
+func parseTVShowFromBaseName(baseName, filename string) (*TVShowInfo, error) {
+	episodeMatch := findEpisodeMatch(baseName)
+	if !episodeMatch.found {
+		return nil, fmt.Errorf("%w: no episode information found in: %s", ErrParseFailed, filename)
 	}
 
-	titlePart := extractTitleBeforeEpisode(baseName)
+	titlePart := baseName[:episodeMatch.loc[0]]
 
 	titlePart = stripReleaseMarkers(titlePart)
 
-	year := extractYear(baseName)
+	year := ""
+	if episodeMatch.kind != "date" {
+		year = extractYear(baseName)
+	}
 	if year != "" {
 		titlePart = removeYear(titlePart, year)
 	}
@@ -167,14 +186,15 @@ func ParseTVShowName(filename string) (*TVShowInfo, error) {
 	titlePart = strings.TrimSpace(titlePart)
 
 	if titlePart == "" {
-		return nil, fmt.Errorf("could not extract TV show title from: %s", filename)
+		return nil, fmt.Errorf("%w: could not extract TV show title from: %s", ErrParseFailed, filename)
 	}
 
 	return &TVShowInfo{
-		Title:   titlePart,
-		Year:    year,
-		Season:  season,
-		Episode: episode,
+		Title:       titlePart,
+		Year:        year,
+		Season:      episodeMatch.season,
+		Episode:     episodeMatch.episode,
+		EpisodeDate: episodeMatch.date,
 	}, nil
 }
 
@@ -210,6 +230,17 @@ func FormatTVEpisodeFilename(title, year string, season, episode int, ext string
 	return fmt.Sprintf("%s S%02dE%02d.%s", title, season, episode, ext)
 }
 
+func FormatTVEpisodeFilenameFromInfo(info *TVShowInfo, ext string) string {
+	if info == nil {
+		return ""
+	}
+	if info.EpisodeDate != "" {
+		title := NormalizeTVShowName(info.Title, info.Year)
+		return fmt.Sprintf("%s %s.%s", title, info.EpisodeDate, ext)
+	}
+	return FormatTVEpisodeFilename(info.Title, info.Year, info.Season, info.Episode, ext)
+}
+
 // knownReleaseGroups is an exhaustive list of common release groups
 // used to safely strip only known groups instead of greedy -Word$ patterns
 var knownReleaseGroups = map[string]bool{
@@ -235,6 +266,65 @@ var qualityMarkerDetect = regexp.MustCompile(`(?i)(x264|x265|h264|h265|hevc|avc|
 
 // releaseGroupSuffix matches release group tags at end of filename like "-SPARKS", "-postbot"
 var releaseGroupSuffix = regexp.MustCompile(`(?i)-[A-Za-z0-9]+$`)
+
+// collectStrippedTokens collects the release metadata tokens (quality, codec,
+// release group, etc.) that stripReleaseMarkers would remove from baseName.
+func collectStrippedTokens(baseName string) []string {
+	var tokens []string
+	seen := make(map[string]bool)
+
+	add := func(tok string) {
+		tok = strings.TrimSpace(tok)
+		lower := strings.ToLower(tok)
+		if tok != "" && !seen[lower] {
+			seen[lower] = true
+			tokens = append(tokens, tok)
+		}
+	}
+
+	s := baseName
+
+	// Phase 1: strip known release group suffixes from the right
+	for {
+		idx := strings.LastIndex(s, "-")
+		if idx < 0 || idx == len(s)-1 {
+			break
+		}
+		candidate := strings.ToLower(s[idx+1:])
+		if knownReleaseGroups[candidate] {
+			add(s[idx+1:])
+			s = s[:idx]
+		} else {
+			break
+		}
+	}
+
+	// Phase 2: if quality/codec markers are present, any remaining -Word$ suffix
+	// is almost certainly a release group
+	if qualityMarkerDetect.MatchString(s) {
+		for {
+			m := releaseGroupSuffix.FindString(s)
+			if m == "" {
+				break
+			}
+			add(strings.TrimPrefix(m, "-"))
+			newS := releaseGroupSuffix.ReplaceAllString(s, "")
+			if newS == s {
+				break
+			}
+			s = newS
+		}
+	}
+
+	// Apply release patterns to the original baseName to catch quality/codec tokens
+	for _, re := range releasePatterns {
+		for _, m := range re.FindAllString(baseName, -1) {
+			add(m)
+		}
+	}
+
+	return tokens
+}
 
 func stripReleaseMarkers(s string) string {
 	// Phase 1: Strip known release group suffixes (safe — always strip these)
@@ -311,33 +401,81 @@ func removeYear(s, year string) string {
 	return s
 }
 
-func extractEpisodeInfo(s string) (season, episode int, found bool) {
+type episodeMatch struct {
+	season  int
+	episode int
+	loc     []int
+	kind    string
+	date    string
+	found   bool
+}
+
+func findEpisodeMatch(s string) episodeMatch {
 	match := episodeSERegex.FindStringSubmatch(s)
 	if len(match) > 2 {
-		season, _ = strconv.Atoi(match[1])
-		episode, _ = strconv.Atoi(match[2])
-		return season, episode, true
+		season, _ := strconv.Atoi(match[1])
+		episode, _ := strconv.Atoi(match[2])
+		return episodeMatch{
+			season:  season,
+			episode: episode,
+			loc:     episodeSERegex.FindStringIndex(s),
+			kind:    "season_episode",
+			found:   true,
+		}
 	}
 
 	match = episodeXRegex.FindStringSubmatch(s)
 	if len(match) > 2 {
-		season, _ = strconv.Atoi(match[1])
-		episode, _ = strconv.Atoi(match[2])
-		return season, episode, true
+		season, _ := strconv.Atoi(match[1])
+		episode, _ := strconv.Atoi(match[2])
+		return episodeMatch{
+			season:  season,
+			episode: episode,
+			loc:     episodeXRegex.FindStringIndex(s),
+			kind:    "x",
+			found:   true,
+		}
 	}
 
-	return 0, 0, false
+	match = episodeEPRegex.FindStringSubmatch(s)
+	if len(match) > 1 {
+		episode, _ := strconv.Atoi(match[1])
+		return episodeMatch{
+			season:  1,
+			episode: episode,
+			loc:     episodeEPRegex.FindStringIndex(s),
+			kind:    "absolute",
+			found:   true,
+		}
+	}
+
+	match = episodeDateRegex.FindStringSubmatch(s)
+	if len(match) > 4 {
+		season, _ := strconv.Atoi(match[1])
+		month, _ := strconv.Atoi(match[3])
+		day, _ := strconv.Atoi(match[4])
+		return episodeMatch{
+			season:  season,
+			episode: month*100 + day,
+			loc:     episodeDateRegex.FindStringIndex(s),
+			kind:    "date",
+			date:    fmt.Sprintf("%04d-%02d-%02d", season, month, day),
+			found:   true,
+		}
+	}
+
+	return episodeMatch{}
+}
+
+func extractEpisodeInfo(s string) (season, episode int, found bool) {
+	match := findEpisodeMatch(s)
+	return match.season, match.episode, match.found
 }
 
 func extractTitleBeforeEpisode(s string) string {
-	loc := episodeSERegex.FindStringIndex(s)
-	if loc != nil {
-		return s[:loc[0]]
-	}
-
-	loc = episodeXRegex.FindStringIndex(s)
-	if loc != nil {
-		return s[:loc[0]]
+	match := findEpisodeMatch(s)
+	if match.found {
+		return s[:match.loc[0]]
 	}
 
 	return s

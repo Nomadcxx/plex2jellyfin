@@ -10,6 +10,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -778,4 +779,16 @@ func TestCleanupAllowlist_ParentNotPurged(t *testing.T) {
 	assert.NoError(t, err, "parent with junk must not be purged")
 	_, err = os.Stat(parentJunk)
 	assert.NoError(t, err, "junk in parent must survive")
+}
+
+func TestObfuscatedFileHandling(t *testing.T) {
+	// ParseTVShowFromPathVerbose must fall back to the release folder name when the
+	// filename is an obfuscated hash, and return stripped quality tokens from it.
+	path := "/downloads/The.White.Lotus.S02E07.1080p.WEB-DL/q1reIwWo3oVx97qiPp0731Eglz7WFVn8.mkv"
+	info, tokens, err := naming.ParseTVShowFromPathVerbose(path)
+	require.NoError(t, err)
+	assert.Equal(t, "The White Lotus", info.Title)
+	assert.Equal(t, 2, info.Season)
+	assert.Equal(t, 7, info.Episode)
+	assert.NotEmpty(t, tokens, "verbose call should return stripped tokens from folder name")
 }

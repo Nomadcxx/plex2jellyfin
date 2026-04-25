@@ -37,7 +37,7 @@ func IsObfuscatedFilename(filename string) bool {
 		return true
 	}
 
-	if episodeSERegex.MatchString(baseName) || episodeXRegex.MatchString(baseName) {
+	if IsTVEpisodeFilename(filename) {
 		return false
 	}
 
@@ -116,9 +116,15 @@ func hasHighEntropy(s string) bool {
 // ParseTVShowFromPath extracts TV info from path when filename is obfuscated.
 // Example: /downloads/The.White.Lotus.S02E07.1080p/random.mkv -> TVShowInfo
 func ParseTVShowFromPath(path string) (*TVShowInfo, error) {
+	info, _, err := ParseTVShowFromPathVerbose(path)
+	return info, err
+}
+
+// ParseTVShowFromPathVerbose extracts TV info from path and returns stripped tokens.
+func ParseTVShowFromPathVerbose(path string) (*TVShowInfo, []string, error) {
 	filename := filepath.Base(path)
 	if !IsObfuscatedFilename(filename) {
-		return ParseTVShowName(filename)
+		return ParseTVShowNameVerbose(filename)
 	}
 
 	dir := filepath.Dir(path)
@@ -129,13 +135,13 @@ func ParseTVShowFromPath(path string) (*TVShowInfo, error) {
 
 		folderName := filepath.Base(dir)
 		if IsTVEpisodeFilename(folderName) {
-			return ParseTVShowName(folderName)
+			return ParseTVShowNameVerbose(folderName)
 		}
 
 		dir = filepath.Dir(dir)
 	}
 
-	return nil, &ParseError{
+	return nil, nil, &ParseError{
 		Filename: path,
 		Message:  "could not extract TV show info from path (obfuscated filename, no episode markers in parent folders)",
 	}
@@ -144,9 +150,15 @@ func ParseTVShowFromPath(path string) (*TVShowInfo, error) {
 // ParseMovieFromPath extracts movie info from path when filename is obfuscated.
 // Example: /downloads/Inception.2010.1080p.BluRay/random.mkv -> MovieInfo
 func ParseMovieFromPath(path string) (*MovieInfo, error) {
+	info, _, err := ParseMovieFromPathVerbose(path)
+	return info, err
+}
+
+// ParseMovieFromPathVerbose extracts movie info from path and returns stripped tokens.
+func ParseMovieFromPathVerbose(path string) (*MovieInfo, []string, error) {
 	filename := filepath.Base(path)
 	if !IsObfuscatedFilename(filename) {
-		return ParseMovieName(filename)
+		return ParseMovieNameVerbose(filename)
 	}
 
 	dir := filepath.Dir(path)
@@ -163,16 +175,16 @@ func ParseMovieFromPath(path string) (*MovieInfo, error) {
 		}
 
 		if !IsTVEpisodeFilename(folderName) {
-			info, err := ParseMovieName(folderName)
+			info, tokens, err := ParseMovieNameVerbose(folderName)
 			if err == nil && !IsGarbageTitle(info.Title) {
-				return info, nil
+				return info, tokens, nil
 			}
 		}
 
 		dir = filepath.Dir(dir)
 	}
 
-	return nil, &ParseError{
+	return nil, nil, &ParseError{
 		Filename: path,
 		Message:  "could not extract movie info from path (obfuscated filename, no valid movie name in parent folders)",
 	}
@@ -229,4 +241,10 @@ type ParseError struct {
 
 func (e *ParseError) Error() string {
 	return e.Message + ": " + e.Filename
+}
+
+// Unwrap lets errors.Is(err, ErrParseFailed) recognize ParseError as a
+// deterministic parse failure.
+func (e *ParseError) Unwrap() error {
+	return ErrParseFailed
 }
