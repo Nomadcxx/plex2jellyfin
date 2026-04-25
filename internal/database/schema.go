@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 13
+const currentSchemaVersion = 14
 
 // SQL migration scripts
 var migrations = []migration{
@@ -477,6 +477,42 @@ var migrations = []migration{
 		up: []string{
 			`CREATE INDEX IF NOT EXISTS idx_media_files_parse_method ON media_files(parse_method)`,
 			`INSERT INTO schema_version (version) VALUES (13)`,
+		},
+	},
+	{
+		version: 14,
+		up: []string{
+			`CREATE TABLE parse_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_path TEXT NOT NULL,
+    source_filename TEXT NOT NULL,
+    event_at DATETIME NOT NULL,
+    media_type_guessed TEXT,
+    parse_method TEXT,
+    parsed_title TEXT,
+    parsed_year INTEGER,
+    parsed_season INTEGER,
+    parsed_episode INTEGER,
+    parser_stripped_tokens TEXT,
+    target_path TEXT,
+    target_at DATETIME,
+    existing_match_method TEXT,
+    organize_outcome TEXT,
+    organize_error TEXT,
+    jellyfin_item_id TEXT,
+    jellyfin_imdb_id TEXT,
+    jellyfin_tmdb_id TEXT,
+    jellyfin_tvdb_id TEXT,
+    jellyfin_resolved_at DATETIME,
+    auto_label TEXT,
+    human_label_override TEXT
+)`,
+			`CREATE INDEX idx_pd_source_path ON parse_decisions(source_path)`,
+			`CREATE INDEX idx_pd_target_path ON parse_decisions(target_path)`,
+			`CREATE INDEX idx_pd_event_at ON parse_decisions(event_at)`,
+			`CREATE INDEX idx_pd_auto_label ON parse_decisions(auto_label)`,
+			`CREATE INDEX idx_pd_organize_outcome ON parse_decisions(organize_outcome)`,
+			`INSERT INTO schema_version (version) VALUES (14)`,
 		},
 	},
 }
