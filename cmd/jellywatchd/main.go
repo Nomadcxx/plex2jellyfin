@@ -380,6 +380,34 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			logging.F("interval", "15m"))
 	}
 
+	// Start Jellyfin parse-decision sweeper (requires both Jellyfin and DB).
+	if jellyfinClient != nil && db != nil {
+		sweeper := jellyfin.NewSweeper(jellyfinClient, db)
+		go func() {
+			select {
+			case <-time.After(30 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+			if err := sweeper.RunOnce(24*time.Hour, 7*24*time.Hour); err != nil {
+				logger.Warn("daemon", "Jellyfin sweeper error", logging.F("error", err.Error()))
+			}
+			ticker := time.NewTicker(6 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if err := sweeper.RunOnce(24*time.Hour, 7*24*time.Hour); err != nil {
+						logger.Warn("daemon", "Jellyfin sweeper error", logging.F("error", err.Error()))
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		logger.Info("daemon", "Jellyfin parse-decision sweeper started")
+	}
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
