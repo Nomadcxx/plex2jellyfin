@@ -612,11 +612,11 @@ func TestOrganizeTVEpisode_Dedup_DifferentNameSameKey(t *testing.T) {
 	// The prefix check will NOT recognise this as the same episode.
 	// Use BluRay so it outscores any incoming file with unknown/WEB source.
 	existing := filepath.Join(seasonDir, "Show.S01E03.1080p.BluRay.mkv")
-	createTestFile(t, existing, 2*1024*1024*1024)
+	createTestFile(t, existing, 1024*1024)
 
 	// Incoming: same key, lower quality (720p WEB-DL scores below 1080p BluRay).
 	incoming := filepath.Join(sourceDir, "Silo.2023.S01E03.720p.WEB-DL.mkv")
-	createTestFile(t, incoming, 500*1024*1024)
+	createTestFile(t, incoming, 1024)
 
 	org := setupTVOrganizer(t)
 	result, err := org.OrganizeTVEpisode(incoming, libraryDir)
@@ -640,7 +640,7 @@ func TestOrganizeTVEpisode_Dedup_SubtitleNotCounted(t *testing.T) {
 	require.NoError(t, os.WriteFile(srt, []byte("1\n00:00:01 --> 00:00:02\nHello\n"), 0644))
 
 	incoming := filepath.Join(sourceDir, "Silo.2023.S01E04.1080p.WEB-DL.mkv")
-	createTestFile(t, incoming, 500*1024*1024)
+	createTestFile(t, incoming, 1024)
 
 	org := setupTVOrganizer(t, WithDryRun(true))
 	result, err := org.OrganizeTVEpisode(incoming, libraryDir)
@@ -661,10 +661,10 @@ func TestOrganizeTVWithParsed_Dedup_DifferentNameSameKey(t *testing.T) {
 
 	// Non-canonical filename: prefix check won't match "Breaking Bad (2008) S02E05".
 	existing := filepath.Join(seasonDir, "BB.S02E05.1080p.BluRay.mkv")
-	createTestFile(t, existing, 2*1024*1024*1024)
+	createTestFile(t, existing, 1024*1024)
 
 	incoming := filepath.Join(sourceDir, "Breaking.Bad.S02E05.720p.mkv")
-	createTestFile(t, incoming, 500*1024*1024)
+	createTestFile(t, incoming, 1024)
 
 	org := setupTVOrganizer(t)
 	tv := naming.TVShowInfo{Title: "Breaking Bad", Year: "2008", Season: 2, Episode: 5}
@@ -720,10 +720,10 @@ func TestOrganizeTVEpisode_DateBased(t *testing.T) {
 	// Existing file whose name the prefix check cannot match against an incoming
 	// "Late Night Show 2021-03-15.mkv" target.
 	existing := filepath.Join(seasonDir, "LateNight.2021.03.15.1080p.mkv")
-	createTestFile(t, existing, 1*1024*1024*1024)
+	createTestFile(t, existing, 1024*1024)
 
 	incoming := filepath.Join(sourceDir, "Late.Night.Show.2021.03.15.720p.mkv")
-	createTestFile(t, incoming, 500*1024*1024)
+	createTestFile(t, incoming, 1024)
 
 	org := setupTVOrganizer(t)
 	result, err := org.OrganizeTVEpisode(incoming, libraryDir)
