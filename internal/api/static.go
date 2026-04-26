@@ -4,15 +4,20 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"strings"
 )
 
 // spaFileServer serves static files with SPA fallback to index.html
 func spaFileServer(root fs.FS) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Clean the path to prevent directory traversal
-		cleanPath := path.Clean(r.URL.Path)
-		if cleanPath == "." {
-			cleanPath = "/"
+		// Clean the path to prevent directory traversal, then strip the
+		// leading slash because fs.FS.Open requires unrooted paths
+		// (paths starting with "/" fail fs.ValidPath and never resolve
+		// against an embed.FS, causing every asset to fall through to
+		// the SPA fallback).
+		cleanPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if cleanPath == "" || cleanPath == "." {
+			cleanPath = "index.html"
 		}
 
 		// Try to open the file

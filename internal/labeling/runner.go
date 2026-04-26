@@ -29,8 +29,10 @@ func NewRunner(db *database.MediaDB, getName JellyfinNameFetcher) *Runner {
 
 // RunOnce queries all unlabeled rows (AutoLabelIsNull), derives a label for
 // each, and persists non-empty labels.  It loops in pages of 1 000 until a
-// page returns fewer rows than the limit, guaranteeing that more than 1 000
-// labeled rows in the database never hide unlabeled ones.
+// page returns fewer rows than the limit or until a full page yields zero
+// label writes (meaning every remaining row is currently un-derivable —
+// e.g. inside the TTL window with no resolved provider ID — so re-querying
+// would just return the same page forever).
 func (r *Runner) RunOnce() error {
 	var firstErr error
 
@@ -43,6 +45,7 @@ func (r *Runner) RunOnce() error {
 			return fmt.Errorf("labeling runner query: %w", err)
 		}
 
+		labeled := 0
 		for _, dec := range rows {
 			label, err := r.labelOne(dec)
 			if err != nil {
@@ -58,10 +61,17 @@ func (r *Runner) RunOnce() error {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("UpdateAutoLabel id=%d: %w", dec.ID, err)
 				}
+				continue
 			}
+			labeled++
 		}
 
 		if len(rows) < pageSize {
+			break
+		}
+		// Full page returned but nothing was labeled — the next query
+		// would return the same rows.  Stop and let the next tick retry.
+		if labeled == 0 {
 			break
 		}
 	}
