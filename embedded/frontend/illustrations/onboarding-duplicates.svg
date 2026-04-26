@@ -1,0 +1,65 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="dupOnGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2d1b4e;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="dupOnGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:0.4" />
+      <stop offset="100%" style="stop-color:#a78bfa;stop-opacity:0.2" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#dupOnGrad1)"/>
+  
+  <!-- Decorative elements -->
+  <circle cx="80" cy="80" r="60" fill="#8b5cf6" fill-opacity="0.05"/>
+  <circle cx="420" cy="420" r="100" fill="#a78bfa" fill-opacity="0.03"/>
+  
+  <!-- Main illustration: Duplicate detection -->
+  <g transform="translate(256, 200)">
+    <!-- Two duplicate files -->
+    <g transform="translate(-50, 0)">
+      <rect x="0" y="0" width="60" height="75" rx="6" fill="#1e1b4b" stroke="#8b5cf6" stroke-width="2"/>
+      <rect x="8" y="12" width="44" height="6" rx="3" fill="#8b5cf6" opacity="0.5"/>
+      <rect x="8" y="24" width="30" height="4" rx="2" fill="#a78bfa" opacity="0.3"/>
+      <rect x="8" y="32" width="35" height="4" rx="2" fill="#a78bfa" opacity="0.3"/>
+      
+      <!-- Quality badge -->
+      <circle cx="50" cy="65" r="12" fill="#10b981" stroke="#34d399" stroke-width="2"/>
+      <path d="M44,65 L48,69 L56,61" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    
+    <g transform="translate(40, 20)">
+      <rect x="0" y="0" width="60" height="75" rx="6" fill="#1e1b4b" stroke="#ef4444" stroke-width="2" stroke-dasharray="4 2"/>
+      <rect x="8" y="12" width="44" height="6" rx="3" fill="#ef4444" opacity="0.3"/>
+      <rect x="8" y="24" width="30" height="4" rx="2" fill="#f87171" opacity="0.2"/>
+      <rect x="8" y="32" width="35" height="4" rx="2" fill="#f87171" opacity="0.2"/>
+      
+      <!-- Delete badge -->
+      <circle cx="50" cy="65" r="12" fill="#ef4444" stroke="#f87171" stroke-width="2"/>
+      <path d="M46,65 L54,65" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    
+    <!-- Comparison arrows -->
+    <path d="M-20,40 L20,40" stroke="#8b5cf6" stroke-width="2" stroke-dasharray="4 4"/>
+    <path d="M15,35 L20,40 L15,45" stroke="#8b5cf6" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- File count badge -->
+    <g transform="translate(0, -60)">
+      <rect x="-30" y="0" width="60" height="24" rx="12" fill="#8b5cf6" fill-opacity="0.2" stroke="#8b5cf6" stroke-width="1"/>
+      <text x="0" y="16" text-anchor="middle" fill="#a78bfa" font-family="system-ui, sans-serif" font-size="12" font-weight="600">
+        2 copies
+      </text>
+    </g>
+  </g>
+  
+  <!-- Text -->
+  <text x="256" y="380" text-anchor="middle" fill="#c4b5fd" font-family="system-ui, sans-serif" font-size="24" font-weight="600">
+    Find Duplicates
+  </text>
+  <text x="256" y="410" text-anchor="middle" fill="#a78bfa" font-family="system-ui, sans-serif" font-size="16">
+    We keep the best quality, remove the rest
+  </text>
+</svg>

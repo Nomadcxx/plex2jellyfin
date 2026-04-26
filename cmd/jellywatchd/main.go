@@ -18,6 +18,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/labeling"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
+	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/scanner"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
@@ -215,8 +216,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "Recovered stuck sync log entries", logging.F("count", recovered))
 	}
 
-	// Get config directory for activity logging
-	configDir := filepath.Join(os.Getenv("HOME"), ".config", "jellywatch")
+	// Get config directory for activity logging.  Use paths.JellyWatchDir
+	// so we honour SUDO_USER and write to the same ~/.config/jellywatch
+	// the web UI reads from (otherwise root-run daemon and SUDO_USER-aware
+	// jellyweb diverge: daemon writes /root/.config/..., webui reads
+	// /home/nomadx/.config/... and the activity feed is permanently empty).
+	configDir, err := paths.JellyWatchDir()
+	if err != nil {
+		configDir = filepath.Join(os.Getenv("HOME"), ".config", "jellywatch")
+	}
 	if cfgFile != "" {
 		configDir = filepath.Dir(cfgFile)
 	}

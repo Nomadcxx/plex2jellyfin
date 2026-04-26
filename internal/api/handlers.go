@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -331,11 +332,12 @@ func (s *Server) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 // ActivityStream implements api.ServerInterface - SSE stream for real-time activity
 func (s *Server) ActivityStream(w http.ResponseWriter, r *http.Request) {
-	// Set SSE headers
+	// Set SSE headers. CORS is handled by the chi middleware via config;
+	// overriding the header here would leak the hardcoded dev origin into
+	// production responses.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
 
 	// Flush helper
 	flusher, ok := w.(http.Flusher)
@@ -343,6 +345,13 @@ func (s *Server) ActivityStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "streaming_unsupported", "Streaming not supported")
 		return
 	}
+
+	connectedAt := time.Now()
+	remote := r.RemoteAddr
+	log.Printf("[api] SSE activity connected remote=%s", remote)
+	defer func() {
+		log.Printf("[api] SSE activity disconnected remote=%s duration=%s", remote, time.Since(connectedAt).Round(time.Second))
+	}()
 
 	// Send initial connection message
 	fmt.Fprintf(w, "event: connected\ndata: {\"message\":\"Connected to activity stream\"}\n\n")
@@ -379,7 +388,10 @@ func (s *Server) GetActivity(w http.ResponseWriter, r *http.Request, params api.
 
 	// Check if activity logger is available
 	if s.activityLogger == nil {
-		writeJSON(w, http.StatusOK, []api.ActivityEvent{})
+		writeJSON(w, http.StatusOK, struct {
+			Events []api.ActivityEvent `json:"events"`
+			Total  int                 `json:"total"`
+		}{Events: []api.ActivityEvent{}, Total: 0})
 		return
 	}
 
@@ -396,7 +408,16 @@ func (s *Server) GetActivity(w http.ResponseWriter, r *http.Request, params api.
 		events[i] = convertEntryToActivityEvent(entry)
 	}
 
-	writeJSON(w, http.StatusOK, events)
+	// Frontend (web/src/hooks/useActivity.ts) expects an envelope object
+	// with `events` and `total` keys.  Returning a bare array makes
+	// `data?.events` undefined and the UI shows nothing.
+	writeJSON(w, http.StatusOK, struct {
+		Events []api.ActivityEvent `json:"events"`
+		Total  int                 `json:"total"`
+	}{
+		Events: events,
+		Total:  len(events),
+	})
 }
 
 // convertEntryToActivityEvent converts an activity.Entry to an API ActivityEvent
