@@ -43,10 +43,17 @@ func init() {
 	patterns := []string{
 		`\b\d{3,4}[pi]\b`,
 		`\b(4K|UHD)\b`,
-		`\b(HDR10\+?|HDR|DoVi|DV)\b`,
-		`\b(DTS[ -]?HD|DTS[ -]?X|DTS|TrueHD|Atmos|AAC|AC3|DD\+?|DDP|FLAC)\b`,
+		`\b(HDR10\+?|HDR|DoVi|DV|SDR|HLG)\b`,
+		// Codec glued to channel digits (must come BEFORE bare codec match so the
+		// trailing channel digits get stripped together): AAC5.1, EAC3.5.1, DDP5.1
+		`\b(?:E?AC3|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d)?\b`,
+		`\b(DTS[ -]?HD|DTS[ -]?X|DTS|TrueHD|Atmos|AAC|AC3|EAC3|DD\+?|DDP|FLAC)\b`,
 		`\bDDP?\d[ .]?\d\b`,
-		`\b\d[ .]?\d\b`,
+		// Audio channels alone (require an explicit separator to avoid stripping
+		// 2-digit standalone numbers like "28" in "28 Weeks Later").
+		`\b\d[ .]\d\b`,
+		// Channel-count tokens like "6CH", "8CH"
+		`\b\d+CH\b`,
 		`\b(BluRay|Blu-ray|BDRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB)\b`,
 		`\b(HDTV|DVDRip|DVD)\b`,
 		`\b(AMZN|NF|ATVP|HULU|DSNP|MAX|PMTP)\b`,
@@ -55,7 +62,8 @@ func init() {
 		`\b(HEVC|AVC|AV1)\b`,
 		`\b(PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED)\b`,
 		`\b(DUAL|DL|MULTI|DUB|SUB|SUBS)\b`,
-		`\b(RARBG|YTS|YIFY|FLUX|ETHEL|Kitsune|NTb|CMRG|SPARKS|FGT)\b`,
+		`@\w+`,
+		`\b(RARBG|YTS|YIFY|FLUX|ETHEL|Kitsune|NTb|CMRG|SPARKS|FGT|BZ|TSRG)\b`,
 		`\bv\d+\b`,
 		`\[.*?\]`,
 		`\b(8bit|10bit|12bit)\b`,
@@ -247,6 +255,7 @@ var knownReleaseGroups = map[string]bool{
 	"sparks": true, "postbot": true, "sm737": true, "flux": true, "ethel": true,
 	"kitsune": true, "ntb": true, "cmrg": true, "fgt": true, "rarbg": true,
 	"yts": true, "yify": true, "evo": true, "ion10": true, "tigole": true,
+	"bz": true, "tsrg": true,
 	"geckos": true, "stuttershit": true, "sadpanda": true, "grym": true,
 	"demand": true, "nogrp": true, "mzabi": true, "hone": true, "cakes": true,
 	"sujaidr": true, "ggez": true, "ggwp": true, "tbs": true, "lol": true,

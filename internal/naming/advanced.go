@@ -39,19 +39,22 @@ func init() {
 
 		// Audio formats with channels (most specific first)
 		`\b(DTS-HD\s?MA|DTS-HD\s?HRA|DTS-HD|DTS-X|DTS-ES)\b`, // DTS variants
+		// Codec glued to channel digits: AAC5.1, EAC3.5.1, DDP5.1, DD5.1
+		`\b(?:E?AC3|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d)?\b`,
 		`\b(DD\+?|DDP|E?AC3|AAC|AC3)\d\s\d\b`,                // Audio with channels
 		`\b(DD\+?|DDP|E?AC3|AAC|AC3)\b`,                      // Audio without channels
 		`\b(TrueHD|Atmos|FLAC|PCM|Opus|MP3|DTS)\b`,           // Other audio codecs
 		`\d+Audio`,                             // Orphaned audio markers like "3Audio"
 		`MA\d+\s\d+`,                           // Orphaned MA markers like "MA5 1"
-		`\b\d\.\d\b`,                           // Matches 5.1, 7.1 etc.
+		`\b\d+CH\b`,                            // Channel-count tokens like 6CH, 8CH
+		`\b\d[ .]\d\b`,                         // Matches 5.1, 7.1 (require separator)
 		`\bHD\b`,                               // Remove solitary HD tokens
 		`\bCBR\b`,                              // Remove CBR quality token
 		`\b(DUAL|DUAL-CBR|DUAL-ENC|CBR|CRF)\b`, // Remove DUAL/quality tokens
 
 		// Audio channels (after audio codecs)
 		`\b\d\s\d\b`, // 7 1, 5 1, 2 0
-		`\b\d\.\d\b`, // Matches 5.1, 7.1 etc.
+		`\b\d[ .]\d\b`, // Matches 5.1, 7.1 (require separator)
 		`\b(Stereo|Mono)\b`,
 		// Commentary markers
 		`\b(Plus Commentary|Commentary|Audio Commentary)\b`,
