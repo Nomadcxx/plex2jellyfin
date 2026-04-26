@@ -354,6 +354,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		})
 		labeler := labeling.NewRunner(db, fetcher)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("daemon", "Parse-decision labeler panic recovered",
+						fmt.Errorf("%v", r))
+				}
+			}()
 			// Short initial delay so the daemon starts up before the first run.
 			select {
 			case <-time.After(30 * time.Second):
@@ -384,6 +390,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if jellyfinClient != nil && db != nil {
 		sweeper := jellyfin.NewSweeper(jellyfinClient, db)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("daemon", "Jellyfin sweeper panic recovered",
+						fmt.Errorf("%v", r))
+				}
+			}()
 			select {
 			case <-time.After(30 * time.Second):
 			case <-ctx.Done():

@@ -174,6 +174,10 @@ func (m *MediaDB) UpdateOutcome(id int64, u OutcomeUpdate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// First-write-wins: only resolve a row if it has not yet been
+	// Jellyfin-resolved.  This prevents the sweeper and the webhook
+	// handler (or two concurrent sweep windows) from overwriting each
+	// other's provider IDs in a last-write-wins race.
 	_, err := m.db.Exec(`
 		UPDATE parse_decisions SET
 			jellyfin_item_id = ?,
@@ -181,7 +185,7 @@ func (m *MediaDB) UpdateOutcome(id int64, u OutcomeUpdate) error {
 			jellyfin_tmdb_id = ?,
 			jellyfin_tvdb_id = ?,
 			jellyfin_resolved_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND jellyfin_resolved_at IS NULL`,
 		nullStr(u.JellyfinItemID), nullStr(u.JellyfinImdbID),
 		nullStr(u.JellyfinTmdbID), nullStr(u.JellyfinTvdbID),
 		nullTimePtr(u.JellyfinResolvedAt),
@@ -310,6 +314,31 @@ func (m *MediaDB) GetUnresolvedDecisionByTargetPath(targetPath string) (*ParseDe
 		return nil, nil
 	}
 	return d, err
+}
+
+// HasRecentSuccessForSource returns true when there is a parse_decisions row
+// for sourcePath with organize_outcome = 'success' and event_at within the
+// given lookback window.  Used by the cleanup gate to ensure we only purge
+// source directories that this daemon successfully organized — never bare
+// files a user may have dropped in.
+func (m *MediaDB) HasRecentSuccessForSource(sourcePath string, lookback time.Duration) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cutoff := time.Now().UTC().Add(-lookback)
+	var n int
+	err := m.db.QueryRow(`
+		SELECT COUNT(1)
+		FROM parse_decisions
+		WHERE source_path = ?
+		  AND organize_outcome = 'success'
+		  AND event_at >= ?`,
+		sourcePath, cutoff,
+	).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // scanner abstracts *sql.Row and *sql.Rows for scanDecision.

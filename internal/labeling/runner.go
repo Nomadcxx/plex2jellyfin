@@ -80,6 +80,21 @@ func (r *Runner) RunOnce() error {
 }
 
 func (r *Runner) labelOne(dec *database.ParseDecision) (string, error) {
+	// Re-fetch the row immediately before labeling to close the TOCTOU
+	// window between the bulk query in RunOnce and the per-row decision
+	// here.  The Jellyfin sweeper writes provider IDs concurrently, and
+	// stale data in `dec` would cause us to label a row FAIL when a
+	// provider ID has just been resolved.
+	if r.db != nil {
+		fresh, err := r.db.GetDecision(dec.ID)
+		if err != nil {
+			return "", fmt.Errorf("refetch decision id=%d: %w", dec.ID, err)
+		}
+		if fresh != nil {
+			dec = fresh
+		}
+	}
+
 	if !hasProviderID(*dec) {
 		return DeriveLabel(*dec, "", r.ttl), nil
 	}

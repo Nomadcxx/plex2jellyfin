@@ -607,6 +607,7 @@ func (h *MediaHandler) processFile(path string) {
 	if isTVEpisode {
 		if len(h.tvLibraries) == 0 {
 			h.logger.Warn("handler", "No TV libraries configured, skipping", logging.F("filename", filename))
+			h.updateDecisionOrganize(decisionID, nil, fmt.Errorf("no TV libraries configured"))
 			return
 		}
 		mediaType = notify.MediaTypeTVEpisode
@@ -676,6 +677,7 @@ func (h *MediaHandler) processFile(path string) {
 	} else {
 		if len(h.movieLibs) == 0 {
 			h.logger.Warn("handler", "No movie libraries configured, skipping", logging.F("filename", filename))
+			h.updateDecisionOrganize(decisionID, nil, fmt.Errorf("no movie libraries configured"))
 			return
 		}
 		targetLib = h.movieLibs[0]
@@ -722,6 +724,7 @@ func (h *MediaHandler) processFile(path string) {
 
 		if !h.checkTargetHealth(targetLib) {
 			h.logger.Warn("handler", "Target library unhealthy, skipping", logging.F("filename", filename), logging.F("target", targetLib))
+			h.updateDecisionOrganize(decisionID, nil, fmt.Errorf("target library unhealthy: %s", targetLib))
 			return
 		}
 
@@ -1023,6 +1026,25 @@ func (h *MediaHandler) cleanupSourceDir(sourcePath string) {
 	// Gate: source still present means keepSource or dry-run — do nothing.
 	if _, err := os.Stat(sourcePath); err == nil {
 		return
+	}
+
+	// Allowlist gate: only purge a source directory when there is a recent
+	// successful parse_decisions row for this exact source path.  Without
+	// this, any file that disappears for an unrelated reason (manual rm,
+	// transient mount loss, racing daemon) would cause us to delete the
+	// surrounding release directory.
+	if h.db != nil {
+		ok, err := h.db.HasRecentSuccessForSource(sourcePath, 24*time.Hour)
+		if err != nil {
+			h.logger.Warn("handler", "cleanup gate query failed; aborting cleanup",
+				logging.F("path", sourcePath), logging.F("error", err.Error()))
+			return
+		}
+		if !ok {
+			h.logger.Info("handler", "Skipping cleanup: no recent SUCCESS parse_decisions row",
+				logging.F("path", sourcePath))
+			return
+		}
 	}
 
 	// Build a set of watch roots for O(1) boundary checks.

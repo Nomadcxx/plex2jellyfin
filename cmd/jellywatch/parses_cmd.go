@@ -126,6 +126,7 @@ func newParsesCmdWithDeps(openDB func() (*database.MediaDB, error), stdout, stde
 	cmd.Flags().Int64Var(&overrideID, "override", 0, "row ID to set human_label_override on")
 	cmd.Flags().StringVar(&label, "label", "", "human label value (ok|wrong|drift|fail); required with --override")
 	cmd.Flags().IntVar(&limit, "limit", 100, "maximum rows to return")
+	cmd.MarkFlagsMutuallyExclusive("failures", "drift")
 
 	return cmd
 }

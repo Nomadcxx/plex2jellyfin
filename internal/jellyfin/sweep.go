@@ -97,13 +97,15 @@ func (s *Sweeper) sweepByPath(pathMap map[string]*database.ParseDecision) error 
 				continue
 			}
 			now := time.Now().UTC()
-			_ = s.db.UpdateOutcome(row.ID, database.OutcomeUpdate{
+			if err := s.db.UpdateOutcome(row.ID, database.OutcomeUpdate{
 				JellyfinItemID:     item.ID,
 				JellyfinImdbID:     item.ProviderIDs["Imdb"],
 				JellyfinTmdbID:     item.ProviderIDs["Tmdb"],
 				JellyfinTvdbID:     item.ProviderIDs["Tvdb"],
 				JellyfinResolvedAt: &now,
-			})
+			}); err != nil {
+				return fmt.Errorf("UpdateOutcome id=%d: %w", row.ID, err)
+			}
 			delete(pathMap, item.Path)
 		}
 
