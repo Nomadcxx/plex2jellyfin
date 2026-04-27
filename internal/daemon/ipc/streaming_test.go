@@ -23,7 +23,7 @@ func TestAttachReplaysFrames(t *testing.T) {
 		<-ctx.Done()
 	})
 
-	srv.Register(CmdAttach, attachHandler(srv))
+	srv.Register(CmdAttach, AttachHandler(srv))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

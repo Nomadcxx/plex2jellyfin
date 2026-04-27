@@ -179,3 +179,27 @@ p <- database.ProgressEvent{Phase: "walking"}
 p <- database.ProgressEvent{Phase: "indexing", Current: 1, Total: 1}
 return nil
 }
+
+func TestResetDBHandlerRequiresLiteralConfirm(t *testing.T) {
+srv := ipc.NewServer(filepath.Join(t.TempDir(), "ctl.sock"))
+srv.SetRegistry(ipc.NewOpRegistry())
+srv.RegisterStreaming(ipc.CmdResetDB, resetDBHandler(nil, nil))
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+if err := srv.Start(ctx); err != nil {
+t.Fatal(err)
+}
+defer srv.Stop()
+
+cli := ipc.NewClient(srv.Path())
+frames, _ := cli.Stream(ctx, ipc.CmdResetDB, map[string]any{"confirm": "wrong"})
+gotErr := false
+for f := range frames {
+if f.Type == ipc.FrameError {
+gotErr = true
+}
+}
+if !gotErr {
+t.Error("expected ErrBadRequest for wrong confirm")
+}
+}

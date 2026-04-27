@@ -49,9 +49,9 @@ func heartbeatLoop(ctx context.Context, opID string, w *ringWriter, done <-chan 
 	}
 }
 
-// attachHandler replays the op's frame ring then keeps the connection
+// AttachHandler replays the op's frame ring then keeps the connection
 // open until the op finalizes (or the client disconnects).
-func attachHandler(s *Server) Handler {
+func AttachHandler(s *Server) Handler {
 	return func(ctx context.Context, req Request, w FrameWriter) {
 		var args struct {
 			OpID string `json:"op_id"`
@@ -102,8 +102,8 @@ func attachHandler(s *Server) Handler {
 	}
 }
 
-// cancelHandler cancels an in-flight op via the registry.
-func cancelHandler(s *Server) Handler {
+// CancelHandler cancels an in-flight op via the registry.
+func CancelHandler(s *Server) Handler {
 	return func(ctx context.Context, req Request, w FrameWriter) {
 		var args struct {
 			OpID string `json:"op_id"`
