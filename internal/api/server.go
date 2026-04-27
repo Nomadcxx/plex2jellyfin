@@ -13,6 +13,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/jellywatch/internal/jellyweb/daemonctl"
 	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -31,6 +32,7 @@ type Server struct {
 	playbackLocks  *jellyfin.PlaybackLockManager
 	deferredQueue  *jellyfin.DeferredQueue
 	ipc            IPCCaller
+	launcher       *daemonctl.Launcher
 }
 
 // NewServer creates a new API server
@@ -134,6 +136,16 @@ func (s *Server) apiRouter() *chi.Mux {
 	r.Post("/settings/jellyfin/test", testH.Jellyfin)
 
 	if s.ipc != nil {
+		daemonH := &DaemonHandlers{IPC: s.ipc, Launcher: s.launcher}
+		r.Route("/daemon", func(r chi.Router) {
+			r.Get("/status", daemonH.Status)
+			r.Post("/stop", daemonH.Stop)
+			r.Post("/reload", daemonH.Reload)
+			r.Post("/start", daemonH.Start)
+			r.Post("/restart", daemonH.Restart)
+			r.Post("/recover", daemonH.Recover)
+		})
+
 		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		pathsH := &PathsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		libsH := &LibrariesHandlers{Cfg: s.cfg, IPC: s.ipc}
