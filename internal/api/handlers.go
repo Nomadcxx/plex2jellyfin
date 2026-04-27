@@ -187,6 +187,28 @@ func (s *Server) ConsolidateItem(w http.ResponseWriter, r *http.Request, itemId 
 		}
 	}
 
+	// On dry-run, return the plan without executing so the UI can preview moves.
+	if dryRun {
+		moves := make([]map[string]interface{}, 0, len(plan.Operations))
+		for _, op := range plan.Operations {
+			moves = append(moves, map[string]interface{}{
+				"from":  op.SourcePath,
+				"to":    op.DestinationPath,
+				"bytes": op.Size,
+			})
+		}
+		fmt.Printf("Consolidation: [DRY RUN] Would consolidate %d files (%d bytes)\n", plan.TotalFiles, plan.TotalBytes)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":    true,
+			"dryRun":     true,
+			"filesMoved": plan.TotalFiles,
+			"bytesMoved": plan.TotalBytes,
+			"targetPath": plan.TargetPath,
+			"moves":      moves,
+		})
+		return
+	}
+
 	// Execute the consolidation
 	if err := consolidator.ExecutePlan(plan, dryRun); err != nil {
 		writeError(w, http.StatusInternalServerError, "consolidation_failed", fmt.Sprintf("Failed to consolidate: %v", err))
@@ -204,9 +226,6 @@ func (s *Server) ConsolidateItem(w http.ResponseWriter, r *http.Request, itemId 
 	}
 
 	message := fmt.Sprintf("Consolidated %d files (%d bytes)", plan.TotalFiles, plan.TotalBytes)
-	if dryRun {
-		message = fmt.Sprintf("[DRY RUN] Would consolidate %d files (%d bytes)", plan.TotalFiles, plan.TotalBytes)
-	}
 
 	// Log the message for debugging
 	fmt.Printf("Consolidation: %s\n", message)
@@ -357,8 +376,16 @@ func (s *Server) ActivityStream(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "event: connected\ndata: {\"message\":\"Connected to activity stream\"}\n\n")
 	flusher.Flush()
 
+	// Subscribe to live activity entries (no-op if logger not configured).
+	var entries <-chan activity.Entry
+	var cancel func()
+	if s.activityLogger != nil {
+		entries, cancel = s.activityLogger.Subscribe()
+		defer cancel()
+	}
+
 	// Heartbeat ticker
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -366,6 +393,17 @@ func (s *Server) ActivityStream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			// Client disconnected
 			return
+		case entry, ok := <-entries:
+			if !ok {
+				entries = nil
+				continue
+			}
+			payload, err := json.Marshal(entry)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: activity\ndata: %s\n\n", payload)
+			flusher.Flush()
 		case <-ticker.C:
 			// Send heartbeat
 			fmt.Fprintf(w, "event: heartbeat\ndata: {\"ts\":%d}\n\n", time.Now().Unix())
@@ -712,11 +750,85 @@ func (s *Server) GetStuckItems(w http.ResponseWriter, r *http.Request, managerId
 	writeJSON(w, http.StatusOK, apiItems)
 }
 
-// ScanStream implements api.ServerInterface - SSE stream for scan progress
+// ScanStream implements api.ServerInterface - SSE stream for scan progress.
+// Periodic scanner state lives in the daemon process; from the web server we
+// emit an in-process snapshot of scanState every 2s plus start/end transition
+// events so the UI can show live progress for scans triggered via /scan.
 func (s *Server) ScanStream(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": "SSE scan streaming not yet implemented",
-	})
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming_unsupported", "Streaming not supported")
+		return
+	}
+
+	fmt.Fprintf(w, "event: connected\ndata: {\"message\":\"Connected to scan stream\"}\n\n")
+	flusher.Flush()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	send := func(eventName string, payload map[string]interface{}) {
+		buf, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventName, buf)
+		flusher.Flush()
+	}
+
+	snapshot := func() (string, map[string]interface{}) {
+		scanState.mu.RLock()
+		defer scanState.mu.RUnlock()
+		payload := map[string]interface{}{
+			"type":         "scan_status",
+			"status":       scanState.status,
+			"progress":     scanState.progress,
+			"message":      scanState.message,
+			"filesScanned": scanState.filesScanned,
+			"timestamp":    time.Now().Format(time.RFC3339),
+		}
+		if !scanState.startTime.IsZero() {
+			payload["startTime"] = scanState.startTime.Format(time.RFC3339)
+		}
+		if !scanState.lastScan.IsZero() {
+			payload["lastScan"] = scanState.lastScan.Format(time.RFC3339)
+		}
+		return scanState.status, payload
+	}
+
+	prevStatus, payload := snapshot()
+	send("scan_status", payload)
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			status, payload := snapshot()
+			if status != prevStatus {
+				switch status {
+				case "scanning":
+					send("scan_started", payload)
+				case "idle", "completed":
+					send("scan_completed", payload)
+				case "failed":
+					send("scan_failed", payload)
+				}
+				prevStatus = status
+			}
+			send("scan_status", payload)
+		case <-heartbeat.C:
+			fmt.Fprintf(w, "event: heartbeat\ndata: {\"ts\":%d}\n\n", time.Now().Unix())
+			flusher.Flush()
+		}
+	}
 }
 
 // Helper functions

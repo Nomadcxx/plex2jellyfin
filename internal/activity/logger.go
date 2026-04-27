@@ -35,6 +35,13 @@ type Entry struct {
 	SonarrNotified bool        `json:"sonarr_notified"`
 	RadarrNotified bool        `json:"radarr_notified"`
 	Error          string      `json:"error,omitempty"`
+	// Deterministic marks a failure that won't succeed on retry without the
+	// source file changing (e.g. unparseable filename). The retry loop gates
+	// on mtime and a long interval before re-attempting.
+	Deterministic bool `json:"deterministic,omitempty"`
+	// SourceMtime is the unix-second mtime of Source at the time of this
+	// entry. Used with Deterministic to detect file changes across scans.
+	SourceMtime int64 `json:"source_mtime,omitempty"`
 }
 
 type Logger struct {
@@ -43,6 +50,9 @@ type Logger struct {
 	logDir      string
 	currentFile *os.File
 	currentDate string
+
+	subMu       sync.Mutex
+	subscribers map[chan Entry]struct{}
 }
 
 func NewLogger(configDir string) (*Logger, error) {
@@ -53,9 +63,45 @@ func NewLogger(configDir string) (*Logger, error) {
 	}
 
 	return &Logger{
-		configDir: configDir,
-		logDir:    logDir,
+		configDir:   configDir,
+		logDir:      logDir,
+		subscribers: make(map[chan Entry]struct{}),
 	}, nil
+}
+
+// Subscribe registers a subscriber that receives every successfully written
+// activity Entry. The returned channel is buffered; writes that would block
+// are dropped to keep the writer fast. Call the returned cancel func to
+// unsubscribe and close the channel.
+func (l *Logger) Subscribe() (<-chan Entry, func()) {
+	ch := make(chan Entry, 64)
+	l.subMu.Lock()
+	if l.subscribers == nil {
+		l.subscribers = make(map[chan Entry]struct{})
+	}
+	l.subscribers[ch] = struct{}{}
+	l.subMu.Unlock()
+
+	cancel := func() {
+		l.subMu.Lock()
+		if _, ok := l.subscribers[ch]; ok {
+			delete(l.subscribers, ch)
+			close(ch)
+		}
+		l.subMu.Unlock()
+	}
+	return ch, cancel
+}
+
+func (l *Logger) publish(entry Entry) {
+	l.subMu.Lock()
+	defer l.subMu.Unlock()
+	for ch := range l.subscribers {
+		select {
+		case ch <- entry:
+		default:
+		}
+	}
 }
 
 func (l *Logger) Log(entry Entry) error {
@@ -82,6 +128,9 @@ func (l *Logger) Log(entry Entry) error {
 	}
 
 	_, err = l.currentFile.Write(append(line, '\n'))
+	if err == nil {
+		l.publish(entry)
+	}
 	return err
 }
 

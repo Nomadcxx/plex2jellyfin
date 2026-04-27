@@ -40,6 +40,56 @@ type PeriodicScanner struct {
 	// Health tracking
 	healthy         bool
 	lastHealthCheck time.Time
+
+	// Live event subscribers
+	subMu       sync.Mutex
+	subscribers map[chan ScanEvent]struct{}
+}
+
+// ScanEvent is a live event emitted by the periodic scanner.
+type ScanEvent struct {
+	Type      string    `json:"type"`
+	Path      string    `json:"path,omitempty"`
+	Total     int       `json:"total,omitempty"`
+	Done      int       `json:"done,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	Error     string    `json:"error,omitempty"`
+}
+
+// Subscribe registers a subscriber channel for ScanEvents. Slow consumers
+// have events dropped on a non-blocking send. Call cancel to unsubscribe.
+func (s *PeriodicScanner) Subscribe() (<-chan ScanEvent, func()) {
+	ch := make(chan ScanEvent, 64)
+	s.subMu.Lock()
+	if s.subscribers == nil {
+		s.subscribers = make(map[chan ScanEvent]struct{})
+	}
+	s.subscribers[ch] = struct{}{}
+	s.subMu.Unlock()
+
+	cancel := func() {
+		s.subMu.Lock()
+		if _, ok := s.subscribers[ch]; ok {
+			delete(s.subscribers, ch)
+			close(ch)
+		}
+		s.subMu.Unlock()
+	}
+	return ch, cancel
+}
+
+func (s *PeriodicScanner) publish(ev ScanEvent) {
+	if ev.Timestamp.IsZero() {
+		ev.Timestamp = time.Now()
+	}
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	for ch := range s.subscribers {
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
 }
 
 // NewPeriodicScanner creates a new scanner with the given config
@@ -151,6 +201,7 @@ func (s *PeriodicScanner) runScan() (err error) {
 
 	start := time.Now()
 	s.logger.Info("scanner", "Periodic scan starting")
+	s.publish(ScanEvent{Type: "scan_started"})
 
 	// Phase 1: Scan watch directories
 	processed, errors := s.scanWatchDirectories()
@@ -173,6 +224,12 @@ func (s *PeriodicScanner) runScan() (err error) {
 		logging.F("retried", retried),
 		logging.F("cleaned", cleaned))
 
+	s.publish(ScanEvent{
+		Type:  "scan_completed",
+		Total: processed + errors,
+		Done:  processed,
+	})
+
 	return nil
 }
 
@@ -188,6 +245,9 @@ func (s *PeriodicScanner) checkOrphans() {
 	}
 
 	if len(orphans) == 0 {
+		// Previously silent on the zero case; a single INFO per scan makes
+		// it obvious the check is running and Jellyfin is clean.
+		s.logger.Info("scanner", "Orphan check complete", logging.F("orphans", 0))
 		return
 	}
 
@@ -231,8 +291,10 @@ func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
 					logging.F("path", path),
 					logging.F("error", err.Error()))
 				errors++
+				s.publish(ScanEvent{Type: "file_processed", Path: path, Error: err.Error()})
 			} else {
 				processed++
+				s.publish(ScanEvent{Type: "file_processed", Path: path})
 			}
 
 			return nil
