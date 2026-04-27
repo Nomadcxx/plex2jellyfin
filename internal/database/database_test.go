@@ -724,3 +724,21 @@ func TestNoConflictOnHigherPriorityUpdate(t *testing.T) {
 
 	t.Logf("Conflict recorded for priority override: %v", conflicts)
 }
+
+func TestMediaDBSQLReturnsHandle(t *testing.T) {
+db, err := OpenPath(filepath.Join(t.TempDir(), "media.db"))
+if err != nil {
+t.Fatal(err)
+}
+defer db.Close()
+if db.SQL() == nil {
+t.Fatal("SQL() returned nil")
+}
+var n int
+if err := db.SQL().QueryRow("SELECT 1").Scan(&n); err != nil {
+t.Fatal(err)
+}
+if n != 1 {
+t.Errorf("got %d, want 1", n)
+}
+}

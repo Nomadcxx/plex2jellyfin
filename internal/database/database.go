@@ -79,3 +79,9 @@ func (m *MediaDB) migrate() error {
 func (m *MediaDB) DB() *sql.DB {
 	return m.db
 }
+
+// SQL returns the underlying *sql.DB. Preferred over DB() for new code that
+// wires the raw handle into maintenance / DDL helpers.
+func (m *MediaDB) SQL() *sql.DB {
+	return m.db
+}
