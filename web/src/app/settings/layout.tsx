@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bot, FolderOpen, HardDrive, ListChecks, LockKeyhole, Radio, Settings, SlidersHorizontal, Wrench } from 'lucide-react';
+import { Bot, Database, FolderOpen, HardDrive, ListChecks, LockKeyhole, Radio, Server, Settings, SlidersHorizontal, Wrench } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
+import { useDaemon } from '@/hooks/useDaemon';
 
 const nav = [
   { href: '/settings', label: 'Overview', icon: Settings },
@@ -16,10 +17,22 @@ const nav = [
   { href: '/settings/options', label: 'Options', icon: SlidersHorizontal },
   { href: '/settings/logging', label: 'Logging', icon: Wrench },
   { href: '/settings/permissions', label: 'Permissions', icon: LockKeyhole },
+  { href: '/settings/daemon', label: 'Daemon', icon: Server },
+  { href: '/settings/database', label: 'Database', icon: Database },
 ];
+
+function daemonDotColor(state?: string) {
+  switch (state) {
+    case 'running': return 'bg-green-500';
+    case 'interrupted': return 'bg-yellow-500';
+    case 'stopped': return 'bg-red-500';
+    default: return 'bg-zinc-500';
+  }
+}
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { status } = useDaemon(5000);
 
   return (
     <AppShell>
@@ -28,6 +41,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           {nav.map((item) => {
             const active = pathname === item.href;
             const Icon = item.icon;
+            const isDaemon = item.href === '/settings/daemon';
             return (
               <Link
                 key={item.href}
@@ -38,6 +52,12 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
               >
                 <Icon className="h-4 w-4" />
                 {item.label}
+                {isDaemon && (
+                  <span
+                    aria-label={`daemon ${status?.state ?? 'unknown'}`}
+                    className={`ml-auto inline-block h-2 w-2 rounded-full ${daemonDotColor(status?.state)}`}
+                  />
+                )}
               </Link>
             );
           })}
