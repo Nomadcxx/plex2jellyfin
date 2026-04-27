@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import { LayoutDashboard, Copy, Download, Activity, FolderSync, Settings } from 'lucide-react';
 
 const navigation = [
@@ -14,6 +15,11 @@ const navigation = [
 ];
 
 export function Sidebar() {
+  const pathname = usePathname();
+
+  const isActive = (href: string) =>
+    href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/');
+
   return (
     <aside className="w-64 bg-zinc-900 border-r border-zinc-800 h-screen p-4">
       <div className="mb-8 flex items-center gap-3">
@@ -31,9 +37,14 @@ export function Sidebar() {
           <Link
             key={item.name}
             href={item.href}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+            className={
+              isActive(item.href)
+                ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-fuchsia-500/15 text-fuchsia-300 font-medium'
+                : 'flex items-center gap-3 px-3 py-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+            }
+            aria-current={isActive(item.href) ? 'page' : undefined}
           >
-            <item.icon className="h-4 w-4" />
+            <item.icon className="h-4 w-4 shrink-0" />
             {item.name}
           </Link>
         ))}

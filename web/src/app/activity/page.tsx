@@ -48,7 +48,7 @@ function getEventColor(type: string) {
 }
 
 export default function ActivityPage() {
-  const { events, isConnected } = useActivityStream();
+  const { events, isConnected, loadOlder, isLoadingMore, hasMore } = useActivityStream();
 
   const badgeColor = isConnected
     ? 'bg-emerald-500'
@@ -143,6 +143,18 @@ export default function ActivityPage() {
                 </div>
               ))}
             </div>
+            {hasMore && (
+              <div className="mt-8 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => void loadOlder()}
+                  disabled={isLoadingMore}
+                  className="px-4 py-2 text-sm font-medium rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 hover:text-zinc-100 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  {isLoadingMore ? 'Loading…' : 'Load older events'}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

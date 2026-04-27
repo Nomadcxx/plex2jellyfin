@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Toaster } from 'sonner';
 import { AuthGuard } from '@/components/auth/AuthGuard';
+import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -20,9 +21,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // before the session check resolves. When auth is disabled (auth.enabled
   // false), AuthGuard is a no-op pass-through.
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthGuard>{children}</AuthGuard>
-      <Toaster theme="dark" position="bottom-right" richColors closeButton />
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthGuard>{children}</AuthGuard>
+        <Toaster theme="dark" position="bottom-right" richColors closeButton />
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

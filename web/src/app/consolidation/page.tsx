@@ -8,7 +8,7 @@ import {
   type ConsolidationPreview,
 } from '@/hooks/useConsolidation';
 import Image from 'next/image';
-import { FolderSync, ArrowRight, Layers, LayoutGrid, CheckCircle2, ArrowDown, Eye } from 'lucide-react';
+import { FolderSync, ArrowRight, Layers, Tv, CheckCircle2, ArrowDown, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -32,6 +32,8 @@ export default function ConsolidationPage() {
   const [activeConsolidations, setActiveConsolidations] = useState<Set<number>>(new Set());
   const [previewItemId, setPreviewItemId] = useState<number | null>(null);
   const [previewData, setPreviewData] = useState<ConsolidationPreview | null>(null);
+  // G10: confirm before firing a direct consolidation (without preview).
+  const [confirmItemId, setConfirmItemId] = useState<number | null>(null);
 
   const handlePreview = (itemId: number) => {
     setPreviewItemId(itemId);
@@ -109,8 +111,17 @@ export default function ConsolidationPage() {
   }
 
   const items = data?.items || [];
-  const totalMoves = data?.totalMoves || 0;
-  const totalBytes = data?.totalBytes || 0;
+  // P7: server returns totalMoves=0; derive from items so the badge reflects
+  // reality.
+  const totalMoves =
+    data?.totalMoves && data.totalMoves > 0
+      ? data.totalMoves
+      : items.reduce((sum, it) => sum + (it.filesToMove || 0), 0);
+  const totalBytes =
+    data?.totalBytes && data.totalBytes > 0
+      ? data.totalBytes
+      : items.reduce((sum, it) => sum + (it.bytesToMove || 0), 0);
+  const confirmItem = confirmItemId !== null ? items.find((it) => it.id === confirmItemId) : null;
 
   return (
     <AppShell>
@@ -169,10 +180,10 @@ export default function ConsolidationPage() {
                 <Card key={item.id} className="overflow-hidden border-zinc-800/60 bg-zinc-950/50 hover:border-zinc-700 hover:bg-zinc-900/50 transition-all duration-300">
                   <div className="flex flex-col md:flex-row h-full">
                     {/* Poster Placeholder Side */}
-                    <div className="w-full md:w-48 bg-zinc-900 flex-shrink-0 flex items-center justify-center border-r border-zinc-800 p-6 md:p-0">
-                      <div className="flex flex-col items-center justify-center opacity-40">
-                        <LayoutGrid className="h-12 w-12 mb-3" />
-                        <span className="text-sm font-medium uppercase tracking-wider">{item.mediaType || 'SERIES'}</span>
+                    <div className="w-full md:w-48 flex-shrink-0 flex items-center justify-center border-r border-zinc-800 p-6 md:p-0 bg-gradient-to-br from-sky-500/10 via-indigo-500/10 to-zinc-900">
+                      <div className="flex flex-col items-center justify-center text-sky-300">
+                        <Tv className="h-14 w-14 mb-3" strokeWidth={1.5} />
+                        <span className="text-xs font-semibold uppercase tracking-wider text-sky-300/80">{item.mediaType || 'SERIES'}</span>
                       </div>
                     </div>
                     
@@ -240,7 +251,7 @@ export default function ConsolidationPage() {
                           <Button 
                             size="lg"
                             className="w-full md:w-auto bg-sky-600 hover:bg-sky-500 text-white shadow-lg shadow-sky-500/20 relative overflow-hidden group"
-                            onClick={() => item.id !== undefined && handleConsolidate(item.id)}
+                            onClick={() => item.id !== undefined && setConfirmItemId(item.id)}
                             disabled={isConsolidating}
                           >
                             <span className="relative z-10 flex items-center">
@@ -310,6 +321,38 @@ export default function ConsolidationPage() {
               className="bg-sky-600 hover:bg-sky-500"
               onClick={handleConsolidateFromPreview}
               disabled={!previewData || previewMutation.isPending}
+            >
+              Run Consolidation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmItemId !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmItemId(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Consolidate {confirmItem?.title ?? 'series'}?</DialogTitle>
+            <DialogDescription>
+              {confirmItem
+                ? `${confirmItem.filesToMove ?? 0} file${(confirmItem.filesToMove ?? 0) === 1 ? '' : 's'} (${formatBytes(confirmItem.bytesToMove || 0)}) will be moved into ${confirmItem.targetLocation || 'the target location'}.`
+                : 'This action will move files between library folders.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmItemId(null)}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-sky-600 hover:bg-sky-500"
+              onClick={() => {
+                if (confirmItemId !== null) handleConsolidate(confirmItemId);
+                setConfirmItemId(null);
+              }}
             >
               Run Consolidation
             </Button>

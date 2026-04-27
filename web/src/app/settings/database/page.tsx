@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ConfirmDestructive } from '@/components/settings/ConfirmDestructive';
 import { ProgressCard } from '@/components/settings/ProgressCard';
@@ -9,25 +10,48 @@ import { useOpStream } from '@/hooks/useOpStream';
 export default function DatabasePage() {
   const [opID, setOpID] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const { events } = useOpStream(opID);
 
+  const lastEvent = events[events.length - 1];
+  const opFinished =
+    lastEvent?.type === 'done' ||
+    lastEvent?.type === 'error' ||
+    lastEvent?.type === 'cancelled';
+
   async function startRescan() {
-    const r = await fetch('/api/v1/database/rescan', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dry_run: false }),
-    });
-    const { op_id } = await r.json();
-    setOpID(op_id);
+    setIsStarting(true);
+    try {
+      const r = await fetch('/api/v1/database/rescan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dry_run: false }),
+      });
+      if (!r.ok) throw new Error(`Server error ${r.status}`);
+      const { op_id } = await r.json();
+      setOpID(op_id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start re-scan');
+    } finally {
+      setIsStarting(false);
+    }
   }
 
   async function startReset() {
     setConfirmReset(false);
-    const r = await fetch('/api/v1/database/reset', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirm: 'media.db', preserve: ['audit_log'] }),
-    });
-    const { op_id } = await r.json();
-    setOpID(op_id);
+    setIsStarting(true);
+    try {
+      const r = await fetch('/api/v1/database/reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'media.db', preserve: ['audit_log'] }),
+      });
+      if (!r.ok) throw new Error(`Server error ${r.status}`);
+      const { op_id } = await r.json();
+      setOpID(op_id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start reset');
+    } finally {
+      setIsStarting(false);
+    }
   }
 
   if (opID) {
@@ -35,6 +59,9 @@ export default function DatabasePage() {
       <div className="space-y-4">
         <h1 className="text-2xl font-semibold">Database</h1>
         <ProgressCard title="Operation in progress" events={events} />
+        {opFinished && (
+          <Button variant="outline" onClick={() => setOpID(null)}>Done</Button>
+        )}
       </div>
     );
   }
@@ -49,7 +76,7 @@ export default function DatabasePage() {
           Re-walks all watch folders. Existing parse decisions and audit history are preserved.
         </p>
         <div className="mt-3">
-          <Button onClick={startRescan}>Start re-scan</Button>
+          <Button onClick={startRescan} disabled={isStarting}>Start re-scan</Button>
         </div>
       </div>
 
@@ -60,7 +87,7 @@ export default function DatabasePage() {
           Audit log is preserved.
         </p>
         <div className="mt-3">
-          <Button variant="destructive" onClick={() => setConfirmReset(true)}>Reset database…</Button>
+          <Button variant="destructive" onClick={() => setConfirmReset(true)} disabled={isStarting}>Reset database…</Button>
         </div>
       </div>
 

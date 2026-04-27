@@ -22,7 +22,7 @@ export function SecretField({ value, onChange, placeholder }: Props) {
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
       />
-      <Button type="button" variant="outline" size="icon" onClick={() => setVisible((v) => !v)}>
+      <Button type="button" variant="outline" size="icon" onClick={() => setVisible((v) => !v)} aria-label={visible ? 'Hide secret' : 'Reveal secret'}>
         {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </Button>
     </div>

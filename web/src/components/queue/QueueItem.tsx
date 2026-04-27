@@ -1,8 +1,11 @@
 'use client';
 
+import { useState } from 'react';
+import { toast } from 'sonner';
 import { formatBytes } from '@/lib/utils';
 import { Download, X, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useClearQueueItem } from '@/hooks/useDashboard';
 
 type QueueItemData = {
@@ -25,11 +28,19 @@ interface QueueItemProps {
 
 export function QueueItem({ item, managerId }: QueueItemProps) {
   const clearMutation = useClearQueueItem(managerId);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const handleClear = () => {
-    if (confirm(`Remove "${item.title}" from queue?`)) {
-      clearMutation.mutate({ itemId: item.id || 0 });
-    }
+  const handleConfirm = () => {
+    clearMutation.mutate(
+      { itemId: item.id || 0 },
+      {
+        onSuccess: () => toast.success(`Removed "${item.title}" from queue`),
+        onError: (err: unknown) =>
+          toast.error(
+            `Failed to remove: ${(err as Error)?.message ?? 'Unknown error'}`,
+          ),
+      },
+    );
   };
 
   const progress = item.progress || 
@@ -82,13 +93,23 @@ export function QueueItem({ item, managerId }: QueueItemProps) {
         <Button
           variant="ghost"
           size="sm"
+          aria-label="Remove from queue"
           className="text-zinc-400 hover:text-red-400 flex-shrink-0"
-          onClick={handleClear}
+          onClick={() => setConfirmOpen(true)}
           disabled={clearMutation.isPending}
         >
           <X className="h-4 w-4" />
         </Button>
       </div>
+      <AlertDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Remove from queue?"
+        description={item.title ? `"${item.title}" will be removed from the download client.` : undefined}
+        confirmLabel="Remove"
+        destructive
+        onConfirm={handleConfirm}
+      />
     </div>
   );
 }

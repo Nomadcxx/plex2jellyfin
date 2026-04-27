@@ -85,6 +85,7 @@ export function PathListEditor({
                   variant="outline"
                   size="icon"
                   disabled={removing}
+                  aria-label="Remove path"
                   onClick={async () => {
                     await onRemove(index);
                     toast.success('Path removed');

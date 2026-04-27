@@ -3,11 +3,20 @@
 import Image from 'next/image';
 import { AppShell } from '@/components/layout/AppShell';
 import { useDashboard } from '@/hooks/useDashboard';
+import { useDuplicates } from '@/hooks/useDashboard';
 import { formatBytes } from '@/lib/utils';
-import { Database, HardDrive, Copy, FolderTree } from 'lucide-react';
+import { Database, HardDrive, Copy, FolderTree, Film, Tv, ListVideo, AlertTriangle } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function DashboardPage() {
-  const { data, isLoading } = useDashboard();
+  const { data, isLoading, isError, error } = useDashboard();
+  // The libraryStats.duplicateGroups field only updates after a duplicate
+  // scan persists results to the DB. The /duplicates endpoint computes
+  // groups live, so prefer its count when the DB stat is 0/missing.
+  const { data: dupData } = useDuplicates();
+  const liveDuplicateGroups = dupData?.groups?.length ?? 0;
+  const dbDuplicateGroups = data?.libraryStats?.duplicateGroups ?? 0;
+  const duplicateGroups = dbDuplicateGroups || liveDuplicateGroups;
 
   return (
     <AppShell>
@@ -22,7 +31,16 @@ export default function DashboardPage() {
           />
           <h1 className="text-3xl font-bold">Dashboard</h1>
         </div>
-        
+
+        {isError && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              Failed to load dashboard: {(error as Error)?.message ?? 'Unknown error'}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {isLoading ? (
           <div className="grid grid-cols-4 gap-4">
             {[1, 2, 3, 4].map((i) => (
@@ -30,28 +48,48 @@ export default function DashboardPage() {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              title="Total Files"
-              value={data?.libraryStats?.totalFiles?.toLocaleString() || '0'}
-              icon={Database}
-            />
-            <StatCard
-              title="Library Size"
-              value={formatBytes(data?.libraryStats?.totalSize || 0)}
-              icon={HardDrive}
-            />
-            <StatCard
-              title="Duplicates"
-              value={data?.libraryStats?.duplicateGroups || 0}
-              icon={Copy}
-            />
-            <StatCard
-              title="Scattered Series"
-              value={data?.libraryStats?.scatteredSeries || 0}
-              icon={FolderTree}
-            />
-          </div>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard
+                title="Total Files"
+                value={data?.libraryStats?.totalFiles?.toLocaleString() || '0'}
+                icon={Database}
+              />
+              <StatCard
+                title="Library Size"
+                value={formatBytes(data?.libraryStats?.totalSize || 0)}
+                icon={HardDrive}
+              />
+              <StatCard
+                title="Duplicates"
+                value={duplicateGroups.toLocaleString()}
+                icon={Copy}
+              />
+              <StatCard
+                title="Scattered Series"
+                value={(data?.libraryStats?.scatteredSeries ?? 0).toLocaleString()}
+                icon={FolderTree}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <StatCard
+                title="Movies"
+                value={(data?.libraryStats?.movieCount ?? 0).toLocaleString()}
+                icon={Film}
+              />
+              <StatCard
+                title="Series"
+                value={(data?.libraryStats?.seriesCount ?? 0).toLocaleString()}
+                icon={Tv}
+              />
+              <StatCard
+                title="Episodes"
+                value={(data?.libraryStats?.episodeCount ?? 0).toLocaleString()}
+                icon={ListVideo}
+              />
+            </div>
+          </>
         )}
 
         <div className="mt-8">

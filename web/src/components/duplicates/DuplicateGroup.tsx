@@ -1,11 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { formatBytes } from '@/lib/utils';
 import { Copy, Trash2, Film, Tv, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useDeleteDuplicate } from '@/hooks/useDashboard';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { toast } from 'sonner';
 
 type MediaFile = {
   id?: number;
@@ -31,21 +34,28 @@ interface DuplicateGroupProps {
 
 export function DuplicateGroup({ group }: DuplicateGroupProps) {
   const deleteMutation = useDeleteDuplicate();
+  const [pendingFileId, setPendingFileId] = useState<number | null>(null);
   const files = group.files || [];
 
   // Sort by quality score (highest first)
-  const sortedFiles = [...files].sort((a, b) => 
+  const sortedFiles = [...files].sort((a, b) =>
     (b.qualityScore || 0) - (a.qualityScore || 0)
   );
 
   const bestFile = sortedFiles[0];
   const duplicates = sortedFiles.slice(1);
 
-  const handleDelete = (fileId?: number) => {
-    if (!fileId) return;
-    if (confirm('Delete this duplicate file?')) {
-      deleteMutation.mutate({ groupId: group.id || '', fileId });
-    }
+  const handleDeleteConfirm = () => {
+    if (!pendingFileId) return;
+    const fileId = pendingFileId;
+    deleteMutation.mutate(
+      { groupId: group.id || '', fileId },
+      {
+        onSuccess: () => toast.success('Duplicate deleted'),
+        onError: (err) =>
+          toast.error(`Delete failed: ${(err as Error).message ?? 'Unknown error'}`),
+      }
+    );
   };
 
   const getQualityBadge = (source: string) => {
@@ -143,12 +153,12 @@ export function DuplicateGroup({ group }: DuplicateGroupProps) {
                     {getQualityBadge(file.sourceType || '')}
                   </div>
                 </div>
-                
+
                 <Button
                   variant="outline"
                   size="sm"
                   className="text-rose-400 border-rose-500/20 hover:bg-rose-500/10 hover:text-rose-300 hover:border-rose-500/30 flex-shrink-0"
-                  onClick={() => handleDelete(file.id)}
+                  onClick={() => file.id && setPendingFileId(file.id)}
                   disabled={deleteMutation.isPending}
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
@@ -159,6 +169,16 @@ export function DuplicateGroup({ group }: DuplicateGroupProps) {
           ))}
         </div>
       </CardContent>
+
+      <AlertDialog
+        open={pendingFileId !== null}
+        onOpenChange={(open) => !open && setPendingFileId(null)}
+        title="Delete duplicate file?"
+        description="This will permanently delete the file from disk. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={handleDeleteConfirm}
+        destructive
+      />
     </Card>
   );
 }

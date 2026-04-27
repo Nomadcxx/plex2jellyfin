@@ -10,6 +10,7 @@ import { SettingsSection } from '@/lib/api/client';
 import { useSettingsSection, useTestSettingsConnection, useUpdateSettingsSection } from '@/hooks/useSettings';
 import { SecretField } from './SecretField';
 import { SubsystemReloadStatus } from './SubsystemReloadStatus';
+import { Switch } from '@/components/ui/switch';
 import { TestConnectionButton } from './TestConnectionButton';
 
 type FieldType = 'text' | 'number' | 'boolean' | 'secret';
@@ -116,12 +117,12 @@ function FieldInput({
 }) {
   if (field.type === 'boolean') {
     return (
-      <input
-        type="checkbox"
-        className="h-4 w-4 rounded border-zinc-700 bg-zinc-900"
-        checked={Boolean(value)}
-        onChange={(event) => onChange(event.target.checked)}
-      />
+      <div className="flex items-center gap-2 pt-1">
+        <Switch
+          checked={Boolean(value)}
+          onCheckedChange={(checked) => onChange(checked)}
+        />
+      </div>
     );
   }
   if (field.type === 'number') {

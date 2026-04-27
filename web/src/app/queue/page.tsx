@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { QueueItem } from '@/components/queue/QueueItem';
 import { useMediaManagers } from '@/hooks/useDashboard';
@@ -13,8 +14,22 @@ export default function QueuePage() {
   const { data: managersData } = useMediaManagers();
   const managers = managersData || [];
 
-  // Jellyfin has no download queue — only pick Sonarr/Radarr-style managers.
-  const activeManager = managers.find(m => m.online && m.type !== 'jellyfin');
+  const queueManagers = managers.filter((m) => m.type !== 'jellyfin');
+  const [selectedManagerId, setSelectedManagerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (queueManagers.length === 0) {
+      setSelectedManagerId(null);
+      return;
+    }
+    if (selectedManagerId && queueManagers.some((m) => m.id === selectedManagerId)) {
+      return;
+    }
+    const firstOnline = queueManagers.find((m) => m.online) ?? queueManagers[0];
+    setSelectedManagerId(firstOnline.id);
+  }, [queueManagers, selectedManagerId]);
+
+  const activeManager = queueManagers.find((m) => m.id === selectedManagerId);
   const managerId = activeManager?.id;
 
   const { data: queueData, isLoading: queueLoading, isError: queueError, error: queueErr } = useQueue(managerId || '');
@@ -39,6 +54,38 @@ export default function QueuePage() {
             )}
           </div>
         </div>
+
+        {queueManagers.length > 1 && (
+          <div
+            role="tablist"
+            aria-label="Media manager"
+            className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1"
+          >
+            {queueManagers.map((m) => {
+              const isActive = m.id === selectedManagerId;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setSelectedManagerId(m.id)}
+                  className={
+                    'px-3 py-1.5 rounded-md text-sm font-medium transition ' +
+                    (isActive
+                      ? 'bg-fuchsia-500/15 text-fuchsia-300'
+                      : 'text-zinc-400 hover:text-zinc-200')
+                  }
+                >
+                  {m.name}
+                  {!m.online && (
+                    <span className="ml-2 text-xs text-amber-400">offline</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {!managerId ? (
           <div className="p-8 bg-zinc-900 rounded-lg border border-zinc-800 text-center">

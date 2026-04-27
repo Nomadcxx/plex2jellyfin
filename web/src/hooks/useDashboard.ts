@@ -10,6 +10,9 @@ type DashboardResponse = {
     totalSize?: number;
     duplicateGroups?: number;
     scatteredSeries?: number;
+    movieCount?: number;
+    seriesCount?: number;
+    episodeCount?: number;
   };
   mediaManagers?: Array<{
     id: string;

@@ -30,7 +30,8 @@ export function useDaemon(intervalMs = 5000) {
   }, [intervalMs]);
 
   async function action(name: 'start' | 'stop' | 'restart' | 'reload') {
-    await fetch(`/api/v1/daemon/${name}`, { method: 'POST' });
+    const r = await fetch(`/api/v1/daemon/${name}`, { method: 'POST' });
+    if (!r.ok) throw new Error(`Daemon ${name} failed (${r.status})`);
   }
 
   return { status, action };
