@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Activity, Loader2, X } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -73,13 +73,6 @@ export function JobsTray() {
 
   const ops = useMemo(() => data?.ops ?? [], [data]);
   const running = ops.filter((o) => o.state === 'running');
-
-  // Auto-close when nothing is running and panel was just emptied.
-  useEffect(() => {
-    if (running.length === 0 && open && ops.length === 0) {
-      setOpen(false);
-    }
-  }, [running.length, ops.length, open]);
 
   const cancel = async (id: string) => {
     try {

@@ -145,7 +145,7 @@ scn := &fakeScannerForTest{}
 logFile, _ := ipc.OpenOpLog(filepath.Join(dir, "op_log.jsonl"))
 defer logFile.Close()
 
-srv.RegisterStreaming(ipc.CmdRescan, rescanHandler(scn, logFile))
+srv.RegisterStreaming(ipc.CmdRescan, rescanHandler(scn, nil, logFile))
 ctx, cancel := context.WithCancel(context.Background())
 defer cancel()
 if err := srv.Start(ctx); err != nil {

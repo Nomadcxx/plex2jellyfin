@@ -116,16 +116,24 @@ DryRun bool     `json:"dry_run"`
 }
 
 type rescanScanner interface {
-FullRescan(ctx context.Context, paths []string, dryRun bool, p chan<- database.ProgressEvent) error
+	FullRescan(ctx context.Context, paths []string, dryRun bool, p chan<- database.ProgressEvent) error
 }
 
-func rescanHandler(scanner rescanScanner, log *ipc.OpLog) ipc.StreamingHandler {
+func rescanHandler(scanner rescanScanner, defaultPaths func() []string, log *ipc.OpLog) ipc.StreamingHandler {
 return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
 var args rescanArgs
 if len(raw) > 0 {
 _ = json.Unmarshal(raw, &args)
 }
+if len(args.Paths) == 0 && defaultPaths != nil {
+args.Paths = defaultPaths()
+}
 _ = log.Begin(op.ID, ipc.CmdRescan, map[string]any{"paths": args.Paths, "dry_run": args.DryRun})
+if len(args.Paths) == 0 {
+w.Error(op.ID, ipc.ErrBadRequest, "no library paths configured; set libraries.tv or libraries.movies first")
+_ = log.End(op.ID, "error", "no library paths configured")
+return
+}
 progress := make(chan database.ProgressEvent, 64)
 doneCh := make(chan struct{})
 go func() {

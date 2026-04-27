@@ -396,7 +396,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	controlServer.Register(daemonipc.CmdRecover, recoverHandler(opLog, getPending, clearPending))
 
 	fileScanner := scanner.NewFileScanner(db)
-	controlServer.RegisterStreaming(daemonipc.CmdRescan, guardMutator(getPending, rescanHandler(fileScanner, opLog)))
+	rescanDefaults := func() []string {
+		paths := append([]string{}, cfg.Libraries.TV...)
+		paths = append(paths, cfg.Libraries.Movies...)
+		return paths
+	}
+	controlServer.RegisterStreaming(daemonipc.CmdRescan, guardMutator(getPending, rescanHandler(fileScanner, rescanDefaults, opLog)))
 	controlServer.RegisterStreaming(daemonipc.CmdResetDB, guardMutator(getPending, resetDBHandler(db.SQL(), opLog)))
 	controlServer.Register(daemonipc.CmdAttach, daemonipc.AttachHandler(controlServer))
 	controlServer.Register(daemonipc.CmdCancel, daemonipc.CancelHandler(controlServer))
