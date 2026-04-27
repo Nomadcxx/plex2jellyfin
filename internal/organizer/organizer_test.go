@@ -730,6 +730,10 @@ func TestOrganizeTVEpisode_DateBased(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.Skipped, "lower-quality date-based duplicate must be skipped; SkipReason=%q err=%v", result.SkipReason, result.Error)
 	assert.FileExists(t, existing, "existing date-based episode must not be removed by dedup")
+	// l2: be explicit about which file remains after dedup.  The newer,
+	// lower-quality incoming source must be left in place (not moved) and the
+	// older, higher-quality existing file must continue to live at its target.
+	assert.FileExists(t, incoming, "skipped incoming source must not be moved or deleted")
 }
 
 // ---------------------------------------------------------------------------

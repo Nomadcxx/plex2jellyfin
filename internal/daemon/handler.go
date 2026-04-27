@@ -583,19 +583,26 @@ func (h *MediaHandler) processFile(path string) {
 	sourceHint := h.getSourceHint(path)
 	isTVEpisode := naming.IsTVEpisodeFromPath(path, sourceHint)
 
-	// Insert one parse decision row per debounced processing attempt.
+	// Insert one parse decision row per debounced processing attempt.  We
+	// look up any prior decision for this source path so the audit can
+	// surface how the same file was previously parsed (ExistingMatchMethod).
 	var decisionID int64
 	if h.db != nil {
 		mediaTypeGuessed := "movie"
 		if isTVEpisode {
 			mediaTypeGuessed = "tv"
 		}
+		var existingMethod string
+		if prior, perr := h.db.GetMostRecentDecisionBySourcePath(path); perr == nil && prior != nil {
+			existingMethod = prior.ParseMethod
+		}
 		var insertErr error
 		decisionID, insertErr = h.db.InsertDecision(database.ParseDecision{
-			SourcePath:       path,
-			SourceFilename:   filepath.Base(path),
-			EventAt:          time.Now().UTC(),
-			MediaTypeGuessed: mediaTypeGuessed,
+			SourcePath:          path,
+			SourceFilename:      filepath.Base(path),
+			EventAt:             time.Now().UTC(),
+			MediaTypeGuessed:    mediaTypeGuessed,
+			ExistingMatchMethod: existingMethod,
 		})
 		if insertErr != nil {
 			h.logger.Warn("handler", "failed to insert parse decision",
@@ -651,6 +658,7 @@ func (h *MediaHandler) processFile(path string) {
 
 			confidence := naming.CalculateTitleConfidence(tvInfo.Title, filename)
 			if h.shouldQueueForAI(path, filename, tvInfo, nil, confidence) {
+				h.markDecisionQueued(decisionID)
 				h.queueForAI(path, filename, tvInfo, nil, "tv", confidence, "", decisionID)
 				return
 			}
@@ -712,6 +720,7 @@ func (h *MediaHandler) processFile(path string) {
 
 			confidence := naming.CalculateTitleConfidence(movieInfo.Title, filename)
 			if h.shouldQueueForAI(path, filename, nil, movieInfo, confidence) {
+				h.markDecisionQueued(decisionID)
 				h.queueForAI(path, filename, nil, movieInfo, "movie", confidence, targetLib, decisionID)
 				return
 			}
@@ -1581,6 +1590,21 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 	}
 }
 
+// markDecisionQueued sets organize_outcome='queued' on a decision row that
+// has been handed off to the AI enhancement queue.  Without this marker the
+// row would remain organize_outcome=NULL forever if the daemon restarts
+// before the AI worker completes.
+func (h *MediaHandler) markDecisionQueued(id int64) {
+	if h.db == nil || id == 0 {
+		return
+	}
+	if err := h.db.MarkDecisionQueued(id); err != nil {
+		h.logger.Warn("handler", "failed to mark parse decision queued",
+			logging.F("decision_id", id),
+			logging.F("error", err.Error()))
+	}
+}
+
 // updateDecisionOrganize updates the organize columns of a parse decision row.
 // It is a no-op when the DB is not configured or the decision ID is zero.
 func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.OrganizationResult, err error) {
@@ -1605,9 +1629,9 @@ func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.Organi
 	case result.Skipped:
 		u.OrganizeOutcome = "skipped"
 		u.TargetPath = result.TargetPath
-		if result.TargetPath != "" {
-			u.TargetAt = &now
-		}
+		// l1: leave TargetAt nil for skipped paths.  No write happened, so
+		// stamping target_at would mislead the auditor into thinking a copy
+		// landed at this path at this moment.
 	default:
 		u.OrganizeOutcome = "failed"
 		if result.Error != nil {

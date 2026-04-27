@@ -31,6 +31,7 @@ type ParseDecision struct {
 	JellyfinTvdbID       string
 	JellyfinResolvedAt   *time.Time
 	AutoLabel            string
+	AutoLabelAt          *time.Time
 	HumanLabelOverride   string
 }
 
@@ -198,13 +199,45 @@ func (m *MediaDB) UpdateOutcome(id int64, u OutcomeUpdate) error {
 }
 
 // UpdateAutoLabel sets the auto_label column for the given decision row.
+// It is idempotent under races: a write with computedAt only succeeds when no
+// label exists yet OR the existing label is older than computedAt.  Callers
+// without a specific timestamp can use UpdateAutoLabel which captures the
+// current time.
 func (m *MediaDB) UpdateAutoLabel(id int64, label string) error {
+	return m.UpdateAutoLabelAt(id, label, time.Now().UTC())
+}
+
+// UpdateAutoLabelAt is the timestamp-aware variant of UpdateAutoLabel.  Pass
+// the moment the caller derived the label; the write is suppressed when a
+// fresher label is already present, preventing stale sweeper writes from
+// overwriting a newer labeler decision.
+func (m *MediaDB) UpdateAutoLabelAt(id int64, label string, computedAt time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	_, err := m.db.Exec(`UPDATE parse_decisions SET auto_label = ? WHERE id = ?`, nullStr(label), id)
+	_, err := m.db.Exec(`
+		UPDATE parse_decisions
+		   SET auto_label = ?, auto_label_at = ?
+		 WHERE id = ?
+		   AND (auto_label IS NULL OR auto_label_at IS NULL OR auto_label_at < ?)`,
+		nullStr(label), computedAt, id, computedAt)
 	if err != nil {
 		return fmt.Errorf("UpdateAutoLabel: %w", err)
+	}
+	return nil
+}
+
+// ClearAutoLabel removes any existing auto_label and timestamp for the given
+// decision row, forcing the labeling runner to re-derive a label on its next
+// pass.
+func (m *MediaDB) ClearAutoLabel(id int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec(
+		`UPDATE parse_decisions SET auto_label = NULL, auto_label_at = NULL WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("ClearAutoLabel: %w", err)
 	}
 	return nil
 }
@@ -352,7 +385,7 @@ const decisionColumns = `id, source_path, source_filename, event_at,
 	parser_stripped_tokens, target_path, target_at,
 	existing_match_method, organize_outcome, organize_error,
 	jellyfin_item_id, jellyfin_imdb_id, jellyfin_tmdb_id, jellyfin_tvdb_id,
-	jellyfin_resolved_at, auto_label, human_label_override`
+	jellyfin_resolved_at, auto_label, auto_label_at, human_label_override`
 
 func scanDecision(s scanner) (*ParseDecision, error) {
 	var d ParseDecision
@@ -375,6 +408,7 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		jellyfinTvdbID       sql.NullString
 		jellyfinResolvedAt   sql.NullTime
 		autoLabel            sql.NullString
+		autoLabelAt          sql.NullTime
 		humanLabelOverride   sql.NullString
 	)
 
@@ -385,7 +419,7 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		&parserStrippedTokens, &targetPath, &targetAt,
 		&existingMatchMethod, &organizeOutcome, &organizeError,
 		&jellyfinItemID, &jellyfinImdbID, &jellyfinTmdbID, &jellyfinTvdbID,
-		&jellyfinResolvedAt, &autoLabel, &humanLabelOverride,
+		&jellyfinResolvedAt, &autoLabel, &autoLabelAt, &humanLabelOverride,
 	)
 	if err != nil {
 		return nil, err
@@ -424,9 +458,88 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		d.JellyfinResolvedAt = &t
 	}
 	d.AutoLabel = autoLabel.String
+	if autoLabelAt.Valid {
+		t := autoLabelAt.Time
+		d.AutoLabelAt = &t
+	}
 	d.HumanLabelOverride = humanLabelOverride.String
 
 	return &d, nil
+}
+
+// QueryStaleLabeledDecisions returns rows that already have an auto_label but
+// whose label was written more than olderThan ago AND that have been
+// Jellyfin-resolved.  The labeling runner uses this to re-derive labels after
+// a Jellyfin rename or a late provider-ID resolution would otherwise leave a
+// stale PASS / DRIFT / FAIL on the row.
+func (m *MediaDB) QueryStaleLabeledDecisions(olderThan time.Duration, limit int) ([]*ParseDecision, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cutoff := time.Now().UTC().Add(-olderThan)
+
+	query := `SELECT ` + decisionColumns + `
+		FROM parse_decisions
+		WHERE auto_label IS NOT NULL
+		  AND auto_label_at IS NOT NULL
+		  AND auto_label_at < ?
+		  AND jellyfin_resolved_at IS NOT NULL
+		ORDER BY auto_label_at ASC`
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := m.db.Query(query, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("QueryStaleLabeledDecisions: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*ParseDecision
+	for rows.Next() {
+		d, err := scanDecision(rows)
+		if err != nil {
+			return nil, fmt.Errorf("QueryStaleLabeledDecisions scan: %w", err)
+		}
+		results = append(results, d)
+	}
+	return results, rows.Err()
+}
+
+// GetMostRecentDecisionBySourcePath returns the most recent prior parse
+// decision for the given source path, or nil when none exists.  The handler
+// uses this to populate ExistingMatchMethod on a freshly inserted row so the
+// audit can show how the same file was previously parsed.
+func (m *MediaDB) GetMostRecentDecisionBySourcePath(sourcePath string) (*ParseDecision, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	row := m.db.QueryRow(`
+		SELECT `+decisionColumns+`
+		FROM parse_decisions
+		WHERE source_path = ?
+		ORDER BY id DESC
+		LIMIT 1`, sourcePath)
+	d, err := scanDecision(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return d, err
+}
+
+// MarkDecisionQueued sets organize_outcome = 'queued' for a decision row that
+// has been handed off to the AI enhancement queue, distinguishing it from
+// rows that have not yet been organize-attempted (NULL) or that have failed.
+func (m *MediaDB) MarkDecisionQueued(id int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec(
+		`UPDATE parse_decisions SET organize_outcome = 'queued' WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("MarkDecisionQueued: %w", err)
+	}
+	return nil
 }
 
 // nullStr converts an empty string to sql.NullString{Valid:false}.

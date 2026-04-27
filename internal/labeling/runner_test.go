@@ -166,3 +166,86 @@ func TestRunner_UpdateAutoLabelErrorIsReturned(t *testing.T) {
 		t.Errorf("AutoLabel = %q, want PASS", got.AutoLabel)
 	}
 }
+
+func TestRunner_StaleLabelIsReDerivedAfterRename(t *testing.T) {
+	// h8: a row labeled PASS days ago must be re-evaluated by the labeling
+	// runner when the Jellyfin name later changes (e.g. a rename in
+	// Jellyfin), so the auditor sees DRIFT instead of a stale PASS.
+	db := openTestDB(t)
+
+	now := time.Now().UTC()
+	resolved := now.Add(-30 * 24 * time.Hour)
+	dec := database.ParseDecision{
+		SourcePath:         "/downloads/show.mkv",
+		SourceFilename:     "show.mkv",
+		EventAt:            now.Add(-30 * 24 * time.Hour),
+		ParsedTitle:        "Tracker",
+		JellyfinItemID:     "item1",
+		JellyfinResolvedAt: &resolved,
+	}
+	id := insertDecision(t, db, dec)
+
+	// Stamp the row as PASS 30 days ago so it is older than the default
+	// 14-day stale window.
+	pastLabelAt := now.Add(-30 * 24 * time.Hour)
+	if err := db.UpdateAutoLabelAt(id, "PASS", pastLabelAt); err != nil {
+		t.Fatalf("seed UpdateAutoLabelAt: %v", err)
+	}
+
+	got, _ := db.GetDecision(id)
+	if got.AutoLabel != "PASS" {
+		t.Fatalf("seed AutoLabel = %q, want PASS", got.AutoLabel)
+	}
+
+	// Jellyfin now reports a different name → DRIFT.
+	r := labeling.NewRunner(db, alwaysName("Renamed Show"))
+	if err := r.RunOnce(); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	got, _ = db.GetDecision(id)
+	if got.AutoLabel != "DRIFT" {
+		t.Errorf("AutoLabel after rename = %q, want DRIFT", got.AutoLabel)
+	}
+	if got.AutoLabelAt == nil || !got.AutoLabelAt.After(pastLabelAt) {
+		t.Errorf("AutoLabelAt = %v, want a fresh timestamp after %v", got.AutoLabelAt, pastLabelAt)
+	}
+}
+
+func TestRunner_FreshLabelIsNotReDerived(t *testing.T) {
+	// Sanity: a row labeled within the stale window is not re-touched.
+	db := openTestDB(t)
+
+	now := time.Now().UTC()
+	resolved := now.Add(-time.Hour)
+	dec := database.ParseDecision{
+		SourcePath:         "/downloads/fresh.mkv",
+		SourceFilename:     "fresh.mkv",
+		EventAt:            now.Add(-2 * time.Hour),
+		ParsedTitle:        "Tracker",
+		JellyfinItemID:     "item-fresh",
+		JellyfinResolvedAt: &resolved,
+	}
+	id := insertDecision(t, db, dec)
+	if err := db.UpdateAutoLabelAt(id, "PASS", now.Add(-time.Hour)); err != nil {
+		t.Fatalf("seed UpdateAutoLabelAt: %v", err)
+	}
+
+	called := 0
+	getName := func(string) (string, error) {
+		called++
+		return "Renamed", nil
+	}
+	r := labeling.NewRunner(db, getName)
+	if err := r.RunOnce(); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if called != 0 {
+		t.Errorf("getName called %d times for fresh label; want 0", called)
+	}
+	got, _ := db.GetDecision(id)
+	if got.AutoLabel != "PASS" {
+		t.Errorf("AutoLabel = %q, want PASS (untouched)", got.AutoLabel)
+	}
+}

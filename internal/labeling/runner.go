@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	pageSize   = 1000
-	defaultTTL = 7 * 24 * time.Hour
+	pageSize          = 1000
+	defaultTTL        = 7 * 24 * time.Hour
+	defaultStaleAfter = 14 * 24 * time.Hour
 )
 
 // JellyfinNameFetcher resolves a Jellyfin item ID to the item's display name.
@@ -17,22 +18,32 @@ type JellyfinNameFetcher func(itemID string) (string, error)
 
 // Runner processes unlabeled ParseDecision rows and writes auto-labels.
 type Runner struct {
-	db      *database.MediaDB
-	getName JellyfinNameFetcher
-	ttl     time.Duration
+	db          *database.MediaDB
+	getName     JellyfinNameFetcher
+	ttl         time.Duration
+	staleAfter  time.Duration
+	stalePageSz int
 }
 
-// NewRunner returns a Runner with the default 7-day TTL.
+// NewRunner returns a Runner with the default 7-day TTL and 14-day stale
+// re-evaluation window.
 func NewRunner(db *database.MediaDB, getName JellyfinNameFetcher) *Runner {
-	return &Runner{db: db, getName: getName, ttl: defaultTTL}
+	return &Runner{
+		db:          db,
+		getName:     getName,
+		ttl:         defaultTTL,
+		staleAfter:  defaultStaleAfter,
+		stalePageSz: pageSize,
+	}
 }
+
+// SetStaleAfter overrides the stale re-evaluation window (primarily for tests).
+func (r *Runner) SetStaleAfter(d time.Duration) { r.staleAfter = d }
 
 // RunOnce queries all unlabeled rows (AutoLabelIsNull), derives a label for
-// each, and persists non-empty labels.  It loops in pages of 1 000 until a
-// page returns fewer rows than the limit or until a full page yields zero
-// label writes (meaning every remaining row is currently un-derivable —
-// e.g. inside the TTL window with no resolved provider ID — so re-querying
-// would just return the same page forever).
+// each, and persists non-empty labels.  It then re-evaluates any rows whose
+// existing label was written more than staleAfter ago so that Jellyfin renames
+// or late provider-ID resolutions are reflected in the auto-label.
 func (r *Runner) RunOnce() error {
 	var firstErr error
 
@@ -47,6 +58,7 @@ func (r *Runner) RunOnce() error {
 
 		labeled := 0
 		for _, dec := range rows {
+			computedAt := time.Now().UTC()
 			label, err := r.labelOne(dec)
 			if err != nil {
 				if firstErr == nil {
@@ -57,7 +69,7 @@ func (r *Runner) RunOnce() error {
 			if label == "" {
 				continue
 			}
-			if err := r.db.UpdateAutoLabel(dec.ID, label); err != nil {
+			if err := r.db.UpdateAutoLabelAt(dec.ID, label, computedAt); err != nil {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("UpdateAutoLabel id=%d: %w", dec.ID, err)
 				}
@@ -76,6 +88,48 @@ func (r *Runner) RunOnce() error {
 		}
 	}
 
+	if err := r.runStalePass(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+
+	return firstErr
+}
+
+// runStalePass re-derives labels on rows whose label is older than staleAfter
+// and overwrites them in place so the auditor sees the current ground truth.
+func (r *Runner) runStalePass() error {
+	if r.staleAfter <= 0 {
+		return nil
+	}
+	rows, err := r.db.QueryStaleLabeledDecisions(r.staleAfter, r.stalePageSz)
+	if err != nil {
+		return fmt.Errorf("labeling stale query: %w", err)
+	}
+	var firstErr error
+	for _, dec := range rows {
+		computedAt := time.Now().UTC()
+		label, err := r.labelOne(dec)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if label == "" {
+			continue
+		}
+		if label == dec.AutoLabel {
+			// Touch the timestamp so we don't re-process this row every
+			// tick once it's stable.
+			if err := r.db.UpdateAutoLabelAt(dec.ID, label, computedAt); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("UpdateAutoLabel(stale, unchanged) id=%d: %w", dec.ID, err)
+			}
+			continue
+		}
+		if err := r.db.UpdateAutoLabelAt(dec.ID, label, computedAt); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("UpdateAutoLabel(stale) id=%d: %w", dec.ID, err)
+		}
+	}
 	return firstErr
 }
 

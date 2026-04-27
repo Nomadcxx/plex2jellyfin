@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 14
+const currentSchemaVersion = 15
 
 // SQL migration scripts
 var migrations = []migration{
@@ -481,6 +481,10 @@ var migrations = []migration{
 	},
 	{
 		version: 14,
+		// Track every debounced parse/organize attempt in a single audit table.
+		// Replaces ad-hoc logging by giving the auditor a queryable history of
+		// each decision's parse method, target path, organize outcome, Jellyfin
+		// resolution, and auto-label so drift can be detected after the fact.
 		up: []string{
 			`CREATE TABLE parse_decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -513,6 +517,18 @@ var migrations = []migration{
 			`CREATE INDEX idx_pd_auto_label ON parse_decisions(auto_label)`,
 			`CREATE INDEX idx_pd_organize_outcome ON parse_decisions(organize_outcome)`,
 			`INSERT INTO schema_version (version) VALUES (14)`,
+		},
+	},
+	{
+		version: 15,
+		// Track when an auto_label was written so the labeling runner can
+		// re-evaluate stale labels (Jellyfin renames, late provider-ID
+		// resolution) and so concurrent writers can guard against overwriting
+		// a fresher label.
+		up: []string{
+			`ALTER TABLE parse_decisions ADD COLUMN auto_label_at TIMESTAMP`,
+			`CREATE INDEX idx_pd_auto_label_at ON parse_decisions(auto_label_at)`,
+			`INSERT INTO schema_version (version) VALUES (15)`,
 		},
 	},
 }

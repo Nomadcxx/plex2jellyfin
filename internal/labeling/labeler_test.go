@@ -65,4 +65,24 @@ func TestDeriveLabel(t *testing.T) {
 			t.Errorf("got %q, want empty string (not DRIFT)", got)
 		}
 	})
+
+	t.Run("no provider ID just inside TTL returns empty string", func(t *testing.T) {
+		// Boundary check: time.Since(EventAt) just below ttl must not yet
+		// emit FAIL.  We pick a 100 ms buffer to absorb test-runner jitter
+		// while still pinning the inside-the-window semantics.
+		dec := decNoProviderID(testTTL - 100*time.Millisecond)
+		got := labeling.DeriveLabel(dec, "", testTTL)
+		if got != "" {
+			t.Errorf("got %q just inside ttl, want empty string", got)
+		}
+	})
+
+	t.Run("no provider ID just past TTL returns FAIL", func(t *testing.T) {
+		// Boundary check: time.Since(EventAt) just above ttl must emit FAIL.
+		dec := decNoProviderID(testTTL + 100*time.Millisecond)
+		got := labeling.DeriveLabel(dec, "", testTTL)
+		if got != "FAIL" {
+			t.Errorf("got %q just past ttl, want FAIL", got)
+		}
+	})
 }

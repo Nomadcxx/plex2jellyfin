@@ -17,6 +17,11 @@ func TestFuzzyTitleEqual(t *testing.T) {
 		{"the dreadful aac5 1 bz", "The Dreadful", false},
 		{"Marvel's Daredevil", "Marvels Daredevil", true},
 		{"X-Men", "x men", true},
+		// l5: a capitalised "With" inside the title proper must NOT be treated
+		// as a bridge token, so a longer title containing "With" is not
+		// considered a fuzzy match for its prefix.
+		{"Hunting With Dogs", "Hunting", false},
+		{"Hunting", "Hunting With Dogs", false},
 	}
 	for _, tc := range cases {
 		got := labeling.FuzzyTitleEqual(tc.a, tc.b)

@@ -57,6 +57,14 @@ func TestParserCorpusRegression(t *testing.T) {
 					if info.Year != wantYear {
 						t.Errorf("year = %q, want %q", info.Year, wantYear)
 					}
+				} else {
+					// l6: a corpus entry with parsed_year == 0 means "no year
+					// in the source path".  The parser represents the missing
+					// year as an empty string, so assert that explicitly to
+					// distinguish from a literal "year zero".
+					if info.Year != "" {
+						t.Errorf("year = %q, want empty string for missing year", info.Year)
+					}
 				}
 				if info.Season != entry.ParsedSeason {
 					t.Errorf("season = %d, want %d", info.Season, entry.ParsedSeason)
@@ -76,6 +84,11 @@ func TestParserCorpusRegression(t *testing.T) {
 					wantYear := strconv.Itoa(entry.ParsedYear)
 					if info.Year != wantYear {
 						t.Errorf("year = %q, want %q", info.Year, wantYear)
+					}
+				} else {
+					// l6: see comment above — missing year ⇒ empty string.
+					if info.Year != "" {
+						t.Errorf("year = %q, want empty string for missing year", info.Year)
 					}
 				}
 			default:
