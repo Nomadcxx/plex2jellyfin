@@ -33,6 +33,7 @@ type Server struct {
 	wg              sync.WaitGroup
 	mu              sync.Mutex
 	stopped         bool
+	registry        *OpRegistry
 }
 
 func NewServer(path string) *Server {
@@ -40,7 +41,56 @@ func NewServer(path string) *Server {
 		path:            path,
 		handlers:        make(map[Command]Handler),
 		allowedPeerUIDs: map[int]struct{}{os.Getuid(): {}},
+		registry:        NewOpRegistry(),
 	}
+}
+
+// Path returns the unix socket path; tests use it to dial the running server.
+func (s *Server) Path() string { return s.path }
+
+// SetRegistry replaces the default registry. Streaming handlers panic at
+// request time if the registry is nil — NewServer already provides one.
+func (s *Server) SetRegistry(r *OpRegistry) {
+	if r == nil {
+		panic("ipc: SetRegistry(nil)")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.registry = r
+}
+
+// Registry exposes the op registry so handlers in main can access it.
+func (s *Server) Registry() *OpRegistry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.registry
+}
+
+// StreamingHandler is invoked once per streaming request. The server has
+// already allocated an op_id, started the registry entry, and started a
+// heartbeat goroutine before calling.
+type StreamingHandler func(ctx context.Context, args json.RawMessage, w FrameWriter, op *Op)
+
+// RegisterStreaming wraps a streaming handler with op_id allocation,
+// registry tracking, and frame ring mirroring.
+func (s *Server) RegisterStreaming(cmd Command, h StreamingHandler) {
+	if s.registry == nil {
+		panic("ipc: RegisterStreaming requires a registry")
+	}
+	s.Register(cmd, func(ctx context.Context, req Request, w FrameWriter) {
+		opCtx, cancel := context.WithCancel(ctx)
+		op, err := s.registry.Start(req.ID, cmd, cancel)
+		if err != nil {
+			w.Error(req.ID, ErrBusy, err.Error())
+			return
+		}
+		defer s.registry.Finish(op.ID, "done", nil)
+		ringW := &ringWriter{inner: w, ring: op.Frames}
+		hbDone := make(chan struct{})
+		go heartbeatLoop(opCtx, req.ID, ringW, hbDone)
+		h(opCtx, req.Args, ringW, op)
+		close(hbDone)
+	})
 }
 
 func (s *Server) Register(cmd Command, h Handler) {
