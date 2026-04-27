@@ -563,6 +563,243 @@ paths:
         '401':
           description: Invalid or missing webhook secret
 
+  # ============ SETTINGS ============
+  /settings/{section}:
+    get:
+      operationId: getSettingsSection
+      summary: Read a config section
+      tags: [Settings]
+      parameters:
+        - name: section
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: reveal
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1]
+      responses:
+        '200':
+          description: Config section
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          description: Unknown section
+    put:
+      operationId: putSettingsSection
+      summary: Replace a config section
+      tags: [Settings]
+      parameters:
+        - name: section
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /settings/paths/{kind}:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [movies, tv]
+    get:
+      operationId: getSettingsPaths
+      summary: List watch paths
+      tags: [Settings]
+      responses:
+        '200':
+          description: Watch paths
+    post:
+      operationId: addSettingsPath
+      summary: Add a watch path
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Added
+    put:
+      operationId: replaceSettingsPaths
+      summary: Replace watch paths
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Replaced
+
+  /settings/paths/{kind}/{index}:
+    delete:
+      operationId: removeSettingsPath
+      summary: Remove a watch path
+      tags: [Settings]
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [movies, tv]
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Removed
+
+  /settings/libraries/{kind}:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [movies, tv]
+    get:
+      operationId: getSettingsLibraries
+      summary: List library paths
+      tags: [Settings]
+      responses:
+        '200':
+          description: Library paths
+    post:
+      operationId: addSettingsLibrary
+      summary: Add a library path
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Added
+    put:
+      operationId: replaceSettingsLibraries
+      summary: Replace library paths
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Replaced
+
+  /settings/libraries/{kind}/{index}:
+    delete:
+      operationId: removeSettingsLibrary
+      summary: Remove a library path
+      tags: [Settings]
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [movies, tv]
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Removed
+
+  /settings/sonarr/test:
+    post:
+      operationId: testSonarrConnection
+      summary: Test Sonarr connection
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Connection test result
+
+  /settings/radarr/test:
+    post:
+      operationId: testRadarrConnection
+      summary: Test Radarr connection
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Connection test result
+
+  /settings/jellyfin/test:
+    post:
+      operationId: testJellyfinConnection
+      summary: Test Jellyfin connection
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Connection test result
+
+  /paths/preflight:
+    post:
+      operationId: preflightPath
+      summary: Check path access before saving
+      tags: [Settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Probe result
+
 components:
   schemas:
     # Dashboard

@@ -95,9 +95,89 @@ export interface paths {
     /** Clear session cookie */
     post: operations["logout"];
   };
+  "/jellyfin/verify": {
+    /** Get Jellyfin verification status */
+    get: operations["getJellyfinVerification"];
+  };
+  "/jellyfin/verify/run": {
+    /** Run Jellyfin verification for a library */
+    post: operations["runJellyfinVerification"];
+  };
+  "/jellyfin/verify/results": {
+    /** Get verification results */
+    get: operations["getJellyfinVerificationResults"];
+  };
+  "/jellyfin/unidentifiable": {
+    /** Get unidentifiable items from Jellyfin */
+    get: operations["getJellyfinUnidentifiableItems"];
+  };
+  "/jellyfin/plugin/status": {
+    /** Get JellyWatch companion plugin status */
+    get: operations["getJellyfinPluginStatus"];
+  };
   "/health": {
     /** Health check endpoint */
     get: operations["healthCheck"];
+  };
+  "/webhooks/jellyfin": {
+    /** Receive Jellyfin webhook events */
+    post: operations["jellyfinWebhook"];
+  };
+  "/settings/{section}": {
+    /** Read a config section */
+    get: operations["getSettingsSection"];
+    /** Replace a config section */
+    put: operations["putSettingsSection"];
+  };
+  "/settings/paths/{kind}": {
+    /** List watch paths */
+    get: operations["getSettingsPaths"];
+    /** Replace watch paths */
+    put: operations["replaceSettingsPaths"];
+    /** Add a watch path */
+    post: operations["addSettingsPath"];
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+      };
+    };
+  };
+  "/settings/paths/{kind}/{index}": {
+    /** Remove a watch path */
+    delete: operations["removeSettingsPath"];
+  };
+  "/settings/libraries/{kind}": {
+    /** List library paths */
+    get: operations["getSettingsLibraries"];
+    /** Replace library paths */
+    put: operations["replaceSettingsLibraries"];
+    /** Add a library path */
+    post: operations["addSettingsLibrary"];
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+      };
+    };
+  };
+  "/settings/libraries/{kind}/{index}": {
+    /** Remove a library path */
+    delete: operations["removeSettingsLibrary"];
+  };
+  "/settings/sonarr/test": {
+    /** Test Sonarr connection */
+    post: operations["testSonarrConnection"];
+  };
+  "/settings/radarr/test": {
+    /** Test Radarr connection */
+    post: operations["testRadarrConnection"];
+  };
+  "/settings/jellyfin/test": {
+    /** Test Jellyfin connection */
+    post: operations["testJellyfinConnection"];
+  };
+  "/paths/preflight": {
+    /** Check path access before saving */
+    post: operations["preflightPath"];
   };
 }
 
@@ -126,7 +206,7 @@ export interface components {
     MediaManagerInfo: {
       id?: string;
       /** @enum {string} */
-      type?: "sonarr" | "radarr" | "mediadownloader" | "custom";
+      type?: "sonarr" | "radarr" | "jellyfin" | "mediadownloader" | "custom";
       name?: string;
       enabled?: boolean;
       capabilities?: components["schemas"]["ManagerCapabilities"];
@@ -288,6 +368,46 @@ export interface components {
     };
     Error: {
       code?: string;
+      message?: string;
+    };
+    JellyfinVerificationStatus: {
+      enabled?: boolean;
+      pluginEnabled?: boolean;
+      connected?: boolean;
+      /** Format: date-time */
+      lastVerification?: string;
+      librariesVerified?: number;
+      totalMismatches?: number;
+    };
+    JellyfinVerificationResult: {
+      libraryPath?: string;
+      scannedCount?: number;
+      identifiedCount?: number;
+      unidentifiedCount?: number;
+      mismatches?: components["schemas"]["JellyfinMismatch"][];
+      /** Format: date-time */
+      lastRun?: string;
+    };
+    JellyfinMismatch: {
+      path?: string;
+      /** @enum {string} */
+      issue?: "orphaned" | "missing" | "unidentified";
+      itemName?: string;
+      itemId?: string;
+    };
+    UnidentifiableItem: {
+      id?: string;
+      name?: string;
+      path?: string;
+      type?: string;
+      /** Format: date-time */
+      dateAdded?: string;
+    };
+    JellyfinPluginStatus: {
+      installed?: boolean;
+      version?: string;
+      healthy?: boolean;
+      libraries?: number;
       message?: string;
     };
   };
@@ -643,6 +763,79 @@ export interface operations {
       };
     };
   };
+  /** Get Jellyfin verification status */
+  getJellyfinVerification: {
+    responses: {
+      /** @description Verification status */
+      200: {
+        content: {
+          "application/json": components["schemas"]["JellyfinVerificationStatus"];
+        };
+      };
+    };
+  };
+  /** Run Jellyfin verification for a library */
+  runJellyfinVerification: {
+    requestBody?: {
+      content: {
+        "application/json": {
+          libraryId?: string;
+          libraryPath?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Verification started */
+      202: {
+        content: {
+          "application/json": components["schemas"]["OperationResult"];
+        };
+      };
+    };
+  };
+  /** Get verification results */
+  getJellyfinVerificationResults: {
+    parameters: {
+      query?: {
+        libraryId?: string;
+      };
+    };
+    responses: {
+      /** @description Verification results */
+      200: {
+        content: {
+          "application/json": components["schemas"]["JellyfinVerificationResult"];
+        };
+      };
+    };
+  };
+  /** Get unidentifiable items from Jellyfin */
+  getJellyfinUnidentifiableItems: {
+    parameters: {
+      query?: {
+        libraryId?: string;
+      };
+    };
+    responses: {
+      /** @description Unidentifiable items */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UnidentifiableItem"][];
+        };
+      };
+    };
+  };
+  /** Get JellyWatch companion plugin status */
+  getJellyfinPluginStatus: {
+    responses: {
+      /** @description Plugin status */
+      200: {
+        content: {
+          "application/json": components["schemas"]["JellyfinPluginStatus"];
+        };
+      };
+    };
+  };
   /** Health check endpoint */
   healthCheck: {
     responses: {
@@ -654,6 +847,264 @@ export interface operations {
             version?: string;
           };
         };
+      };
+    };
+  };
+  /** Receive Jellyfin webhook events */
+  jellyfinWebhook: {
+    requestBody: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description Event accepted */
+      200: {
+        content: never;
+      };
+      /** @description Invalid payload */
+      400: {
+        content: never;
+      };
+      /** @description Invalid or missing webhook secret */
+      401: {
+        content: never;
+      };
+    };
+  };
+  /** Read a config section */
+  getSettingsSection: {
+    parameters: {
+      query?: {
+        reveal?: 1;
+      };
+      path: {
+        section: string;
+      };
+    };
+    responses: {
+      /** @description Config section */
+      200: {
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+      /** @description Unknown section */
+      404: {
+        content: never;
+      };
+    };
+  };
+  /** Replace a config section */
+  putSettingsSection: {
+    parameters: {
+      path: {
+        section: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description Saved */
+      200: {
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  /** List watch paths */
+  getSettingsPaths: {
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+      };
+    };
+    responses: {
+      /** @description Watch paths */
+      200: {
+        content: never;
+      };
+    };
+  };
+  /** Replace watch paths */
+  replaceSettingsPaths: {
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description Replaced */
+      200: {
+        content: never;
+      };
+    };
+  };
+  /** Add a watch path */
+  addSettingsPath: {
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description Added */
+      201: {
+        content: never;
+      };
+    };
+  };
+  /** Remove a watch path */
+  removeSettingsPath: {
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+        index: number;
+      };
+    };
+    responses: {
+      /** @description Removed */
+      204: {
+        content: never;
+      };
+    };
+  };
+  /** List library paths */
+  getSettingsLibraries: {
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+      };
+    };
+    responses: {
+      /** @description Library paths */
+      200: {
+        content: never;
+      };
+    };
+  };
+  /** Replace library paths */
+  replaceSettingsLibraries: {
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description Replaced */
+      200: {
+        content: never;
+      };
+    };
+  };
+  /** Add a library path */
+  addSettingsLibrary: {
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description Added */
+      201: {
+        content: never;
+      };
+    };
+  };
+  /** Remove a library path */
+  removeSettingsLibrary: {
+    parameters: {
+      path: {
+        kind: "movies" | "tv";
+        index: number;
+      };
+    };
+    responses: {
+      /** @description Removed */
+      204: {
+        content: never;
+      };
+    };
+  };
+  /** Test Sonarr connection */
+  testSonarrConnection: {
+    requestBody: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description Connection test result */
+      200: {
+        content: never;
+      };
+    };
+  };
+  /** Test Radarr connection */
+  testRadarrConnection: {
+    requestBody: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description Connection test result */
+      200: {
+        content: never;
+      };
+    };
+  };
+  /** Test Jellyfin connection */
+  testJellyfinConnection: {
+    requestBody: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description Connection test result */
+      200: {
+        content: never;
+      };
+    };
+  };
+  /** Check path access before saving */
+  preflightPath: {
+    requestBody: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description Probe result */
+      200: {
+        content: never;
       };
     };
   };
