@@ -15,7 +15,7 @@
 
 The webui today is built for analysis (duplicates, consolidation, parse decisions). Configuration and operational control are absent: the only mutable settings field is the AI section; there is no UI for daemon start/stop/restart, no way to trigger DB cleanup or rebuild from the UI, and the watch folders / library locations / Sonarr / Radarr / Jellyfin sections are read-only. Users must edit `~/.config/jellywatch/config.toml` by hand and run `systemctl` to apply changes.
 
-This design closes those gaps for a **local-only deployment** (no auth gating; users are explicitly told not to expose `jellyweb` to the network).
+This design closes those gaps for a **local-only deployment**. Local-only is enforced by default: `jellyweb` binds to loopback unless explicitly configured otherwise, and unsafe non-loopback binds require web authentication to be enabled. Users are still told not to expose `jellyweb` directly to untrusted networks.
 
 ## 2. Goals & Non-Goals
 
@@ -25,9 +25,10 @@ This design closes those gaps for a **local-only deployment** (no auth gating; u
 - Webui can re-scan media and reset the database with TUI-installer-grade progress UX.
 - All destructive operations have appropriate safety gates and crash-safe semantics.
 - The CLI grows a thin `jellywatch daemon …` command set so scripts and post-install hooks have parity with the UI.
+- The control plane is safe-by-default on fresh installs: loopback bind by default, auth required for non-loopback HTTP binds, and UID-aware IPC permissions.
 
 ### Non-Goals
-- Authentication / authorization (deferred — local-only).
+- New multi-user authentication / RBAC (deferred). Existing password auth remains supported and is required for unsafe non-loopback binds.
 - Network-transparent IPC (deferred — local-only).
 - Cross-version compatibility during in-place upgrades (deferred — installer restarts both processes together).
 - Logs viewer, metrics, AI cost tracking (chunk 3).
@@ -59,6 +60,8 @@ This design closes those gaps for a **local-only deployment** (no auth gating; u
 - **`jellywatchd` exposes no HTTP control surface.** All mutation/lifecycle commands travel over the IPC socket. Daemon `health_addr` remains for chunk-3 observability.
 - **`jellyweb` owns "start"** of the daemon: it spawns the daemon process if not running, or delegates to systemd if a unit is detected. Start logic is daemon-launch-strategy aware: prefer systemd → fallback to direct exec.
 - **Long-running ops execute inside the daemon.** Their progress streams travel IPC → `jellyweb` → SSE → browser.
+- **`jellyweb` HTTP is local by default.** The default bind address changes to `127.0.0.1`; `0.0.0.0` / non-loopback binds are refused unless `password` is configured or an explicit `--allow-unauthenticated-remote` development override is passed.
+- **REST API paths are mounted under `/api/v1`.** Endpoint names below omit the prefix for readability; browser-visible API calls use `/api/v1/...`.
 
 ### 3.3 Bootstrap order on a fresh install
 1. `jellyweb` starts first (always available, used for setup wizard).
@@ -70,12 +73,20 @@ This design closes those gaps for a **local-only deployment** (no auth gating; u
    - Else → `jellyweb` exec-spawns the daemon **detached** (`setsid`, stdout/stderr redirected to a daemon log file) so `jellyweb`'s lifecycle does not bind the daemon's. This path is intended for development and non-systemd hosts.
 5. UI surfaces "daemon installed?" so unintegrated installs can be diagnosed and offers a "Install systemd unit" button when missing.
 
+### 3.4 Identity and permission model
+
+`jellywatchd` may run either as the same user as `jellyweb` or as root when configured file ownership changes require `chown`.
+
+- Same-user daemon: `control.sock` is `0600`, owned by the daemon/web UID. `SO_PEERCRED` requires peer UID equality.
+- Root/system daemon: installer writes an allowlisted web UID into the daemon unit/config context. `control.sock` is still root-owned, but the daemon accepts exactly that peer UID via `SO_PEERCRED`; no arbitrary local user may connect. The socket directory remains `0700` where possible, or `0710` with an installer-created group only if needed by the platform.
+- Direct exec fallback: same-user only. If config requires root-only ownership operations, direct exec is disabled and the UI explains that a systemd/system service is required.
+
 ## 4. IPC Protocol
 
 ### 4.1 Transport
 - Unix domain socket at `~/.config/jellywatch/control.sock`.
-- File permissions `0600`, owned by daemon UID.
-- **`SO_PEERCRED`** check on each connection: daemon refuses peers whose UID differs from its own (defense-in-depth alongside socket perms).
+- File permissions follow the identity model in §3.4.
+- **`SO_PEERCRED`** check on each connection: daemon refuses peers outside the same UID / explicit installer allowlist.
 - Stale-socket detection on daemon startup (try connect → if dead, unlink and recreate).
 - Daemon removes the socket on graceful shutdown.
 
@@ -147,10 +158,11 @@ Failed reloads return:
 - 10-minute dedup window: re-issued `op_id` returns the original op's stream.
 
 ### 4.9 Crash recovery for destructive ops
-- Before mutation, the daemon writes `{op_id, cmd, args, started_at, state: "in_progress"}` to `~/.config/jellywatch/op_log.jsonl`.
-- On op completion, the line is rewritten with `done`, `failed`, or `cancelled`.
-- On daemon **startup**, it scans `op_log.jsonl` for `in_progress` records.
+- Before mutation, the daemon appends `{op_id, cmd, args, ts, state: "in_progress"}` to `~/.config/jellywatch/op_log.jsonl` and fsyncs it.
+- On op completion, the daemon appends a second record with `done`, `failed`, or `cancelled`; records are never edited in place.
+- On daemon **startup**, it folds `op_log.jsonl` by `op_id` and looks for latest-state `in_progress` records.
 - If found, the daemon refuses normal startup; `STATUS` returns `{state: "interrupted", interrupted_op: {...}}`. The webui shows a recovery screen requiring an explicit user decision (discard or resume) before any other operation is allowed.
+- Log compaction rewrites the whole file atomically only after all latest states are terminal.
 
 ### 4.10 Error taxonomy
 Defined enum, shared between client and server in `internal/daemon/ipc/errors.go`:
@@ -165,6 +177,8 @@ CONFLICT, INTERRUPTED, CANCELLED, TIMEOUT, INTERNAL, NOT_IMPLEMENTED
 - New commands added in v1 are opt-in (a daemon that doesn't know `FOO` returns `NOT_IMPLEMENTED`).
 
 ## 5. REST API (`jellyweb` ↔ browser)
+
+All routes in this section are mounted under `/api/v1`; examples omit the prefix for readability.
 
 ### 5.1 Settings — read
 
@@ -184,7 +198,7 @@ Whole-section replace:
 ```
 PUT /settings/sonarr     PUT /settings/radarr     PUT /settings/jellyfin
 PUT /settings/ai         PUT /settings/daemon     PUT /settings/logging
-PUT /settings/options
+PUT /settings/options    PUT /settings/permissions
 ```
 
 Array CRUD (paths, libraries):
@@ -225,21 +239,26 @@ POST /paths/preflight                body: {path, kind: "watch"|"library"}
 3. Re-read config from disk (defensive)
 4. Apply section change to in-memory struct
 5. Run validation pipeline (non-blocking warnings)
-6. Atomic write: tmp → fsync → rename
-7. Release flock
-8. Send RELOAD via IPC; wait up to 3s
-9. Respond 200:
+6. Create an atomic backup of current `config.toml`
+7. Atomic write new config: tmp → fsync → rename
+8. Send `RELOAD` via IPC; wait up to 3s
+9. If reload fails, atomically restore the backup before releasing the lock
+10. Release flock
+11. Respond 200:
    {
      saved: true,
      validation: { warnings: [...] },
-     reload: { ok, reloaded: [...], failed: [...] }
+     reload: { ok, reloaded: [...], failed: [...] },
+     restored_previous_config: false
    }
 ```
 
 Three end-states the UI distinguishes:
 - **Green:** `validation.warnings == [] && reload.ok`.
 - **Yellow:** validation has warnings or some non-critical signal; reload OK.
-- **Red:** saved but reload reports failures — UI shows which subsystems and offers retry / revert.
+- **Red:** reload reports failures and previous config was restored — UI shows which subsystems failed and offers retry / edit. Disk and daemon runtime remain consistent.
+
+If `jellyweb` cannot reach the daemon during save, the default behavior is to leave the previous config in place and return 502/504. Manual edits can still be applied through `/daemon/reload`.
 
 ### 5.5 Daemon lifecycle
 
@@ -261,6 +280,16 @@ POST /database/rescan      body: {paths?, dry_run}                → 202 + op_i
 POST /database/reset       body: {confirm: "media.db",
                                   preserve: ["audit_log"]}        → 202 + op_id
 ```
+
+Database lifecycle operations require maintenance coordination because both `jellyweb` and `jellywatchd` may hold SQLite handles:
+
+1. `jellyweb` enters DB maintenance mode: new DB-backed HTTP requests return 503 with `code: "MAINTENANCE"` and in-flight DB reads get a short drain window.
+2. `jellyweb` closes its `MediaDB` handle and acknowledges readiness to the daemon.
+3. Daemon pauses scanner/watch processing, closes or checkpoints its DB handle as needed, then performs reset/rescan.
+4. Daemon reopens the DB and exits maintenance mode.
+5. `jellyweb` reopens its DB handle before returning terminal progress to the browser.
+
+If either process cannot enter maintenance mode, the operation fails before destructive mutation begins.
 
 ### 5.7 SSE progress relay
 
@@ -290,6 +319,7 @@ Every new endpoint added to `api/openapi.yaml`. Spec drift is a CI failure (exis
 /settings/database         DB rescan / reset
 /settings/options          general toggles
 /settings/logging          log level + rotation
+/settings/permissions      file ownership/mode settings
 ```
 
 Layout: persistent left rail with section navigation + status pills (green/yellow/red dot per section, fed by a single `/settings` overview poll every 30s). Right pane is the section's form.
@@ -343,7 +373,7 @@ Two cards:
 - **Reset database** (destructive) — typed-confirm modal asking the user to type `media.db`. On confirm → 202 + op_id → page transitions to a full-screen `ProgressCard` with installer-style phase feed.
 
 ### 6.6 SSE reattach
-`useOpStream` keeps the active `op_id` in session storage. On page reload or navigation, it re-attaches via `?since=N`. Lost progress lines stream from the daemon's op buffer.
+`useOpStream` keeps the active `op_id` in session storage. On page reload or navigation, it re-attaches via `?since=N`. Lost progress lines stream from the daemon's op buffer. The buffer is bounded per op; if `since` is older than the retained range, the server emits a synthetic snapshot event followed by live progress.
 
 ## 7. Validation & Safety Pipeline (consolidated)
 
@@ -358,6 +388,7 @@ Two cards:
 | IPC RELOAD       | daemon                  | Two-phase        | Prepare → commit, with rollback    |
 | Op log           | daemon                  | Crash recovery   | Detect interrupted destructive ops |
 | `SO_PEERCRED`    | daemon socket accept    | Yes              | UID-bound IPC                      |
+| DB maintenance   | web + daemon            | Yes              | Close/reopen SQLite handles safely |
 
 ## 8. CLI parity additions
 
@@ -388,8 +419,10 @@ internal/api/settings_handlers.go        NEW   per-section read/write/validate/t
 internal/api/paths_handlers.go           NEW   array CRUD for paths, libraries
 internal/api/daemon_handlers.go          NEW   /daemon/* lifecycle handlers
 internal/api/database_handlers.go        NEW   /database/* lifecycle handlers
+internal/api/db_maintenance.go           NEW   close/reopen DB handle coordination
 internal/api/sse_relay.go                NEW   IPC ATTACH → SSE relay
 internal/api/server.go                   EDIT  mount new routes
+cmd/jellyweb/main.go                     EDIT  default loopback bind + unsafe bind guard
 internal/config/config.go                EDIT  atomic write + flock; struct tags for secrets
 api/openapi.yaml                         EDIT  add all new routes
 cmd/jellywatch/daemon_cmd.go             NEW   CLI subcommands
@@ -409,6 +442,7 @@ web/src/app/settings/daemon/page.tsx                     NEW
 web/src/app/settings/database/page.tsx                   NEW
 web/src/app/settings/options/page.tsx                    NEW
 web/src/app/settings/logging/page.tsx                    NEW
+web/src/app/settings/permissions/page.tsx                NEW
 web/src/components/settings/SettingsForm.tsx             NEW
 web/src/components/settings/PathListEditor.tsx           NEW
 web/src/components/settings/SecretField.tsx              NEW
@@ -430,7 +464,7 @@ web/src/lib/api/client.ts                                EDIT  → typed clients
 - 4xx: schema / validation failure, returns `{error: {code, message, details}}`.
 - 503: `flock` couldn't be acquired in 2s.
 - 502/504: IPC to daemon failed or timed out — UI shows "Daemon unreachable" and offers `/daemon/start`.
-- 200 with `reload.failed != []`: write succeeded but daemon couldn't apply — UI shows red banner + retry/revert.
+- 200 with `reload.failed != []`: attempted write was restored because daemon couldn't apply it — UI shows red banner + retry/edit.
 
 ### 10.2 daemon ↔ IPC
 - Errors carry a code from the §4.10 enum.
@@ -439,7 +473,7 @@ web/src/lib/api/client.ts                                EDIT  → typed clients
 
 ### 10.3 Subsystem reload failure
 - Two-phase prepare/commit means failure leaves previous state intact (§4.6).
-- UI shows which subsystems failed and their reasons; `[Retry reload]` and `[Revert config]` are offered.
+- UI shows which subsystems failed and their reasons; `[Retry]` and `[Edit config]` are offered. Revert is unnecessary for web saves because the previous config is restored automatically on reload failure.
 
 ### 10.4 Crashed daemon
 - `op_log.jsonl` records in-progress destructive ops.
@@ -448,8 +482,8 @@ web/src/lib/api/client.ts                                EDIT  → typed clients
 ## 11. Testing
 
 ### 11.1 Backend
-- **Unit:** every IPC command handler, the two-phase reload supervisor (mock subsystems with controllable Prepare/Commit/Rollback failure), config save (flock contention, partial-write injection), op log replay.
-- **Integration:** start `jellywatchd` + `jellyweb` in test harness, drive via IPC client + REST. Cover happy path, reload failure, mid-rescan cancel, mid-reset crash + recovery (kill daemon process, restart, verify recovery flow).
+- **Unit:** every IPC command handler, the two-phase reload supervisor (mock subsystems with controllable Prepare/Commit/Rollback failure), config save (flock contention, partial-write injection, reload-failure restore), op log replay, unsafe bind guard.
+- **Integration:** start `jellywatchd` + `jellyweb` in test harness, drive via IPC client + REST. Cover happy path, reload failure with disk restore, mid-rescan cancel, DB maintenance close/reopen, root-daemon peer UID allowlist, mid-reset crash + recovery (kill daemon process, restart, verify recovery flow).
 - **Property:** atomic write + flock contention with N parallel writers (no partial files, no lost updates).
 
 ### 11.2 Frontend
