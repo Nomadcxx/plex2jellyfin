@@ -33,6 +33,16 @@ type PutSectionResponse struct {
 }
 
 func SaveConfigAndReload(ctx context.Context, path string, candidate *config.Config, ipcClient IPCCaller) (PutSectionResponse, error) {
+	return SaveConfigAndReloadSection(ctx, path, candidate, ipcClient, "")
+}
+
+// SaveConfigAndReloadSection saves the candidate config and triggers a daemon
+// reload. If section is non-empty, only a reload failure for that specific
+// subsystem rolls back the config; failures from other subsystems are surfaced
+// as warnings in the response but the new config is kept. This prevents a
+// stale watch on an unrelated path (e.g., scanner) from blocking a save to
+// another section (e.g., ai).
+func SaveConfigAndReloadSection(ctx context.Context, path string, candidate *config.Config, ipcClient IPCCaller, section string) (PutSectionResponse, error) {
 	prev, _ := os.ReadFile(path)
 	if err := config.AtomicWriteWithLock(path, []byte(candidate.ToTOML()), 0600); err != nil {
 		return PutSectionResponse{}, err
@@ -47,7 +57,27 @@ func SaveConfigAndReload(ctx context.Context, path string, candidate *config.Con
 	}
 
 	resp := PutSectionResponse{Saved: true, Reload: reload}
-	if !reload.OK {
+
+	rollback := !reload.OK
+	if rollback && section != "" {
+		// Only roll back if the section we changed actually failed to
+		// reload (or if the IPC call itself failed).
+		sectionFailed := false
+		for _, f := range reload.Failed {
+			if f.Name == section || f.Name == "ipc" {
+				sectionFailed = true
+				break
+			}
+		}
+		rollback = sectionFailed
+		if !rollback {
+			// Other subsystems failed but our change reloaded fine; surface
+			// the partial success so the UI can stop reporting a hard error.
+			resp.Reload.OK = true
+		}
+	}
+
+	if rollback {
 		if len(prev) > 0 {
 			if err := config.AtomicWriteWithLock(path, prev, 0600); err != nil {
 				return resp, err

@@ -67,7 +67,7 @@ func (h *SettingsHandlers) Put(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "config_path_error", err.Error())
 		return
 	}
-	resp, err := SaveConfigAndReload(r.Context(), configPath, current, h.IPC)
+	resp, err := SaveConfigAndReloadSection(r.Context(), configPath, current, h.IPC, section)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "config_save_error", err.Error())
 		return

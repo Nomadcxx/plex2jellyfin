@@ -78,7 +78,12 @@ func (w *Watcher) ReplaceWatchPaths(paths []string) error {
 
 	for _, path := range w.fsWatcher.WatchList() {
 		if err := w.fsWatcher.Remove(path); err != nil {
-			return fmt.Errorf("unable to remove watch %s: %w", path, err)
+			// Non-fatal: the watch may have been auto-removed by the kernel
+			// when the directory was deleted (e.g., post-extraction cleanup
+			// of a SABnzbd _UNPACK_ folder). fsnotify returns EINVAL for
+			// such stale watches; we don't want a stale watch to block the
+			// entire reload pipeline.
+			log.Printf("watcher: ignoring remove error for %s: %v", path, err)
 		}
 	}
 	return w.watchLocked(paths)
