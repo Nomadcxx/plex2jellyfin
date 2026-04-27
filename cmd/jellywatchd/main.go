@@ -382,6 +382,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	controlServer.Register(daemonipc.CmdReload, reloadHandler(getCurrentConfig, setCurrentConfig, config.Load, reloadSupervisor))
 	controlServer.Register(daemonipc.CmdStop, stopHandler(func() { cancel() }))
 	controlServer.Register(daemonipc.CmdRecover, recoverHandler(opLog, getPending, clearPending))
+
+	fileScanner := scanner.NewFileScanner(db)
+	controlServer.RegisterStreaming(daemonipc.CmdRescan, guardMutator(getPending, rescanHandler(fileScanner, opLog)))
 	if err := controlServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start control plane: %w", err)
 	}

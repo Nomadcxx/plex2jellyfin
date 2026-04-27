@@ -10,6 +10,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	"github.com/Nomadcxx/jellywatch/internal/daemon/reload"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 )
 
 type captureFrameWriter struct {
@@ -132,4 +133,49 @@ t.Errorf("expected pending cleared, got %d", len(got))
 if len(getPending()) != 0 {
 t.Error("in-memory pending not cleared")
 }
+}
+
+func TestRescanStreamsProgress(t *testing.T) {
+dir := t.TempDir()
+sock := filepath.Join(dir, "ctl.sock")
+srv := ipc.NewServer(sock)
+srv.SetRegistry(ipc.NewOpRegistry())
+
+scn := &fakeScannerForTest{}
+logFile, _ := ipc.OpenOpLog(filepath.Join(dir, "op_log.jsonl"))
+defer logFile.Close()
+
+srv.RegisterStreaming(ipc.CmdRescan, rescanHandler(scn, logFile))
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+if err := srv.Start(ctx); err != nil {
+t.Fatal(err)
+}
+defer srv.Stop()
+
+cli := ipc.NewClient(sock)
+frames, errc := cli.Stream(ctx, ipc.CmdRescan, map[string]any{"dry_run": false})
+progress, done := 0, false
+for f := range frames {
+switch f.Type {
+case ipc.FrameProgress:
+progress++
+case ipc.FrameDone:
+done = true
+}
+}
+if err := <-errc; err != nil {
+t.Fatal(err)
+}
+if progress < 1 || !done {
+t.Errorf("progress=%d done=%v", progress, done)
+}
+}
+
+type fakeScannerForTest struct{}
+
+func (*fakeScannerForTest) FullRescan(ctx context.Context, paths []string, dry bool, p chan<- database.ProgressEvent) error {
+p <- database.ProgressEvent{Phase: "walking"}
+p <- database.ProgressEvent{Phase: "indexing", Current: 1, Total: 1}
+return nil
 }
