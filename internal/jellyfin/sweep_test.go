@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -72,7 +73,8 @@ func TestSweep_RecentRowIsSweepedWithinLookback(t *testing.T) {
 	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
 
 	sweeper := NewSweeper(client, db)
-	if err := sweeper.RunOnce(24*time.Hour, 7*24*time.Hour); err != nil {
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
@@ -110,8 +112,9 @@ func TestSweep_OldRowSkippedByNormalSweep(t *testing.T) {
 	})
 	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
 	sweeper := NewSweeper(client, db)
+	sweeper.SetPageDelay(0)
 	// 24h lookback, 7d ttl: row is 48h old, outside lookback but inside TTL.
-	if err := sweeper.RunOnce(24*time.Hour, 7*24*time.Hour); err != nil {
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
@@ -147,8 +150,9 @@ func TestSweep_UnresolvedRowOlderThanTTLIsLabeledFAIL(t *testing.T) {
 	srv, _ := newFakeJellyfinServer(t, []Item{})
 	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
 	sweeper := NewSweeper(client, db)
+	sweeper.SetPageDelay(0)
 
-	if err := sweeper.RunOnce(24*time.Hour, 7*24*time.Hour); err != nil {
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
@@ -210,7 +214,8 @@ func TestSweep_PaginationFollowsTotalRecordCount(t *testing.T) {
 
 	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
 	sweeper := NewSweeper(client, db)
-	if err := sweeper.RunOnce(24*time.Hour, 7*24*time.Hour); err != nil {
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
@@ -243,7 +248,8 @@ func TestSweep_APIErrorDoesNotMarkRows(t *testing.T) {
 
 	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
 	sweeper := NewSweeper(client, db)
-	if err := sweeper.RunOnce(24*time.Hour, 7*24*time.Hour); err == nil {
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err == nil {
 		t.Fatalf("expected error from RunOnce when API returns 500")
 	}
 
@@ -257,4 +263,99 @@ func TestSweep_APIErrorDoesNotMarkRows(t *testing.T) {
 	if dec.AutoLabel != "" {
 		t.Errorf("row should not be auto-labeled on API error, got %q", dec.AutoLabel)
 	}
+}
+
+func TestSweep_ContextCancellationAbortsPagination(t *testing.T) {
+db := newSweepDB(t)
+// Seed enough rows that the sweep would otherwise paginate.
+for i := 0; i < 5; i++ {
+_, err := db.InsertDecision(database.ParseDecision{
+SourcePath:      "/dl/x.mkv",
+SourceFilename:  "x.mkv",
+EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+TargetPath:      "/library/x" + strconv.Itoa(i) + ".mkv",
+OrganizeOutcome: "success",
+})
+if err != nil {
+t.Fatalf("InsertDecision: %v", err)
+}
+}
+
+srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// Slow server: hold long enough that the per-request 30s timeout
+// would normally allow it, but cancellation should abort sooner.
+select {
+case <-r.Context().Done():
+return
+case <-time.After(2 * time.Second):
+}
+w.Header().Set("Content-Type", "application/json")
+_ = json.NewEncoder(w).Encode(ItemsResponse{Items: nil, TotalRecordCount: 0})
+}))
+defer srv.Close()
+
+client := NewClient(Config{URL: srv.URL, APIKey: "k"})
+sweeper := NewSweeper(client, db)
+sweeper.SetPageDelay(0)
+
+ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+defer cancel()
+
+start := time.Now()
+err := sweeper.RunOnce(ctx, 24*time.Hour, 7*24*time.Hour)
+elapsed := time.Since(start)
+if err == nil {
+t.Fatalf("expected error on ctx cancellation, got nil")
+}
+if elapsed > 1500*time.Millisecond {
+t.Errorf("expected sweep to abort promptly, took %v", elapsed)
+}
+}
+
+func TestSweep_PageDelayIsRespectedAndCancellable(t *testing.T) {
+db := newSweepDB(t)
+for i := 0; i < 3; i++ {
+_, err := db.InsertDecision(database.ParseDecision{
+SourcePath:      "/dl/x.mkv",
+SourceFilename:  "x.mkv",
+EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+TargetPath:      "/library/d" + strconv.Itoa(i) + ".mkv",
+OrganizeOutcome: "success",
+})
+if err != nil {
+t.Fatalf("InsertDecision: %v", err)
+}
+}
+
+items := []Item{{ID: "a", Path: "/library/d0.mkv"}, {ID: "b", Path: "/library/d1.mkv"}, {ID: "c", Path: "/library/d2.mkv"}}
+srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+startIndex, _ := strconv.Atoi(r.URL.Query().Get("StartIndex"))
+const limit = 1
+end := startIndex + limit
+if end > len(items) {
+end = len(items)
+}
+var page []Item
+if startIndex < len(items) {
+page = items[startIndex:end]
+}
+w.Header().Set("Content-Type", "application/json")
+_ = json.NewEncoder(w).Encode(ItemsResponse{Items: page, TotalRecordCount: len(items)})
+}))
+defer srv.Close()
+
+client := NewClient(Config{URL: srv.URL, APIKey: "k"})
+sweeper := NewSweeper(client, db)
+// Tight delay; verifies pageDelay is honored without slowing the test much.
+sweeper.SetPageDelay(20 * time.Millisecond)
+
+start := time.Now()
+if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
+t.Fatalf("RunOnce: %v", err)
+}
+elapsed := time.Since(start)
+// 3 items, page size 1 from server -> 3 fetches, 2 sleeps of 20ms = >=40ms.
+if elapsed < 30*time.Millisecond {
+t.Errorf("expected pageDelay to slow pagination, took %v", elapsed)
+}
 }

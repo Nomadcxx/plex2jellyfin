@@ -409,7 +409,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			case <-ctx.Done():
 				return
 			}
-			if err := sweeper.RunOnce(24*time.Hour, 7*24*time.Hour); err != nil {
+			if err := sweeper.RunOnce(ctx, 24*time.Hour, 7*24*time.Hour); err != nil {
 				logger.Warn("daemon", "Jellyfin sweeper error", logging.F("error", err.Error()))
 			}
 			ticker := time.NewTicker(6 * time.Hour)
@@ -417,7 +417,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			for {
 				select {
 				case <-ticker.C:
-					if err := sweeper.RunOnce(24*time.Hour, 7*24*time.Hour); err != nil {
+					if err := sweeper.RunOnce(ctx, 24*time.Hour, 7*24*time.Hour); err != nil {
 						logger.Warn("daemon", "Jellyfin sweeper error", logging.F("error", err.Error()))
 					}
 				case <-ctx.Done():

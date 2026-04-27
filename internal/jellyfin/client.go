@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -66,6 +67,10 @@ func (c *Client) request(method, endpoint string, body io.Reader) (*http.Respons
 }
 
 func (c *Client) requestWithAuth(method, endpoint string, body io.Reader, withAuth bool) (*http.Response, error) {
+	return c.requestCtx(context.Background(), method, endpoint, body, withAuth)
+}
+
+func (c *Client) requestCtx(ctx context.Context, method, endpoint string, body io.Reader, withAuth bool) (*http.Response, error) {
 	base, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL: %w", err)
@@ -77,7 +82,7 @@ func (c *Client) requestWithAuth(method, endpoint string, body io.Reader, withAu
 	}
 
 	fullURL := base.ResolveReference(rel)
-	req, err := http.NewRequest(method, fullURL.String(), body)
+	req, err := http.NewRequestWithContext(ctx, method, fullURL.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -101,6 +106,22 @@ func (c *Client) requestWithAuth(method, endpoint string, body io.Reader, withAu
 	}
 
 	return resp, nil
+}
+
+func (c *Client) getCtx(ctx context.Context, endpoint string, result interface{}) error {
+	resp, err := c.requestCtx(ctx, http.MethodGet, endpoint, nil, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if result != nil {
+		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+			return fmt.Errorf("decoding response: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (c *Client) get(endpoint string, result interface{}) error {

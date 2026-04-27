@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -90,16 +91,22 @@ func (c *Client) GetOrphanedEpisodes() ([]Item, error) {
 // ListItemsPage returns a single page of items (Movies/Episodes) starting at
 // startIndex. Pagination is driven by the caller using ItemsResponse.TotalRecordCount.
 func (c *Client) ListItemsPage(startIndex, limit int) (*ItemsResponse, error) {
-query := url.Values{}
-query.Set("Recursive", "true")
-query.Set("IncludeItemTypes", "Episode,Movie")
-query.Set("Fields", "Path,ProviderIds")
-query.Set("StartIndex", strconv.Itoa(startIndex))
-query.Set("Limit", strconv.Itoa(limit))
-
-var resp ItemsResponse
-if err := c.get("/Items?"+query.Encode(), &resp); err != nil {
-return nil, fmt.Errorf("listing items page: %w", err)
+	return c.ListItemsPageCtx(context.Background(), startIndex, limit)
 }
-return &resp, nil
+
+// ListItemsPageCtx is the context-aware variant of ListItemsPage. It honors
+// ctx cancellation/timeout for the outbound HTTP request.
+func (c *Client) ListItemsPageCtx(ctx context.Context, startIndex, limit int) (*ItemsResponse, error) {
+	query := url.Values{}
+	query.Set("Recursive", "true")
+	query.Set("IncludeItemTypes", "Episode,Movie")
+	query.Set("Fields", "Path,ProviderIds")
+	query.Set("StartIndex", strconv.Itoa(startIndex))
+	query.Set("Limit", strconv.Itoa(limit))
+
+	var resp ItemsResponse
+	if err := c.getCtx(ctx, "/Items?"+query.Encode(), &resp); err != nil {
+		return nil, fmt.Errorf("listing items page: %w", err)
+	}
+	return &resp, nil
 }
