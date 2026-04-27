@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { LayoutDashboard, Copy, Download, Activity, FolderSync } from 'lucide-react';
+import { LayoutDashboard, Copy, Download, Activity, FolderSync, Settings } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -10,6 +10,7 @@ const navigation = [
   { name: 'Queue', href: '/queue', icon: Download },
   { name: 'Activity', href: '/activity', icon: Activity },
   { name: 'Consolidation', href: '/consolidation', icon: FolderSync },
+  { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
 export function Sidebar() {
