@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/api"
 	"github.com/Nomadcxx/jellywatch/internal/activity"
 	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/paths"
@@ -28,6 +30,7 @@ type Server struct {
 	sessionOnce    sync.Once
 	playbackLocks  *jellyfin.PlaybackLockManager
 	deferredQueue  *jellyfin.DeferredQueue
+	ipc            IPCCaller
 }
 
 // NewServer creates a new API server
@@ -45,7 +48,7 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 		sessions = NewSessionStore()
 	}
 
-	return &Server{
+	s := &Server{
 		db:             db,
 		cfg:            cfg,
 		service:        service.NewCleanupService(db),
@@ -54,6 +57,10 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 		playbackLocks:  jellyfin.NewPlaybackLockManager(),
 		deferredQueue:  jellyfin.NewDeferredQueue(),
 	}
+	if configDir, err := paths.JellyWatchDir(); err == nil {
+		s.ipc = ipc.NewClient(filepath.Join(configDir, "control.sock"))
+	}
+	return s
 }
 
 // Close releases server resources (stops SessionStore cleanup goroutine, etc.)
@@ -85,9 +92,15 @@ func (s *Server) Handler() *chi.Mux {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// CORS middleware for development
+	// CORS middleware. Origins are config-driven so production deployments
+	// behind reverse proxies or on non-default ports don't silently fail
+	// preflight checks with the previously-hardcoded dev origin.
+	allowedOrigins := []string{"http://localhost:3000"}
+	if s.cfg != nil && len(s.cfg.API.AllowedOrigins) > 0 {
+		allowedOrigins = s.cfg.API.AllowedOrigins
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:3000"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Link"},
@@ -114,6 +127,33 @@ func (s *Server) apiRouter() *chi.Mux {
 
 	// Webhooks are intentionally mounted outside generated OpenAPI handlers.
 	r.Post("/webhooks/jellyfin", s.HandleJellyfinWebhook)
+	r.Post("/paths/preflight", PreflightHandler{}.ServeHTTP)
+	testH := TestHandlers{}
+	r.Post("/settings/sonarr/test", testH.Sonarr)
+	r.Post("/settings/radarr/test", testH.Radarr)
+	r.Post("/settings/jellyfin/test", testH.Jellyfin)
+
+	if s.ipc != nil {
+		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}
+		pathsH := &PathsHandlers{Cfg: s.cfg, IPC: s.ipc}
+		libsH := &LibrariesHandlers{Cfg: s.cfg, IPC: s.ipc}
+		r.Route("/settings", func(r chi.Router) {
+			r.Get("/{section}", settingsH.Get)
+			r.Put("/{section}", settingsH.Put)
+			r.Route("/paths", func(r chi.Router) {
+				r.Get("/{kind}", pathsH.Get)
+				r.Post("/{kind}", pathsH.Add)
+				r.Delete("/{kind}/{index}", pathsH.Remove)
+				r.Put("/{kind}", pathsH.Replace)
+			})
+			r.Route("/libraries", func(r chi.Router) {
+				r.Get("/{kind}", libsH.Get)
+				r.Post("/{kind}", libsH.Add)
+				r.Delete("/{kind}/{index}", libsH.Remove)
+				r.Put("/{kind}", libsH.Replace)
+			})
+		})
+	}
 
 	// Mount generated API routes
 	api.HandlerFromMux(s, r)

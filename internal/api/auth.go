@@ -162,6 +162,17 @@ func isSecureRequest(r *http.Request) bool {
 	return false
 }
 
+// shouldSetSecureCookie decides whether to set the Secure flag on session
+// cookies. Config takes precedence: if `secure_cookies = true` is set,
+// always force Secure (operator-asserted). Otherwise auto-detect from the
+// request itself, which covers local HTTP dev and HTTPS-via-proxy prod.
+func (s *Server) shouldSetSecureCookie(r *http.Request) bool {
+	if s.cfg != nil && s.cfg.SecureCookies {
+		return true
+	}
+	return isSecureRequest(r)
+}
+
 // Login implements api.ServerInterface
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
@@ -203,7 +214,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   isSecureRequest(r),
+		Secure:   s.shouldSetSecureCookie(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(SessionDuration.Seconds()),
 	})
@@ -226,7 +237,7 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   isSecureRequest(r),
+		Secure:   s.shouldSetSecureCookie(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1, // Delete cookie
 	})
