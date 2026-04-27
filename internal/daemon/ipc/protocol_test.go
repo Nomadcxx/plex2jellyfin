@@ -25,3 +25,11 @@ func TestErrorCodeIsString(t *testing.T) {
 		t.Errorf("ErrBusy = %q, want BUSY", ErrBusy)
 	}
 }
+
+func TestLifecycleCommandsDefined(t *testing.T) {
+for _, c := range []Command{CmdStop, CmdRescan, CmdResetDB, CmdAttach, CmdCancel, CmdRecover} {
+if string(c) == "" {
+t.Errorf("command constant empty")
+}
+}
+}

@@ -7,8 +7,14 @@ const ProtocolVersion = 1
 type Command string
 
 const (
-	CmdStatus Command = "STATUS"
-	CmdReload Command = "RELOAD"
+	CmdStatus  Command = "STATUS"
+	CmdReload  Command = "RELOAD"
+	CmdStop    Command = "STOP"
+	CmdRescan  Command = "RESCAN"
+	CmdResetDB Command = "RESET_DB"
+	CmdAttach  Command = "ATTACH"
+	CmdCancel  Command = "CANCEL"
+	CmdRecover Command = "RECOVER"
 )
 
 type Request struct {
