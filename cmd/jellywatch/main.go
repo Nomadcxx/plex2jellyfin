@@ -90,6 +90,7 @@ Features:
 	rootCmd.AddCommand(newHealthCmd())
 	rootCmd.AddCommand(newReviewCmd())
 	rootCmd.AddCommand(newParsesCmd())
+	rootCmd.AddCommand(newDaemonCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
