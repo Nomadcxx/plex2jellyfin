@@ -372,10 +372,16 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		copy(out, pending)
 		return out
 	}
+	clearPending := func() {
+		pendingMu.Lock()
+		pending = nil
+		pendingMu.Unlock()
+	}
 
 	controlServer.Register(daemonipc.CmdStatus, statusHandler(time.Now(), getCurrentConfig, getPending))
 	controlServer.Register(daemonipc.CmdReload, reloadHandler(getCurrentConfig, setCurrentConfig, config.Load, reloadSupervisor))
 	controlServer.Register(daemonipc.CmdStop, stopHandler(func() { cancel() }))
+	controlServer.Register(daemonipc.CmdRecover, recoverHandler(opLog, getPending, clearPending))
 	if err := controlServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start control plane: %w", err)
 	}

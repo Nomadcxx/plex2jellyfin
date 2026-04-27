@@ -96,3 +96,40 @@ if !called {
 t.Error("stop func not invoked")
 }
 }
+
+func TestRecoverDiscardClearsPending(t *testing.T) {
+dir := t.TempDir()
+sock := filepath.Join(dir, "ctl.sock")
+logFile, _ := ipc.OpenOpLog(filepath.Join(dir, "op_log.jsonl"))
+defer logFile.Close()
+_ = logFile.Begin("op-x", ipc.CmdResetDB, nil)
+
+pending, _ := logFile.Pending()
+if len(pending) != 1 {
+t.Fatal("setup: expected 1 pending")
+}
+
+current := pending
+getPending := func() []ipc.OpLogEntry { return current }
+clearPending := func() { current = nil }
+
+srv := ipc.NewServer(sock)
+srv.Register(ipc.CmdRecover, recoverHandler(logFile, getPending, clearPending))
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+if err := srv.Start(ctx); err != nil {
+t.Fatal(err)
+}
+defer srv.Stop()
+
+cli := ipc.NewClient(sock)
+if _, err := cli.Call(ctx, ipc.CmdRecover, map[string]string{"action": "discard"}); err != nil {
+t.Fatal(err)
+}
+if got, _ := logFile.Pending(); len(got) != 0 {
+t.Errorf("expected pending cleared, got %d", len(got))
+}
+if len(getPending()) != 0 {
+t.Error("in-memory pending not cleared")
+}
+}

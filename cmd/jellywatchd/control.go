@@ -76,3 +76,32 @@ func reloadHandler(
 		w.Result(req.ID, data)
 	}
 }
+
+type recoverArgs struct {
+Action string `json:"action"`
+}
+
+func recoverHandler(log *ipc.OpLog, getPending func() []ipc.OpLogEntry, clearPending func()) ipc.Handler {
+return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+var a recoverArgs
+if err := json.Unmarshal(req.Args, &a); err != nil {
+w.Error(req.ID, ipc.ErrBadRequest, err.Error())
+return
+}
+switch a.Action {
+case "discard":
+for _, p := range getPending() {
+if err := log.MarkDiscarded(p.ID); err != nil {
+w.Error(req.ID, ipc.ErrInternal, err.Error())
+return
+}
+}
+clearPending()
+w.Result(req.ID, json.RawMessage(`{"discarded":true}`))
+case "resume":
+w.Error(req.ID, ipc.ErrNotImplemented, "resume not supported in v1")
+default:
+w.Error(req.ID, ipc.ErrBadRequest, "action must be discard or resume")
+}
+}
+}
