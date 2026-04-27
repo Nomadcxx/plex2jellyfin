@@ -157,6 +157,11 @@ func (s *Server) apiRouter() *chi.Mux {
 			r.Post("/reset", dbH.Reset)
 		})
 
+		if attacher, ok := s.ipc.(IPCAttacher); ok {
+			sse := &SSERelay{IPC: attacher}
+			r.Get("/events/op/{op_id}", sse.Stream)
+		}
+
 		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		pathsH := &PathsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		libsH := &LibrariesHandlers{Cfg: s.cfg, IPC: s.ipc}

@@ -66,6 +66,49 @@ func (c *Client) Stream(ctx context.Context, cmd Command, args any) (<-chan Fram
 	return frames, errc
 }
 
+// Attach subscribes to an in-flight op's frame stream via the daemon's
+// ATTACH command. There is a ~1ms race between the API allocating the op_id
+// and the daemon registering it; this method retries on ErrNotFound for up
+// to ~1s with a small backoff so a fast SSE subscription doesn't 404.
+func (c *Client) Attach(ctx context.Context, opID string) (<-chan Frame, error) {
+	deadline := time.Now().Add(1 * time.Second)
+	for {
+		frames, errc := c.Stream(ctx, CmdAttach, map[string]string{"op_id": opID})
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case f, ok := <-frames:
+			if !ok {
+				if err := <-errc; err != nil {
+					return nil, err
+				}
+				return nil, errors.New("ipc attach: stream closed without frames")
+			}
+			if f.Type == FrameError && f.Code == ErrNotFound && time.Now().Before(deadline) {
+				// Drain the rest of this attempt before retrying.
+				for range frames {
+				}
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(50 * time.Millisecond):
+				}
+				continue
+			}
+			// Re-emit the peeked frame onto a new channel so the caller sees it.
+			out := make(chan Frame, 32)
+			out <- f
+			go func() {
+				defer close(out)
+				for ff := range frames {
+					out <- ff
+				}
+			}()
+			return out, nil
+		}
+	}
+}
+
 // StreamWithID issues a streaming command using a caller-supplied op ID so that
 // the daemon's OpRegistry/op-log key (req.ID) matches the ID the API hands back
 // to the SSE relay. It blocks until the stream terminates with FrameDone or
