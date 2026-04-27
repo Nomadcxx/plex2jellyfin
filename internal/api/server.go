@@ -135,7 +135,7 @@ func (s *Server) apiRouter() *chi.Mux {
 	// Webhooks are intentionally mounted outside generated OpenAPI handlers.
 	r.Post("/webhooks/jellyfin", s.HandleJellyfinWebhook)
 	r.Post("/paths/preflight", PreflightHandler{}.ServeHTTP)
-	testH := TestHandlers{}
+	testH := &TestHandlers{Cfg: s.cfg}
 	r.Post("/settings/sonarr/test", testH.Sonarr)
 	r.Post("/settings/radarr/test", testH.Radarr)
 	r.Post("/settings/jellyfin/test", testH.Jellyfin)
