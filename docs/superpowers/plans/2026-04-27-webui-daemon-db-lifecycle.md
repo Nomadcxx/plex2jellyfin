@@ -18,6 +18,27 @@
 
 ---
 
+## Pre-flight: existing-API anchors (verified against repo at plan time)
+
+These are the real signatures we extend; deviations from them are bugs.
+
+- **`internal/api/config_save_pipeline.go:12`** — the live `IPCCaller` interface is:
+  ```go
+  type IPCCaller interface {
+      Call(ctx context.Context, cmd ipc.Command, args any) (json.RawMessage, error)
+  }
+  ```
+  Every test stub and handler in this plan **must** include `ctx`. We extend (not replace) this interface; see Task 4.1.
+- **`internal/database/database.go`** — entry points are `Open() (*MediaDB, error)` and `OpenPath(path string) (*MediaDB, error)`. `MediaDB` wraps a `*sql.DB`. A getter `(*MediaDB).SQL() *sql.DB` is added in Task 2.0 so maintenance code can use the raw handle.
+- **`internal/scanner`** — the scanner type is `FileScanner` (`NewFileScanner`, `NewFileScannerWithAI`). There is **no** `Scanner` type. The rescan capability is added as a method on `*FileScanner` in Task 2.1a, reusing the existing periodic walk path.
+- **`cmd/jellywatchd/control.go:14`** — the live status struct is `daemonStatus{PID, UptimeSeconds, ConfigLoaded}`. Task 1.6 extends this struct rather than introducing a parallel `statusPayload`.
+- **`internal/daemon/ipc/server.go`** — `Server` does **not** export a `Path()` accessor. Task 1.4 adds `func (s *Server) Path() string { return s.path }`.
+- **`internal/daemon/ipc/server.go:38`** — `NewServer` does **not** allocate a registry. Task 1.4 changes `NewServer` to allocate a default `NewOpRegistry()` so `RegisterStreaming` is safe without an explicit `SetRegistry`.
+
+If during execution any of these no longer match (e.g., main rebased), STOP and reconcile before continuing.
+
+---
+
 ## File Structure
 
 ### Backend (NEW)
@@ -81,7 +102,7 @@ Append to `internal/daemon/ipc/protocol_test.go`:
 
 ```go
 func TestLifecycleCommandsDefined(t *testing.T) {
-	for _, c := range []Command{CmdStop, CmdRescan, CmdResetDB, CmdAttach, CmdCancel} {
+	for _, c := range []Command{CmdStop, CmdRescan, CmdResetDB, CmdAttach, CmdCancel, CmdRecover} {
 		if string(c) == "" {
 			t.Errorf("command constant empty")
 		}
@@ -107,6 +128,7 @@ const (
 	CmdResetDB Command = "RESET_DB"
 	CmdAttach  Command = "ATTACH"
 	CmdCancel  Command = "CANCEL"
+	CmdRecover Command = "RECOVER"
 )
 ```
 
@@ -624,30 +646,58 @@ Expected: FAIL.
 
 - [ ] **Step 3: Extend `Server` with streaming**
 
-In `internal/daemon/ipc/server.go`, add:
+In `internal/daemon/ipc/server.go`, add (and update `NewServer` to allocate a default registry so `RegisterStreaming` is safe out of the box):
 
 ```go
 type StreamingHandler func(ctx context.Context, args json.RawMessage, w FrameWriter, op *Op)
 
-// SetRegistry attaches the registry that streaming handlers use.
-func (s *Server) SetRegistry(r *OpRegistry) { s.registry = r }
+// Path returns the unix socket path; tests use it to dial the running server.
+func (s *Server) Path() string { return s.path }
+
+// SetRegistry replaces the default registry. Streaming handlers panic at
+// request time if the registry is nil — NewServer already provides one.
+func (s *Server) SetRegistry(r *OpRegistry) {
+    if r == nil {
+        panic("ipc: SetRegistry(nil)")
+    }
+    s.registry = r
+}
 
 // RegisterStreaming wraps a streaming handler with op_id allocation,
 // registry tracking, and frame ring mirroring.
 func (s *Server) RegisterStreaming(cmd Command, h StreamingHandler) {
-	s.Register(cmd, func(ctx context.Context, req Request, w FrameWriter) {
-		opCtx, cancel := context.WithCancel(ctx)
-		op, err := s.registry.Start(req.ID, cmd, cancel)
-		if err != nil {
-			w.Error(req.ID, ErrBusy, err.Error())
-			return
-		}
-		ringW := &ringWriter{inner: w, ring: op.Frames}
-		go heartbeatLoop(opCtx, req.ID, ringW)
-		h(opCtx, req.Args, ringW, op)
-	})
+    if s.registry == nil {
+        panic("ipc: RegisterStreaming requires a registry")
+    }
+    s.Register(cmd, func(ctx context.Context, req Request, w FrameWriter) {
+        opCtx, cancel := context.WithCancel(ctx)
+        op, err := s.registry.Start(req.ID, cmd, cancel)
+        if err != nil {
+            w.Error(req.ID, ErrBusy, err.Error())
+            return
+        }
+        defer s.registry.Finish(op.ID, "done", nil) // overwritten by handler on error/cancel
+        ringW := &ringWriter{inner: w, ring: op.Frames}
+        hbDone := make(chan struct{})
+        go heartbeatLoop(opCtx, req.ID, ringW, hbDone)
+        h(opCtx, req.Args, ringW, op)
+        close(hbDone)
+    })
 }
 ```
+
+Also update `NewServer`:
+```go
+func NewServer(path string) *Server {
+    return &Server{
+        path:            path,
+        handlers:        make(map[Command]Handler),
+        allowedPeerUIDs: map[int]struct{}{os.Getuid(): {}},
+        registry:        NewOpRegistry(),
+    }
+}
+```
+And add the `registry *OpRegistry` field to `Server`.
 
 ```go
 // internal/daemon/ipc/streaming.go
@@ -687,12 +737,14 @@ func (w *ringWriter) write(f Frame) {
 	}
 }
 
-func heartbeatLoop(ctx context.Context, opID string, w *ringWriter) {
+func heartbeatLoop(ctx context.Context, opID string, w *ringWriter, done <-chan struct{}) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-done:
 			return
 		case <-t.C:
 			w.write(Frame{ID: opID, Type: FrameHeartbeat, TS: time.Now().Unix()})
@@ -756,7 +808,9 @@ func attachHandler(s *Server) Handler {
 	}
 }
 
-// cancelHandler cancels an in-flight op via the registry.
+// cancelHandler cancels an in-flight op via the registry. The streaming
+// handler's deferred Finish will then transition state to "cancelled"
+// once the goroutine returns from ctx.Err().
 func cancelHandler(s *Server) Handler {
 	return func(ctx context.Context, req Request, w FrameWriter) {
 		var args struct {
@@ -977,36 +1031,69 @@ controlServer.Register(ipc.CmdStop, stopHandler(func() {
 }))
 ```
 
-Also add the registry/op-log/recovery sequence:
+Also extend the existing `daemonStatus` struct in `cmd/jellywatchd/control.go` (do not introduce a parallel `statusPayload`). Add fields and update `statusHandler`:
+
+```go
+type daemonStatus struct {
+    PID            int              `json:"pid"`
+    UptimeSeconds  int64            `json:"uptime_seconds"`
+    ConfigLoaded   bool             `json:"config_loaded"`
+    State          string           `json:"state"` // "running" | "interrupted"
+    InterruptedOps []ipc.OpLogEntry `json:"interrupted_ops,omitempty"`
+}
+```
+
+`statusHandler` now takes a getter for pending ops:
+
+```go
+func statusHandler(startedAt time.Time, getConfig func() *config.Config, getPending func() []ipc.OpLogEntry) ipc.Handler {
+    return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+        pending := getPending()
+        status := daemonStatus{
+            PID:            os.Getpid(),
+            UptimeSeconds:  int64(time.Since(startedAt).Seconds()),
+            ConfigLoaded:   getConfig() != nil,
+            State:          "running",
+            InterruptedOps: pending,
+        }
+        if len(pending) > 0 {
+            status.State = "interrupted"
+        }
+        data, err := json.Marshal(status)
+        if err != nil {
+            w.Error(req.ID, ipc.ErrInternal, err.Error())
+            return
+        }
+        w.Result(req.ID, data)
+    }
+}
+```
+
+Update existing call sites that pass `statusHandler(...)` to supply the new third argument. Add the registry/op-log/recovery sequence in `main.go`:
 
 ```go
 // Op-registry + op-log are required by streaming commands.
 opLogPath := filepath.Join(configDir, "op_log.jsonl")
 opLog, err := ipc.OpenOpLog(opLogPath)
 if err != nil {
-	log.Fatalf("open op log: %v", err)
+    log.Fatalf("open op log: %v", err)
 }
 defer opLog.Close()
 
-pending, err := opLog.Pending()
-if err != nil {
-	log.Fatalf("scan op log: %v", err)
+pending, _ := opLog.Pending()
+var pendingMu sync.Mutex
+getPending := func() []ipc.OpLogEntry {
+    pendingMu.Lock(); defer pendingMu.Unlock()
+    out := make([]ipc.OpLogEntry, len(pending)); copy(out, pending); return out
 }
-registry := ipc.NewOpRegistry()
-controlServer.SetRegistry(registry)
+clearPending := func() { pendingMu.Lock(); pending = nil; pendingMu.Unlock() }
 
-// Replay-state in STATUS:
-getCurrentStatus := func() statusPayload {
-	st := statusPayload{State: "running", Version: Version}
-	if len(pending) > 0 {
-		st.State = "interrupted"
-		st.InterruptedOps = pending
-	}
-	return st
-}
+// Server already has a registry from NewServer; expose it for handlers
+// that need direct access (none today).
+controlServer.Register(ipc.CmdStatus, statusHandler(startedAt, getCurrentConfig, getPending))
 ```
 
-(Adjust `statusHandler` to surface `interrupted_op` per spec §5.5.)
+While `len(pending) > 0`, mutating IPC commands (`RESCAN`, `RESET_DB`) must reject with `ErrConflict` until the operator clears the interrupted state via `RECOVER` (Task 1.7).
 
 - [ ] **Step 4: Run tests**
 
@@ -1022,11 +1109,153 @@ git commit -m "feat(daemon): STOP IPC + op-log recovery on startup"
 
 ---
 
+### Task 1.7: RECOVER command (discard / resume)
+
+**Files:** Modify: `internal/daemon/ipc/protocol.go`, `cmd/jellywatchd/control.go`. Test: `cmd/jellywatchd/control_test.go`.
+
+The browser's `/daemon/recover` endpoint (Task 3.1) needs a daemon-side handler. Resume is out of scope for v1 (no destructive op is currently re-runnable mid-flight) — the handler accepts `discard` and rejects `resume` with `ErrNotImplemented`. Discard marks every pending op as `cancelled` in the op log and clears the daemon's in-memory pending slice so subsequent mutators are unblocked.
+
+- [ ] **Step 1: Failing test**
+
+```go
+func TestRecoverDiscardClearsPending(t *testing.T) {
+    dir := t.TempDir()
+    sock := filepath.Join(dir, "ctl.sock")
+    logFile, _ := ipc.OpenOpLog(filepath.Join(dir, "op_log.jsonl"))
+    defer logFile.Close()
+    _ = logFile.Begin("op-x", ipc.CmdResetDB, nil)
+
+    pending, _ := logFile.Pending()
+    if len(pending) != 1 { t.Fatal("setup: expected 1 pending") }
+
+    var current = pending
+    getPending := func() []ipc.OpLogEntry { return current }
+    clearPending := func() { current = nil }
+
+    srv := ipc.NewServer(sock)
+    srv.Register(ipc.CmdRecover, recoverHandler(logFile, getPending, clearPending))
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    srv.Start(ctx); defer srv.Stop()
+
+    cli := ipc.NewClient(sock)
+    if _, err := cli.Call(ctx, ipc.CmdRecover, map[string]string{"action": "discard"}); err != nil {
+        t.Fatal(err)
+    }
+    if got, _ := logFile.Pending(); len(got) != 0 {
+        t.Errorf("expected pending cleared, got %d", len(got))
+    }
+    if len(getPending()) != 0 { t.Error("in-memory pending not cleared") }
+}
+```
+
+- [ ] **Step 2: Add `CmdRecover` constant** to `protocol.go` alongside the others.
+
+- [ ] **Step 3: Implement**
+
+```go
+// cmd/jellywatchd/control.go
+type recoverArgs struct { Action string `json:"action"` }
+
+func recoverHandler(log *ipc.OpLog, getPending func() []ipc.OpLogEntry, clearPending func()) ipc.Handler {
+    return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+        var a recoverArgs
+        if err := json.Unmarshal(req.Args, &a); err != nil {
+            w.Error(req.ID, ipc.ErrBadRequest, err.Error()); return
+        }
+        switch a.Action {
+        case "discard":
+            for _, p := range getPending() {
+                if err := log.MarkDiscarded(p.ID); err != nil {
+                    w.Error(req.ID, ipc.ErrInternal, err.Error()); return
+                }
+            }
+            clearPending()
+            w.Result(req.ID, json.RawMessage(`{"discarded":true}`))
+        case "resume":
+            w.Error(req.ID, ipc.ErrNotImplemented, "resume not supported in v1")
+        default:
+            w.Error(req.ID, ipc.ErrBadRequest, "action must be discard or resume")
+        }
+    }
+}
+```
+
+Wire in `main.go`:
+```go
+controlServer.Register(ipc.CmdRecover, recoverHandler(opLog, getPending, clearPending))
+```
+
+Also gate `RESCAN` / `RESET_DB` registration:
+```go
+guard := func(h ipc.StreamingHandler) ipc.StreamingHandler {
+    return func(ctx context.Context, args json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
+        if len(getPending()) > 0 {
+            w.Error(op.ID, ipc.ErrConflict, "interrupted op pending; recover first")
+            return
+        }
+        h(ctx, args, w, op)
+    }
+}
+controlServer.RegisterStreaming(ipc.CmdRescan,  guard(rescanHandler(scanner, opLog)))
+controlServer.RegisterStreaming(ipc.CmdResetDB, guard(resetDBHandler(db, opLog)))
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `go test ./cmd/jellywatchd/... -run TestRecover && go test ./internal/daemon/ipc/...`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/daemon/ipc/protocol.go cmd/jellywatchd/
+git commit -m "feat(daemon): RECOVER IPC (discard) + interrupted-op gate on mutators"
+```
+
+---
+
 ## Phase 2 — Long-running ops
+
+### Task 2.0: Expose `*sql.DB` from `MediaDB`
+
+**Files:** Modify: `internal/database/database.go`. Test: `internal/database/database_test.go`.
+
+The maintenance package needs the raw handle (DDL, VACUUM). Add a getter rather than passing `*MediaDB` deep into the IPC layer.
+
+- [ ] **Step 1: Failing test**
+
+```go
+func TestMediaDBSQLReturnsHandle(t *testing.T) {
+    db, err := OpenPath(filepath.Join(t.TempDir(), "media.db"))
+    if err != nil { t.Fatal(err) }
+    defer db.Close()
+    if db.SQL() == nil { t.Fatal("SQL() returned nil") }
+    var n int
+    if err := db.SQL().QueryRow("SELECT 1").Scan(&n); err != nil { t.Fatal(err) }
+}
+```
+
+- [ ] **Step 2: Implement**
+
+```go
+func (m *MediaDB) SQL() *sql.DB { return m.db } // or whatever the field is named
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add internal/database/
+git commit -m "feat(db): expose underlying *sql.DB via MediaDB.SQL"
+```
+
+---
 
 ### Task 2.1: Database maintenance package
 
 **Files:** Create: `internal/database/maintenance.go`, `internal/database/maintenance_test.go`.
+
+Before writing the test, **audit the schema** (`internal/database/schema.go`) to determine: (a) which user tables exist, (b) whether any "preserve on reset" table exists today (e.g., `audit_log`, `sync_log`). The test below assumes `sync_log` is preserved; substitute the actual operator-history table name if different. If no such table exists, scope `preserve` to the empty set and update the API/UI text in Task 4.1 / 7.6 accordingly.
 
 - [ ] **Step 1: Failing test**
 
@@ -1035,57 +1264,60 @@ git commit -m "feat(daemon): STOP IPC + op-log recovery on startup"
 package database
 
 import (
-	"context"
-	"path/filepath"
-	"testing"
+    "context"
+    "path/filepath"
+    "testing"
 )
 
-func TestResetDatabaseTruncatesTables(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "media.db")
-	db, err := Open(dbPath) // assume Open exists in this package
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO media (path) VALUES ('/x')`); err != nil {
-		t.Fatal(err)
-	}
+func TestResetDatabaseTruncatesUserTables(t *testing.T) {
+    dir := t.TempDir()
+    mdb, err := OpenPath(filepath.Join(dir, "media.db"))
+    if err != nil { t.Fatal(err) }
+    defer mdb.Close()
 
-	progress := make(chan ProgressEvent, 8)
-	go func() { for range progress {} }()
+    db := mdb.SQL()
+    // Insert into a known table (substitute the real table name from
+    // schema.go — e.g., "movies" or "media_files").
+    if _, err := db.Exec(`INSERT INTO media_files (path) VALUES ('/x')`); err != nil {
+        t.Fatal(err)
+    }
 
-	preserve := []string{"audit_log"}
-	if err := ResetDatabase(context.Background(), db, preserve, progress); err != nil {
-		t.Fatal(err)
-	}
-	close(progress)
+    progress := make(chan ProgressEvent, 16)
+    go func() { for range progress {} }()
 
-	var n int
-	if err := db.QueryRow("SELECT COUNT(*) FROM media").Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Errorf("media count = %d, want 0", n)
-	}
+    if err := ResetDatabase(context.Background(), db, nil, progress); err != nil {
+        t.Fatal(err)
+    }
+    close(progress)
+
+    var n int
+    if err := db.QueryRow("SELECT COUNT(*) FROM media_files").Scan(&n); err != nil {
+        t.Fatal(err)
+    }
+    if n != 0 {
+        t.Errorf("media_files count = %d, want 0", n)
+    }
 }
 
-func TestResetDatabasePreservesAuditLog(t *testing.T) {
-	dir := t.TempDir()
-	db, _ := Open(filepath.Join(dir, "media.db"))
-	db.Exec(`INSERT INTO audit_log (event) VALUES ('boot')`)
-
-	progress := make(chan ProgressEvent, 8)
-	go func() { for range progress {} }()
-	if err := ResetDatabase(context.Background(), db, []string{"audit_log"}, progress); err != nil {
-		t.Fatal(err)
-	}
-	close(progress)
-
-	var n int
-	db.QueryRow("SELECT COUNT(*) FROM audit_log").Scan(&n)
-	if n != 1 {
-		t.Errorf("audit_log preserved count = %d, want 1", n)
-	}
+func TestResetDatabasePreservesNamedTable(t *testing.T) {
+    dir := t.TempDir()
+    mdb, _ := OpenPath(filepath.Join(dir, "media.db"))
+    defer mdb.Close()
+    db := mdb.SQL()
+    // Substitute a table that exists in schema.go and is meaningful to
+    // preserve (e.g., "sync_log"). If none exist, drop this test.
+    if _, err := db.Exec(`INSERT INTO sync_log (event) VALUES ('boot')`); err != nil {
+        t.Skip("sync_log table not present in schema; preserve-list test skipped")
+    }
+    progress := make(chan ProgressEvent, 16)
+    go func() { for range progress {} }()
+    if err := ResetDatabase(context.Background(), db, []string{"sync_log"}, progress); err != nil {
+        t.Fatal(err)
+    }
+    close(progress)
+    var n int
+    db.QueryRow("SELECT COUNT(*) FROM sync_log").Scan(&n)
+    if n != 1 { t.Errorf("sync_log preserved count = %d, want 1", n) }
 }
 ```
 
@@ -1146,7 +1378,10 @@ func ResetDatabase(ctx context.Context, db *sql.DB, preserve []string, progress 
 	}
 
 	progress <- ProgressEvent{Phase: "vacuuming"}
-	if _, err := db.ExecContext(ctx, "VACUUM"); err != nil {
+	// VACUUM cannot run inside a transaction; database/sql + go-sqlite3
+	// does not auto-wrap Exec in one, so this is safe. Use Exec (not
+	// ExecContext) because VACUUM ignores cancel mid-statement anyway.
+	if _, err := db.Exec("VACUUM"); err != nil {
 		return fmt.Errorf("vacuum: %w", err)
 	}
 
@@ -1176,36 +1411,113 @@ func listUserTables(db *sql.DB) ([]string, error) {
 }
 ```
 
-Add a similar `Rescan` function:
-
-```go
-type RescanFn func(ctx context.Context, paths []string, dryRun bool, progress chan<- ProgressEvent) error
-```
-
-This delegates to the existing scanner. We won't reimplement it here — instead, expose a hook the daemon main wires:
-
-```go
-// In internal/scanner/scanner.go (NEW METHOD):
-func (s *Scanner) FullRescan(ctx context.Context, paths []string, dryRun bool, progress chan<- ProgressEvent) error {
-	// Walks each path, re-indexes every file, emits ProgressEvent.
-	// (Implementation detail — uses existing walker, extended to take
-	// a context + progress channel. ~80 LOC.)
-	return s.fullRescanImpl(ctx, paths, dryRun, progress)
-}
-```
-
-(Add a corresponding test in `internal/scanner/scanner_test.go`. The walker logic already exists; the test just verifies the progress channel receives events and ctx cancellation is honored at file boundaries.)
+Add a similar `Rescan` capability — but the actual walk lives on the existing scanner type, so it is implemented in Task 2.1a, not here.
 
 - [ ] **Step 4: Run tests**
 
-Run: `go test ./internal/database/... ./internal/scanner/...`
+Run: `go test ./internal/database/...`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/database/maintenance.go internal/database/maintenance_test.go internal/scanner/scanner.go internal/scanner/scanner_test.go
-git commit -m "feat(db,scanner): ResetDatabase and FullRescan with progress channels and ctx-cancel"
+git add internal/database/maintenance.go internal/database/maintenance_test.go
+git commit -m "feat(db): ResetDatabase with progress channel and ctx-cancel"
+```
+
+---
+
+### Task 2.1a: `FileScanner.FullRescan`
+
+**Files:** Modify: `internal/scanner/scanner.go` (or a new `internal/scanner/rescan.go`), `internal/scanner/periodic.go`. Test: `internal/scanner/rescan_test.go` (new).
+
+The existing scanner has a periodic walker (`internal/scanner/periodic.go`); `FullRescan` is a one-shot version of that path that emits `database.ProgressEvent` values and honors `ctx`. Rather than duplicate logic, expose a method that wraps the existing walk with a progress adapter.
+
+**Contract:**
+```go
+func (s *FileScanner) FullRescan(ctx context.Context, paths []string, dryRun bool, progress chan<- database.ProgressEvent) error
+```
+
+- Emits `{Phase: "walking", Msg: <root>}` once per root.
+- Emits `{Phase: "indexing", Msg: <file>, Current: i, Total: n}` per file processed.
+- Emits `{Phase: "complete"}` at end.
+- Returns `ctx.Err()` when cancellation is observed at a file boundary.
+- `dryRun` means: walk + classify but do not write to the database.
+
+- [ ] **Step 1: Failing test**
+
+```go
+// internal/scanner/rescan_test.go
+package scanner
+
+import (
+    "context"
+    "os"
+    "path/filepath"
+    "testing"
+
+    "github.com/Nomadcxx/jellywatch/internal/database"
+)
+
+func TestFullRescanEmitsProgressAndHonorsCancel(t *testing.T) {
+    dir := t.TempDir()
+    os.WriteFile(filepath.Join(dir, "a.mkv"), []byte("x"), 0644)
+    os.WriteFile(filepath.Join(dir, "b.mkv"), []byte("y"), 0644)
+
+    mdb, _ := database.OpenPath(filepath.Join(t.TempDir(), "m.db"))
+    defer mdb.Close()
+    s := NewFileScanner(mdb)
+
+    progress := make(chan database.ProgressEvent, 16)
+    done := make(chan error, 1)
+    ctx, cancel := context.WithCancel(context.Background())
+    go func() { done <- s.FullRescan(ctx, []string{dir}, true, progress) }()
+
+    var saw bool
+    for ev := range progress {
+        if ev.Phase == "indexing" { saw = true }
+        if ev.Phase == "complete" { break }
+    }
+    if err := <-done; err != nil { t.Fatal(err) }
+    if !saw { t.Error("no indexing events emitted") }
+    _ = cancel
+}
+```
+
+- [ ] **Step 2: Implement**
+
+Reuse the periodic walker. Sketch:
+
+```go
+func (s *FileScanner) FullRescan(ctx context.Context, roots []string, dryRun bool, progress chan<- database.ProgressEvent) error {
+    files, err := s.collectFiles(roots) // existing helper or new wrapper
+    if err != nil { return err }
+    for i, root := range roots {
+        progress <- database.ProgressEvent{Phase: "walking", Msg: root, Current: i + 1, Total: len(roots)}
+    }
+    for i, f := range files {
+        if err := ctx.Err(); err != nil { return err }
+        progress <- database.ProgressEvent{Phase: "indexing", Msg: f, Current: i + 1, Total: len(files)}
+        if dryRun { continue }
+        if err := s.indexOne(ctx, f); err != nil { return err }
+    }
+    progress <- database.ProgressEvent{Phase: "complete"}
+    return nil
+}
+```
+
+If `collectFiles` / `indexOne` don't exist with these names, factor them out from `periodic.go` first. Add a unit test for the factor-out before this task to keep behavior pinned.
+
+- [ ] **Step 3: Run tests**
+
+Run: `go test ./internal/scanner/...`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add internal/scanner/
+git commit -m "feat(scanner): FullRescan one-shot walk with progress channel and ctx-cancel"
 ```
 
 ---
@@ -1401,7 +1713,7 @@ func resetDBHandler(db *sql.DB, log *ipc.OpLog) ipc.StreamingHandler {
 
 Wire into main:
 ```go
-controlServer.RegisterStreaming(ipc.CmdResetDB, resetDBHandler(db, opLog))
+controlServer.RegisterStreaming(ipc.CmdResetDB, guard(resetDBHandler(db.SQL(), opLog)))
 ```
 
 Also register cancel + attach:
@@ -1437,6 +1749,7 @@ git commit -m "feat(daemon): RESET_DB IPC with typed-confirm gate, ATTACH/CANCEL
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
@@ -1446,10 +1759,15 @@ import (
 
 type stubDaemonIPC struct {
 	statusBody json.RawMessage
+	streamErr  error
 }
 
-func (s stubDaemonIPC) Call(cmd ipc.Command, args any) (json.RawMessage, error) {
+func (s stubDaemonIPC) Call(ctx context.Context, cmd ipc.Command, args any) (json.RawMessage, error) {
 	return s.statusBody, nil
+}
+
+func (s stubDaemonIPC) StreamWithID(ctx context.Context, cmd ipc.Command, args any, opID string) error {
+	return s.streamErr
 }
 
 func TestDaemonStatusReturnsRunning(t *testing.T) {
@@ -1493,9 +1811,8 @@ type DaemonHandlers struct {
 }
 
 func (h *DaemonHandlers) Status(w http.ResponseWriter, r *http.Request) {
-	body, err := h.IPC.Call(ipc.CmdStatus, nil)
+	body, err := h.IPC.Call(r.Context(), ipc.CmdStatus, nil)
 	if err != nil {
-		// Daemon unreachable.
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"state":"stopped"}`))
 		return
@@ -1505,7 +1822,7 @@ func (h *DaemonHandlers) Status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DaemonHandlers) Stop(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.IPC.Call(ipc.CmdStop, nil); err != nil {
+	if _, err := h.IPC.Call(r.Context(), ipc.CmdStop, nil); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -1513,7 +1830,7 @@ func (h *DaemonHandlers) Stop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DaemonHandlers) Reload(w http.ResponseWriter, r *http.Request) {
-	body, err := h.IPC.Call(ipc.CmdReload, nil)
+	body, err := h.IPC.Call(r.Context(), ipc.CmdReload, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -1531,7 +1848,7 @@ func (h *DaemonHandlers) Start(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DaemonHandlers) Restart(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.IPC.Call(ipc.CmdStop, nil)
+	_, _ = h.IPC.Call(r.Context(), ipc.CmdStop, nil)
 	if err := h.Launcher.Start(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1546,7 +1863,7 @@ type recoverArgs struct {
 func (h *DaemonHandlers) Recover(w http.ResponseWriter, r *http.Request) {
 	var a recoverArgs
 	json.NewDecoder(r.Body).Decode(&a)
-	body, err := h.IPC.Call(ipc.Command("RECOVER"), a)
+	body, err := h.IPC.Call(r.Context(), ipc.CmdRecover, a)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -1796,14 +2113,18 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
+The op ID is allocated by the API handler so the SSE relay can subscribe before the IPC connection finishes its first frame. The handler dispatches an asynchronous IPC stream that reuses the supplied ID via a new `Client.StreamWithID` (the daemon's `OpRegistry` and op-log key on `req.ID`, so the wire ID and the op_id must match).
+
 ```go
 // internal/api/database_handlers.go
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
+	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	"github.com/google/uuid"
 )
 
@@ -1820,9 +2141,9 @@ func (h *DatabaseHandlers) Rescan(w http.ResponseWriter, r *http.Request) {
 	var body rescanReq
 	json.NewDecoder(r.Body).Decode(&body)
 	opID := "op-" + uuid.NewString()
-	// Kick off the IPC stream in a goroutine; the SSE relay will
-	// re-attach to op_id when the browser subscribes.
-	go h.IPC.Stream(ipc.CmdRescan, body, opID) // pseudo — see relay note
+	// Detached background stream; result/error frames are surfaced via
+	// the SSE relay (Task 5.1) when the browser ATTACHes to op_id.
+	go h.IPC.StreamWithID(context.Background(), ipc.CmdRescan, body, opID)
 	respondAccepted(w, opID)
 }
 
@@ -1839,7 +2160,7 @@ func (h *DatabaseHandlers) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opID := "op-" + uuid.NewString()
-	go h.IPC.Stream(ipc.CmdResetDB, body, opID)
+	go h.IPC.StreamWithID(context.Background(), ipc.CmdResetDB, body, opID)
 	respondAccepted(w, opID)
 }
 
@@ -1850,34 +2171,42 @@ func respondAccepted(w http.ResponseWriter, opID string) {
 }
 ```
 
-> **Implementation note:** the existing `IPCCaller` only has `Call`. Extend the interface with `Stream(cmd, args, opID) error` that fires-and-forgets a streaming op. The actual frame relay happens in the SSE handler (Task 5.1) which `ATTACH`es to the op via the daemon registry. The kickoff goroutine just initiates the op so `op_id` becomes valid.
-
-Update `IPCCaller`:
+Extend `IPCCaller` (in `internal/api/config_save_pipeline.go`) — additive, existing call sites unaffected:
 
 ```go
 type IPCCaller interface {
-	Call(cmd ipc.Command, args any) (json.RawMessage, error)
-	Stream(cmd ipc.Command, args any, opID string) error
+    Call(ctx context.Context, cmd ipc.Command, args any) (json.RawMessage, error)
+    StreamWithID(ctx context.Context, cmd ipc.Command, args any, opID string) error
 }
 ```
 
-Add to `ipc.Client`:
+Add a real implementation on `ipc.Client` that dials, writes a Request whose `ID == opID`, and drains frames into the daemon's registry/ring (the relay later ATTACHes to that ID). The function returns nil on clean termination so the goroutine exits silently:
 
 ```go
+// internal/daemon/ipc/client.go
 func (c *Client) StreamWithID(ctx context.Context, cmd Command, args any, opID string) error {
-	// Same as Stream, but uses the supplied opID instead of generating one.
-	// Fire and forget — the caller is expected to ATTACH later via SSE.
-	go func() {
-		_, _ = c.Stream(ctx, cmd, args)
-	}()
-	return nil
+    conn, err := net.DialTimeout("unix", c.path, 2*time.Second)
+    if err != nil { return err }
+    defer conn.Close()
+    go func() { <-ctx.Done(); conn.Close() }()
+    req := Request{V: ProtocolVersion, ID: opID, Cmd: cmd}
+    if args != nil {
+        b, _ := json.Marshal(args); req.Args = b
+    }
+    if err := json.NewEncoder(conn).Encode(req); err != nil { return err }
+    dec := json.NewDecoder(bufio.NewReader(conn))
+    for {
+        var f Frame
+        if err := dec.Decode(&f); err != nil {
+            if ctx.Err() != nil { return nil }
+            return err
+        }
+        if f.Type == FrameDone || f.Type == FrameError { return nil }
+    }
 }
 ```
 
-- [ ] **Step 4: Mount routes**
-
-```go
-dbH := &DatabaseHandlers{IPC: s.ipc}
+> **Race note:** the dispatch goroutine takes ~1ms to register the op in the daemon's registry. The SSE relay (Task 5.1) must retry `ATTACH` for up to ~1s before returning 404 to the browser, otherwise a fast subscription races the kickoff. See Task 5.1 for the retry loop.
 r.Route("/database", func(r chi.Router) {
 	r.Post("/rescan", dbH.Rescan)
 	r.Post("/reset", dbH.Reset)
@@ -1942,7 +2271,16 @@ func TestSSERelayForwardsFrames(t *testing.T) {
 }
 ```
 
-(Add a `fakeStream` test helper exposing `Stream(opID) (<-chan ipc.Frame, error)`.)
+(Add a `fakeStream` test helper exposing `Attach(ctx, opID) (<-chan ipc.Frame, error)`, plus a `withChiRouteParam(req, key, val)` helper that wraps `chi.RouteContext` so `chi.URLParam` works in unit tests:
+
+```go
+func withChiRouteParam(r *http.Request, key, val string) *http.Request {
+    rctx := chi.NewRouteContext()
+    rctx.URLParams.Add(key, val)
+    return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+}
+```
+)
 
 - [ ] **Step 2: Run, verify fail**
 
@@ -1956,6 +2294,7 @@ Expected: FAIL.
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1965,7 +2304,7 @@ import (
 )
 
 type IPCAttacher interface {
-	Attach(opID string) (<-chan ipc.Frame, error)
+	Attach(ctx context.Context, opID string) (<-chan ipc.Frame, error)
 }
 
 type SSERelay struct {
@@ -1974,7 +2313,7 @@ type SSERelay struct {
 
 func (s *SSERelay) Stream(w http.ResponseWriter, r *http.Request) {
 	opID := chi.URLParam(r, "op_id")
-	frames, err := s.IPC.Attach(opID)
+	frames, err := s.IPC.Attach(r.Context(), opID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -2006,14 +2345,47 @@ func (s *SSERelay) Stream(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Add `Attach` to `ipc.Client` (delegates to ATTACH IPC command):
+Add `Attach` to `ipc.Client` (delegates to ATTACH IPC command, with a short retry to absorb the kickoff race):
 
 ```go
 // In internal/daemon/ipc/client.go
-func (c *Client) Attach(opID string) (<-chan Frame, error) {
-	frames, _ := c.Stream(context.Background(), CmdAttach, map[string]string{"op_id": opID})
-	return frames, nil
+func (c *Client) Attach(ctx context.Context, opID string) (<-chan Frame, error) {
+    deadline := time.Now().Add(1 * time.Second)
+    for {
+        frames, errc := c.Stream(ctx, CmdAttach, map[string]string{"op_id": opID})
+        // Peek the first frame; if it's an ErrNotFound, retry.
+        select {
+        case f, ok := <-frames:
+            if !ok {
+                if err := <-errc; err != nil { return nil, err }
+                return nil, errors.New("stream closed without frames")
+            }
+            if f.Type == FrameError && f.Code == ErrNotFound && time.Now().Before(deadline) {
+                time.Sleep(50 * time.Millisecond); continue
+            }
+            // Re-emit the peeked frame onto a new channel so the caller sees it.
+            out := make(chan Frame, 32)
+            out <- f
+            go func() {
+                defer close(out)
+                for ff := range frames { out <- ff }
+            }()
+            return out, nil
+        case <-ctx.Done():
+            return nil, ctx.Err()
+        }
+    }
 }
+```
+
+The `IPCAttacher` interface and `SSERelay` call site need to pass `r.Context()`:
+
+```go
+type IPCAttacher interface {
+    Attach(ctx context.Context, opID string) (<-chan ipc.Frame, error)
+}
+// ...
+frames, err := s.IPC.Attach(r.Context(), opID)
 ```
 
 - [ ] **Step 4: Mount route + test**
@@ -2822,6 +3194,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -2829,33 +3202,46 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/go-chi/chi/v5"
 )
+
+// ipcCallerAdapter satisfies both IPCCaller and IPCAttacher around the
+// real ipc.Client.
+type ipcCallerAdapter struct{ c *ipc.Client }
+
+func (a ipcCallerAdapter) Call(ctx context.Context, cmd ipc.Command, args any) (json.RawMessage, error) {
+	return a.c.Call(ctx, cmd, args)
+}
+func (a ipcCallerAdapter) StreamWithID(ctx context.Context, cmd ipc.Command, args any, opID string) error {
+	return a.c.StreamWithID(ctx, cmd, args, opID)
+}
+func (a ipcCallerAdapter) Attach(ctx context.Context, opID string) (<-chan ipc.Frame, error) {
+	return a.c.Attach(ctx, opID)
+}
 
 func TestRescanEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "ctl.sock")
 
-	// daemon side
 	srv := ipc.NewServer(sock)
-	srv.SetRegistry(ipc.NewOpRegistry())
 	srv.RegisterStreaming(ipc.CmdRescan, func(ctx context.Context, _ json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
 		w.Progress(op.ID, "walking", "/x", 1, 2)
 		w.Progress(op.ID, "indexing", "/x", 2, 2)
 		w.Done(op.ID, json.RawMessage(`{"ok":true}`))
 	})
+	srv.Register(ipc.CmdAttach, attachHandler(srv))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv.Start(ctx); defer srv.Stop()
 
-	// jellyweb side
 	cli := ipc.NewClient(sock)
-	dbH := &DatabaseHandlers{IPC: ipcCallerAdapter{c: cli}}
-	sse := &SSERelay{IPC: cli}
+	adapter := ipcCallerAdapter{c: cli}
+	dbH := &DatabaseHandlers{IPC: adapter}
+	sse := &SSERelay{IPC: adapter}
 	mux := chi.NewRouter()
 	mux.Post("/database/rescan", dbH.Rescan)
 	mux.Get("/events/op/{op_id}", sse.Stream)
 
-	// 1. POST /database/rescan
 	req := httptest.NewRequest("POST", "/database/rescan", strings.NewReader(`{"dry_run":false}`))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -2865,19 +3251,20 @@ func TestRescanEndToEnd(t *testing.T) {
 	var body map[string]string
 	json.Unmarshal(w.Body.Bytes(), &body)
 	opID := body["op_id"]
+	if opID == "" { t.Fatal("missing op_id") }
 
-	// 2. GET /events/op/{id}
 	req2 := httptest.NewRequest("GET", "/events/op/"+opID, nil)
 	w2 := httptest.NewRecorder()
 	ctx2, cancel2 := context.WithTimeout(req2.Context(), 2*time.Second)
 	defer cancel2()
 	mux.ServeHTTP(w2, req2.WithContext(ctx2))
 
-	if !strings.Contains(w2.Body.String(), `"phase":"walking"`) {
-		t.Errorf("missing walking frame in SSE: %s", w2.Body.String())
+	out := w2.Body.String()
+	if !strings.Contains(out, `"phase":"walking"`) {
+		t.Errorf("missing walking frame in SSE: %s", out)
 	}
-	if !strings.Contains(w2.Body.String(), `"type":"done"`) {
-		t.Errorf("missing done frame in SSE: %s", w2.Body.String())
+	if !strings.Contains(out, `"type":"done"`) {
+		t.Errorf("missing done frame in SSE: %s", out)
 	}
 }
 ```
@@ -2933,11 +3320,11 @@ git commit -m "feat(web): daemon-state pill in settings nav"
 ## Self-Review
 
 - [ ] **Spec coverage:**
-  - §4.4 commands STOP/RESCAN/RESET_DB/ATTACH/CANCEL → Tasks 1.6, 2.2, 2.3, 1.4 (ATTACH+CANCEL inside the same task), 1.4
+  - §4.4 commands STOP/RESCAN/RESET_DB/ATTACH/CANCEL/RECOVER → Tasks 1.6, 2.2, 2.3, 1.4 (ATTACH+CANCEL), 1.7
   - §4.5 heartbeats → Task 1.4
   - §4.6 reattach → Task 1.4 (server-side) + Task 7.4 (client-side)
-  - §4.7 cancellation → Task 1.4
-  - §4.9 op log + crash recovery → Task 1.3 + Task 1.6 (recovery wiring)
+  - §4.7 cancellation → Task 1.4 (CANCEL); CANCEL → Finish wiring documented in Task 1.4 streaming wrapper
+  - §4.9 op log + crash recovery → Task 1.3 (log) + Task 1.6 (startup scan) + Task 1.7 (RECOVER + mutator gate)
   - §5.5 daemon endpoints → Task 3.1
   - §5.6 database endpoints → Task 4.1
   - §5.7 SSE relay → Task 5.1
@@ -2945,6 +3332,8 @@ git commit -m "feat(web): daemon-state pill in settings nav"
   - §6.5 database UI → Task 7.6
   - §6.6 SSE reattach → Task 7.4
   - §8 CLI parity → Task 6.1
+- [ ] **Pre-flight anchors verified:** `IPCCaller` ctx-bearing, `MediaDB.SQL()` exposed, `FileScanner.FullRescan` defined, `daemonStatus` extended (not duplicated), `Server.Path()` accessor, `NewServer` allocates default registry.
+- [ ] **op_id flow:** allocated by API → passed via `StreamWithID` → daemon registers under same ID → SSE `Attach` retries up to 1s to absorb the kickoff race.
 - [ ] **Placeholder scan:** No TBD/TODO/etc. left.
 - [ ] **Type consistency:** `Op`, `OpRegistry`, `OpLog`, `FrameRing`, `OpEvent`, `useDaemon`, `useOpStream` — referenced consistently.
 - [ ] All commit messages are conventional and contain no AI attribution.
