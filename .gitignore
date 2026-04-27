@@ -94,6 +94,23 @@ web/node_modules/
 web/.next/
 web/out/
 web/dist/
+web/next-env.d.ts
+web/tsconfig.tsbuildinfo
+
+# Build output (binaries produced by `make` or `go build -o build/`)
+build/
+
+# Codex / agent scratch
+.codex
+.codex/
+
+# Root-level scratch scripts and reports (debugging / one-off tooling)
+/*.py
+/jellywatch_scan*.txt
+/scan_results.txt
+/metadata_refresh_results.csv
+/BUGFIX-PROMPT.md
+/HANDOVER-CLEANUP.md
 
 # Backups
 *.bak
