@@ -33,7 +33,7 @@ func TestStatusHandlerReportsDaemonStatus(t *testing.T) {
 	w := &captureFrameWriter{}
 	h := statusHandler(started, func() *config.Config {
 		return &config.Config{}
-	}, nil)
+	}, nil, "test")
 
 	h(context.Background(), ipc.Request{ID: "status", Cmd: ipc.CmdStatus}, w)
 

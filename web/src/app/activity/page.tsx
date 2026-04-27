@@ -2,10 +2,9 @@
 
 import Image from 'next/image';
 import { AppShell } from '@/components/layout/AppShell';
-import { useActivity } from '@/hooks/useActivity';
-import { Activity, Loader2, AlertTriangle, FileText, CheckCircle2, Info, FolderSync, ArrowRight, Download } from 'lucide-react';
+import { useActivityStream } from '@/hooks/useSSE';
+import { Activity, AlertTriangle, FileText, CheckCircle2, Info, FolderSync, Download } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 
 // Simple relative time formatter
 function timeAgo(date: Date | string | undefined): string {
@@ -49,42 +48,15 @@ function getEventColor(type: string) {
 }
 
 export default function ActivityPage() {
-  const { data, isLoading, error } = useActivity();
+  const { events, isConnected } = useActivityStream();
 
-  if (isLoading) {
-    return (
-      <AppShell>
-        <div className="space-y-8 max-w-4xl mx-auto">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 bg-zinc-900 rounded-lg animate-pulse" />
-            <div className="h-8 w-48 bg-zinc-900 rounded animate-pulse" />
-          </div>
-          <div className="space-y-4 relative pl-8">
-            <div className="absolute left-[15px] top-0 bottom-0 w-px bg-zinc-800" />
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-24 bg-zinc-900/50 rounded-xl animate-pulse ml-4" />
-            ))}
-          </div>
-        </div>
-      </AppShell>
-    );
-  }
-
-  if (error) {
-    return (
-      <AppShell>
-        <div className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-xl max-w-4xl mx-auto flex gap-4">
-          <AlertTriangle className="h-6 w-6 text-rose-500 flex-shrink-0" />
-          <div>
-            <h3 className="text-lg font-medium text-rose-400">Failed to load activity feed</h3>
-            <p className="text-zinc-400 mt-1">There was an error communicating with the activity stream. Ensure the daemon is running.</p>
-          </div>
-        </div>
-      </AppShell>
-    );
-  }
-
-  const events = data?.events || [];
+  const badgeColor = isConnected
+    ? 'bg-emerald-500'
+    : 'bg-amber-500';
+  const pingColor = isConnected
+    ? 'bg-emerald-400'
+    : 'bg-amber-400';
+  const statusLabel = isConnected ? 'Live Connection' : 'Reconnecting…';
 
   return (
     <AppShell>
@@ -105,10 +77,10 @@ export default function ActivityPage() {
           
           <div className="flex items-center gap-3 bg-zinc-900/50 px-4 py-2 rounded-full border border-zinc-800">
             <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${pingColor} opacity-75`}></span>
+              <span className={`relative inline-flex rounded-full h-3 w-3 ${badgeColor}`}></span>
             </span>
-            <span className="text-sm font-medium text-zinc-300">Live Connection</span>
+            <span className="text-sm font-medium text-zinc-300">{statusLabel}</span>
           </div>
         </div>
 

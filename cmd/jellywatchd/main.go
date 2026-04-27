@@ -34,6 +34,7 @@ var (
 	cfgFile     string
 	backendName string
 	healthAddr  string
+	version     = "dev" // Set by build flags: -ldflags="-X main.version=1.0.0"
 )
 
 func main() {
@@ -389,7 +390,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		pendingMu.Unlock()
 	}
 
-	controlServer.Register(daemonipc.CmdStatus, statusHandler(time.Now(), getCurrentConfig, getPending))
+	controlServer.Register(daemonipc.CmdStatus, statusHandler(time.Now(), getCurrentConfig, getPending, version))
 	controlServer.Register(daemonipc.CmdReload, reloadHandler(getCurrentConfig, setCurrentConfig, config.Load, reloadSupervisor))
 	controlServer.Register(daemonipc.CmdStop, stopHandler(func() { cancel() }))
 	controlServer.Register(daemonipc.CmdRecover, recoverHandler(opLog, getPending, clearPending))

@@ -18,10 +18,11 @@ type daemonStatus struct {
 	UptimeSeconds  int64            `json:"uptime_seconds"`
 	ConfigLoaded   bool             `json:"config_loaded"`
 	State          string           `json:"state"`
+	Version        string           `json:"version,omitempty"`
 	InterruptedOps []ipc.OpLogEntry `json:"interrupted_ops,omitempty"`
 }
 
-func statusHandler(startedAt time.Time, getConfig func() *config.Config, getPending func() []ipc.OpLogEntry) ipc.Handler {
+func statusHandler(startedAt time.Time, getConfig func() *config.Config, getPending func() []ipc.OpLogEntry, ver string) ipc.Handler {
 	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
 		var pending []ipc.OpLogEntry
 		if getPending != nil {
@@ -32,6 +33,7 @@ func statusHandler(startedAt time.Time, getConfig func() *config.Config, getPend
 			UptimeSeconds:  int64(time.Since(startedAt).Seconds()),
 			ConfigLoaded:   getConfig() != nil,
 			State:          "running",
+			Version:        ver,
 			InterruptedOps: pending,
 		}
 		if len(pending) > 0 {

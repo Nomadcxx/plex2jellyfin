@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 export type DaemonStatus = {
   state: 'running' | 'stopped' | 'interrupted';
   version?: string;
-  uptime_s?: number;
+  uptime_seconds?: number;
   current_op?: { id: string; cmd: string };
   config_hash?: string;
   interrupted_op?: any;

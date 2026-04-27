@@ -7,17 +7,18 @@ import { useQueue, useStuckItems } from '@/hooks/useQueue';
 import { Download, AlertTriangle } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function QueuePage() {
   const { data: managersData } = useMediaManagers();
   const managers = managersData || [];
 
-  // For MVP, show queue from first online manager
-  const activeManager = managers.find(m => m.online);
+  // Jellyfin has no download queue — only pick Sonarr/Radarr-style managers.
+  const activeManager = managers.find(m => m.online && m.type !== 'jellyfin');
   const managerId = activeManager?.id;
 
-  const { data: queueData, isLoading: queueLoading } = useQueue(managerId || '');
-  const { data: stuckData, isLoading: stuckLoading } = useStuckItems(managerId || '');
+  const { data: queueData, isLoading: queueLoading, isError: queueError, error: queueErr } = useQueue(managerId || '');
+  const { data: stuckData, isLoading: stuckLoading, isError: stuckError, error: stuckErr } = useStuckItems(managerId || '');
 
   const queueItems = queueData?.items || [];
   const stuckItems = stuckData?.items || [];
@@ -71,6 +72,13 @@ export default function QueuePage() {
             <TabsContent value="active" className="space-y-4">
               {queueLoading ? (
                 <div className="h-32 bg-zinc-900 rounded-lg animate-pulse" />
+              ) : queueError ? (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    Failed to load queue: {(queueErr as Error)?.message ?? 'Unknown error'}
+                  </AlertDescription>
+                </Alert>
               ) : queueItems.length === 0 ? (
                 <div className="p-8 text-center text-zinc-400">
                   No active downloads
@@ -85,6 +93,13 @@ export default function QueuePage() {
             <TabsContent value="stuck" className="space-y-4">
               {stuckLoading ? (
                 <div className="h-32 bg-zinc-900 rounded-lg animate-pulse" />
+              ) : stuckError ? (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    Failed to load stuck items: {(stuckErr as Error)?.message ?? 'Unknown error'}
+                  </AlertDescription>
+                </Alert>
               ) : stuckItems.length === 0 ? (
                 <div className="p-8 text-center text-zinc-400">
                   No stuck items
