@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
@@ -37,6 +38,7 @@ type Result struct {
 
 // Matcher handles AI-based title matching
 type Matcher struct {
+	mu           sync.RWMutex
 	config       config.AIConfig
 	client       *http.Client
 	systemPrompt string
@@ -44,17 +46,8 @@ type Matcher struct {
 
 // NewMatcher creates a new AI matcher
 func NewMatcher(cfg config.AIConfig) (*Matcher, error) {
-	if cfg.Enabled && cfg.Model == "" {
-		return nil, fmt.Errorf("AI enabled but no model specified")
-	}
-	if cfg.Enabled && cfg.OllamaEndpoint == "" {
-		return nil, fmt.Errorf("AI enabled but no Ollama endpoint specified")
-	}
-	if cfg.ConfidenceThreshold < 0 || cfg.ConfidenceThreshold > 1 {
-		return nil, fmt.Errorf("confidence threshold must be between 0 and 1")
-	}
-	if cfg.TimeoutSeconds < 1 {
-		return nil, fmt.Errorf("timeout must be at least 1 second")
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
 	}
 
 	return &Matcher{
@@ -66,14 +59,46 @@ func NewMatcher(cfg config.AIConfig) (*Matcher, error) {
 	}, nil
 }
 
+func validateConfig(cfg config.AIConfig) error {
+	if cfg.Enabled && cfg.Model == "" {
+		return fmt.Errorf("AI enabled but no model specified")
+	}
+	if cfg.Enabled && cfg.OllamaEndpoint == "" {
+		return fmt.Errorf("AI enabled but no Ollama endpoint specified")
+	}
+	if cfg.ConfidenceThreshold < 0 || cfg.ConfidenceThreshold > 1 {
+		return fmt.Errorf("confidence threshold must be between 0 and 1")
+	}
+	if cfg.TimeoutSeconds < 1 {
+		return fmt.Errorf("timeout must be at least 1 second")
+	}
+	return nil
+}
+
+func (m *Matcher) Reconfigure(cfg config.AIConfig) error {
+	if err := validateConfig(cfg); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config = cfg
+	m.client = &http.Client{
+		Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second,
+	}
+	return nil
+}
+
 // Parse sends a filename to Ollama and returns parsed metadata
 func (m *Matcher) Parse(ctx context.Context, filename string) (*Result, error) {
-	return m.parseWithModel(ctx, filename, m.config.Model)
+	cfg := m.GetConfig()
+	return m.parseWithModel(ctx, filename, cfg.Model)
 }
 
 // ParseWithContext sends a filename with additional library context to Ollama
 func (m *Matcher) ParseWithContext(ctx context.Context, filename string, libraryType string, folderPath string, currentTitle string, currentConfidence float64) (*Result, error) {
+	m.mu.RLock()
 	contextPrompt := m.systemPrompt
+	m.mu.RUnlock()
 
 	if libraryType != "" {
 		contextPrompt += fmt.Sprintf("\n\n## File Context\n- File is in a %s\n", libraryType)
@@ -95,13 +120,15 @@ func (m *Matcher) ParseWithContext(ctx context.Context, filename string, library
 		contextPrompt += fmt.Sprintf("- Current title: %s (confidence: %.2f)\n", currentTitle, currentConfidence)
 	}
 
-	return m.parseWithModel(ctx, contextPrompt+"\n\nNow parse this filename: "+filename, m.config.Model)
+	cfg := m.GetConfig()
+	return m.parseWithModel(ctx, contextPrompt+"\n\nNow parse this filename: "+filename, cfg.Model)
 }
 
 // ParseWithRetry sends a filename to Ollama with one retry attempt on malformed JSON responses.
 // Uses nudge prompt to guide the AI to correct JSON formatting on retry.
 func (m *Matcher) ParseWithRetry(ctx context.Context, filename string) (*Result, error) {
-	result, err := m.parseWithModel(ctx, filename, m.config.Model)
+	cfg := m.GetConfig()
+	result, err := m.parseWithModel(ctx, filename, cfg.Model)
 	if err == nil {
 		return result, nil
 	}
@@ -119,7 +146,7 @@ func (m *Matcher) ParseWithRetry(ctx context.Context, filename string) (*Result,
 	}
 
 	nudgePrompt := GetNudgePrompt()
-	retryResult, retryErr := m.parseWithModel(ctx, filename+" "+nudgePrompt, m.config.Model)
+	retryResult, retryErr := m.parseWithModel(ctx, filename+" "+nudgePrompt, cfg.Model)
 	if retryErr == nil {
 		if os.Getenv("DEBUG_AI") == "1" {
 			fmt.Printf("[AI] Retry with nudge prompt succeeded\n")
@@ -154,16 +181,23 @@ func isJSONError(err error) bool {
 
 // ParseWithCloud sends a filename to Ollama cloud model and returns parsed metadata
 func (m *Matcher) ParseWithCloud(ctx context.Context, filename string) (*Result, error) {
-	if m.config.CloudModel == "" {
+	cfg := m.GetConfig()
+	if cfg.CloudModel == "" {
 		return nil, fmt.Errorf("no cloud model configured")
 	}
-	return m.parseWithModel(ctx, filename, m.config.CloudModel)
+	return m.parseWithModel(ctx, filename, cfg.CloudModel)
 }
 
 // parseWithModel sends a filename to a specific model
 func (m *Matcher) parseWithModel(ctx context.Context, filename, model string) (*Result, error) {
+	m.mu.RLock()
+	cfg := m.config
+	client := m.client
+	systemPrompt := m.systemPrompt
+	m.mu.RUnlock()
+
 	// Construct full prompt
-	fullPrompt := m.systemPrompt + "\n" + filename
+	fullPrompt := systemPrompt + "\n" + filename
 
 	reqBody := GenerateRequest{
 		Model:  model,
@@ -177,10 +211,10 @@ func (m *Matcher) parseWithModel(ctx context.Context, filename, model string) (*
 	}
 
 	// Create HTTP request with context
-	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(m.config.TimeoutSeconds)*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, "POST", m.config.OllamaEndpoint+"/api/generate", bytes.NewReader(reqJSON))
+	req, err := http.NewRequestWithContext(reqCtx, "POST", cfg.OllamaEndpoint+"/api/generate", bytes.NewReader(reqJSON))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -188,7 +222,7 @@ func (m *Matcher) parseWithModel(ctx context.Context, filename, model string) (*
 
 	// Send request
 	startTime := time.Now()
-	resp, err := m.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request to Ollama: %w", err)
 	}
@@ -196,7 +230,7 @@ func (m *Matcher) parseWithModel(ctx context.Context, filename, model string) (*
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("ollama returned %d: %s", resp.StatusCode, string(body))
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	// Parse response
@@ -254,15 +288,20 @@ func (m *Matcher) parseWithModel(ctx context.Context, filename, model string) (*
 
 // IsAvailable checks if Ollama is running
 func (m *Matcher) IsAvailable(ctx context.Context) bool {
+	m.mu.RLock()
+	endpoint := m.config.OllamaEndpoint
+	client := m.client
+	m.mu.RUnlock()
+
 	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", m.config.OllamaEndpoint+"/api/tags", nil)
+	req, err := http.NewRequestWithContext(reqCtx, "GET", endpoint+"/api/tags", nil)
 	if err != nil {
 		return false
 	}
 
-	resp, err := m.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}
@@ -273,6 +312,8 @@ func (m *Matcher) IsAvailable(ctx context.Context) bool {
 
 // GetConfig returns the matcher's configuration
 func (m *Matcher) GetConfig() config.AIConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config
 }
 

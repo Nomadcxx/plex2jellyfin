@@ -74,6 +74,38 @@ func TestMatcher_ParseMovie(t *testing.T) {
 	}
 }
 
+func TestMatcherReconfigureUpdatesRuntimeConfig(t *testing.T) {
+	matcher, err := NewMatcher(config.AIConfig{
+		Enabled:             true,
+		Model:               "old-model",
+		OllamaEndpoint:      "http://old.example",
+		ConfidenceThreshold: 0.8,
+		TimeoutSeconds:      30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	next := config.AIConfig{
+		Enabled:             true,
+		Model:               "new-model",
+		OllamaEndpoint:      "http://new.example",
+		ConfidenceThreshold: 0.7,
+		TimeoutSeconds:      10,
+	}
+	if err := matcher.Reconfigure(next); err != nil {
+		t.Fatal(err)
+	}
+
+	got := matcher.GetConfig()
+	if got.Model != next.Model {
+		t.Fatalf("model = %q, want %q", got.Model, next.Model)
+	}
+	if got.OllamaEndpoint != next.OllamaEndpoint {
+		t.Fatalf("endpoint = %q, want %q", got.OllamaEndpoint, next.OllamaEndpoint)
+	}
+}
+
 func TestMatcher_ParseTVEpisode(t *testing.T) {
 	// Create mock Ollama server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

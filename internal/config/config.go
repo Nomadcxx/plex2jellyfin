@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 	"os/user"
-	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -35,8 +35,16 @@ type Config struct {
 	Logging       LoggingConfig     `mapstructure:"logging"`
 	Permissions   PermissionsConfig `mapstructure:"permissions"`
 	AI            AIConfig          `mapstructure:"ai"`
-	Password      string            `mapstructure:"password"`
+	API           APIConfig         `mapstructure:"api"`
+	Password      string            `mapstructure:"password" secret:"true"`
 	SecureCookies bool              `mapstructure:"secure_cookies"`
+}
+
+// APIConfig holds HTTP-server-only concerns (CORS, etc.). CORS origins
+// default to the Next.js dev server; same-origin production deployments
+// don't need CORS, but external dev or reverse-proxied setups might.
+type APIConfig struct {
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
 }
 
 // Helper methods for permissions resolution and parsing
@@ -120,6 +128,14 @@ type LoggingConfig struct {
 	File       string `mapstructure:"file"`
 	MaxSizeMB  int    `mapstructure:"max_size_mb"`
 	MaxBackups int    `mapstructure:"max_backups"`
+	// MaxAgeDays is the maximum age of a rotated log file. Files older than
+	// this (by mtime) are deleted at rotation time. Zero disables age-based
+	// pruning — only MaxBackups gates retention.
+	MaxAgeDays int `mapstructure:"max_age_days"`
+	// Compress gzips rotated backups (jellywatch.1.log → jellywatch.1.log.gz).
+	// Cuts disk footprint ~5-10×; decompressed on demand with zcat/gunzip.
+	// Default false for backwards compatibility with existing deployments.
+	Compress bool `mapstructure:"compress"`
 }
 
 type CircuitBreakerConfig struct {
@@ -136,23 +152,23 @@ type KeepaliveConfig struct {
 
 // AIConfig contains AI title matching configuration
 type AIConfig struct {
-	Enabled              bool                 `mapstructure:"enabled"`
-	OllamaEndpoint       string               `mapstructure:"ollama_endpoint"`
-	Model                string               `mapstructure:"model"`
-	FallbackModel        string               `mapstructure:"fallback_model"`
-	ConfidenceThreshold  float64              `mapstructure:"confidence_threshold"`
-	AutoTriggerThreshold float64              `mapstructure:"auto_trigger_threshold"`
-	TimeoutSeconds       int                  `mapstructure:"timeout_seconds"`
-	CacheEnabled         bool                 `mapstructure:"cache_enabled"`
-	CloudModel           string               `mapstructure:"cloud_model"`
-	AutoResolveRisky     bool                 `mapstructure:"auto_resolve_risky"`
-	CircuitBreaker       CircuitBreakerConfig `mapstructure:"circuit_breaker"`
-	Keepalive            KeepaliveConfig      `mapstructure:"keepalive"`
-	RetryDelay           time.Duration        `mapstructure:"retry_delay"`
-	MaxRetries           int                  `mapstructure:"max_retries"`
-	HourlyLimit                int           `mapstructure:"hourly_limit"`
-	DailyLimit                 int           `mapstructure:"daily_limit"`
-	EnhancementIntervalSeconds int           `mapstructure:"enhancement_interval_seconds"`
+	Enabled                    bool                 `mapstructure:"enabled"`
+	OllamaEndpoint             string               `mapstructure:"ollama_endpoint"`
+	Model                      string               `mapstructure:"model"`
+	FallbackModel              string               `mapstructure:"fallback_model"`
+	ConfidenceThreshold        float64              `mapstructure:"confidence_threshold"`
+	AutoTriggerThreshold       float64              `mapstructure:"auto_trigger_threshold"`
+	TimeoutSeconds             int                  `mapstructure:"timeout_seconds"`
+	CacheEnabled               bool                 `mapstructure:"cache_enabled"`
+	CloudModel                 string               `mapstructure:"cloud_model"`
+	AutoResolveRisky           bool                 `mapstructure:"auto_resolve_risky"`
+	CircuitBreaker             CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	Keepalive                  KeepaliveConfig      `mapstructure:"keepalive"`
+	RetryDelay                 time.Duration        `mapstructure:"retry_delay"`
+	MaxRetries                 int                  `mapstructure:"max_retries"`
+	HourlyLimit                int                  `mapstructure:"hourly_limit"`
+	DailyLimit                 int                  `mapstructure:"daily_limit"`
+	EnhancementIntervalSeconds int                  `mapstructure:"enhancement_interval_seconds"`
 }
 
 // WatchConfig contains directories to watch
@@ -184,14 +200,14 @@ type OptionsConfig struct {
 type SonarrConfig struct {
 	Enabled        bool   `mapstructure:"enabled"`
 	URL            string `mapstructure:"url"`
-	APIKey         string `mapstructure:"api_key"`
+	APIKey         string `mapstructure:"api_key" secret:"true"`
 	NotifyOnImport bool   `mapstructure:"notify_on_import"`
 }
 
 type RadarrConfig struct {
 	Enabled        bool   `mapstructure:"enabled"`
 	URL            string `mapstructure:"url"`
-	APIKey         string `mapstructure:"api_key"`
+	APIKey         string `mapstructure:"api_key" secret:"true"`
 	NotifyOnImport bool   `mapstructure:"notify_on_import"`
 }
 
@@ -199,14 +215,14 @@ type RadarrConfig struct {
 type JellyfinConfig struct {
 	Enabled            bool   `mapstructure:"enabled"`
 	URL                string `mapstructure:"url"`
-	APIKey             string `mapstructure:"api_key"`
+	APIKey             string `mapstructure:"api_key" secret:"true"`
 	NotifyOnImport     bool   `mapstructure:"notify_on_import"`
 	PlaybackSafety     bool   `mapstructure:"playback_safety"`
 	VerifyAfterRefresh bool   `mapstructure:"verify_after_refresh"`
-	WebhookSecret      string `mapstructure:"webhook_secret"`
+	WebhookSecret      string `mapstructure:"webhook_secret" secret:"true"`
 	// Plugin settings
 	PluginEnabled         bool   `mapstructure:"plugin_enabled"`
-	PluginSharedSecret    string `mapstructure:"plugin_shared_secret"`
+	PluginSharedSecret    string `mapstructure:"plugin_shared_secret" secret:"true"`
 	PluginAutoScan        bool   `mapstructure:"plugin_auto_scan"`
 	PluginVerifyOnStartup bool   `mapstructure:"plugin_verify_on_startup"`
 	PluginVerifyInterval  int    `mapstructure:"plugin_verify_interval"`
@@ -260,16 +276,16 @@ func DefaultConfig() *Config {
 			PluginVerifyInterval:  0,
 		},
 		AI: AIConfig{
-			Enabled:              false,
-			OllamaEndpoint:       "http://localhost:11434",
-			Model:                "qwen2.5vl:7b",
-			ConfidenceThreshold:  0.8,
-			AutoTriggerThreshold: 0.6,
-			TimeoutSeconds:       30,
-			CacheEnabled:         true,
-			CloudModel:           "nemotron-3-nano:30b-cloud",
-			RetryDelay:           500 * time.Millisecond,
-			MaxRetries:           3,
+			Enabled:                    false,
+			OllamaEndpoint:             "http://localhost:11434",
+			Model:                      "qwen2.5vl:7b",
+			ConfidenceThreshold:        0.8,
+			AutoTriggerThreshold:       0.6,
+			TimeoutSeconds:             30,
+			CacheEnabled:               true,
+			CloudModel:                 "nemotron-3-nano:30b-cloud",
+			RetryDelay:                 500 * time.Millisecond,
+			MaxRetries:                 3,
 			HourlyLimit:                10,
 			DailyLimit:                 50,
 			EnhancementIntervalSeconds: 30,
@@ -289,6 +305,11 @@ func DefaultConfig() *Config {
 			File:       "",
 			MaxSizeMB:  10,
 			MaxBackups: 5,
+			MaxAgeDays: 0,
+			Compress:   false,
+		},
+		API: APIConfig{
+			AllowedOrigins: []string{"http://localhost:3000"},
 		},
 	}
 }
@@ -317,7 +338,66 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("unable to unmarshal config: %w", err)
 	}
 
+	// Warn on keys in the TOML that the schema doesn't know about. Helps
+	// catch typos ("max_ages_days") that viper would otherwise silently
+	// ignore, leaving users wondering why a setting has no effect.
+	if unknown := findUnknownKeys(v, cfg); len(unknown) > 0 {
+		fmt.Fprintf(os.Stderr, "config warning: %d unknown key(s) in %s: %v\n", len(unknown), configPath, unknown)
+	}
+
 	return cfg, nil
+}
+
+// findUnknownKeys returns config keys present in the loaded TOML but absent
+// from the Config schema's mapstructure tags. Compares flattened dotted keys
+// (e.g. "logging.max_size_mb") against the set of known paths reflected out
+// of the struct.
+func findUnknownKeys(v *viper.Viper, cfg *Config) []string {
+	known := collectKnownKeys(reflect.TypeOf(*cfg), "")
+	knownSet := make(map[string]struct{}, len(known))
+	for _, k := range known {
+		knownSet[strings.ToLower(k)] = struct{}{}
+	}
+	var unknown []string
+	for _, k := range v.AllKeys() {
+		if _, ok := knownSet[strings.ToLower(k)]; !ok {
+			unknown = append(unknown, k)
+		}
+	}
+	return unknown
+}
+
+// collectKnownKeys walks the Config struct, emitting a dotted key path for
+// every leaf field (matching viper's AllKeys() format).
+func collectKnownKeys(t reflect.Type, prefix string) []string {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		if prefix != "" {
+			return []string{prefix}
+		}
+		return nil
+	}
+	var out []string
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("mapstructure")
+		if tag == "" || tag == "-" {
+			// No tag means viper uses the lowercase field name.
+			tag = strings.ToLower(f.Name)
+		}
+		key := tag
+		if prefix != "" {
+			key = prefix + "." + tag
+		}
+		out = append(out, collectKnownKeys(f.Type, key)...)
+	}
+	// A parent struct with no exported fields still counts as a leaf.
+	if len(out) == 0 && prefix != "" {
+		return []string{prefix}
+	}
+	return out
 }
 
 // Save saves configuration to file
@@ -327,21 +407,7 @@ func (c *Config) Save() error {
 		return err
 	}
 
-	configDir := filepath.Dir(configFile)
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return fmt.Errorf("unable to create config dir: %w", err)
-	}
-
-	content := c.ToTOML()
-	if err := os.WriteFile(configFile, []byte(content), 0600); err != nil {
-		return err
-	}
-
-	// Tighten permissions on existing config dir and file in case they were created with looser perms
-	os.Chmod(configDir, 0700)
-	os.Chmod(configFile, 0600)
-
-	return nil
+	return AtomicWriteWithLock(configFile, []byte(c.ToTOML()), 0600)
 }
 
 func ConfigPath() (string, error) {
@@ -485,6 +551,16 @@ level = "%s"
 file = "%s"
 max_size_mb = %d
 max_backups = %d
+max_age_days = %d
+compress = %v
+
+# ============================================================================
+# API / WEB SERVER
+# CORS origins for the web UI. Same-origin production deployments don't
+# need to change this; reverse proxies or external dev servers do.
+# ============================================================================
+[api]
+allowed_origins = %s
 `,
 		formatStringSlice(c.Watch.TV),
 		formatStringSlice(c.Watch.Movies),
@@ -531,6 +607,9 @@ max_backups = %d
 		c.Logging.File,
 		c.Logging.MaxSizeMB,
 		c.Logging.MaxBackups,
+		c.Logging.MaxAgeDays,
+		c.Logging.Compress,
+		formatStringSlice(c.API.AllowedOrigins),
 	)
 
 	// Append permissions if configured
@@ -583,14 +662,14 @@ func GetDatabasePath() string {
 // DefaultAIConfig returns default AI configuration
 func DefaultAIConfig() AIConfig {
 	return AIConfig{
-		Enabled:              false,
-		OllamaEndpoint:       "http://localhost:11434",
-		Model:                "qwen2.5vl:7b",
-		ConfidenceThreshold:  0.8,
-		AutoTriggerThreshold: 0.6,
-		TimeoutSeconds:       5,
-		CacheEnabled:         true,
-		RetryDelay:           100 * time.Millisecond,
+		Enabled:                    false,
+		OllamaEndpoint:             "http://localhost:11434",
+		Model:                      "qwen2.5vl:7b",
+		ConfidenceThreshold:        0.8,
+		AutoTriggerThreshold:       0.6,
+		TimeoutSeconds:             5,
+		CacheEnabled:               true,
+		RetryDelay:                 100 * time.Millisecond,
 		HourlyLimit:                10,
 		DailyLimit:                 50,
 		EnhancementIntervalSeconds: 30,

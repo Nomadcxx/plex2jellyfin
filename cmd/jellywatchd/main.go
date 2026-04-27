@@ -7,12 +7,15 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
+	daemonipc "github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	daemonreload "github.com/Nomadcxx/jellywatch/internal/daemon/reload"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/labeling"
@@ -59,6 +62,18 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("unable to load config: %w", err)
+	}
+	var currentConfigMu sync.RWMutex
+	currentConfig := cfg
+	getCurrentConfig := func() *config.Config {
+		currentConfigMu.RLock()
+		defer currentConfigMu.RUnlock()
+		return currentConfig
+	}
+	setCurrentConfig := func(next *config.Config) {
+		currentConfigMu.Lock()
+		defer currentConfigMu.Unlock()
+		currentConfig = next
 	}
 
 	logCfg := logging.Config{
@@ -328,6 +343,21 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	reloadSupervisor := daemonreload.NewSupervisor()
+	reloadSupervisor.Register(daemonreload.NewLoggingReloadable(logger))
+	reloadSupervisor.Register(daemonreload.NewScannerReloadable(w))
+	if aiMatcher != nil {
+		reloadSupervisor.Register(daemonreload.NewAIReloadable(aiMatcher))
+	}
+
+	controlServer := daemonipc.NewServer(filepath.Join(configDir, "control.sock"))
+	controlServer.Register(daemonipc.CmdStatus, statusHandler(time.Now(), getCurrentConfig))
+	controlServer.Register(daemonipc.CmdReload, reloadHandler(getCurrentConfig, setCurrentConfig, config.Load, reloadSupervisor))
+	if err := controlServer.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start control plane: %w", err)
+	}
+	defer controlServer.Stop()
 
 	// Start AI enhancement ticker
 	if cfg.AI.Enabled && aiMatcher != nil {

@@ -2,9 +2,36 @@ package ai
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 )
+
+// HTTPError represents a non-2xx response from the Ollama API.
+// Permanent (4xx auth/subscription) errors won't recover on retry; the caller
+// should blacklist immediately instead of burning retry attempts.
+type HTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("ollama returned %d: %s", e.StatusCode, e.Body)
+}
+
+// IsPermanent reports whether the error is unlikely to recover on retry.
+// Auth/config failures (401/403/404) and malformed requests (400) indicate
+// a problem retries won't solve. 429 (rate-limited by provider) is also
+// treated as permanent for this call — our own rate limiter + backoff
+// already governs retry cadence, and hammering a 429 just consumes the
+// retry budget for no gain.
+func (e *HTTPError) IsPermanent() bool {
+	switch e.StatusCode {
+	case 400, 401, 403, 404, 429:
+		return true
+	}
+	return false
+}
 
 // FlexInt handles JSON that may be int, string, or null
 type FlexInt struct {
