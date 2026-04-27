@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/api"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/jellyweb/daemonctl"
 	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/spf13/cobra"
 )
@@ -63,6 +65,20 @@ func runServer(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	server := api.NewServer(db, cfg)
+	if binary, err := os.Executable(); err == nil {
+		logPath := ""
+		if dir, derr := paths.JellyWatchDir(); derr == nil {
+			logPath = dir + "/jellywatchd.log"
+		}
+		// Replace jellyweb basename with jellywatchd so the launcher invokes
+		// the daemon binary, not this web server, when falling back to direct exec.
+		if idx := strings.LastIndex(binary, "/"); idx >= 0 {
+			binary = binary[:idx+1] + "jellywatchd"
+		} else {
+			binary = "jellywatchd"
+		}
+		server.SetLauncher(daemonctl.New(binary, logPath))
+	}
 	handler := server.Handler()
 
 	addr := net.JoinHostPort(host, port)

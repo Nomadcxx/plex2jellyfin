@@ -65,6 +65,11 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 	return s
 }
 
+// SetLauncher attaches a daemon Launcher used by /daemon/{start,restart} routes.
+func (s *Server) SetLauncher(l *daemonctl.Launcher) {
+	s.launcher = l
+}
+
 // Close releases server resources (stops SessionStore cleanup goroutine, etc.)
 func (s *Server) Close() {
 	if s.sessions != nil {
