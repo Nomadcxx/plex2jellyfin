@@ -179,6 +179,42 @@ export interface paths {
     /** Check path access before saving */
     post: operations["preflightPath"];
   };
+  "/daemon/status": {
+    /** Daemon status */
+    get: operations["getDaemonStatus"];
+  };
+  "/daemon/start": {
+    /** Start the daemon process */
+    post: operations["startDaemon"];
+  };
+  "/daemon/stop": {
+    /** Request the daemon to stop */
+    post: operations["stopDaemon"];
+  };
+  "/daemon/restart": {
+    /** Stop then start the daemon */
+    post: operations["restartDaemon"];
+  };
+  "/daemon/reload": {
+    /** Reload daemon configuration */
+    post: operations["reloadDaemon"];
+  };
+  "/daemon/recover": {
+    /** Apply recovery action to an interrupted op */
+    post: operations["recoverDaemon"];
+  };
+  "/database/rescan": {
+    /** Kick off a full library rescan */
+    post: operations["rescanDatabase"];
+  };
+  "/database/reset": {
+    /** Reset the media database (typed-confirm gated) */
+    post: operations["resetDatabase"];
+  };
+  "/events/op/{op_id}": {
+    /** Server-Sent Events stream of frames for an op */
+    get: operations["streamOpEvents"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -409,6 +445,38 @@ export interface components {
       healthy?: boolean;
       libraries?: number;
       message?: string;
+    };
+    DaemonStatus: {
+      /** @description One of running, stopped, starting, stopping, degraded */
+      state?: string;
+      pid?: number;
+      uptime_seconds?: number;
+      version?: string;
+      [key: string]: unknown;
+    };
+    ReloadResult: {
+      ok?: boolean;
+      reloaded?: string[];
+      failed?: {
+          name?: string;
+          error?: string;
+        }[];
+    };
+    RecoverRequest: {
+      /** @description Recovery action (e.g. discard) */
+      action: string;
+    };
+    RescanRequest: {
+      paths?: string[];
+      dry_run?: boolean;
+    };
+    ResetRequest: {
+      /** @description Must equal "media.db" to authorize the reset */
+      confirm: string;
+      preserve?: string[];
+    };
+    OpAccepted: {
+      op_id: string;
     };
   };
   responses: never;
@@ -1104,6 +1172,149 @@ export interface operations {
     responses: {
       /** @description Probe result */
       200: {
+        content: never;
+      };
+    };
+  };
+  /** Daemon status */
+  getDaemonStatus: {
+    responses: {
+      /** @description Daemon status */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DaemonStatus"];
+        };
+      };
+    };
+  };
+  /** Start the daemon process */
+  startDaemon: {
+    responses: {
+      /** @description Start requested */
+      202: {
+        content: never;
+      };
+      /** @description Launcher error */
+      500: {
+        content: never;
+      };
+    };
+  };
+  /** Request the daemon to stop */
+  stopDaemon: {
+    responses: {
+      /** @description Stop requested */
+      202: {
+        content: never;
+      };
+      /** @description IPC error */
+      502: {
+        content: never;
+      };
+    };
+  };
+  /** Stop then start the daemon */
+  restartDaemon: {
+    responses: {
+      /** @description Restart requested */
+      202: {
+        content: never;
+      };
+      /** @description Launcher error */
+      500: {
+        content: never;
+      };
+    };
+  };
+  /** Reload daemon configuration */
+  reloadDaemon: {
+    responses: {
+      /** @description Reload result */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReloadResult"];
+        };
+      };
+      /** @description IPC error */
+      502: {
+        content: never;
+      };
+    };
+  };
+  /** Apply recovery action to an interrupted op */
+  recoverDaemon: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RecoverRequest"];
+      };
+    };
+    responses: {
+      /** @description Recovery applied */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description IPC error */
+      502: {
+        content: never;
+      };
+    };
+  };
+  /** Kick off a full library rescan */
+  rescanDatabase: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RescanRequest"];
+      };
+    };
+    responses: {
+      /** @description Op started */
+      202: {
+        content: {
+          "application/json": components["schemas"]["OpAccepted"];
+        };
+      };
+    };
+  };
+  /** Reset the media database (typed-confirm gated) */
+  resetDatabase: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResetRequest"];
+      };
+    };
+    responses: {
+      /** @description Op started */
+      202: {
+        content: {
+          "application/json": components["schemas"]["OpAccepted"];
+        };
+      };
+      /** @description Confirmation token missing or wrong */
+      400: {
+        content: never;
+      };
+    };
+  };
+  /** Server-Sent Events stream of frames for an op */
+  streamOpEvents: {
+    parameters: {
+      path: {
+        op_id: string;
+      };
+    };
+    responses: {
+      /** @description SSE stream of progress / done / error frames */
+      200: {
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      /** @description No such op */
+      404: {
         content: never;
       };
     };

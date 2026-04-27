@@ -800,6 +800,153 @@ paths:
         '200':
           description: Probe result
 
+  # ============ DAEMON LIFECYCLE ============
+  /daemon/status:
+    get:
+      operationId: getDaemonStatus
+      summary: Daemon status
+      tags: [Daemon]
+      responses:
+        '200':
+          description: Daemon status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DaemonStatus'
+
+  /daemon/start:
+    post:
+      operationId: startDaemon
+      summary: Start the daemon process
+      tags: [Daemon]
+      responses:
+        '202':
+          description: Start requested
+        '500':
+          description: Launcher error
+
+  /daemon/stop:
+    post:
+      operationId: stopDaemon
+      summary: Request the daemon to stop
+      tags: [Daemon]
+      responses:
+        '202':
+          description: Stop requested
+        '502':
+          description: IPC error
+
+  /daemon/restart:
+    post:
+      operationId: restartDaemon
+      summary: Stop then start the daemon
+      tags: [Daemon]
+      responses:
+        '202':
+          description: Restart requested
+        '500':
+          description: Launcher error
+
+  /daemon/reload:
+    post:
+      operationId: reloadDaemon
+      summary: Reload daemon configuration
+      tags: [Daemon]
+      responses:
+        '200':
+          description: Reload result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReloadResult'
+        '502':
+          description: IPC error
+
+  /daemon/recover:
+    post:
+      operationId: recoverDaemon
+      summary: Apply recovery action to an interrupted op
+      tags: [Daemon]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecoverRequest'
+      responses:
+        '200':
+          description: Recovery applied
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '502':
+          description: IPC error
+
+  # ============ DATABASE LIFECYCLE ============
+  /database/rescan:
+    post:
+      operationId: rescanDatabase
+      summary: Kick off a full library rescan
+      tags: [Database]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RescanRequest'
+      responses:
+        '202':
+          description: Op started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpAccepted'
+
+  /database/reset:
+    post:
+      operationId: resetDatabase
+      summary: Reset the media database (typed-confirm gated)
+      tags: [Database]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetRequest'
+      responses:
+        '202':
+          description: Op started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpAccepted'
+        '400':
+          description: Confirmation token missing or wrong
+
+  # ============ OP EVENT STREAM ============
+  /events/op/{op_id}:
+    get:
+      operationId: streamOpEvents
+      summary: Server-Sent Events stream of frames for an op
+      tags: [Events]
+      parameters:
+        - name: op_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE stream of progress / done / error frames
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '404':
+          description: No such op
+
 components:
   schemas:
     # Dashboard
@@ -1253,4 +1400,75 @@ components:
         libraries:
           type: integer
         message:
+          type: string
+
+    # Daemon / database lifecycle
+    DaemonStatus:
+      type: object
+      properties:
+        state:
+          type: string
+          description: One of running, stopped, starting, stopping, degraded
+        pid:
+          type: integer
+        uptime_seconds:
+          type: integer
+        version:
+          type: string
+      additionalProperties: true
+
+    ReloadResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        reloaded:
+          type: array
+          items:
+            type: string
+        failed:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              error:
+                type: string
+
+    RecoverRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          description: Recovery action (e.g. discard)
+
+    RescanRequest:
+      type: object
+      properties:
+        paths:
+          type: array
+          items:
+            type: string
+        dry_run:
+          type: boolean
+
+    ResetRequest:
+      type: object
+      required: [confirm]
+      properties:
+        confirm:
+          type: string
+          description: Must equal "media.db" to authorize the reset
+        preserve:
+          type: array
+          items:
+            type: string
+
+    OpAccepted:
+      type: object
+      required: [op_id]
+      properties:
+        op_id:
           type: string
