@@ -11,6 +11,7 @@ import (
 
 type IPCCaller interface {
 	Call(ctx context.Context, cmd ipc.Command, args any) (json.RawMessage, error)
+	StreamWithID(ctx context.Context, cmd ipc.Command, args any, opID string) error
 }
 
 type ReloadResult struct {

@@ -18,10 +18,18 @@ func (f failingReloadIPC) Call(ctx context.Context, cmd ipc.Command, args any) (
 	return json.RawMessage(`{"ok":false,"failed":[{"name":"ai","error":"bad config"}]}`), nil
 }
 
+func (f failingReloadIPC) StreamWithID(ctx context.Context, cmd ipc.Command, args any, opID string) error {
+	return nil
+}
+
 type successfulReloadIPC struct{}
 
 func (s successfulReloadIPC) Call(ctx context.Context, cmd ipc.Command, args any) (json.RawMessage, error) {
 	return json.RawMessage(`{"ok":true,"reloaded":["logging"]}`), nil
+}
+
+func (s successfulReloadIPC) StreamWithID(ctx context.Context, cmd ipc.Command, args any, opID string) error {
+	return nil
 }
 
 func TestSavePipelineRestoresPreviousConfigOnReloadFailure(t *testing.T) {

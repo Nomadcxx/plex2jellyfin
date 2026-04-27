@@ -66,6 +66,47 @@ func (c *Client) Stream(ctx context.Context, cmd Command, args any) (<-chan Fram
 	return frames, errc
 }
 
+// StreamWithID issues a streaming command using a caller-supplied op ID so that
+// the daemon's OpRegistry/op-log key (req.ID) matches the ID the API hands back
+// to the SSE relay. It blocks until the stream terminates with FrameDone or
+// FrameError, the connection closes, or ctx is cancelled. Returns nil on clean
+// termination.
+func (c *Client) StreamWithID(ctx context.Context, cmd Command, args any, opID string) error {
+	conn, err := net.DialTimeout("unix", c.path, 2*time.Second)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	go func() {
+		<-ctx.Done()
+		conn.Close()
+	}()
+	req := Request{V: ProtocolVersion, ID: opID, Cmd: cmd}
+	if args != nil {
+		b, err := json.Marshal(args)
+		if err != nil {
+			return err
+		}
+		req.Args = b
+	}
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bufio.NewReader(conn))
+	for {
+		var f Frame
+		if err := dec.Decode(&f); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		if f.Type == FrameDone || f.Type == FrameError {
+			return nil
+		}
+	}
+}
+
 type Client struct {
 	path string
 }

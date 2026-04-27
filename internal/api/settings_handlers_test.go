@@ -28,6 +28,10 @@ func (s *stubIPC) Call(ctx context.Context, cmd ipc.Command, args any) (json.Raw
 	return json.RawMessage(`{"ok":true,"reloaded":["ai"]}`), nil
 }
 
+func (s *stubIPC) StreamWithID(ctx context.Context, cmd ipc.Command, args any, opID string) error {
+	return nil
+}
+
 func newTestSettingsRouter(t *testing.T, cfg *config.Config) (*chi.Mux, *stubIPC) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())

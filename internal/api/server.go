@@ -151,6 +151,12 @@ func (s *Server) apiRouter() *chi.Mux {
 			r.Post("/recover", daemonH.Recover)
 		})
 
+		dbH := &DatabaseHandlers{IPC: s.ipc}
+		r.Route("/database", func(r chi.Router) {
+			r.Post("/rescan", dbH.Rescan)
+			r.Post("/reset", dbH.Reset)
+		})
+
 		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		pathsH := &PathsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		libsH := &LibrariesHandlers{Cfg: s.cfg, IPC: s.ipc}
