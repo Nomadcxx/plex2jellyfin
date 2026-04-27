@@ -1,0 +1,47 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="consGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a5f;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0f172a;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="consGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0ea5e9;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:#0284c7;stop-opacity:0.1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#consGrad1)"/>
+  
+  <!-- Decorative circles -->
+  <circle cx="120" cy="100" r="70" fill="#0ea5e9" fill-opacity="0.05"/>
+  <circle cx="400" cy="400" r="90" fill="#38bdf8" fill-opacity="0.03"/>
+  
+  <!-- Main illustration: Organized folders -->
+  <g transform="translate(256, 220)">
+    <!-- Main folder -->
+    <path d="M-60,-20 L-60,40 L60,40 L60,-10 L20,-10 L10,-20 Z" fill="#0c4a6e" stroke="#0ea5e9" stroke-width="2"/>
+    <rect x="-55" y="-15" width="110" height="50" rx="2" fill="url(#consGrad2)"/>
+    
+    <!-- Sub folders inside -->
+    <rect x="-45" y="-5" width="25" height="20" rx="2" fill="#0284c7" fill-opacity="0.4"/>
+    <rect x="-15" y="-5" width="25" height="20" rx="2" fill="#0284c7" fill-opacity="0.3"/>
+    <rect x="15" y="-5" width="25" height="20" rx="2" fill="#0284c7" fill-opacity="0.4"/>
+    
+    <!-- Organization lines -->
+    <path d="M-70,50 L70,50" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 4"/>
+    <path d="M-70,60 L70,60" stroke="#38bdf8" stroke-width="1" stroke-linecap="round" stroke-dasharray="2 2" opacity="0.5"/>
+    
+    <!-- Checkmark badge -->
+    <circle cx="50" cy="-30" r="20" fill="#0284c7" fill-opacity="0.2" stroke="#0ea5e9" stroke-width="2"/>
+    <path d="M42,-30 L47,-25 L58,-36" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+  
+  <!-- Text -->
+  <text x="256" y="380" text-anchor="middle" fill="#7dd3fc" font-family="system-ui, sans-serif" font-size="24" font-weight="600">
+    Perfectly Organized
+  </text>
+  <text x="256" y="410" text-anchor="middle" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="16">
+    All series are consolidated
+  </text>
+</svg>

@@ -1,0 +1,48 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="queueGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e1b4b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#312e81;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="queueGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:0.4" />
+      <stop offset="100%" style="stop-color:#818cf8;stop-opacity:0.1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#queueGrad1)"/>
+  
+  <!-- Decorative circles -->
+  <circle cx="100" cy="120" r="80" fill="#6366f1" fill-opacity="0.05"/>
+  <circle cx="420" cy="380" r="100" fill="#818cf8" fill-opacity="0.03"/>
+  
+  <!-- Main illustration: Download/Queue idle state -->
+  <g transform="translate(256, 200)">
+    <!-- Cloud download icon -->
+    <path d="M-40,-20 Q-40,-40 -20,-40 Q-10,-55 10,-45 Q25,-55 40,-40 Q60,-40 60,-20 Q60,0 40,5 L40,15 L20,15 L20,5 L-20,5 L-20,15 L-40,15 L-40,5 Q-60,0 -60,-20 Q-60,-40 -40,-20" 
+          fill="#312e81" stroke="#6366f1" stroke-width="2"/>
+    
+    <!-- Download arrow -->
+    <g transform="translate(0, 10)">
+      <path d="M0,-15 L0,10" stroke="#818cf8" stroke-width="4" stroke-linecap="round"/>
+      <path d="M-8,2 L0,10 L8,2" stroke="#818cf8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    
+    <!-- Sleep/idle indicators -->
+    <text x="50" y="-50" fill="#6366f1" font-family="system-ui, sans-serif" font-size="24" opacity="0.5">z</text>
+    <text x="65" y="-65" fill="#818cf8" font-family="system-ui, sans-serif" font-size="18" opacity="0.3">z</text>
+    
+    <!-- Progress bar (empty) -->
+    <rect x="-60" y="40" width="120" height="8" rx="4" fill="#1e1b4b" stroke="#312e81" stroke-width="1"/>
+    <rect x="-58" y="42" width="4" height="4" rx="2" fill="#6366f1" fill-opacity="0.3"/>
+  </g>
+  
+  <!-- Text -->
+  <text x="256" y="380" text-anchor="middle" fill="#a5b4fc" font-family="system-ui, sans-serif" font-size="24" font-weight="600">
+    Queue Idle
+  </text>
+  <text x="256" y="410" text-anchor="middle" fill="#818cf8" font-family="system-ui, sans-serif" font-size="16">
+    No active downloads
+  </text>
+</svg>

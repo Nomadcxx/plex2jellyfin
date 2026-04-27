@@ -1,0 +1,50 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="actGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2e1065;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4c1d95;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="actGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#a855f7;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:#c084fc;stop-opacity:0.1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#actGrad1)"/>
+  
+  <!-- Decorative circles -->
+  <circle cx="90" cy="90" r="70" fill="#a855f7" fill-opacity="0.05"/>
+  <circle cx="430" cy="410" r="90" fill="#c084fc" fill-opacity="0.03"/>
+  
+  <!-- Main illustration: Timeline/Activity waiting -->
+  <g transform="translate(256, 200)">
+    <!-- Timeline vertical line -->
+    <line x1="0" y1="-60" x2="0" y2="60" stroke="#6b21a8" stroke-width="3" stroke-linecap="round"/>
+    
+    <!-- Timeline nodes (inactive) -->
+    <circle cx="0" cy="-40" r="8" fill="#4c1d95" stroke="#7c3aed" stroke-width="2"/>
+    <circle cx="0" cy="0" r="8" fill="#4c1d95" stroke="#7c3aed" stroke-width="2"/>
+    <circle cx="0" cy="40" r="8" fill="#4c1d95" stroke="#7c3aed" stroke-width="2"/>
+    
+    <!-- Event cards (ghost/placeholder) -->
+    <rect x="20" y="-55" width="80" height="30" rx="6" fill="#4c1d95" fill-opacity="0.3" stroke="#6b21a8" stroke-width="1"/>
+    <rect x="20" y="-15" width="60" height="30" rx="6" fill="#4c1d95" fill-opacity="0.2" stroke="#6b21a8" stroke-width="1"/>
+    <rect x="20" y="25" width="70" height="30" rx="6" fill="#4c1d95" fill-opacity="0.3" stroke="#6b21a8" stroke-width="1"/>
+    
+    <!-- Clock/hourglass suggestion -->
+    <g transform="translate(-80, 0)" opacity="0.4">
+      <circle cx="0" cy="0" r="25" fill="#5b21b6" stroke="#7c3aed" stroke-width="1"/>
+      <path d="M-10,-5 L0,10 L10,-5" stroke="#a855f7" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M-10,5 L0,-10 L10,5" stroke="#a855f7" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  
+  <!-- Text -->
+  <text x="256" y="380" text-anchor="middle" fill="#d8b4fe" font-family="system-ui, sans-serif" font-size="24" font-weight="600">
+    Quiet in here...
+  </text>
+  <text x="256" y="410" text-anchor="middle" fill="#c084fc" font-family="system-ui, sans-serif" font-size="16">
+    No recent activity recorded
+  </text>
+</svg>
