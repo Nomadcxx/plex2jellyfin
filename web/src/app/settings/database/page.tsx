@@ -12,7 +12,7 @@ export default function DatabasePage() {
   const { events } = useOpStream(opID);
 
   async function startRescan() {
-    const r = await fetch('/api/database/rescan', {
+    const r = await fetch('/api/v1/database/rescan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dry_run: false }),
     });
@@ -22,7 +22,7 @@ export default function DatabasePage() {
 
   async function startReset() {
     setConfirmReset(false);
-    const r = await fetch('/api/database/reset', {
+    const r = await fetch('/api/v1/database/reset', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: 'media.db', preserve: ['audit_log'] }),
     });

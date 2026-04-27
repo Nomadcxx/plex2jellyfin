@@ -20,14 +20,14 @@ export default function DaemonPage() {
           <pre className="mt-2 text-xs">{JSON.stringify(status.interrupted_op, null, 2)}</pre>
           <div className="mt-3 flex gap-2">
             <Button onClick={async () => {
-              await fetch('/api/daemon/recover', {
+              await fetch('/api/v1/daemon/recover', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'discard' }),
               });
               location.reload();
             }}>Discard</Button>
             <Button variant="outline" onClick={async () => {
-              await fetch('/api/daemon/recover', {
+              await fetch('/api/v1/daemon/recover', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'resume' }),
               });

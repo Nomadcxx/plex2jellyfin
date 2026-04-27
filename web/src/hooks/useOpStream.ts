@@ -11,7 +11,7 @@ export function useOpStream(opID: string | null) {
   useEffect(() => {
     if (!opID) return;
     sessionStorage.setItem(STORAGE_KEY, opID);
-    const es = new EventSource(`/api/events/op/${opID}`);
+    const es = new EventSource(`/api/v1/events/op/${opID}`);
     es.onmessage = (ev) => {
       try {
         const f = JSON.parse(ev.data);
