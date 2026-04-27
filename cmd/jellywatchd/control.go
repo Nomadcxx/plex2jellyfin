@@ -13,6 +13,39 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/database"
 )
 
+// relayProgress forwards database.ProgressEvents from the channel to the
+// FrameWriter. Phase transitions and the final frame of each phase are
+// always sent; otherwise emissions are throttled to ~4 Hz to avoid
+// flooding the IPC channel and SSE relay on large libraries (100k+ files).
+func relayProgress(progress <-chan database.ProgressEvent, w ipc.FrameWriter, opID string, doneCh chan<- struct{}) {
+	const minInterval = 250 * time.Millisecond
+	var (
+		lastPhase string
+		lastSent  time.Time
+		pending   *database.ProgressEvent
+	)
+	flush := func() {
+		if pending == nil {
+			return
+		}
+		w.Progress(opID, pending.Phase, pending.Msg, pending.Current, pending.Total)
+		lastSent = time.Now()
+		lastPhase = pending.Phase
+		pending = nil
+	}
+	for ev := range progress {
+		ev := ev
+		if ev.Phase != lastPhase || time.Since(lastSent) >= minInterval {
+			pending = &ev
+			flush()
+			continue
+		}
+		pending = &ev
+	}
+	flush()
+	close(doneCh)
+}
+
 type daemonStatus struct {
 	PID            int              `json:"pid"`
 	UptimeSeconds  int64            `json:"uptime_seconds"`
@@ -136,12 +169,7 @@ return
 }
 progress := make(chan database.ProgressEvent, 64)
 doneCh := make(chan struct{})
-go func() {
-for ev := range progress {
-w.Progress(op.ID, ev.Phase, ev.Msg, ev.Current, ev.Total)
-}
-close(doneCh)
-}()
+go relayProgress(progress, w, op.ID, doneCh)
 err := scanner.FullRescan(ctx, args.Paths, args.DryRun, progress)
 close(progress)
 <-doneCh
@@ -174,12 +202,7 @@ return
 _ = log.Begin(op.ID, ipc.CmdResetDB, map[string]any{"preserve": args.Preserve})
 progress := make(chan database.ProgressEvent, 64)
 doneCh := make(chan struct{})
-go func() {
-for ev := range progress {
-w.Progress(op.ID, ev.Phase, ev.Msg, ev.Current, ev.Total)
-}
-close(doneCh)
-}()
+go relayProgress(progress, w, op.ID, doneCh)
 err := database.ResetDatabase(ctx, db, args.Preserve, progress)
 close(progress)
 <-doneCh

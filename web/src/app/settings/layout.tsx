@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bot, Database, FolderOpen, HardDrive, ListChecks, LockKeyhole, Radio, Server, Settings, SlidersHorizontal, Wrench } from 'lucide-react';
+import { Bot, Database, FolderOpen, HardDrive, ListChecks, LockKeyhole, Radio, Search, Server, Settings, SlidersHorizontal, Wrench } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { useDaemon } from '@/hooks/useDaemon';
 
@@ -18,6 +18,7 @@ const nav = [
   { href: '/settings/logging', label: 'Logging', icon: Wrench },
   { href: '/settings/permissions', label: 'Permissions', icon: LockKeyhole },
   { href: '/settings/daemon', label: 'Daemon', icon: Server },
+  { href: '/settings/indexing', label: 'Indexing', icon: Search },
   { href: '/settings/database', label: 'Database', icon: Database },
 ];
 

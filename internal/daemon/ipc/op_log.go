@@ -100,4 +100,58 @@ func (l *OpLog) Pending() ([]OpLogEntry, error) {
 
 func (l *OpLog) MarkDiscarded(id string) error { return l.End(id, "cancelled", "discarded by recovery") }
 
+// RecentByCmd returns the most recent finished entries (most-recent first)
+// for the given command, merged with their Begin metadata so callers can
+// compute durations. n=0 returns all matching entries.
+func RecentByCmd(path string, cmd Command, n int) ([]OpLogEntry, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+	begins := map[string]OpLogEntry{}
+	type pair struct {
+		begin, end OpLogEntry
+	}
+	var done []pair
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		var e OpLogEntry
+		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
+			continue
+		}
+		if e.State == "in_progress" {
+			if e.Cmd == cmd {
+				begins[e.ID] = e
+			}
+			continue
+		}
+		b, ok := begins[e.ID]
+		if !ok {
+			continue
+		}
+		delete(begins, e.ID)
+		done = append(done, pair{begin: b, end: e})
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]OpLogEntry, 0, len(done))
+	for i := len(done) - 1; i >= 0; i-- {
+		merged := done[i].begin
+		merged.State = done[i].end.State
+		merged.Msg = done[i].end.Msg
+		merged.EndedAt = done[i].end.EndedAt
+		out = append(out, merged)
+		if n > 0 && len(out) >= n {
+			break
+		}
+	}
+	return out, nil
+}
+
 var ErrInterruptedOp = errors.New("interrupted op exists; recovery required")

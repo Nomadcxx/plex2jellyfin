@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/google/uuid"
 )
 
@@ -41,6 +42,23 @@ func (h *DatabaseHandlers) Reset(w http.ResponseWriter, r *http.Request) {
 	opID := "op-" + uuid.NewString()
 	go h.IPC.StreamWithID(context.Background(), ipc.CmdResetDB, body, opID)
 	respondAccepted(w, opID)
+}
+
+// LastRescans returns the most recent rescan executions read from
+// op_log.jsonl. Used by the Indexing tab to display "last scan" info.
+func (h *DatabaseHandlers) LastRescans(w http.ResponseWriter, r *http.Request) {
+	logPath, err := paths.OpLogPath()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	entries, err := ipc.RecentByCmd(logPath, ipc.CmdRescan, 10)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"entries": entries})
 }
 
 func respondAccepted(w http.ResponseWriter, opID string) {

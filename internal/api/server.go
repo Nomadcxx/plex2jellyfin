@@ -167,6 +167,7 @@ func (s *Server) apiRouter() *chi.Mux {
 		r.Route("/database", func(r chi.Router) {
 			r.Post("/rescan", dbH.Rescan)
 			r.Post("/reset", dbH.Reset)
+			r.Get("/rescan/last", dbH.LastRescans)
 		})
 
 		if attacher, ok := s.ipc.(IPCAttacher); ok {

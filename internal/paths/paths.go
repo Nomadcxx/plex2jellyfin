@@ -67,6 +67,16 @@ func ConfigPath() (string, error) {
 	return filepath.Join(dir, "config.toml"), nil
 }
 
+// OpLogPath returns the path to the JellyWatch op log.
+// This is ~/.config/jellywatch/op_log.jsonl for the actual user.
+func OpLogPath() (string, error) {
+	dir, err := JellyWatchDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "op_log.jsonl"), nil
+}
+
 // PlansDir returns the directory for plan files.
 // This is ~/.config/jellywatch/plans for the actual user.
 func PlansDir() (string, error) {
