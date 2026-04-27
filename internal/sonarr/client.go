@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 )
 
@@ -38,7 +37,7 @@ func NewClient(cfg Config) *Client {
 }
 
 func (c *Client) request(method, endpoint string, body io.Reader) (*http.Response, error) {
-	fullURL, err := url.JoinPath(c.baseURL, endpoint)
+	fullURL, err := joinURL(c.baseURL, endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}

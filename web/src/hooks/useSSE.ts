@@ -18,6 +18,30 @@ export function useActivityStream() {
   useEffect(() => {
     closedRef.current = false;
 
+    // Seed with recent history so the page isn't empty until the next live
+    // event arrives. SSE only sends new entries from this point forward.
+    const seed = async () => {
+      try {
+        const res = await fetch('/api/v1/activity?limit=100');
+        if (!res.ok) return;
+        const body = (await res.json()) as { events?: ActivityEvent[] };
+        if (closedRef.current) return;
+        if (Array.isArray(body.events) && body.events.length > 0) {
+          setEvents((prev) => {
+            const seen = new Set(prev.map((e) => e.id));
+            const merged = [...prev];
+            for (const e of body.events!) {
+              if (!seen.has(e.id)) merged.push(e);
+            }
+            return merged.slice(0, 100);
+          });
+        }
+      } catch {
+        // network errors are surfaced via the SSE connection state instead
+      }
+    };
+    seed();
+
     const connect = () => {
       if (closedRef.current) return;
       const eventSource = new EventSource('/api/v1/activity/stream');
@@ -31,7 +55,10 @@ export function useActivityStream() {
       const handleEvent = (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data) as ActivityEvent;
-          setEvents((prev) => [data, ...prev].slice(0, 100));
+          setEvents((prev) => {
+            if (prev.some((e) => e.id === data.id)) return prev;
+            return [data, ...prev].slice(0, 100);
+          });
         } catch (error) {
           console.error('Failed to parse SSE data:', error);
         }
