@@ -31,6 +31,7 @@ type Server struct {
 	sessionOnce    sync.Once
 	playbackLocks  *jellyfin.PlaybackLockManager
 	deferredQueue  *jellyfin.DeferredQueue
+	pathTranslator *jellyfin.PathTranslator
 	ipc            IPCCaller
 	launcher       *daemonctl.Launcher
 }
@@ -58,6 +59,13 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 		sessions:       sessions,
 		playbackLocks:  jellyfin.NewPlaybackLockManager(),
 		deferredQueue:  jellyfin.NewDeferredQueue(),
+	}
+	if cfg != nil {
+		mappings := make([]jellyfin.PathMapping, 0, len(cfg.Jellyfin.PathMappings))
+		for _, m := range cfg.Jellyfin.PathMappings {
+			mappings = append(mappings, jellyfin.PathMapping{Jellyfin: m.Jellyfin, Daemon: m.Daemon})
+		}
+		s.pathTranslator = jellyfin.NewPathTranslator(mappings)
 	}
 	if configDir, err := paths.JellyWatchDir(); err == nil {
 		s.ipc = ipc.NewClient(filepath.Join(configDir, "control.sock"))

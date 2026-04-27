@@ -72,7 +72,7 @@ func isLoopbackRequest(r *http.Request) bool {
 }
 
 func (s *Server) handlePlaybackStart(event jellyfin.WebhookEvent) {
-	path := strings.TrimSpace(event.ItemPath)
+	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
 	if path == "" || s.playbackLocks == nil {
 		return
 	}
@@ -89,7 +89,7 @@ func (s *Server) handlePlaybackStart(event jellyfin.WebhookEvent) {
 }
 
 func (s *Server) handlePlaybackStop(event jellyfin.WebhookEvent) {
-	path := strings.TrimSpace(event.ItemPath)
+	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
 	if path == "" {
 		return
 	}
@@ -105,7 +105,7 @@ func (s *Server) handlePlaybackStop(event jellyfin.WebhookEvent) {
 }
 
 func (s *Server) handleItemAdded(event jellyfin.WebhookEvent) {
-	path := strings.TrimSpace(event.ItemPath)
+	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
 	itemID := strings.TrimSpace(event.ItemID)
 
 	if s.db != nil && path != "" && itemID != "" {

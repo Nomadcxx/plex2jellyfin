@@ -260,6 +260,16 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	pathMappings := make([]jellyfin.PathMapping, 0, len(cfg.Jellyfin.PathMappings))
+	for _, m := range cfg.Jellyfin.PathMappings {
+		pathMappings = append(pathMappings, jellyfin.PathMapping{Jellyfin: m.Jellyfin, Daemon: m.Daemon})
+	}
+	pathTranslator := jellyfin.NewPathTranslator(pathMappings)
+	if len(pathMappings) > 0 {
+		logger.Info("daemon", "Jellyfin path mappings configured",
+			logging.F("count", len(pathMappings)))
+	}
+
 	handler, err := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
 		TVLibraries:     cfg.Libraries.TV,
 		MovieLibs:       cfg.Libraries.Movies,
@@ -282,6 +292,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		ConfigDir:       configDir,
 		PlaybackLocks:   playbackLocks,
 		DeferredQueue:   deferredQueue,
+		PathTranslator:  pathTranslator,
 		AIEnabled:       cfg.AI.Enabled && aiMatcher != nil,
 		AIMatcher:       aiMatcher,
 		AIConfig:        cfg.AI,
@@ -461,6 +472,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// Start Jellyfin parse-decision sweeper (requires both Jellyfin and DB).
 	if jellyfinClient != nil && db != nil {
 		sweeper := jellyfin.NewSweeper(jellyfinClient, db)
+		sweeper.SetPathTranslator(pathTranslator)
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {

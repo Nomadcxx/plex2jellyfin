@@ -19,14 +19,25 @@ const (
 // library by enumerating items and matching by Path. Rows that remain
 // unresolved past the TTL are auto-labeled as FAIL.
 type Sweeper struct {
-	client    *Client
-	db        *database.MediaDB
-	pageDelay time.Duration
+	client     *Client
+	db         *database.MediaDB
+	pageDelay  time.Duration
+	translator *PathTranslator
 }
 
 // NewSweeper constructs a Sweeper over the given Jellyfin client and database.
 func NewSweeper(client *Client, db *database.MediaDB) *Sweeper {
 	return &Sweeper{client: client, db: db, pageDelay: sweepDefaultDelay}
+}
+
+// SetPathTranslator configures prefix translation between Jellyfin's view
+// of media paths and the daemon's view. A nil translator disables
+// translation (paths are matched as-is).
+func (s *Sweeper) SetPathTranslator(t *PathTranslator) {
+	if s == nil {
+		return
+	}
+	s.translator = t
 }
 
 // SetPageDelay overrides the inter-page sleep used to rate-limit Jellyfin
@@ -114,7 +125,8 @@ func (s *Sweeper) sweepByPath(ctx context.Context, pathMap map[string]*database.
 			if item.Path == "" {
 				continue
 			}
-			row, ok := pathMap[item.Path]
+			lookup := s.translator.JellyfinToDaemon(item.Path)
+			row, ok := pathMap[lookup]
 			if !ok {
 				continue
 			}
@@ -128,7 +140,7 @@ func (s *Sweeper) sweepByPath(ctx context.Context, pathMap map[string]*database.
 			}); err != nil {
 				return fmt.Errorf("UpdateOutcome id=%d: %w", row.ID, err)
 			}
-			delete(pathMap, item.Path)
+			delete(pathMap, lookup)
 		}
 
 		startIndex += len(page.Items)

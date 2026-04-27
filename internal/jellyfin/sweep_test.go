@@ -359,3 +359,80 @@ if elapsed < 30*time.Millisecond {
 t.Errorf("expected pageDelay to slow pagination, took %v", elapsed)
 }
 }
+
+func TestSweep_PathTranslationResolvesContainerPaths(t *testing.T) {
+db := newSweepDB(t)
+// Daemon writes to /mnt/STORAGE5/TVSHOWS/...
+daemonPath := "/mnt/STORAGE5/TVSHOWS/Tracker (2024)/Season 03/Tracker (2024) S03E18.mkv"
+id, err := db.InsertDecision(database.ParseDecision{
+SourcePath:      "/dl/tracker.mkv",
+SourceFilename:  "tracker.mkv",
+EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+TargetPath:      daemonPath,
+OrganizeOutcome: "success",
+})
+if err != nil {
+t.Fatalf("InsertDecision: %v", err)
+}
+
+// Jellyfin reports a container-internal path.
+jellyfinPath := "/tv5/Tracker (2024)/Season 03/Tracker (2024) S03E18.mkv"
+srv, _ := newFakeJellyfinServer(t, []Item{
+{ID: "jf-99", Path: jellyfinPath, ProviderIDs: map[string]string{"Imdb": "tt39402011"}},
+})
+client := NewClient(Config{URL: srv.URL, APIKey: "k"})
+
+sweeper := NewSweeper(client, db)
+sweeper.SetPageDelay(0)
+sweeper.SetPathTranslator(NewPathTranslator([]PathMapping{
+{Jellyfin: "/tv5", Daemon: "/mnt/STORAGE5/TVSHOWS"},
+}))
+
+if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
+t.Fatalf("RunOnce: %v", err)
+}
+
+dec, err := db.GetDecision(id)
+if err != nil {
+t.Fatalf("GetDecision: %v", err)
+}
+if dec.JellyfinItemID != "jf-99" {
+t.Errorf("expected JellyfinItemID=jf-99 (translation should match), got %q", dec.JellyfinItemID)
+}
+if dec.JellyfinImdbID != "tt39402011" {
+t.Errorf("expected JellyfinImdbID=tt39402011, got %q", dec.JellyfinImdbID)
+}
+if dec.JellyfinResolvedAt == nil {
+t.Error("expected JellyfinResolvedAt to be set")
+}
+}
+
+func TestSweep_NoTranslatorMissesContainerPath(t *testing.T) {
+// Regression guard: without a translator, a container-internal path must
+// NOT match a daemon-side target_path. This is the bug the translator fixes.
+db := newSweepDB(t)
+daemonPath := "/mnt/STORAGE5/TVSHOWS/Foo/Foo S01E01.mkv"
+id, err := db.InsertDecision(database.ParseDecision{
+SourcePath:      "/dl/foo.mkv",
+SourceFilename:  "foo.mkv",
+EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+TargetPath:      daemonPath,
+OrganizeOutcome: "success",
+})
+if err != nil {
+t.Fatalf("InsertDecision: %v", err)
+}
+srv, _ := newFakeJellyfinServer(t, []Item{
+{ID: "jf-1", Path: "/tv5/Foo/Foo S01E01.mkv"},
+})
+client := NewClient(Config{URL: srv.URL, APIKey: "k"})
+sweeper := NewSweeper(client, db)
+sweeper.SetPageDelay(0)
+if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
+t.Fatalf("RunOnce: %v", err)
+}
+dec, _ := db.GetDecision(id)
+if dec.JellyfinItemID != "" {
+t.Errorf("without translator, expected no match; got %q", dec.JellyfinItemID)
+}
+}

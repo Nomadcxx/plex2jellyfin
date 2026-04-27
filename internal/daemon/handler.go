@@ -47,6 +47,7 @@ type MediaHandler struct {
 	activityLogger   *activity.Logger
 	playbackLocks    *jellyfin.PlaybackLockManager
 	deferredQueue    *jellyfin.DeferredQueue
+	pathTranslator   *jellyfin.PathTranslator
 	pendingAI        map[string]*PendingItem
 	pendingAICap     int
 	aiMatcher        *ai.Matcher
@@ -193,6 +194,7 @@ type MediaHandlerConfig struct {
 	ConfigDir       string
 	PlaybackLocks   *jellyfin.PlaybackLockManager
 	DeferredQueue   *jellyfin.DeferredQueue
+	PathTranslator  *jellyfin.PathTranslator
 	AIEnabled       bool
 	AIMatcher       *ai.Matcher
 	AIConfig        config.AIConfig
@@ -297,6 +299,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		activityLogger:   activityLogger,
 		playbackLocks:    cfg.PlaybackLocks,
 		deferredQueue:    cfg.DeferredQueue,
+		pathTranslator:   cfg.PathTranslator,
 		pendingAI:        make(map[string]*PendingItem),
 		pendingAICap:     100,
 		aiMatcher:        cfg.AIMatcher,
@@ -1139,7 +1142,8 @@ func (h *MediaHandler) DeferredQueue() *jellyfin.DeferredQueue {
 
 // HandleJellyfinWebhookEvent mutates playback state from webhook events.
 func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
-	path := strings.TrimSpace(event.ItemPath)
+	rawPath := strings.TrimSpace(event.ItemPath)
+	path := h.pathTranslator.JellyfinToDaemon(rawPath)
 	switch event.NotificationType {
 	case jellyfin.EventPlaybackStart:
 		if path == "" || h.playbackLocks == nil {

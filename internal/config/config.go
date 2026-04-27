@@ -226,6 +226,19 @@ type JellyfinConfig struct {
 	PluginAutoScan        bool   `mapstructure:"plugin_auto_scan"`
 	PluginVerifyOnStartup bool   `mapstructure:"plugin_verify_on_startup"`
 	PluginVerifyInterval  int    `mapstructure:"plugin_verify_interval"`
+	// PathMappings translates between Jellyfin's view of a media file
+	// (as seen inside its container/bind mount) and the daemon's view
+	// (host filesystem). Without these, the sweeper and webhook handler
+	// cannot correlate Jellyfin items to parse_decisions rows when
+	// Jellyfin runs in a container with different mount roots.
+	PathMappings []JellyfinPathMapping `mapstructure:"path_mappings"`
+}
+
+// JellyfinPathMapping is a single prefix translation pair. See
+// JellyfinConfig.PathMappings for usage.
+type JellyfinPathMapping struct {
+	Jellyfin string `mapstructure:"jellyfin"`
+	Daemon   string `mapstructure:"daemon"`
 }
 
 // DefaultConfig returns default configuration

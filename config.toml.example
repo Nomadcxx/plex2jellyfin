@@ -48,3 +48,25 @@ notify_on_import = true
 # group = "jellyfin"     # Group name or numeric GID
 # file_mode = "0644"     # File permissions (rw-r--r--)
 # dir_mode = "0755"      # Directory permissions (rwxr-xr-x)
+
+[jellyfin]
+# enabled = true
+# url = "http://localhost:8096"
+# api_key = "..."
+# webhook_secret = "..."
+
+# Path mappings translate between Jellyfin's view of a media file (typically
+# a container-internal path) and the daemon's view (the host filesystem
+# path). Required whenever Jellyfin runs in a container with bind mounts
+# whose roots differ from the daemon's. Without these, the post-organize
+# feedback loop (sweeper + webhook) cannot correlate Jellyfin items with
+# parse_decisions rows and every row will eventually be auto-labeled FAIL.
+# Mappings are applied longest-prefix first.
+#
+# [[jellyfin.path_mappings]]
+# jellyfin = "/tv5"
+# daemon   = "/mnt/STORAGE5/TVSHOWS"
+#
+# [[jellyfin.path_mappings]]
+# jellyfin = "/movies"
+# daemon   = "/mnt/STORAGE2/MOVIES"
