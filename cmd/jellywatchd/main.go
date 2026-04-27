@@ -400,6 +400,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	controlServer.RegisterStreaming(daemonipc.CmdResetDB, guardMutator(getPending, resetDBHandler(db.SQL(), opLog)))
 	controlServer.Register(daemonipc.CmdAttach, daemonipc.AttachHandler(controlServer))
 	controlServer.Register(daemonipc.CmdCancel, daemonipc.CancelHandler(controlServer))
+	controlServer.Register(daemonipc.CmdListOps, daemonipc.ListOpsHandler(controlServer))
 	if err := controlServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start control plane: %w", err)
 	}

@@ -12,13 +12,19 @@ import {
   useSettingsSection,
   useUpdateSettingsSection,
   useTestAIConnection,
+  useAIModels,
 } from '@/hooks/useSettings';
+import { ModelSelect } from '@/components/settings/ModelSelect';
 
 export default function AISettingsPage() {
   const { data, isLoading } = useSettingsSection('ai');
   const update = useUpdateSettingsSection('ai');
   const testConnection = useTestAIConnection();
   const [draft, setDraft] = useState<Record<string, unknown>>({});
+  const endpoint = typeof draft.ollama_endpoint === 'string' ? draft.ollama_endpoint : '';
+  const modelsQuery = useAIModels(endpoint || undefined, true);
+  const models = modelsQuery.data?.models ?? [];
+  const modelsErr = !modelsQuery.data?.success ? modelsQuery.data?.message ?? null : null;
 
   useEffect(() => {
     if (data) setDraft(data);
@@ -98,18 +104,26 @@ export default function AISettingsPage() {
 
               <label className="space-y-2 text-sm">
                 <span className="font-medium text-zinc-300">Primary model</span>
-                <Input
+                <ModelSelect
                   value={typeof draft.model === 'string' ? draft.model : ''}
-                  onChange={(e) => set('model', e.target.value)}
+                  onChange={(v) => set('model', v)}
+                  models={models}
+                  loading={modelsQuery.isFetching}
+                  error={modelsErr}
+                  onRefresh={() => modelsQuery.refetch()}
                   placeholder="llama3"
                 />
               </label>
 
               <label className="space-y-2 text-sm">
                 <span className="font-medium text-zinc-300">Fallback model</span>
-                <Input
+                <ModelSelect
                   value={typeof draft.fallback_model === 'string' ? draft.fallback_model : ''}
-                  onChange={(e) => set('fallback_model', e.target.value)}
+                  onChange={(v) => set('fallback_model', v)}
+                  models={models}
+                  loading={modelsQuery.isFetching}
+                  error={modelsErr}
+                  onRefresh={() => modelsQuery.refetch()}
                   placeholder="mistral"
                 />
               </label>

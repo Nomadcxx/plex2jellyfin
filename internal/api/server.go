@@ -147,6 +147,10 @@ func (s *Server) apiRouter() *chi.Mux {
 	r.Post("/settings/sonarr/test", testH.Sonarr)
 	r.Post("/settings/radarr/test", testH.Radarr)
 	r.Post("/settings/jellyfin/test", testH.Jellyfin)
+	r.Post("/ai/test-connection", s.TestAIConnection)
+	r.Post("/ai/test-prompt", s.TestAIPrompt)
+	r.Get("/ai/models", s.ListAIModels)
+	r.Put("/ai/settings", s.UpdateAISettings)
 
 	if s.ipc != nil {
 		daemonH := &DaemonHandlers{IPC: s.ipc, Launcher: s.launcher}
@@ -169,6 +173,12 @@ func (s *Server) apiRouter() *chi.Mux {
 			sse := &SSERelay{IPC: attacher}
 			r.Get("/events/op/{op_id}", sse.Stream)
 		}
+
+		opsH := &OpsHandlers{IPC: s.ipc}
+		r.Route("/ops", func(r chi.Router) {
+			r.Get("/", opsH.List)
+			r.Post("/{op_id}/cancel", opsH.Cancel)
+		})
 
 		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		pathsH := &PathsHandlers{Cfg: s.cfg, IPC: s.ipc}

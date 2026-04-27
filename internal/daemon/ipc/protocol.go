@@ -15,6 +15,7 @@ const (
 	CmdAttach  Command = "ATTACH"
 	CmdCancel  Command = "CANCEL"
 	CmdRecover Command = "RECOVER"
+	CmdListOps Command = "LIST_OPS"
 )
 
 type Request struct {

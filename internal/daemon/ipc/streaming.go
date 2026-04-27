@@ -121,3 +121,16 @@ func CancelHandler(s *Server) Handler {
 		w.Result(req.ID, json.RawMessage(`{"cancelled":true}`))
 	}
 }
+
+// ListOpsHandler returns a JSON snapshot of every tracked op.
+func ListOpsHandler(s *Server) Handler {
+	return func(ctx context.Context, req Request, w FrameWriter) {
+		ops := s.registry.List()
+		data, err := json.Marshal(map[string]any{"ops": ops})
+		if err != nil {
+			w.Error(req.ID, ErrInternal, err.Error())
+			return
+		}
+		w.Result(req.ID, data)
+	}
+}

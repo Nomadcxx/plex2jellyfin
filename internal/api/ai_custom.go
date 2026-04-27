@@ -103,6 +103,37 @@ func (s *Server) TestAIConnection(w http.ResponseWriter, r *http.Request) {
 		"message":    fmt.Sprintf("Connected to Ollama (%d models available)", len(models)),
 		"latencyMs":  latencyMs,
 		"modelCount": len(models),
+		"models":     models,
+	})
+}
+
+// ListAIModels returns the list of locally-available Ollama models for the
+// given endpoint (or the configured one when none is supplied). Used by the
+// Settings → AI page to populate model picker dropdowns.
+func (s *Server) ListAIModels(w http.ResponseWriter, r *http.Request) {
+	endpoint := strings.TrimSpace(r.URL.Query().Get("endpoint"))
+	if endpoint == "" && s.cfg != nil {
+		endpoint = strings.TrimSpace(s.cfg.AI.OllamaEndpoint)
+	}
+	if endpoint == "" {
+		endpoint = "http://localhost:11434"
+	}
+	endpoint = strings.TrimRight(endpoint, "/")
+
+	models, err := fetchOllamaModels(endpoint)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":  false,
+			"endpoint": endpoint,
+			"message":  err.Error(),
+			"models":   []string{},
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":  true,
+		"endpoint": endpoint,
+		"models":   models,
 	})
 }
 

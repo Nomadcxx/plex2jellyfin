@@ -68,6 +68,71 @@ func (r *OpRegistry) Get(id string) (*Op, bool) {
 	return op, ok
 }
 
+// OpSummary is a serialisable snapshot of an op for status/list APIs.
+type OpSummary struct {
+	ID         string  `json:"id"`
+	Cmd        string  `json:"cmd"`
+	StartedAt  int64   `json:"started_at"`
+	State      string  `json:"state"`
+	Phase      string  `json:"phase,omitempty"`
+	Msg        string  `json:"msg,omitempty"`
+	Current    int     `json:"current,omitempty"`
+	Total      int     `json:"total,omitempty"`
+	FinalCode  string  `json:"final_code,omitempty"`
+	FinalMsg   string  `json:"final_msg,omitempty"`
+	FinishedAt int64   `json:"finished_at,omitempty"`
+	Pct        float64 `json:"pct,omitempty"`
+}
+
+// List returns a snapshot of every tracked op (running and recently
+// finished, until evicted by TTL). Sorted by StartedAt descending.
+func (r *OpRegistry) List() []OpSummary {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]OpSummary, 0, len(r.ops))
+	for _, op := range r.ops {
+		op.mu.Lock()
+		s := OpSummary{
+			ID:        op.ID,
+			Cmd:       string(op.Cmd),
+			StartedAt: op.StartedAt.Unix(),
+			State:     "running",
+		}
+		// Pull last progress frame for live phase/msg/current/total.
+		frames := op.Frames.Snapshot()
+		for i := len(frames) - 1; i >= 0; i-- {
+			f := frames[i]
+			if f.Type == FrameProgress {
+				s.Phase = f.Phase
+				s.Msg = f.Msg
+				s.Current = f.Current
+				s.Total = f.Total
+				if f.Total > 0 {
+					s.Pct = float64(f.Current) / float64(f.Total) * 100
+				}
+				break
+			}
+		}
+		if op.Final != nil {
+			s.State = op.Final.State
+			s.FinalCode = string(op.Final.Code)
+			s.FinalMsg = op.Final.Msg
+			s.FinishedAt = op.Final.At.Unix()
+		}
+		op.mu.Unlock()
+		out = append(out, s)
+	}
+	// newest first
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].StartedAt > out[i].StartedAt {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out
+}
+
 func (r *OpRegistry) Finish(id, state string, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

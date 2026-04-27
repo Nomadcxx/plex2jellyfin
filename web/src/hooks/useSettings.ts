@@ -23,6 +23,7 @@ type AIConnectionTestResult = {
   message?: string;
   latencyMs?: number;
   modelCount?: number;
+  models?: string[];
 };
 
 type AIPromptTestResult = {
@@ -93,6 +94,26 @@ export function useTestAIPrompt() {
   return useMutation({
     mutationFn: (payload: { endpoint?: string; model?: string }) =>
       api.post<AIPromptTestResult>('/ai/test-prompt', payload),
+  });
+}
+
+type AIModelsResult = {
+  success?: boolean;
+  endpoint?: string;
+  models?: string[];
+  message?: string;
+};
+
+export function useAIModels(endpoint: string | undefined, enabled = true) {
+  return useQuery<AIModelsResult>({
+    queryKey: ['settings', 'ai', 'models', endpoint ?? ''],
+    queryFn: () => {
+      const qs = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : '';
+      return api.get<AIModelsResult>(`/ai/models${qs}`);
+    },
+    enabled,
+    staleTime: 30_000,
+    retry: false,
   });
 }
 
