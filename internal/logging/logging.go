@@ -65,10 +65,12 @@ func F(key string, value interface{}) Field {
 
 // Config holds logger configuration
 type Config struct {
-	Level      string `mapstructure:"level"`       // debug, info, warn, error
-	File       string `mapstructure:"file"`        // log file path (empty = stdout only)
-	MaxSizeMB  int    `mapstructure:"max_size_mb"` // max size before rotation (default: 10)
-	MaxBackups int    `mapstructure:"max_backups"` // number of backups to keep (default: 5)
+	Level      string `mapstructure:"level"`        // debug, info, warn, error
+	File       string `mapstructure:"file"`         // log file path (empty = stdout only)
+	MaxSizeMB  int    `mapstructure:"max_size_mb"`  // max size before rotation (default: 10)
+	MaxBackups int    `mapstructure:"max_backups"`  // number of backups to keep (default: 5)
+	MaxAgeDays int    `mapstructure:"max_age_days"` // delete backups older than N days (0 = disabled)
+	Compress   bool   `mapstructure:"compress"`     // gzip rotated backups (default: false)
 }
 
 // DefaultConfig returns default logging configuration
@@ -78,6 +80,8 @@ func DefaultConfig() Config {
 		File:       "", // Will be set to ~/.config/jellywatch/logs/jellywatch.log
 		MaxSizeMB:  10,
 		MaxBackups: 5,
+		MaxAgeDays: 0,
+		Compress:   false,
 	}
 }
 
@@ -89,6 +93,8 @@ type Logger struct {
 	filePath   string
 	maxSize    int64 // in bytes
 	maxBackups int
+	maxAgeDays int
+	compress   bool
 	writers    []io.Writer
 }
 
@@ -98,6 +104,8 @@ func New(cfg Config) (*Logger, error) {
 		level:      ParseLevel(cfg.Level),
 		maxSize:    int64(cfg.MaxSizeMB) * 1024 * 1024,
 		maxBackups: cfg.MaxBackups,
+		maxAgeDays: cfg.MaxAgeDays,
+		compress:   cfg.Compress,
 		writers:    []io.Writer{os.Stdout},
 	}
 
@@ -184,9 +192,17 @@ func (l *Logger) rotate() error {
 		l.file.Close()
 	}
 
-	// Rotate existing backups
-	if err := rotateFiles(l.filePath, l.maxBackups); err != nil {
+	// Rotate existing backups, optionally compressing the newly-rotated file.
+	if err := rotateFiles(l.filePath, l.maxBackups, l.compress); err != nil {
 		return err
+	}
+
+	// Prune backups older than MaxAgeDays (zero disables).
+	if l.maxAgeDays > 0 {
+		if err := pruneOldBackups(l.filePath, l.maxAgeDays); err != nil {
+			// Don't fail rotation if pruning errors — best-effort.
+			fmt.Fprintf(os.Stderr, "log age-pruning error: %v\n", err)
+		}
 	}
 
 	// Reopen the log file

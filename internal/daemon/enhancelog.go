@@ -26,6 +26,14 @@ type EnhanceLogEntry struct {
 	PendingCount int     `json:"pending_count,omitempty"`
 	HourlyUsed   int     `json:"hourly_used,omitempty"`
 	DailyUsed    int     `json:"daily_used,omitempty"`
+	// Metadata persisted on flag so the `review` CLI can reconstruct an
+	// organize call on approval. Previously the flag entry only captured
+	// the filename, leaving approvals as log-only no-ops.
+	SourcePath string `json:"source_path,omitempty"`
+	AIYear     *int   `json:"ai_year,omitempty"`
+	AISeason   *int   `json:"ai_season,omitempty"`
+	AIEpisode  *int   `json:"ai_episode,omitempty"`
+	TargetLib  string `json:"target_lib,omitempty"`
 }
 
 type EnhanceLogger struct {

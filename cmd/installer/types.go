@@ -112,8 +112,9 @@ type model struct {
 	watchFolderFocused int // Which folder entry is focused
 
 	// Library paths
-	tvLibraryPaths    string
-	movieLibraryPaths string
+	tvLibraryPaths      string
+	movieLibraryPaths   string
+	pathOverlapWarning  string
 
 	// Sonarr configuration
 	sonarrEnabled bool

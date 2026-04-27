@@ -8,6 +8,7 @@ import "strings"
 var knownMediaTitles = map[string]bool{
 	// TV Shows that conflict with release group names
 	"barry":            true, // HBO series
+	"beef":             true, // Netflix series
 	"westworld":        true, // HBO series
 	"ted":              true, // Peacock series
 	"lasso":            true, // part of "Ted Lasso"
@@ -75,25 +76,25 @@ var knownMediaTitles = map[string]bool{
 	"aliens":    true, // sci-fi franchise
 
 	// Titles from audit: truncation victims
-	"chinatown":    true, // "Interior Chinatown" truncated to "chinatown"
-	"zeus":         true, // "Blood of Zeus" truncated to "zeus"
-	"war":          true, // "Chief of War" truncated to "war"
-	"empire":       true, // "Boardwalk Empire", "Star Wars: Empire"
-	"dynasty":      true, // CW series
-	"homeland":     true, // Showtime series
-	"revenge":      true, // ABC series
-	"unit":         true, // "The Unit", "Law & Order: SVU" truncated to "unit"
-	"life":         true, // NBC series
-	"legion":       true, // FX series
-	"taboo":        true, // BBC/FX series
-	"continental":  true, // "The Continental"
-	"haven":        true, // Syfy series
-	"crisis":       true, // NBC series
-	"colony":       true, // USA series
-	"mayans":       true, // "Mayans M.C."
-	"seal":         true, // "SEAL Team"
-	"champion":     true, // Netflix series
-	"kingdom":      true, // Netflix/AT&T series
+	"chinatown":   true, // "Interior Chinatown" truncated to "chinatown"
+	"zeus":        true, // "Blood of Zeus" truncated to "zeus"
+	"war":         true, // "Chief of War" truncated to "war"
+	"empire":      true, // "Boardwalk Empire", "Star Wars: Empire"
+	"dynasty":     true, // CW series
+	"homeland":    true, // Showtime series
+	"revenge":     true, // ABC series
+	"unit":        true, // "The Unit", "Law & Order: SVU" truncated to "unit"
+	"life":        true, // NBC series
+	"legion":      true, // FX series
+	"taboo":       true, // BBC/FX series
+	"continental": true, // "The Continental"
+	"haven":       true, // Syfy series
+	"crisis":      true, // NBC series
+	"colony":      true, // USA series
+	"mayans":      true, // "Mayans M.C."
+	"seal":        true, // "SEAL Team"
+	"champion":    true, // Netflix series
+	"kingdom":     true, // Netflix/AT&T series
 }
 
 // IsKnownMediaTitle checks if a title is a known legitimate media title

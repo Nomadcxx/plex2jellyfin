@@ -272,7 +272,7 @@ verify_after_refresh = false
 		configStr += fmt.Sprintf(`
 [ai]
 enabled = true
-ollama_url = "%s"
+ollama_endpoint = "%s"
 model = "%s"
 `, m.aiOllamaURL, m.aiModel)
 		if m.aiFallbackModel != "" {

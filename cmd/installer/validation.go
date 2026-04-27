@@ -5,11 +5,46 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// detectPathOverlap checks if any watch path overlaps with a library path.
+// Returns a warning message if overlap detected, empty string otherwise.
+func (m *model) detectPathOverlap() string {
+	var watchPaths []string
+	for _, wf := range m.watchFolders {
+		for _, p := range splitPaths(wf.Paths) {
+			if p != "" {
+				watchPaths = append(watchPaths, filepath.Clean(p))
+			}
+		}
+	}
+
+	var libPaths []string
+	for _, p := range splitPaths(m.tvLibraryPaths) {
+		if p != "" {
+			libPaths = append(libPaths, filepath.Clean(p))
+		}
+	}
+	for _, p := range splitPaths(m.movieLibraryPaths) {
+		if p != "" {
+			libPaths = append(libPaths, filepath.Clean(p))
+		}
+	}
+
+	for _, wp := range watchPaths {
+		for _, lp := range libPaths {
+			if wp == lp || strings.HasPrefix(wp, lp+string(filepath.Separator)) || strings.HasPrefix(lp, wp+string(filepath.Separator)) {
+				return fmt.Sprintf("Watch path %q overlaps with library path %q — this will cause excessive resource usage. Watch paths should point to download/incoming directories, not library directories.", wp, lp)
+			}
+		}
+	}
+	return ""
+}
 
 func (m model) testSonarr() (tea.Model, tea.Cmd) {
 	m.sonarrTesting = true

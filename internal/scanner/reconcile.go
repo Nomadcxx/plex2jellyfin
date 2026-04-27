@@ -3,6 +3,7 @@ package scanner
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,11 @@ import (
 const (
 	retryWindowHours  = 24
 	cleanupWindowDays = 7
+	// deterministicRetryDays is the minimum interval between retries of a
+	// deterministic failure (e.g. unparseable filename) when the source
+	// file hasn't changed. Short enough to recover after a parser fix ships,
+	// long enough to not re-log the same failure every scan cycle.
+	deterministicRetryDays = 7
 )
 
 func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err error) {
@@ -91,6 +97,13 @@ func (s *PeriodicScanner) processActivityFile(path string, retryWindow, cleanupW
 	hasRecentOrSuccess := false
 	hasOldFailures := false
 
+	// Collect the latest failure entry per source within this file. Multiple
+	// failure entries for the same path accumulate over a day; retrying each
+	// independently produces the classic retry-amplification pattern. We
+	// dedup to the latest entry so a given source is retried at most once
+	// per reconciliation pass.
+	latestFailure := make(map[string]activity.Entry)
+
 	for scanner.Scan() {
 		var entry activity.Entry
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
@@ -99,24 +112,47 @@ func (s *PeriodicScanner) processActivityFile(path string, retryWindow, cleanupW
 
 		if entry.Success {
 			hasRecentOrSuccess = true
+			// A later success for this source clears any pending retry.
+			if entry.Source != "" {
+				delete(latestFailure, entry.Source)
+			}
 			continue
 		}
 
-		// Failed entry
-		if entry.Timestamp.After(retryWindow) {
-			// Recent failure - retry it
-			hasRecentOrSuccess = true
-			if entry.Source != "" {
-				if retryErr := s.retryTransfer(entry); retryErr == nil {
-					retried++
-				}
-			}
-		} else if entry.Timestamp.Before(cleanupWindow) {
-			// Old failure - mark for cleanup
+		if entry.Timestamp.Before(cleanupWindow) {
 			hasOldFailures = true
-		} else {
-			// Between retry and cleanup window - keep but don't retry
-			hasRecentOrSuccess = true
+			continue
+		}
+
+		// Within retention window — consider for retry. Keep the latest
+		// (by timestamp) failure per source.
+		hasRecentOrSuccess = true
+		if entry.Source == "" {
+			continue
+		}
+		if prev, ok := latestFailure[entry.Source]; !ok || entry.Timestamp.After(prev.Timestamp) {
+			latestFailure[entry.Source] = entry
+		}
+	}
+
+	now := time.Now()
+	deterministicCutoff := now.Add(-deterministicRetryDays * 24 * time.Hour)
+
+	for _, entry := range latestFailure {
+		// Only retry failures within the standard retry window unless the
+		// entry is deterministic and due for a periodic re-check.
+		withinRetryWindow := entry.Timestamp.After(retryWindow)
+
+		if entry.Deterministic {
+			if !s.deterministicDueForRetry(entry, deterministicCutoff) {
+				continue
+			}
+		} else if !withinRetryWindow {
+			continue
+		}
+
+		if retryErr := s.retryTransfer(entry); retryErr == nil {
+			retried++
 		}
 	}
 
@@ -126,10 +162,41 @@ func (s *PeriodicScanner) processActivityFile(path string, retryWindow, cleanupW
 	return retried, shouldClean, scanner.Err()
 }
 
+// deterministicDueForRetry returns true when a deterministic failure should
+// be retried this pass. Two triggers (OR): the source mtime has changed
+// since the failure was recorded (file was re-downloaded or renamed), OR
+// the failure is older than deterministicRetryDays (in case a parser fix
+// has shipped that might now handle it).
+func (s *PeriodicScanner) deterministicDueForRetry(entry activity.Entry, cutoff time.Time) bool {
+	if entry.Timestamp.Before(cutoff) {
+		return true
+	}
+	if entry.Source == "" {
+		return false
+	}
+	st, err := os.Stat(entry.Source)
+	if err != nil {
+		return false
+	}
+	return st.ModTime().Unix() != entry.SourceMtime
+}
+
 func (s *PeriodicScanner) retryTransfer(entry activity.Entry) error {
 	// Check if source file still exists
 	if _, err := os.Stat(entry.Source); os.IsNotExist(err) {
 		return err
+	}
+
+	// Only retry files inside configured watch paths
+	insideWatch := false
+	for _, wp := range s.watchPaths {
+		if strings.HasPrefix(entry.Source, wp) {
+			insideWatch = true
+			break
+		}
+	}
+	if !insideWatch {
+		return fmt.Errorf("source %s is outside watch roots, skipping retry", entry.Source)
 	}
 
 	s.logger.Info("scanner", "Retrying failed transfer",

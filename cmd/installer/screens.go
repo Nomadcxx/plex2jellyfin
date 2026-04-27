@@ -137,6 +137,14 @@ func (m model) renderPaths() string {
 		b.WriteString(fmt.Sprintf("%sMovie Libraries: %s\n", moviePrefix, m.movieLibraryPaths))
 	}
 
+	if m.pathOverlapWarning != "" {
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ff5555")).Render("⚠ WARNING: "))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5555")).Render(m.pathOverlapWarning))
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Press Enter again to proceed anyway, or fix the paths above."))
+	}
+
 	return b.String()
 }
 

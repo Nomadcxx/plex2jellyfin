@@ -277,6 +277,12 @@ func (m model) handlePathsKeys(key string) (tea.Model, tea.Cmd) {
 		return m.removeWatchFolder()
 	case "enter":
 		m.savePathsInputs()
+		// Warn if watch paths overlap with library paths (allow override on second press)
+		if overlap := m.detectPathOverlap(); overlap != "" && m.pathOverlapWarning == "" {
+			m.pathOverlapWarning = overlap
+			return m, nil
+		}
+		m.pathOverlapWarning = ""
 		return m.nextStep()
 	case "esc":
 		return m.prevStep()

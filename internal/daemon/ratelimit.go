@@ -50,6 +50,22 @@ func (r *AIRateLimiter) Record() {
 	r.dailyUsed++
 }
 
+// RecordAndReport increments the counters and returns both post-record usage
+// snapshots. Callers that want to log budget pressure (e.g. WARN near cap)
+// can use this to avoid a separate Stats() round-trip under the lock.
+func (r *AIRateLimiter) RecordAndReport() (hourlyUsed, hourlyCap, dailyUsed, dailyCap int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hourlyUsed++
+	r.dailyUsed++
+	return r.hourlyUsed, r.hourlyCap, r.dailyUsed, r.dailyCap
+}
+
+// Caps returns the configured hourly and daily caps.
+func (r *AIRateLimiter) Caps() (hourlyCap, dailyCap int) {
+	return r.hourlyCap, r.dailyCap
+}
+
 func (r *AIRateLimiter) Stats() (hourlyUsed, dailyUsed int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

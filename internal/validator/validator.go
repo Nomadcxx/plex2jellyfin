@@ -148,7 +148,7 @@ func (v *Validator) validateTVFile(path string, result *ValidationResult) {
 
 	// Calculate expected name
 	ext := filepath.Ext(filename)
-	expectedName := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
+	expectedName := naming.FormatTVEpisodeFilenameFromInfo(tv, ext[1:])
 
 	if filename != expectedName {
 		result.Issues = append(result.Issues, "Filename doesn't match expected format")

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -34,6 +35,7 @@ type Watcher struct {
 	handler   Handler
 	dryRun    bool
 	recursive bool
+	mu        sync.Mutex
 }
 
 type Option func(*Watcher)
@@ -65,6 +67,24 @@ func NewWatcher(handler Handler, dryRun bool, opts ...Option) (*Watcher, error) 
 }
 
 func (w *Watcher) Watch(paths []string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.watchLocked(paths)
+}
+
+func (w *Watcher) ReplaceWatchPaths(paths []string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for _, path := range w.fsWatcher.WatchList() {
+		if err := w.fsWatcher.Remove(path); err != nil {
+			return fmt.Errorf("unable to remove watch %s: %w", path, err)
+		}
+	}
+	return w.watchLocked(paths)
+}
+
+func (w *Watcher) watchLocked(paths []string) error {
 	for _, path := range paths {
 		if w.recursive {
 			if err := w.addRecursive(path); err != nil {
