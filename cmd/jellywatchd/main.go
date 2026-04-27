@@ -352,8 +352,30 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	controlServer := daemonipc.NewServer(filepath.Join(configDir, "control.sock"))
-	controlServer.Register(daemonipc.CmdStatus, statusHandler(time.Now(), getCurrentConfig))
+
+	// Op-registry + op-log are required by streaming commands. The server
+	// already allocates an OpRegistry; we open the on-disk op log and read
+	// any pending entries left over from a prior crash.
+	opLogPath := filepath.Join(configDir, "op_log.jsonl")
+	opLog, err := daemonipc.OpenOpLog(opLogPath)
+	if err != nil {
+		return fmt.Errorf("open op log: %w", err)
+	}
+	defer opLog.Close()
+
+	pending, _ := opLog.Pending()
+	var pendingMu sync.Mutex
+	getPending := func() []daemonipc.OpLogEntry {
+		pendingMu.Lock()
+		defer pendingMu.Unlock()
+		out := make([]daemonipc.OpLogEntry, len(pending))
+		copy(out, pending)
+		return out
+	}
+
+	controlServer.Register(daemonipc.CmdStatus, statusHandler(time.Now(), getCurrentConfig, getPending))
 	controlServer.Register(daemonipc.CmdReload, reloadHandler(getCurrentConfig, setCurrentConfig, config.Load, reloadSupervisor))
+	controlServer.Register(daemonipc.CmdStop, stopHandler(func() { cancel() }))
 	if err := controlServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start control plane: %w", err)
 	}

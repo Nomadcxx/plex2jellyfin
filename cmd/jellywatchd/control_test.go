@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func TestStatusHandlerReportsDaemonStatus(t *testing.T) {
 	w := &captureFrameWriter{}
 	h := statusHandler(started, func() *config.Config {
 		return &config.Config{}
-	})
+	}, nil)
 
 	h(context.Background(), ipc.Request{ID: "status", Cmd: ipc.CmdStatus}, w)
 
@@ -75,4 +76,23 @@ func TestReloadHandlerLoadsConfigAndUpdatesCurrentConfig(t *testing.T) {
 	if oldCfg != newCfg {
 		t.Fatal("current config was not updated")
 	}
+}
+
+func TestStopHandlerCallsShutdown(t *testing.T) {
+called := false
+stop := func() { called = true }
+srv := ipc.NewServer(filepath.Join(t.TempDir(), "ctl.sock"))
+srv.Register(ipc.CmdStop, stopHandler(stop))
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+if err := srv.Start(ctx); err != nil {
+t.Fatal(err)
+}
+defer srv.Stop()
+cli := ipc.NewClient(srv.Path())
+_, _ = cli.Call(ctx, ipc.CmdStop, nil)
+time.Sleep(50 * time.Millisecond)
+if !called {
+t.Error("stop func not invoked")
+}
 }
