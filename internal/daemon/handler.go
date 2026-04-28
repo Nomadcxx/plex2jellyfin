@@ -71,6 +71,10 @@ type MediaHandler struct {
 	// targetHealthState remembers the last known healthy/unhealthy state per
 	// target library so we only log on transitions, not every check.
 	targetHealthState map[string]bool
+	// unparseableCache defers re-processing of files that fail with
+	// deterministic, non-recoverable parse/organize errors so the periodic
+	// scanner doesn't burn cycles re-attempting them every 5 minutes.
+	unparseableCache *NegativeCache
 }
 
 type PendingItem struct {
@@ -310,6 +314,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		aiEnabled:         cfg.AIEnabled,
 		loggedErrors:      make(map[string]struct{}),
 		targetHealthState: make(map[string]bool),
+		unparseableCache:  NewNegativeCache(),
 	}, nil
 }
 
@@ -552,6 +557,23 @@ func (h *MediaHandler) processFile(path string) {
 		return
 	}
 
+	// Skip paths within the deterministic-unparseable backoff window. The
+	// periodic scanner re-walks watch folders every few minutes; without this
+	// guard, a single unparseable release (obfuscated SAB hash, season-pack
+	// release without episode markers, numeric-token false positive) would
+	// be re-attempted forever.
+	if deferred, remaining, lastErr := h.unparseableCache.IsDeferred(path); deferred {
+		h.logger.Debug("handler", "Skipping deferred unparseable file",
+			logging.F("path", path),
+			logging.F("remaining", remaining.String()),
+			logging.F("last_error", lastErr))
+		h.mu.Lock()
+		delete(h.pending, path)
+		delete(h.transientRetries, path)
+		h.mu.Unlock()
+		return
+	}
+
 	startTime := time.Now()
 
 	h.mu.Lock()
@@ -752,6 +774,9 @@ func (h *MediaHandler) processFile(path string) {
 	radarrNotified := false
 
 	if err != nil {
+		if IsDeterministicUnparseable(err.Error()) {
+			h.unparseableCache.Record(path, err.Error())
+		}
 		if h.shouldLogError(path, err.Error()) {
 			h.logger.Error("handler", "Organization failed", err, logging.F("filename", filename))
 		}
@@ -780,12 +805,16 @@ func (h *MediaHandler) processFile(path string) {
 		}
 		sonarrNotified, radarrNotified = h.sendNotificationsWithTracking(result, mediaType, parsedTitle, yearStr, parsedSeason, parsedEpisode)
 		h.cleanupSourceDir(path)
+		h.unparseableCache.Forget(path)
 	} else if result.Skipped {
 		h.logger.Info("handler", "Skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
 	} else {
 		errMsg := ""
 		if result.Error != nil {
 			errMsg = result.Error.Error()
+		}
+		if IsDeterministicUnparseable(errMsg) {
+			h.unparseableCache.Record(path, errMsg)
 		}
 		if h.shouldLogError(path, errMsg) {
 			h.logger.Error("handler", "Organization failed", result.Error, logging.F("filename", filename))
