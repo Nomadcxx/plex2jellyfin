@@ -187,6 +187,7 @@ func (s *Server) apiRouter() *chi.Mux {
 		jfH := &JellyfinHandlers{DB: s.db}
 		r.Route("/jellyfin", func(r chi.Router) {
 			r.Get("/identification", jfH.Identification)
+			r.Get("/identification/items", jfH.IdentificationItems)
 		})
 
 		opsStream := &StreamingOpHandlers{IPC: s.ipc}

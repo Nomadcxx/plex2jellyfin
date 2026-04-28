@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import Link from 'next/link';
 import { AppShell } from '@/components/layout/AppShell';
 import { useDashboard, useJellyfinIdentification } from '@/hooks/useDashboard';
 import { useDuplicates } from '@/hooks/useDashboard';
@@ -97,26 +98,34 @@ export default function DashboardPage() {
           <h2 className="text-xl font-semibold mb-4">Jellyfin Identification</h2>
           {jfId ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard
-                title="Resolved"
-                value={`${jfId.resolved.toLocaleString()} / ${jfId.total.toLocaleString()}`}
-                icon={CheckCircle2}
-              />
-              <StatCard
-                title="Identified"
-                value={`${jfId.identified.toLocaleString()} (${(jfId.identified_pct_x10 / 10).toFixed(1)}%)`}
-                icon={CheckCircle2}
-              />
-              <StatCard
-                title="Unidentified"
-                value={jfId.unidentified.toLocaleString()}
-                icon={HelpCircle}
-              />
-              <StatCard
-                title="Failed"
-                value={jfId.failed_auto_label.toLocaleString()}
-                icon={AlertTriangle}
-              />
+              <Link href="/jellyfin?status=identified" className="block hover:opacity-80 transition-opacity">
+                <StatCard
+                  title="Resolved"
+                  value={`${jfId.resolved.toLocaleString()} / ${jfId.total.toLocaleString()}`}
+                  icon={CheckCircle2}
+                />
+              </Link>
+              <Link href="/jellyfin?status=identified" className="block hover:opacity-80 transition-opacity">
+                <StatCard
+                  title="Identified"
+                  value={`${jfId.identified.toLocaleString()} (${(jfId.identified_pct_x10 / 10).toFixed(1)}%)`}
+                  icon={CheckCircle2}
+                />
+              </Link>
+              <Link href="/jellyfin?status=unidentified" className="block hover:opacity-80 transition-opacity">
+                <StatCard
+                  title="Unidentified"
+                  value={jfId.unidentified.toLocaleString()}
+                  icon={HelpCircle}
+                />
+              </Link>
+              <Link href="/jellyfin?status=failed" className="block hover:opacity-80 transition-opacity">
+                <StatCard
+                  title="Failed"
+                  value={jfId.failed_auto_label.toLocaleString()}
+                  icon={AlertTriangle}
+                />
+              </Link>
             </div>
           ) : (
             <p className="text-sm text-zinc-500">Loading identification stats…</p>

@@ -710,7 +710,65 @@ func (m *MediaDB) IdentificationStats() (IdentificationCounts, error) {
 	return c, nil
 }
 
-// CountParseDecisions returns the total number of rows in parse_decisions.
+// IdentificationStatusFilter selects which slice of the identification
+// pipeline to enumerate via ListIdentificationItems.
+type IdentificationStatusFilter string
+
+const (
+	IdentificationUnidentified IdentificationStatusFilter = "unidentified"
+	IdentificationPending      IdentificationStatusFilter = "pending"
+	IdentificationFailed       IdentificationStatusFilter = "failed"
+	IdentificationIdentified   IdentificationStatusFilter = "identified"
+)
+
+// ListIdentificationItems returns parse_decisions rows matching the given
+// identification status. Always restricted to organize_outcome='success'
+// rows with a non-empty target_path; unsuccessful organizes don't surface
+// in the identification dashboard.
+func (m *MediaDB) ListIdentificationItems(status IdentificationStatusFilter, limit int) ([]*ParseDecision, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+
+	var where string
+	switch status {
+	case IdentificationUnidentified:
+		where = "jellyfin_identified = 0"
+	case IdentificationPending:
+		where = "jellyfin_resolved_at IS NULL"
+	case IdentificationFailed:
+		where = "auto_label = 'FAIL'"
+	case IdentificationIdentified:
+		where = "jellyfin_identified = 1"
+	default:
+		return nil, fmt.Errorf("ListIdentificationItems: unknown status %q", status)
+	}
+
+	q := `SELECT ` + decisionColumns + ` FROM parse_decisions
+	      WHERE organize_outcome = 'success'
+	        AND target_path IS NOT NULL AND target_path != ''
+	        AND ` + where + `
+	      ORDER BY COALESCE(target_at, event_at) DESC
+	      LIMIT ?`
+	rows, err := m.db.Query(q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("ListIdentificationItems: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*ParseDecision
+	for rows.Next() {
+		d, err := scanDecision(rows)
+		if err != nil {
+			return nil, fmt.Errorf("ListIdentificationItems scan: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
 // Used by the streaming parses-audit op to compute progress totals.
 func (m *MediaDB) CountParseDecisions() (int, error) {
 m.mu.RLock()
