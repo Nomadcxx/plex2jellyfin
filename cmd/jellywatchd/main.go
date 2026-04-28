@@ -297,6 +297,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		AIEnabled:       cfg.AI.Enabled && aiMatcher != nil,
 		AIMatcher:       aiMatcher,
 		AIConfig:        cfg.AI,
+		TransferConcurrencyPerVolume: cfg.Options.TransferConcurrencyPerVolume,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create media handler: %w", err)

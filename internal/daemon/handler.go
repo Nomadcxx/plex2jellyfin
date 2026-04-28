@@ -202,6 +202,12 @@ type MediaHandlerConfig struct {
 	AIEnabled       bool
 	AIMatcher       *ai.Matcher
 	AIConfig        config.AIConfig
+	// TransferConcurrencyPerVolume caps simultaneous transfers landing on
+	// the same destination mount point. Heavy parallel rsync to one disk
+	// causes I/O contention that triggers false-positive disk-health
+	// failures and long no-progress timeouts. <=0 disables the cap.
+	// Default (when zero) is 2.
+	TransferConcurrencyPerVolume int
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
@@ -242,11 +248,36 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		aiCache = ai.NewCache(cfg.Database.DB())
 	}
 
+	// Build a shared per-volume concurrency limiter so both organizers
+	// coordinate against one budget per destination disk.
+	volumeCap := cfg.TransferConcurrencyPerVolume
+	if volumeCap == 0 {
+		volumeCap = 2
+	}
+	volumeLimiter := transfer.NewVolumeLimiter(volumeCap)
+
+	wrapTransferer := func() (transfer.Transferer, error) {
+		base, err := transfer.New(cfg.Backend)
+		if err != nil {
+			return nil, err
+		}
+		return transfer.NewVolumeLimitedTransferer(base, volumeLimiter), nil
+	}
+
+	tvTransferer, err := wrapTransferer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build TV transferer: %w", err)
+	}
+	movieTransferer, err := wrapTransferer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build Movie transferer: %w", err)
+	}
+
 	// Create TV-specific organizer
 	tvOrgOpts := []func(*organizer.Organizer){
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
-		organizer.WithBackend(cfg.Backend),
+		organizer.WithTransferer(tvTransferer),
 		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
 		organizer.WithDeferredQueue(cfg.DeferredQueue),
 	}
@@ -268,7 +299,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	movieOrgOpts := []func(*organizer.Organizer){
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
-		organizer.WithBackend(cfg.Backend),
+		organizer.WithTransferer(movieTransferer),
 		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
 		organizer.WithDeferredQueue(cfg.DeferredQueue),
 	}

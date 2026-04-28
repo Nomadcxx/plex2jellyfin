@@ -132,6 +132,17 @@ func WithBackend(backend transfer.Backend) func(*Organizer) {
 	}
 }
 
+// WithTransferer injects a pre-built transferer (e.g. one wrapped with a
+// shared VolumeLimiter) so multiple organizers can coordinate on a single
+// per-destination concurrency budget.
+func WithTransferer(t transfer.Transferer) func(*Organizer) {
+	return func(o *Organizer) {
+		if t != nil {
+			o.transferer = t
+		}
+	}
+}
+
 func WithForceOverwrite(force bool) func(*Organizer) {
 	return func(o *Organizer) {
 		o.forceOverwrite = force

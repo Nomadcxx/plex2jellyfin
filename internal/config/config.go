@@ -194,6 +194,12 @@ type OptionsConfig struct {
 	DryRun          bool `mapstructure:"dry_run"`
 	VerifyChecksums bool `mapstructure:"verify_checksums"`
 	DeleteSource    bool `mapstructure:"delete_source"`
+	// TransferConcurrencyPerVolume caps simultaneous transfers landing on
+	// the same destination mount point. Heavy parallel writes to one disk
+	// trigger I/O contention that surfaces as false-positive disk-health
+	// failures and rsync no-progress timeouts. <=0 disables; 0 (unset)
+	// uses the daemon default (2).
+	TransferConcurrencyPerVolume int `mapstructure:"transfer_concurrency_per_volume"`
 }
 
 // SonarrConfig contains Sonarr integration settings
