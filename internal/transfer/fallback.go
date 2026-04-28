@@ -2,7 +2,10 @@ package transfer
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // FallbackTransferer tries multiple backends in order until one succeeds.
@@ -25,7 +28,6 @@ func (f *FallbackTransferer) Name() string {
 }
 
 func (f *FallbackTransferer) CanResume() bool {
-	// Can resume if any backend can resume
 	for _, b := range f.backends {
 		if b.CanResume() {
 			return true
@@ -43,6 +45,23 @@ func (f *FallbackTransferer) Copy(src, dst string, opts TransferOptions) (*Trans
 }
 
 func (f *FallbackTransferer) tryAll(src, dst string, opts TransferOptions, isMove bool) (*TransferResult, error) {
+	// Single upfront health probe shared by all backends. Avoids 3x redundant
+	// write probes contending with active concurrent transfers on the same disk.
+	if !opts.SkipHealthCheck {
+		var requiredSpace int64
+		if info, err := os.Stat(src); err == nil {
+			requiredSpace = info.Size()
+		}
+		if err := CheckDiskHealthForTransfer(src, dst, 30*time.Second, requiredSpace); err != nil {
+			_ = filepath.Dir(dst)
+			return &TransferResult{
+				Success: false,
+				Error:   fmt.Errorf("%w: %v", ErrDiskUnhealthy, err),
+			}, fmt.Errorf("%w: %v", ErrDiskUnhealthy, err)
+		}
+		opts.SkipHealthCheck = true
+	}
+
 	var lastResult *TransferResult
 	var lastErr error
 	var errors []string
@@ -66,13 +85,11 @@ func (f *FallbackTransferer) tryAll(src, dst string, opts TransferOptions, isMov
 		errMsg := fmt.Sprintf("%s: %v", backend.Name(), err)
 		errors = append(errors, errMsg)
 
-		// If not last backend, log and try next
 		if i < len(f.backends)-1 {
 			fmt.Printf("  ⚠️  %s failed, trying %s...\n", backend.Name(), f.backends[i+1].Name())
 		}
 	}
 
-	// All backends failed
 	if lastResult != nil {
 		lastResult.Error = fmt.Errorf("all backends failed: %s", strings.Join(errors, "; "))
 		return lastResult, lastResult.Error

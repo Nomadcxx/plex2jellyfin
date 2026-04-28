@@ -917,7 +917,7 @@ func (h *MediaHandler) sendNotificationsWithTracking(result *organizer.Organizat
 }
 
 func (h *MediaHandler) checkTargetHealth(targetLib string) bool {
-	err := transfer.CheckDiskHealthForTransfer("", targetLib, 5*time.Second, 0)
+	err := transfer.CheckDiskHealthForTransfer("", targetLib, 30*time.Second, 0)
 	healthy := err == nil
 	h.recordTargetHealth(targetLib, healthy, err)
 	if !healthy {

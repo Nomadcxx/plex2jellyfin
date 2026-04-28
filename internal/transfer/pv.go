@@ -70,9 +70,11 @@ func (p *PVTransferer) Copy(src, dst string, opts TransferOptions) (*TransferRes
 		return result, result.Error
 	}
 
-	if err := CheckDiskHealthForTransfer(src, dst, 5*time.Second, result.BytesTotal); err != nil {
-		result.Error = fmt.Errorf("%w: %v", ErrDiskUnhealthy, err)
-		return result, result.Error
+	if !opts.SkipHealthCheck {
+		if err := CheckDiskHealthForTransfer(src, dst, 30*time.Second, result.BytesTotal); err != nil {
+			result.Error = fmt.Errorf("%w: %v", ErrDiskUnhealthy, err)
+			return result, result.Error
+		}
 	}
 
 	maxAttempts := opts.RetryAttempts + 1

@@ -82,6 +82,11 @@ type TransferOptions struct {
 	// DirMode sets the permissions for created directories. A value of 0 means
 	// use 0755 default.
 	DirMode os.FileMode
+
+	// SkipHealthCheck bypasses the per-backend pre-flight CheckDiskHealthForTransfer.
+	// Set by orchestrators (e.g. FallbackTransferer) that have already verified
+	// disk health to avoid redundant write probes that contend with active streams.
+	SkipHealthCheck bool
 }
 
 // DefaultOptions returns sensible default transfer options.

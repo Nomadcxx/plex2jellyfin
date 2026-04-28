@@ -34,7 +34,9 @@ func TestFallbackTransferer_FirstSucceeds(t *testing.T) {
 	second := &mockTransferer{name: "second", shouldFail: false}
 
 	ft := NewFallbackTransferer(first, second)
-	result, err := ft.Move("/src", "/dst", DefaultOptions())
+	opts := DefaultOptions()
+	opts.SkipHealthCheck = true
+	result, err := ft.Move("/src", "/dst", opts)
 
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
@@ -49,7 +51,9 @@ func TestFallbackTransferer_FallsBackOnFailure(t *testing.T) {
 	second := &mockTransferer{name: "second", shouldFail: false}
 
 	ft := NewFallbackTransferer(first, second)
-	result, err := ft.Move("/src", "/dst", DefaultOptions())
+	opts := DefaultOptions()
+	opts.SkipHealthCheck = true
+	result, err := ft.Move("/src", "/dst", opts)
 
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
