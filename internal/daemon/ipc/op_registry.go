@@ -32,8 +32,13 @@ type OpRegistry struct {
 }
 
 var mutators = map[Command]bool{
-	CmdRescan:  true,
-	CmdResetDB: true,
+	CmdRescan:          true,
+	CmdResetDB:         true,
+	CmdConsolidate:     true,
+	CmdAIBatch:         true,
+	CmdMetadataRefresh: true,
+	CmdSweep:           true,
+	CmdParsesAudit:     true,
 }
 
 func NewOpRegistry() *OpRegistry {

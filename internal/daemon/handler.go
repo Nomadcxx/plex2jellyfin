@@ -349,6 +349,12 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	}, nil
 }
 
+// UnparseableCache returns the deterministic-unparseable defer cache. Used
+// by the IPC layer to surface deferred files to the WebUI.
+func (h *MediaHandler) UnparseableCache() *NegativeCache {
+	return h.unparseableCache
+}
+
 func (h *MediaHandler) allWatchPaths() []string {
 	paths := make([]string, 0, len(h.tvWatchPaths)+len(h.movieWatchPaths))
 	paths = append(paths, h.tvWatchPaths...)
@@ -581,6 +587,21 @@ func (h *MediaHandler) processFile(path string) {
 	if strings.Contains(path, string(os.PathSeparator)+"_UNPACK_") {
 		h.logger.Info("handler", "Skipping _UNPACK_ path — extraction still in progress",
 			logging.F("path", path))
+		h.mu.Lock()
+		delete(h.pending, path)
+		delete(h.transientRetries, path)
+		h.mu.Unlock()
+		return
+	}
+
+	// Skip SAB temp-hash filenames (e.g. SXvWQZqPGRTe…BsA2FUBH1HUd.mkv).
+	// SAB renames these to the proper release name when post-processing
+	// finishes; the watcher/scanner will pick up the renamed file. Record in
+	// the negative cache so repeated periodic scans become a no-op.
+	if IsObfuscatedSABFilename(path) {
+		h.logger.Debug("handler", "Skipping obfuscated SAB temp-hash filename",
+			logging.F("path", path))
+		h.unparseableCache.Record(path, "obfuscated SAB temp-hash filename; waiting for SAB rename")
 		h.mu.Lock()
 		delete(h.pending, path)
 		delete(h.transientRetries, path)
@@ -1367,6 +1388,17 @@ func (h *MediaHandler) replayDeferredOperation(op jellyfin.DeferredOp) {
 }
 
 func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
+	h.processPendingAI(ctx, nil)
+}
+
+// ProcessPendingAIWithProgress runs the same logic as ProcessPendingAI but
+// streams phase/progress events to the supplied channel. Suitable for the
+// IPC streaming op so the WebUI can show per-item progress.
+func (h *MediaHandler) ProcessPendingAIWithProgress(ctx context.Context, progress chan<- database.ProgressEvent) {
+	h.processPendingAI(ctx, progress)
+}
+
+func (h *MediaHandler) processPendingAI(ctx context.Context, progress chan<- database.ProgressEvent) {
 	h.mu.Lock()
 	items := make([]*PendingItem, 0, len(h.pendingAI))
 	var blacklistedCount int
@@ -1398,7 +1430,17 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 	now := time.Now()
 	expiry := 24 * time.Hour
 
-	for _, item := range items {
+	if progress != nil {
+		progress <- database.ProgressEvent{Phase: "running", Msg: "AI batch", Total: len(items)}
+	}
+
+	for idx, item := range items {
+		if progress != nil {
+			progress <- database.ProgressEvent{
+				Phase: "running", Msg: item.Filename,
+				Current: idx, Total: len(items),
+			}
+		}
 		// Expire old items — fall back to regex result rather than abandoning the file
 		if now.Sub(item.QueuedAt) > expiry {
 			h.logger.Info("handler", "AI enhancement timed out after 24h, falling back to regex",
@@ -1651,6 +1693,11 @@ func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
 		h.mu.Lock()
 		delete(h.pendingAI, item.Path)
 		h.mu.Unlock()
+	}
+	if progress != nil {
+		progress <- database.ProgressEvent{
+			Phase: "complete", Current: len(items), Total: len(items),
+		}
 	}
 }
 

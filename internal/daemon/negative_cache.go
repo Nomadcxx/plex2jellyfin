@@ -2,10 +2,41 @@ package daemon
 
 import (
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// obfuscatedHashName matches SAB temp-hash filenames such as
+// "SXvWQZqPGRTeZvy6oGudBsA2FUBH1HUd.mkv": 20+ alphanumeric chars and a
+// recognised media extension. SAB renames these to a real release name once
+// post-processing finishes; deferring spares us a parse attempt and keeps the
+// log clean.
+var obfuscatedHashName = regexp.MustCompile(`^[A-Za-z0-9]{20,}\.(mkv|mp4|avi|m4v|mov|wmv|flv|ts|webm)$`)
+
+// parentFolderHasMarkers checks whether the immediate parent directory looks
+// like a real release folder (SxxExx, season pack, year, etc.). When true,
+// the parser can extract show/movie info from the folder name even though the
+// file itself is obfuscated, so we should NOT defer.
+var parentFolderHasMarkers = regexp.MustCompile(`(?i)(s\d{1,2}e\d{1,3}|season[._\s-]?\d+|\b(19|20)\d{2}\b|\bcomplete\b|\bs\d{2}\b)`)
+
+// IsObfuscatedSABFilename reports whether the basename looks like a SAB
+// temp-hash file with no parseable context in its parent folder. Files whose
+// parent folders carry valid release markers are not considered SAB
+// temp-hashes and should fall through to the normal parser.
+func IsObfuscatedSABFilename(path string) bool {
+	base := filepath.Base(path)
+	if !obfuscatedHashName.MatchString(base) {
+		return false
+	}
+	parent := filepath.Base(filepath.Dir(path))
+	if parentFolderHasMarkers.MatchString(parent) {
+		return false
+	}
+	return true
+}
 
 // NegativeCache defers re-processing of files that fail with deterministic,
 // non-recoverable parse/organize errors. The periodic scanner re-walks watch

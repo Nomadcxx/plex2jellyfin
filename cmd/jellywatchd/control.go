@@ -88,6 +88,20 @@ func stopHandler(stop func()) ipc.Handler {
 	}
 }
 
+// deferredHandler returns the contents of the negative cache so the WebUI
+// can show users which files were skipped (and why). The snapshot list is
+// safe to serialize directly.
+func deferredHandler(snapshot func() any) ipc.Handler {
+	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+		data, err := json.Marshal(map[string]any{"entries": snapshot()})
+		if err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		w.Result(req.ID, data)
+	}
+}
+
 func reloadHandler(
 	getConfig func() *config.Config,
 	setConfig func(*config.Config),

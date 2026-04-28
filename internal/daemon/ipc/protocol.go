@@ -15,7 +15,14 @@ const (
 	CmdAttach  Command = "ATTACH"
 	CmdCancel  Command = "CANCEL"
 	CmdRecover Command = "RECOVER"
-	CmdListOps Command = "LIST_OPS"
+	CmdListOps         Command = "LIST_OPS"
+	CmdDeferred        Command = "DEFERRED"
+	CmdConsolidate     Command = "CONSOLIDATE"
+	CmdDupScan         Command = "DUP_SCAN"
+	CmdAIBatch         Command = "AI_BATCH"
+	CmdMetadataRefresh Command = "METADATA_REFRESH"
+	CmdSweep           Command = "SWEEP"
+	CmdParsesAudit     Command = "PARSES_AUDIT"
 )
 
 type Request struct {

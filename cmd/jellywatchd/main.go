@@ -24,6 +24,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/scanner"
+	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
@@ -395,6 +396,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	controlServer.Register(daemonipc.CmdReload, reloadHandler(getCurrentConfig, setCurrentConfig, config.Load, reloadSupervisor))
 	controlServer.Register(daemonipc.CmdStop, stopHandler(func() { cancel() }))
 	controlServer.Register(daemonipc.CmdRecover, recoverHandler(opLog, getPending, clearPending))
+	controlServer.Register(daemonipc.CmdDeferred, deferredHandler(func() any {
+		return handler.UnparseableCache().Snapshot()
+	}))
 
 	fileScanner := scanner.NewFileScanner(db)
 	rescanDefaults := func() []string {
@@ -402,8 +406,22 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		paths = append(paths, cfg.Libraries.Movies...)
 		return paths
 	}
+	// Construct Jellyfin sweeper up front so the IPC streaming handler can
+	// trigger it manually; the periodic ticker reuses the same instance.
+	var jfSweeper *jellyfin.Sweeper
+	if jellyfinClient != nil && db != nil {
+		jfSweeper = jellyfin.NewSweeper(jellyfinClient, db)
+		jfSweeper.SetPathTranslator(pathTranslator)
+	}
+
 	controlServer.RegisterStreaming(daemonipc.CmdRescan, guardMutator(getPending, rescanHandler(fileScanner, rescanDefaults, opLog)))
 	controlServer.RegisterStreaming(daemonipc.CmdResetDB, guardMutator(getPending, resetDBHandler(db.SQL(), opLog)))
+	controlServer.RegisterStreaming(daemonipc.CmdConsolidate, guardMutator(getPending, consolidateHandler(db, opLog)))
+	controlServer.RegisterStreaming(daemonipc.CmdDupScan, dupScanHandler(service.NewCleanupService(db), opLog))
+	controlServer.RegisterStreaming(daemonipc.CmdAIBatch, guardMutator(getPending, aiBatchHandler(handler, aiMatcher, opLog)))
+	controlServer.RegisterStreaming(daemonipc.CmdMetadataRefresh, guardMutator(getPending, metadataRefreshHandler(jellyfinClient, opLog)))
+	controlServer.RegisterStreaming(daemonipc.CmdSweep, guardMutator(getPending, sweepHandler(jfSweeper, opLog)))
+	controlServer.RegisterStreaming(daemonipc.CmdParsesAudit, guardMutator(getPending, parsesAuditHandler(db, opLog)))
 	controlServer.Register(daemonipc.CmdAttach, daemonipc.AttachHandler(controlServer))
 	controlServer.Register(daemonipc.CmdCancel, daemonipc.CancelHandler(controlServer))
 	controlServer.Register(daemonipc.CmdListOps, daemonipc.ListOpsHandler(controlServer))
@@ -478,9 +496,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start Jellyfin parse-decision sweeper (requires both Jellyfin and DB).
-	if jellyfinClient != nil && db != nil {
-		sweeper := jellyfin.NewSweeper(jellyfinClient, db)
-		sweeper.SetPathTranslator(pathTranslator)
+	if jfSweeper != nil {
+		sweeper := jfSweeper
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {

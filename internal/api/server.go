@@ -181,6 +181,19 @@ func (s *Server) apiRouter() *chi.Mux {
 			r.Post("/{op_id}/cancel", opsH.Cancel)
 		})
 
+		deferredH := &DeferredHandlers{IPC: s.ipc}
+		r.Get("/deferred", deferredH.List)
+
+		opsStream := &StreamingOpHandlers{IPC: s.ipc}
+		r.Route("/jobs", func(r chi.Router) {
+			r.Post("/consolidate", opsStream.Consolidate)
+			r.Post("/duplicates/scan", opsStream.DupScan)
+			r.Post("/ai/batch", opsStream.AIBatch)
+			r.Post("/metadata/refresh", opsStream.MetadataRefresh)
+			r.Post("/sweep", opsStream.Sweep)
+			r.Post("/parses/audit", opsStream.ParsesAudit)
+		})
+
 		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		pathsH := &PathsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		libsH := &LibrariesHandlers{Cfg: s.cfg, IPC: s.ipc}
