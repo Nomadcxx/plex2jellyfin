@@ -57,7 +57,26 @@ export const queryKeys = {
   duplicates: ['duplicates'] as const,
   scattered: ['scattered'] as const,
   auth: ['auth', 'status'] as const,
+  jellyfinIdentification: ['jellyfin', 'identification'] as const,
 };
+
+export type JellyfinIdentificationStatus = {
+  total: number;
+  resolved: number;
+  identified: number;
+  unidentified: number;
+  pending_no_seen: number;
+  failed_auto_label: number;
+  identified_pct_x10: number;
+};
+
+export function useJellyfinIdentification() {
+  return useQuery<JellyfinIdentificationStatus>({
+    queryKey: queryKeys.jellyfinIdentification,
+    queryFn: () => api.get('/jellyfin/identification'),
+    refetchInterval: 60 * 1000,
+  });
+}
 
 export function useDashboard() {
   return useQuery<DashboardResponse>({

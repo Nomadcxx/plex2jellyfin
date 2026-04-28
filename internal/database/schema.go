@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 15
+const currentSchemaVersion = 16
 
 // SQL migration scripts
 var migrations = []migration{
@@ -529,6 +529,30 @@ var migrations = []migration{
 			`ALTER TABLE parse_decisions ADD COLUMN auto_label_at TIMESTAMP`,
 			`CREATE INDEX idx_pd_auto_label_at ON parse_decisions(auto_label_at)`,
 			`INSERT INTO schema_version (version) VALUES (15)`,
+		},
+	},
+	{
+		version: 16,
+		// Promote "Jellyfin identified the metadata" to a first-class
+		// signal, distinct from "Jellyfin saw the file" (jellyfin_resolved_at).
+		// Empty ProviderIds means Jellyfin has the path but couldn't identify
+		// it; that is a rename-pipeline failure mode worth tracking.
+		up: []string{
+			`ALTER TABLE parse_decisions ADD COLUMN jellyfin_identified INTEGER`,
+			`ALTER TABLE parse_decisions ADD COLUMN jellyfin_first_seen_at DATETIME`,
+			`UPDATE parse_decisions
+			    SET jellyfin_identified = CASE
+			        WHEN (jellyfin_imdb_id IS NOT NULL AND jellyfin_imdb_id != '')
+			          OR (jellyfin_tmdb_id IS NOT NULL AND jellyfin_tmdb_id != '')
+			          OR (jellyfin_tvdb_id IS NOT NULL AND jellyfin_tvdb_id != '')
+			        THEN 1
+			        WHEN jellyfin_resolved_at IS NOT NULL THEN 0
+			        ELSE NULL
+			    END,
+			    jellyfin_first_seen_at = jellyfin_resolved_at
+			  WHERE jellyfin_resolved_at IS NOT NULL`,
+			`CREATE INDEX idx_pd_jellyfin_identified ON parse_decisions(jellyfin_identified)`,
+			`INSERT INTO schema_version (version) VALUES (16)`,
 		},
 	},
 }

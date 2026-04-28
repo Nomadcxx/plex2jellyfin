@@ -184,6 +184,11 @@ func (s *Server) apiRouter() *chi.Mux {
 		deferredH := &DeferredHandlers{IPC: s.ipc}
 		r.Get("/deferred", deferredH.List)
 
+		jfH := &JellyfinHandlers{DB: s.db}
+		r.Route("/jellyfin", func(r chi.Router) {
+			r.Get("/identification", jfH.Identification)
+		})
+
 		opsStream := &StreamingOpHandlers{IPC: s.ipc}
 		r.Route("/jobs", func(r chi.Router) {
 			r.Post("/consolidate", opsStream.Consolidate)

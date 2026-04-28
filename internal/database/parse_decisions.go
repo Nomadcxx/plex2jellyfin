@@ -30,6 +30,8 @@ type ParseDecision struct {
 	JellyfinTmdbID       string
 	JellyfinTvdbID       string
 	JellyfinResolvedAt   *time.Time
+	JellyfinIdentified   *bool
+	JellyfinFirstSeenAt  *time.Time
 	AutoLabel            string
 	AutoLabelAt          *time.Time
 	HumanLabelOverride   string
@@ -57,11 +59,13 @@ type OrganizeUpdate struct {
 
 // OutcomeUpdate carries updated Jellyfin resolution metadata for a decision row.
 type OutcomeUpdate struct {
-	JellyfinItemID     string
-	JellyfinImdbID     string
-	JellyfinTmdbID     string
-	JellyfinTvdbID     string
-	JellyfinResolvedAt *time.Time
+	JellyfinItemID      string
+	JellyfinImdbID      string
+	JellyfinTmdbID      string
+	JellyfinTvdbID      string
+	JellyfinResolvedAt  *time.Time
+	JellyfinIdentified  *bool
+	JellyfinFirstSeenAt *time.Time
 }
 
 // QueryFilter specifies filter criteria for QueryDecisions.
@@ -185,15 +189,73 @@ func (m *MediaDB) UpdateOutcome(id int64, u OutcomeUpdate) error {
 			jellyfin_imdb_id = ?,
 			jellyfin_tmdb_id = ?,
 			jellyfin_tvdb_id = ?,
-			jellyfin_resolved_at = ?
+			jellyfin_resolved_at = ?,
+			jellyfin_identified = COALESCE(?, jellyfin_identified),
+			jellyfin_first_seen_at = COALESCE(jellyfin_first_seen_at, ?)
 		WHERE id = ? AND jellyfin_resolved_at IS NULL`,
 		nullStr(u.JellyfinItemID), nullStr(u.JellyfinImdbID),
 		nullStr(u.JellyfinTmdbID), nullStr(u.JellyfinTvdbID),
 		nullTimePtr(u.JellyfinResolvedAt),
+		nullBoolPtr(u.JellyfinIdentified),
+		nullTimePtr(u.JellyfinFirstSeenAt),
 		id,
 	)
 	if err != nil {
 		return fmt.Errorf("UpdateOutcome: %w", err)
+	}
+	return nil
+}
+
+// UpgradeOutcome updates Jellyfin resolution columns even when a previous
+// resolution exists, but only when the incoming state is "more identified"
+// than what's stored. Used by ItemUpdated webhook (metadata typically
+// attaches via Update events, not Add) and by the unidentified sweeper pass
+// (which can downgrade a row to identified=0).
+func (m *MediaDB) UpgradeOutcome(id int64, u OutcomeUpdate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec(`
+		UPDATE parse_decisions SET
+			jellyfin_item_id      = COALESCE(NULLIF(?, ''), jellyfin_item_id),
+			jellyfin_imdb_id      = COALESCE(NULLIF(?, ''), jellyfin_imdb_id),
+			jellyfin_tmdb_id      = COALESCE(NULLIF(?, ''), jellyfin_tmdb_id),
+			jellyfin_tvdb_id      = COALESCE(NULLIF(?, ''), jellyfin_tvdb_id),
+			jellyfin_resolved_at  = COALESCE(?, jellyfin_resolved_at),
+			jellyfin_identified   = COALESCE(?, jellyfin_identified),
+			jellyfin_first_seen_at = COALESCE(jellyfin_first_seen_at, ?)
+		WHERE id = ?`,
+		nullStr(u.JellyfinItemID), nullStr(u.JellyfinImdbID),
+		nullStr(u.JellyfinTmdbID), nullStr(u.JellyfinTvdbID),
+		nullTimePtr(u.JellyfinResolvedAt),
+		nullBoolPtr(u.JellyfinIdentified),
+		nullTimePtr(u.JellyfinFirstSeenAt),
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("UpgradeOutcome: %w", err)
+	}
+	return nil
+}
+
+// ClearOutcome clears Jellyfin resolution fields when an item is removed
+// from the Jellyfin library. Marks identified=0 so the row surfaces in
+// "needs-review" lists. Does not touch auto_label.
+func (m *MediaDB) ClearOutcome(id int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec(`
+		UPDATE parse_decisions SET
+			jellyfin_item_id = NULL,
+			jellyfin_imdb_id = NULL,
+			jellyfin_tmdb_id = NULL,
+			jellyfin_tvdb_id = NULL,
+			jellyfin_resolved_at = NULL,
+			jellyfin_identified = 0
+		WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("ClearOutcome: %w", err)
 	}
 	return nil
 }
@@ -349,6 +411,30 @@ func (m *MediaDB) GetUnresolvedDecisionByTargetPath(targetPath string) (*ParseDe
 	return d, err
 }
 
+// GetDecisionByTargetPath returns the most-recent successful organize
+// decision for the given target_path, regardless of Jellyfin resolution
+// state. Used by ItemUpdated/ItemRemoved webhook handlers which need to
+// find an already-resolved row to upgrade or clear.
+func (m *MediaDB) GetDecisionByTargetPath(targetPath string) (*ParseDecision, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	row := m.db.QueryRow(`
+		SELECT `+decisionColumns+`
+		FROM parse_decisions
+		WHERE target_path = ?
+		  AND organize_outcome = 'success'
+		ORDER BY target_at DESC, event_at DESC, id DESC
+		LIMIT 1`,
+		targetPath,
+	)
+	d, err := scanDecision(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return d, err
+}
+
 // HasRecentSuccessForSource returns true when there is a parse_decisions row
 // for sourcePath with organize_outcome = 'success' and event_at within the
 // given lookback window.  Used by the cleanup gate to ensure we only purge
@@ -385,7 +471,8 @@ const decisionColumns = `id, source_path, source_filename, event_at,
 	parser_stripped_tokens, target_path, target_at,
 	existing_match_method, organize_outcome, organize_error,
 	jellyfin_item_id, jellyfin_imdb_id, jellyfin_tmdb_id, jellyfin_tvdb_id,
-	jellyfin_resolved_at, auto_label, auto_label_at, human_label_override`
+	jellyfin_resolved_at, jellyfin_identified, jellyfin_first_seen_at,
+	auto_label, auto_label_at, human_label_override`
 
 func scanDecision(s scanner) (*ParseDecision, error) {
 	var d ParseDecision
@@ -407,6 +494,8 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		jellyfinTmdbID       sql.NullString
 		jellyfinTvdbID       sql.NullString
 		jellyfinResolvedAt   sql.NullTime
+		jellyfinIdentified   sql.NullInt64
+		jellyfinFirstSeenAt  sql.NullTime
 		autoLabel            sql.NullString
 		autoLabelAt          sql.NullTime
 		humanLabelOverride   sql.NullString
@@ -419,7 +508,8 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		&parserStrippedTokens, &targetPath, &targetAt,
 		&existingMatchMethod, &organizeOutcome, &organizeError,
 		&jellyfinItemID, &jellyfinImdbID, &jellyfinTmdbID, &jellyfinTvdbID,
-		&jellyfinResolvedAt, &autoLabel, &autoLabelAt, &humanLabelOverride,
+		&jellyfinResolvedAt, &jellyfinIdentified, &jellyfinFirstSeenAt,
+		&autoLabel, &autoLabelAt, &humanLabelOverride,
 	)
 	if err != nil {
 		return nil, err
@@ -456,6 +546,14 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 	if jellyfinResolvedAt.Valid {
 		t := jellyfinResolvedAt.Time
 		d.JellyfinResolvedAt = &t
+	}
+	if jellyfinIdentified.Valid {
+		v := jellyfinIdentified.Int64 != 0
+		d.JellyfinIdentified = &v
+	}
+	if jellyfinFirstSeenAt.Valid {
+		t := jellyfinFirstSeenAt.Time
+		d.JellyfinFirstSeenAt = &t
 	}
 	d.AutoLabel = autoLabel.String
 	if autoLabelAt.Valid {
@@ -564,6 +662,52 @@ func nullTimePtr(t *time.Time) sql.NullTime {
 		return sql.NullTime{}
 	}
 	return sql.NullTime{Time: *t, Valid: true}
+}
+
+// nullBoolPtr converts a *bool to sql.NullInt64 (SQLite stores bools as 0/1).
+func nullBoolPtr(b *bool) sql.NullInt64 {
+	if b == nil {
+		return sql.NullInt64{}
+	}
+	v := int64(0)
+	if *b {
+		v = 1
+	}
+	return sql.NullInt64{Int64: v, Valid: true}
+}
+
+// IdentificationCounts is the result returned by IdentificationStats.
+type IdentificationCounts struct {
+	Total           int // organize_outcome='success' AND target_path NOT NULL
+	Resolved        int // jellyfin_resolved_at NOT NULL
+	Identified      int // jellyfin_identified=1
+	Unidentified    int // jellyfin_identified=0
+	PendingNoSeen   int // resolved still NULL
+	FailedAutoLabel int // auto_label='FAIL'
+}
+
+// IdentificationStats returns counts feeding the dashboard identification
+// card. Restricted to rows that successfully organized to a target path,
+// since unsuccessful rows are not eligible for Jellyfin identification.
+func (m *MediaDB) IdentificationStats() (IdentificationCounts, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var c IdentificationCounts
+	row := m.db.QueryRow(`
+		SELECT
+			COUNT(*) AS total,
+			SUM(CASE WHEN jellyfin_resolved_at IS NOT NULL THEN 1 ELSE 0 END) AS resolved,
+			SUM(CASE WHEN jellyfin_identified = 1 THEN 1 ELSE 0 END) AS identified,
+			SUM(CASE WHEN jellyfin_identified = 0 THEN 1 ELSE 0 END) AS unidentified,
+			SUM(CASE WHEN jellyfin_resolved_at IS NULL THEN 1 ELSE 0 END) AS pending,
+			SUM(CASE WHEN auto_label = 'FAIL' THEN 1 ELSE 0 END) AS failed
+		FROM parse_decisions
+		WHERE organize_outcome = 'success' AND target_path IS NOT NULL AND target_path != ''`)
+	if err := row.Scan(&c.Total, &c.Resolved, &c.Identified, &c.Unidentified,
+		&c.PendingNoSeen, &c.FailedAutoLabel); err != nil {
+		return c, fmt.Errorf("IdentificationStats: %w", err)
+	}
+	return c, nil
 }
 
 // CountParseDecisions returns the total number of rows in parse_decisions.

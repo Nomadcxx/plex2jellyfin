@@ -34,6 +34,8 @@ type WebhookEvent struct {
 
 const (
 	EventItemAdded      = "ItemAdded"
+	EventItemUpdated    = "ItemUpdated"
+	EventItemRemoved    = "ItemRemoved"
 	EventPlaybackStart  = "PlaybackStart"
 	EventPlaybackStop   = "PlaybackStop"
 	EventLibraryChanged = "LibraryChanged"

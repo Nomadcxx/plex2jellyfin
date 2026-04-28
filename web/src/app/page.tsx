@@ -2,10 +2,10 @@
 
 import Image from 'next/image';
 import { AppShell } from '@/components/layout/AppShell';
-import { useDashboard } from '@/hooks/useDashboard';
+import { useDashboard, useJellyfinIdentification } from '@/hooks/useDashboard';
 import { useDuplicates } from '@/hooks/useDashboard';
 import { formatBytes } from '@/lib/utils';
-import { Database, HardDrive, Copy, FolderTree, Film, Tv, ListVideo, AlertTriangle } from 'lucide-react';
+import { Database, HardDrive, Copy, FolderTree, Film, Tv, ListVideo, AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function DashboardPage() {
@@ -17,6 +17,7 @@ export default function DashboardPage() {
   const liveDuplicateGroups = dupData?.groups?.length ?? 0;
   const dbDuplicateGroups = data?.libraryStats?.duplicateGroups ?? 0;
   const duplicateGroups = dbDuplicateGroups || liveDuplicateGroups;
+  const { data: jfId } = useJellyfinIdentification();
 
   return (
     <AppShell>
@@ -91,6 +92,36 @@ export default function DashboardPage() {
             </div>
           </>
         )}
+
+        <div className="mt-8">
+          <h2 className="text-xl font-semibold mb-4">Jellyfin Identification</h2>
+          {jfId ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard
+                title="Resolved"
+                value={`${jfId.resolved.toLocaleString()} / ${jfId.total.toLocaleString()}`}
+                icon={CheckCircle2}
+              />
+              <StatCard
+                title="Identified"
+                value={`${jfId.identified.toLocaleString()} (${(jfId.identified_pct_x10 / 10).toFixed(1)}%)`}
+                icon={CheckCircle2}
+              />
+              <StatCard
+                title="Unidentified"
+                value={jfId.unidentified.toLocaleString()}
+                icon={HelpCircle}
+              />
+              <StatCard
+                title="Failed"
+                value={jfId.failed_auto_label.toLocaleString()}
+                icon={AlertTriangle}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-500">Loading identification stats…</p>
+          )}
+        </div>
 
         <div className="mt-8">
           <h2 className="text-xl font-semibold mb-4">Media Managers</h2>

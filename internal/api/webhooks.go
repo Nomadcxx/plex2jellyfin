@@ -35,6 +35,10 @@ func (s *Server) HandleJellyfinWebhook(w http.ResponseWriter, r *http.Request) {
 		s.handlePlaybackStop(event)
 	case jellyfin.EventItemAdded:
 		s.handleItemAdded(event)
+	case jellyfin.EventItemUpdated:
+		s.handleItemUpdated(event)
+	case jellyfin.EventItemRemoved:
+		s.handleItemRemoved(event)
 	case jellyfin.EventTaskCompleted:
 		s.handleTaskCompleted(event)
 	case jellyfin.EventLibraryChanged:
@@ -104,6 +108,12 @@ func (s *Server) handlePlaybackStop(event jellyfin.WebhookEvent) {
 	s.logJellyfinActivity("jellyfin_playback_stop", path, event.ItemName, true, "")
 }
 
+func identifiedFromEvent(event jellyfin.WebhookEvent) bool {
+	return strings.TrimSpace(event.ProviderImdb) != "" ||
+		strings.TrimSpace(event.ProviderTmdb) != "" ||
+		strings.TrimSpace(event.ProviderTvdb) != ""
+}
+
 func (s *Server) handleItemAdded(event jellyfin.WebhookEvent) {
 	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
 	itemID := strings.TrimSpace(event.ItemID)
@@ -115,12 +125,15 @@ func (s *Server) handleItemAdded(event jellyfin.WebhookEvent) {
 		}
 		if dec, err := s.db.GetUnresolvedDecisionByTargetPath(path); err == nil && dec != nil {
 			now := time.Now().UTC()
+			identified := identifiedFromEvent(event)
 			if updateErr := s.db.UpdateOutcome(dec.ID, database.OutcomeUpdate{
-				JellyfinItemID:     itemID,
-				JellyfinImdbID:     event.ProviderImdb,
-				JellyfinTmdbID:     event.ProviderTmdb,
-				JellyfinTvdbID:     event.ProviderTvdb,
-				JellyfinResolvedAt: &now,
+				JellyfinItemID:      itemID,
+				JellyfinImdbID:      event.ProviderImdb,
+				JellyfinTmdbID:      event.ProviderTmdb,
+				JellyfinTvdbID:      event.ProviderTvdb,
+				JellyfinResolvedAt:  &now,
+				JellyfinIdentified:  &identified,
+				JellyfinFirstSeenAt: &now,
 			}); updateErr != nil {
 				s.logJellyfinActivity("jellyfin_decision_resolve", path, event.ItemName, false, updateErr.Error())
 			}
@@ -130,6 +143,60 @@ func (s *Server) handleItemAdded(event jellyfin.WebhookEvent) {
 	}
 
 	s.logJellyfinActivity("jellyfin_item_added", path, event.ItemName, true, "")
+}
+
+// handleItemUpdated is the authoritative identification signal: Jellyfin
+// typically attaches metadata via Update events after the initial scan added
+// a bare row. We upgrade the parse_decision in place — even if it was already
+// resolved with empty ProviderIds — so identified can flip from 0 → 1.
+func (s *Server) handleItemUpdated(event jellyfin.WebhookEvent) {
+	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
+	itemID := strings.TrimSpace(event.ItemID)
+
+	if s.db != nil && path != "" && itemID != "" {
+		if err := s.db.UpsertJellyfinItem(path, itemID, event.ItemName, event.ItemType); err != nil {
+			s.logJellyfinActivity("jellyfin_item_updated", path, event.ItemName, false, err.Error())
+			return
+		}
+		if dec, err := s.db.GetDecisionByTargetPath(path); err == nil && dec != nil {
+			now := time.Now().UTC()
+			identified := identifiedFromEvent(event)
+			if updateErr := s.db.UpgradeOutcome(dec.ID, database.OutcomeUpdate{
+				JellyfinItemID:      itemID,
+				JellyfinImdbID:      event.ProviderImdb,
+				JellyfinTmdbID:      event.ProviderTmdb,
+				JellyfinTvdbID:      event.ProviderTvdb,
+				JellyfinResolvedAt:  &now,
+				JellyfinIdentified:  &identified,
+				JellyfinFirstSeenAt: &now,
+			}); updateErr != nil {
+				s.logJellyfinActivity("jellyfin_decision_upgrade", path, event.ItemName, false, updateErr.Error())
+			}
+		} else if err != nil {
+			s.logJellyfinActivity("jellyfin_decision_upgrade", path, event.ItemName, false, err.Error())
+		}
+	}
+
+	s.logJellyfinActivity("jellyfin_item_updated", path, event.ItemName, true, "")
+}
+
+// handleItemRemoved clears Jellyfin resolution on the matching parse_decision
+// and flags identified=0. A removal of a file we organized is a strong signal
+// something went wrong (NFO mismatch, duplicate detection, manual cleanup).
+func (s *Server) handleItemRemoved(event jellyfin.WebhookEvent) {
+	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
+
+	if s.db != nil && path != "" {
+		if dec, err := s.db.GetDecisionByTargetPath(path); err == nil && dec != nil {
+			if clearErr := s.db.ClearOutcome(dec.ID); clearErr != nil {
+				s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, false, clearErr.Error())
+				return
+			}
+		}
+	}
+
+	s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, false,
+		"jellyfin removed item that jellywatch organized")
 }
 
 func (s *Server) handleTaskCompleted(event jellyfin.WebhookEvent) {
