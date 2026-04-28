@@ -105,14 +105,17 @@ export default function IndexingPage() {
       if (scope === 'all') {
         paths = [];
       } else if (scope === 'tv') {
-        const cfg = await api.get<{ libraries?: { tv?: string[] } }>('/settings/libraries').catch(() => null);
-        paths = cfg?.libraries?.tv ?? [];
+        const cfg = await api.get<{ paths?: string[] }>('/settings/libraries/tv').catch(() => null);
+        paths = cfg?.paths ?? [];
       } else if (scope === 'movies') {
-        const cfg = await api.get<{ libraries?: { movies?: string[] } }>('/settings/libraries').catch(() => null);
-        paths = cfg?.libraries?.movies ?? [];
+        const cfg = await api.get<{ paths?: string[] }>('/settings/libraries/movies').catch(() => null);
+        paths = cfg?.paths ?? [];
       } else if (scope === 'watch') {
-        const cfg = await api.get<{ paths?: { tv?: string[]; movies?: string[] } }>('/settings/paths').catch(() => null);
-        paths = [...(cfg?.paths?.tv ?? []), ...(cfg?.paths?.movies ?? [])];
+        const [tv, mv] = await Promise.all([
+          api.get<{ paths?: string[] }>('/settings/paths/tv').catch(() => null),
+          api.get<{ paths?: string[] }>('/settings/paths/movies').catch(() => null),
+        ]);
+        paths = [...(tv?.paths ?? []), ...(mv?.paths ?? [])];
       }
       if (scope !== 'all' && paths.length === 0) {
         throw new Error(`No paths configured for ${scope}; set them in Settings → Paths/Libraries.`);
@@ -184,25 +187,31 @@ export default function IndexingPage() {
 
       {!opID && (
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-4">
-          <h2 className="font-semibold mb-3 flex items-center gap-2">
+          <h2 className="font-semibold mb-1 flex items-center gap-2">
             <Search className="h-4 w-4" /> Start a scan
           </h2>
+          <p className="text-sm text-muted-foreground mb-3">
+            Walks the chosen folders, indexes new files, refreshes parse decisions,
+            and updates <span className="font-mono">media.db</span>.
+          </p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <Button onClick={() => startRescan('all')} disabled={isStarting} className="justify-start gap-2">
               {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderTree className="h-4 w-4" />}
-              Scan all libraries
+              Scan all libraries (write)
             </Button>
-            <Button variant="outline" onClick={() => startRescan('tv')} disabled={isStarting} className="justify-start gap-2">
-              <FolderTree className="h-4 w-4" /> TV libraries only
+            <Button onClick={() => startRescan('tv')} disabled={isStarting} className="justify-start gap-2">
+              <FolderTree className="h-4 w-4" /> Scan TV libraries (write)
             </Button>
-            <Button variant="outline" onClick={() => startRescan('movies')} disabled={isStarting} className="justify-start gap-2">
-              <FolderTree className="h-4 w-4" /> Movie libraries only
+            <Button onClick={() => startRescan('movies')} disabled={isStarting} className="justify-start gap-2">
+              <FolderTree className="h-4 w-4" /> Scan movie libraries (write)
             </Button>
-            <Button variant="outline" onClick={() => startRescan('watch')} disabled={isStarting} className="justify-start gap-2">
-              <FolderTree className="h-4 w-4" /> Watch folders only
+            <Button onClick={() => startRescan('watch')} disabled={isStarting} className="justify-start gap-2">
+              <FolderTree className="h-4 w-4" /> Scan watch folders (write)
             </Button>
-            <Button variant="ghost" onClick={() => startRescan('all', true)} disabled={isStarting} className="justify-start gap-2 sm:col-span-2">
-              <Search className="h-4 w-4" /> Dry run (walk + report, no DB writes)
+          </div>
+          <div className="mt-3 border-t border-zinc-800 pt-3">
+            <Button variant="outline" onClick={() => startRescan('all', true)} disabled={isStarting} className="w-full justify-start gap-2">
+              <Search className="h-4 w-4" /> Dry run — walk + report only, no DB writes
             </Button>
           </div>
         </div>
