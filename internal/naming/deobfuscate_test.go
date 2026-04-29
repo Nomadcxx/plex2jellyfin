@@ -75,6 +75,16 @@ func TestIsObfuscatedFilename(t *testing.T) {
 			filename: "The.Matrix.1999.mkv",
 			want:     false,
 		},
+		{
+			name:     "season pack release with separators not obfuscated",
+			filename: "The.Miniature.Wife.S01.1080p.WEB.h264-ETHEL.mkv",
+			want:     false,
+		},
+		{
+			name:     "long dotted release name not obfuscated",
+			filename: "DTF.St.Louis.S01.1080p.AMZN.WEB-DL.DUAL.DDP5.1.H.264-TURG.mkv",
+			want:     false,
+		},
 	}
 
 	for _, tt := range tests {

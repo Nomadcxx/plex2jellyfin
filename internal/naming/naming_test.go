@@ -30,6 +30,13 @@ func TestParseMovieName(t *testing.T) {
 			wantYear:  "2024",
 			wantErr:   false,
 		},
+		{
+			name:      "Strips language tags (iTA-ENG)",
+			input:     "Nightbitch.2024.iTA-ENG.WEB-DL.1080p.x264-CYBER.mkv",
+			wantTitle: "Nightbitch",
+			wantYear:  "2024",
+			wantErr:   false,
+		},
 	}
 
 	for _, tt := range tests {

@@ -62,6 +62,10 @@ func init() {
 		`\b(HEVC|AVC|AV1)\b`,
 		`\b(PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED)\b`,
 		`\b(DUAL|DL|MULTI|DUB|SUB|SUBS)\b`,
+		// Language/locale tags (e.g., iTA-ENG, FRE, MULTi). 3-letter codes
+		// only — 2-letter codes (EN, NO, ES) collide too often with real
+		// title words ("No Good Deed", "Es", "En").
+		`\b(ITA|ENG|FRE|FRA|GER|DEU|ESP|SPA|POR|RUS|JPN|KOR|CHI|HIN|NORDiC|LATINO)\b`,
 		`@\w+`,
 		`\b(RARBG|YTS|YIFY|FLUX|ETHEL|Kitsune|NTb|CMRG|SPARKS|FGT|BZ|TSRG)\b`,
 		`\bv\d+\b`,

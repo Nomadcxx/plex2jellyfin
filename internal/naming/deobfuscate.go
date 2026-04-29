@@ -65,6 +65,16 @@ func isRandomAlphanumeric(s string) bool {
 		return false
 	}
 
+	// Real obfuscated names (hex, UUIDs, base64, random IDs) are pure
+	// [A-Za-z0-9] with no separators. A name containing dots, hyphens,
+	// underscores, or spaces is structured and should be parsed by the
+	// regular pipeline, not flagged as obfuscated.
+	for _, r := range s {
+		if r == '.' || r == '-' || r == '_' || r == ' ' {
+			return false
+		}
+	}
+
 	hasUpper := false
 	hasLower := false
 	hasDigit := false
