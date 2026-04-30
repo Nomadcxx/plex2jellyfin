@@ -327,6 +327,117 @@ func (m *MediaDB) UpdateHousekeepingTask(id int64, kind, status string, payload 
 	return err
 }
 
+// GetHousekeepingTask fetches a single task by id.
+func (m *MediaDB) GetHousekeepingTask(id int64) (*HousekeepingTask, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	row := m.db.QueryRow(`
+		SELECT id, job_name, kind, payload, dedup_key, priority,
+		       status, attempts, last_error, created_at, started_at,
+		       finished_at, next_attempt_at
+		  FROM housekeeping_tasks
+		 WHERE id = ?`, id)
+	t, err := scanHousekeepingTask(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return t, nil
+}
+
+// PurgeHousekeepingTasks deletes terminal-state tasks (done/skipped/
+// canceled/failed) so the table doesn't grow unbounded. Pass nil to use
+// the default safe set: {done, skipped, canceled}.
+func (m *MediaDB) PurgeHousekeepingTasks(statuses []string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(statuses) == 0 {
+		statuses = []string{TaskStatusDone, TaskStatusSkipped, TaskStatusCanceled}
+	}
+	// Build IN-clause safely.
+	placeholders := ""
+	args := make([]any, 0, len(statuses))
+	for i, s := range statuses {
+		if i > 0 {
+			placeholders += ","
+		}
+		placeholders += "?"
+		args = append(args, s)
+	}
+	res, err := m.db.Exec(`DELETE FROM housekeeping_tasks WHERE status IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// BulkRetryHousekeepingTasks resets multiple tasks back to pending.
+func (m *MediaDB) BulkRetryHousekeepingTasks(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tx, err := m.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+		UPDATE housekeeping_tasks
+		   SET status = 'pending', attempts = 0, last_error = NULL,
+		       started_at = NULL, finished_at = NULL, next_attempt_at = NULL
+		 WHERE id = ? AND status IN ('failed','canceled','flagged','skipped')`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+	var n int64
+	for _, id := range ids {
+		r, err := stmt.Exec(id)
+		if err != nil {
+			return n, err
+		}
+		c, _ := r.RowsAffected()
+		n += c
+	}
+	return n, tx.Commit()
+}
+
+// BulkCancelHousekeepingTasks cancels multiple pending/flagged tasks.
+func (m *MediaDB) BulkCancelHousekeepingTasks(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tx, err := m.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+		UPDATE housekeeping_tasks
+		   SET status = 'canceled', finished_at = CURRENT_TIMESTAMP
+		 WHERE id = ? AND status IN ('pending','flagged','failed')`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+	var n int64
+	for _, id := range ids {
+		r, err := stmt.Exec(id)
+		if err != nil {
+			return n, err
+		}
+		c, _ := r.RowsAffected()
+		n += c
+	}
+	return n, tx.Commit()
+}
+
 type hkScanner interface {
 	Scan(dest ...any) error
 }

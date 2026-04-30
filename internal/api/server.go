@@ -211,8 +211,12 @@ func (s *Server) apiRouter() *chi.Mux {
 		hkH := &HousekeepingHandlers{IPC: s.ipc}
 		r.Route("/housekeeping", func(r chi.Router) {
 			r.Get("/tasks", hkH.ListTasks)
+			r.Delete("/tasks", hkH.PurgeTasks)
+			r.Post("/tasks/bulk", hkH.BulkAction)
+			r.Get("/tasks/{id}", hkH.GetTask)
 			r.Post("/tasks/{id}/retry", hkH.RetryTask)
 			r.Post("/tasks/{id}/cancel", hkH.CancelTask)
+			r.Post("/tasks/{id}/verify", hkH.VerifyTask)
 			r.Post("/verify-flagged", hkH.VerifyFlagged)
 		})
 

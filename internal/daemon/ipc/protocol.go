@@ -31,6 +31,10 @@ const (
 	CmdTaskRetry       Command = "TASK_RETRY"
 	CmdTaskCancel      Command = "TASK_CANCEL"
 	CmdVerifyFlagged   Command = "VERIFY_FLAGGED"
+	CmdTaskGet         Command = "TASK_GET"
+	CmdTasksBulk       Command = "TASKS_BULK"
+	CmdTasksPurge      Command = "TASKS_PURGE"
+	CmdTaskVerify      Command = "TASK_VERIFY"
 )
 
 type Request struct {

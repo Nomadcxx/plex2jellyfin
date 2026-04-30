@@ -215,3 +215,120 @@ func verifyFlaggedHandler(eng *housekeeping.Engine) ipc.Handler {
 		w.Result(req.ID, data)
 	}
 }
+
+func taskGetHandler(db *database.MediaDB) ipc.Handler {
+	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+		var args taskIDArgs
+		if err := json.Unmarshal(req.Args, &args); err != nil || args.ID == 0 {
+			w.Error(req.ID, ipc.ErrBadRequest, "id required")
+			return
+		}
+		t, err := db.GetHousekeepingTask(args.ID)
+		if err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		if t == nil {
+			w.Error(req.ID, ipc.ErrNotFound, "task not found")
+			return
+		}
+		row := map[string]any{
+			"id":         t.ID,
+			"job_name":   t.JobName,
+			"kind":       t.Kind,
+			"payload":    t.Payload,
+			"status":     t.Status,
+			"attempts":   t.Attempts,
+			"priority":   t.Priority,
+			"created_at": t.CreatedAt,
+			"dedup_key":  t.DedupKey,
+		}
+		if t.LastError.Valid {
+			row["last_error"] = t.LastError.String
+		}
+		if t.StartedAt.Valid {
+			row["started_at"] = t.StartedAt.Time
+		}
+		if t.FinishedAt.Valid {
+			row["finished_at"] = t.FinishedAt.Time
+		}
+		if t.NextAttemptAt.Valid {
+			row["next_attempt_at"] = t.NextAttemptAt.Time
+		}
+		data, _ := json.Marshal(row)
+		w.Result(req.ID, data)
+	}
+}
+
+type tasksBulkArgs struct {
+	IDs    []int64 `json:"ids"`
+	Action string  `json:"action"` // "retry" | "cancel"
+}
+
+func tasksBulkHandler(db *database.MediaDB) ipc.Handler {
+	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+		var args tasksBulkArgs
+		if err := json.Unmarshal(req.Args, &args); err != nil {
+			w.Error(req.ID, ipc.ErrBadRequest, err.Error())
+			return
+		}
+		if len(args.IDs) == 0 {
+			w.Error(req.ID, ipc.ErrBadRequest, "ids required")
+			return
+		}
+		var n int64
+		var err error
+		switch args.Action {
+		case "retry":
+			n, err = db.BulkRetryHousekeepingTasks(args.IDs)
+		case "cancel":
+			n, err = db.BulkCancelHousekeepingTasks(args.IDs)
+		default:
+			w.Error(req.ID, ipc.ErrBadRequest, "action must be retry|cancel")
+			return
+		}
+		if err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		data, _ := json.Marshal(map[string]any{"affected": n})
+		w.Result(req.ID, data)
+	}
+}
+
+type tasksPurgeArgs struct {
+	Statuses []string `json:"statuses"`
+}
+
+func tasksPurgeHandler(db *database.MediaDB) ipc.Handler {
+	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+		var args tasksPurgeArgs
+		if len(req.Args) > 0 {
+			_ = json.Unmarshal(req.Args, &args)
+		}
+		n, err := db.PurgeHousekeepingTasks(args.Statuses)
+		if err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		data, _ := json.Marshal(map[string]any{"deleted": n})
+		w.Result(req.ID, data)
+	}
+}
+
+func taskVerifyHandler(eng *housekeeping.Engine) ipc.Handler {
+	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+		var args taskIDArgs
+		if err := json.Unmarshal(req.Args, &args); err != nil || args.ID == 0 {
+			w.Error(req.ID, ipc.ErrBadRequest, "id required")
+			return
+		}
+		vr, err := eng.VerifyTask(ctx, args.ID)
+		if err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		data, _ := json.Marshal(vr)
+		w.Result(req.ID, data)
+	}
+}

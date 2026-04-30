@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
@@ -133,6 +134,80 @@ func (h *HousekeepingHandlers) VerifyFlagged(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 	body, err := h.IPC.Call(ctx, ipc.CmdVerifyFlagged, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
+}
+
+// GetTask returns the full payload + metadata for a single task.
+func (h *HousekeepingHandlers) GetTask(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	body, err := h.IPC.Call(r.Context(), ipc.CmdTaskGet, map[string]int64{"id": id})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
+}
+
+// BulkAction performs retry/cancel against a list of task ids in one call.
+func (h *HousekeepingHandlers) BulkAction(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		IDs    []int64 `json:"ids"`
+		Action string  `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	body, err := h.IPC.Call(r.Context(), ipc.CmdTasksBulk, payload)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
+}
+
+// PurgeTasks deletes terminal-state tasks. ?statuses=done,skipped,canceled
+// (default if omitted: done+skipped+canceled).
+func (h *HousekeepingHandlers) PurgeTasks(w http.ResponseWriter, r *http.Request) {
+	var statuses []string
+	if s := r.URL.Query().Get("statuses"); s != "" {
+		for _, p := range strings.Split(s, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				statuses = append(statuses, p)
+			}
+		}
+	}
+	body, err := h.IPC.Call(r.Context(), ipc.CmdTasksPurge, map[string]any{"statuses": statuses})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
+}
+
+// VerifyTask re-runs the verifier on a single task.
+func (h *HousekeepingHandlers) VerifyTask(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	body, err := h.IPC.Call(ctx, ipc.CmdTaskVerify, map[string]int64{"id": id})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

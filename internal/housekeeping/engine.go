@@ -412,6 +412,46 @@ func (e *Engine) VerifyFlagged(ctx context.Context) (*VerifyFlaggedResult, error
 	return res, nil
 }
 
+// VerifyTask re-runs the verifier on a single flagged year_mismatch task.
+// Returns the resulting verdict plus whether the task was updated.
+func (e *Engine) VerifyTask(ctx context.Context, id int64) (*tmdb.VerifyResult, error) {
+	if e.verifier == nil || !e.verifier.Available() {
+		return nil, fmt.Errorf("verifier unavailable: configure jellyfin or tmdb api key")
+	}
+	t, err := e.db.GetHousekeepingTask(id)
+	if err != nil {
+		return nil, err
+	}
+	if t == nil {
+		return nil, fmt.Errorf("task %d not found", id)
+	}
+	if t.Kind != database.TaskKindYearMismatch {
+		return nil, fmt.Errorf("task %d is not a year_mismatch", id)
+	}
+	title, _ := t.Payload["title"].(string)
+	kind, _ := t.Payload["kind"].(string)
+	srcYear := folderYearFromPath(t.Payload["src_path"])
+	dstYear := folderYearFromPath(t.Payload["dst_path"])
+	mk := tmdb.KindMovie
+	if kind == "tv" {
+		mk = tmdb.KindSeries
+	}
+	vr := e.verifier.Verify(ctx, mk, title, srcYear, title, dstYear)
+	if vr == nil {
+		return nil, fmt.Errorf("verifier returned no result")
+	}
+	t.Payload["verification"] = vr
+	switch vr.Verdict {
+	case "distinct":
+		_ = e.db.UpdateHousekeepingTask(t.ID, database.TaskKindYearMismatch, database.TaskStatusSkipped, t.Payload)
+	case "duplicate":
+		_ = e.db.UpdateHousekeepingTask(t.ID, database.TaskKindMoveMerge, database.TaskStatusPending, t.Payload)
+	default:
+		_ = e.db.UpdateHousekeepingTask(t.ID, database.TaskKindYearMismatch, database.TaskStatusFlagged, t.Payload)
+	}
+	return vr, nil
+}
+
 // folderYearFromPath extracts a 4-digit year from a folder path like
 // "/srv/Movies/Solaris (1972)" → "1972". Returns "" if not found.
 func folderYearFromPath(v any) string {
