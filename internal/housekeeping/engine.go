@@ -426,9 +426,14 @@ func (e *Engine) executeTask(ctx context.Context, t *database.HousekeepingTask) 
 		return e.execStuckSync(t)
 	case database.TaskKindMoveMerge, database.TaskKindNoYearMerge:
 		return e.execMergeMove(ctx, t)
-	case database.TaskKindYearMismatch, database.TaskKindPollutedName, database.TaskKindSubdirMismatch:
-		// Flag-only — should not be executed.
-		return fmt.Errorf("flag-only task kind %q reached executor", t.Kind)
+	case database.TaskKindYearMismatch:
+		// Flagged-then-approved: human OK'd the merge despite the year
+		// difference, so execute it like a normal cross-volume merge.
+		return e.execMergeMove(ctx, t)
+	case database.TaskKindPollutedName, database.TaskKindSubdirMismatch:
+		// These have no deterministic target — a human must rename
+		// manually; reaching the executor is an error.
+		return fmt.Errorf("flag-only task kind %q requires manual action", t.Kind)
 	default:
 		return fmt.Errorf("unknown task kind %q", t.Kind)
 	}

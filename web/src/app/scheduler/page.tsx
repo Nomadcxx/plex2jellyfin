@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Calendar, Play, StopCircle, RotateCw, X, AlertTriangle } from 'lucide-react';
+import { Calendar, Play, StopCircle, RotateCw, Check, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Job = {
@@ -251,16 +251,35 @@ export default function SchedulerPage() {
                             {new Date(t.created_at).toLocaleString()}
                           </td>
                           <td className="p-2 text-right">
+                            {t.status === 'flagged' && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => retryTask(t.id)}
+                                title="Approve and execute"
+                              >
+                                <Check className="h-3 w-3 text-emerald-500" />
+                              </Button>
+                            )}
                             {(t.status === 'failed' ||
-                              t.status === 'flagged' ||
                               t.status === 'canceled' ||
                               t.status === 'skipped') && (
-                              <Button size="sm" variant="ghost" onClick={() => retryTask(t.id)}>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => retryTask(t.id)}
+                                title="Retry"
+                              >
                                 <RotateCw className="h-3 w-3" />
                               </Button>
                             )}
                             {(t.status === 'pending' || t.status === 'flagged') && (
-                              <Button size="sm" variant="ghost" onClick={() => cancelTask(t.id)}>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => cancelTask(t.id)}
+                                title={t.status === 'flagged' ? 'Dismiss' : 'Cancel'}
+                              >
                                 <X className="h-3 w-3" />
                               </Button>
                             )}
