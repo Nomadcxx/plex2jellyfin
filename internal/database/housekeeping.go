@@ -276,6 +276,57 @@ func (m *MediaDB) CancelHousekeepingTask(id int64) error {
 	return err
 }
 
+// ListHousekeepingTasksByKind returns up to `limit` tasks of the given
+// kind+status, oldest first. Used by the verifier sweep.
+func (m *MediaDB) ListHousekeepingTasksByKind(kind, status string, limit int) ([]*HousekeepingTask, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := m.db.Query(`
+		SELECT id, job_name, kind, payload, dedup_key, priority,
+		       status, attempts, last_error, created_at, started_at,
+		       finished_at, next_attempt_at
+		  FROM housekeeping_tasks
+		 WHERE kind = ? AND status = ?
+		 ORDER BY id ASC
+		 LIMIT ?`, kind, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*HousekeepingTask{}
+	for rows.Next() {
+		t, err := scanHousekeepingTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// UpdateHousekeepingTask rewrites a task's kind/status/payload (used when
+// the verifier reclassifies a flagged year_mismatch as distinct or as a
+// genuine duplicate).
+func (m *MediaDB) UpdateHousekeepingTask(id int64, kind, status string, payload map[string]any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+	_, err = m.db.Exec(`
+		UPDATE housekeeping_tasks
+		   SET kind = ?, status = ?, payload = ?,
+		       last_error = NULL,
+		       finished_at = CASE WHEN ? IN ('skipped','done','failed','canceled')
+		                         THEN CURRENT_TIMESTAMP ELSE finished_at END
+		 WHERE id = ?`, kind, status, string(body), status, id)
+	return err
+}
+
 type hkScanner interface {
 	Scan(dest ...any) error
 }

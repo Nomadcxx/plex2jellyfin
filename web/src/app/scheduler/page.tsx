@@ -105,6 +105,25 @@ export default function SchedulerPage() {
     await fetch(`/api/v1/housekeeping/tasks/${id}/cancel`, { method: 'POST' });
     refresh();
   };
+  const verifyFlagged = async () => {
+    const res = await fetch('/api/v1/housekeeping/verify-flagged', { method: 'POST' });
+    if (!res.ok) {
+      const txt = await res.text();
+      toast.error(`Re-verify failed: ${txt}`);
+      return;
+    }
+    const data = await res.json();
+    toast.success(
+      `Verifier: scanned=${data.Scanned ?? 0} distinct=${data.Distinct ?? 0} duplicate=${data.Duplicate ?? 0} unknown=${data.Unknown ?? 0}`
+    );
+    refresh();
+  };
+  const detectNow = async () => {
+    const res = await fetch('/api/v1/scheduler/jobs/housekeeping.detect/run', { method: 'POST' });
+    if (!res.ok) toast.error('Detect failed');
+    else toast.success('Detect started');
+    refresh();
+  };
 
   return (
     <AppShell>
@@ -189,6 +208,13 @@ export default function SchedulerPage() {
 
           <TabsContent value="tasks" className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="default" onClick={detectNow} title="Run housekeeping.detect now">
+                <Play className="h-3 w-3 mr-1" /> Rescan
+              </Button>
+              <Button size="sm" variant="outline" onClick={verifyFlagged} title="Run TMDB verifier on every flagged year_mismatch">
+                <AlertTriangle className="h-3 w-3 mr-1" /> Re-verify flagged
+              </Button>
+              <div className="w-px h-5 bg-zinc-700 mx-1" />
               <Button
                 size="sm"
                 variant={statusFilter === '' ? 'default' : 'outline'}
@@ -216,6 +242,7 @@ export default function SchedulerPage() {
                       <th className="p-2 text-left">Kind</th>
                       <th className="p-2 text-left">Status</th>
                       <th className="p-2 text-left">Path</th>
+                      <th className="p-2 text-left">Notes</th>
                       <th className="p-2 text-left">Attempts</th>
                       <th className="p-2 text-left">Created</th>
                       <th className="p-2 text-right">Actions</th>
@@ -224,7 +251,7 @@ export default function SchedulerPage() {
                   <tbody>
                     {tasks.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="p-6 text-center text-zinc-500">
+                        <td colSpan={8} className="p-6 text-center text-zinc-500">
                           No tasks.
                         </td>
                       </tr>
@@ -236,6 +263,10 @@ export default function SchedulerPage() {
                         (t.payload?.src_path as string) ||
                         (t.payload?.source as string) ||
                         '';
+                      const verification = t.payload?.verification as
+                        | { verdict?: string; source?: string; reason?: string }
+                        | undefined;
+                      const note = verification?.reason || t.last_error || '';
                       return (
                         <tr key={t.id} className="border-b border-zinc-900 hover:bg-zinc-900/40">
                           <td className="p-2 font-mono text-zinc-500">{t.id}</td>
@@ -245,6 +276,12 @@ export default function SchedulerPage() {
                           </td>
                           <td className="p-2 text-xs text-zinc-400 truncate max-w-md" title={path}>
                             {path}
+                          </td>
+                          <td className="p-2 text-xs text-zinc-500 truncate max-w-xs" title={note}>
+                            {verification?.source && (
+                              <span className="text-fuchsia-400">[{verification.source}] </span>
+                            )}
+                            {note}
                           </td>
                           <td className="p-2">{t.attempts}</td>
                           <td className="p-2 text-zinc-500 text-xs">

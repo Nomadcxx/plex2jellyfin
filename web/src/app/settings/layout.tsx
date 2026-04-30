@@ -13,6 +13,7 @@ const nav = [
   { href: '/settings/sonarr', label: 'Sonarr', icon: Radio },
   { href: '/settings/radarr', label: 'Radarr', icon: Radio },
   { href: '/settings/jellyfin', label: 'Jellyfin', icon: ListChecks },
+  { href: '/settings/tmdb', label: 'TMDB', icon: Search },
   { href: '/settings/ai', label: 'AI', icon: Bot },
   { href: '/settings/options', label: 'Options', icon: SlidersHorizontal },
   { href: '/settings/logging', label: 'Logging', icon: Wrench },

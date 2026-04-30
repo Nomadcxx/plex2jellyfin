@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, Bot, FolderOpen, HardDrive, ListChecks, Radio, Settings, SlidersHorizontal, Wrench } from 'lucide-react';
+import { ArrowRight, Bot, FolderOpen, HardDrive, ListChecks, Radio, Search, Settings, SlidersHorizontal, Wrench } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 const sections = [
@@ -10,6 +10,7 @@ const sections = [
   { href: '/settings/sonarr', title: 'Sonarr', desc: 'TV manager connection and import notification settings.', icon: Radio },
   { href: '/settings/radarr', title: 'Radarr', desc: 'Movie manager connection and import notification settings.', icon: Radio },
   { href: '/settings/jellyfin', title: 'Jellyfin', desc: 'Server connection, playback safety, and webhooks.', icon: ListChecks },
+  { href: '/settings/tmdb', title: 'TMDB', desc: 'Optional API key used by the housekeeping verifier to disambiguate remakes.', icon: Search },
   { href: '/settings/ai', title: 'AI', desc: 'Ollama parsing and enhancement model settings.', icon: Bot },
   { href: '/settings/options', title: 'Options', desc: 'Transfer and verification behavior.', icon: SlidersHorizontal },
   { href: '/settings/logging', title: 'Logging', desc: 'Runtime log level and rotation settings.', icon: Wrench },

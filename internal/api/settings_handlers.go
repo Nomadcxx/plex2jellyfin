@@ -93,6 +93,8 @@ func (h *SettingsHandlers) maskSection(section string, raw json.RawMessage) json
 		config.MaskSecrets(&masked.Radarr)
 	case "jellyfin":
 		config.MaskSecrets(&masked.Jellyfin)
+	case "tmdb":
+		config.MaskSecrets(&masked.TMDB)
 	default:
 		return raw
 	}
@@ -137,6 +139,10 @@ func preserveMaskedSectionSecrets(current *config.Config, section string, raw js
 		}
 		if isMaskedSecret(candidate.Jellyfin.PluginSharedSecret) {
 			candidate.Jellyfin.PluginSharedSecret = current.Jellyfin.PluginSharedSecret
+		}
+	case "tmdb":
+		if isMaskedSecret(candidate.TMDB.APIKey) {
+			candidate.TMDB.APIKey = current.TMDB.APIKey
 		}
 	default:
 		return raw, nil

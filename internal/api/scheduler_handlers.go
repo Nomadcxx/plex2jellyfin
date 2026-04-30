@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	"github.com/go-chi/chi/v5"
@@ -116,6 +118,21 @@ func (h *HousekeepingHandlers) CancelTask(w http.ResponseWriter, r *http.Request
 		return
 	}
 	body, err := h.IPC.Call(r.Context(), ipc.CmdTaskCancel, map[string]int64{"id": id})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
+}
+
+// VerifyFlagged re-runs the TMDB verifier across every flagged
+// year_mismatch task and reclassifies them as distinct/duplicate/unknown.
+// May take 30s+ for large flag backlogs (~1s per remote lookup).
+func (h *HousekeepingHandlers) VerifyFlagged(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	body, err := h.IPC.Call(ctx, ipc.CmdVerifyFlagged, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

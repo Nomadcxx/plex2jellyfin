@@ -30,6 +30,7 @@ const (
 	CmdTasksList       Command = "TASKS_LIST"
 	CmdTaskRetry       Command = "TASK_RETRY"
 	CmdTaskCancel      Command = "TASK_CANCEL"
+	CmdVerifyFlagged   Command = "VERIFY_FLAGGED"
 )
 
 type Request struct {

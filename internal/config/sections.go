@@ -20,6 +20,7 @@ var sections = map[string]sectionAccessor{
 	"sonarr":      {get: func(c *Config) any { return c.Sonarr }, set: setSonarr},
 	"radarr":      {get: func(c *Config) any { return c.Radarr }, set: setRadarr},
 	"jellyfin":    {get: func(c *Config) any { return c.Jellyfin }, set: setJellyfin},
+	"tmdb":        {get: func(c *Config) any { return c.TMDB }, set: setTMDB},
 	"ai":          {get: func(c *Config) any { return c.AI }, set: setAI},
 	"daemon":      {get: func(c *Config) any { return c.Daemon }, set: setDaemon},
 	"logging":     {get: func(c *Config) any { return c.Logging }, set: setLogging},
@@ -109,6 +110,15 @@ func setJellyfin(c *Config, raw json.RawMessage) error {
 		return err
 	}
 	c.Jellyfin = v
+	return nil
+}
+
+func setTMDB(c *Config, raw json.RawMessage) error {
+	var v TMDBConfig
+	if err := decodeSection(raw, &v); err != nil {
+		return err
+	}
+	c.TMDB = v
 	return nil
 }
 

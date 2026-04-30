@@ -121,7 +121,33 @@ func (v *Verifier) lookup(ctx context.Context, kind MediaKind, title, year strin
 	if matches == nil {
 		matches = v.fetchAll(ctx, kind, title)
 	}
-	return pickByYear(matches, year)
+	// Narrow to exact-title hits when present so close-but-distinct works
+	// like "Hostel Dissected" don't pollute year-tolerance picking.
+	if exact := filterExactTitle(matches, title); len(exact) > 0 {
+		matches = exact
+	}
+	if m := pickByYear(matches, year); m != nil {
+		return m
+	}
+	// Fallback: if there is exactly one canonical exact-title candidate
+	// across all years, treat the folder as resolving to it (the user's
+	// year is just wrong). When there are several real candidates the
+	// year disambiguator was needed and we stay "unresolved".
+	if len(matches) == 1 {
+		return &matches[0]
+	}
+	return nil
+}
+
+func filterExactTitle(matches []Match, title string) []Match {
+	want := strings.ToLower(strings.TrimSpace(title))
+	out := make([]Match, 0, len(matches))
+	for _, m := range matches {
+		if strings.ToLower(strings.TrimSpace(m.Title)) == want {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func (v *Verifier) lookupLocal(kind MediaKind, title, year string) *Match {
@@ -201,15 +227,39 @@ func (v *Verifier) cacheStore(kind MediaKind, title string, matches []Match) {
 }
 
 func (v *Verifier) fetchAll(ctx context.Context, kind MediaKind, title string) []Match {
-	if matches := v.fetchJellyfin(ctx, kind, title); len(matches) > 0 {
-		v.cacheStore(kind, title, matches)
-		return matches
+	// TMDB first — its release/air dates are the disambiguator we rely on
+	// in pickByYear. Jellyfin RemoteSearch is then used to add any IDs
+	// TMDB missed (or to enrich entries that lack a year).
+	byID := map[string]Match{}
+	order := []string{}
+	add := func(m Match) {
+		if m.ID == "" {
+			return
+		}
+		if existing, ok := byID[m.ID]; ok {
+			// prefer the entry that has a year populated
+			if existing.Year == "" && m.Year != "" {
+				byID[m.ID] = m
+			}
+			return
+		}
+		byID[m.ID] = m
+		order = append(order, m.ID)
 	}
-	if matches := v.fetchTMDB(ctx, kind, title); len(matches) > 0 {
-		v.cacheStore(kind, title, matches)
-		return matches
+	for _, m := range v.fetchTMDB(ctx, kind, title) {
+		add(m)
 	}
-	return nil
+	for _, m := range v.fetchJellyfin(ctx, kind, title) {
+		add(m)
+	}
+	out := make([]Match, 0, len(order))
+	for _, id := range order {
+		out = append(out, byID[id])
+	}
+	if len(out) > 0 {
+		v.cacheStore(kind, title, out)
+	}
+	return out
 }
 
 func (v *Verifier) fetchJellyfin(ctx context.Context, kind MediaKind, title string) []Match {
@@ -292,15 +342,49 @@ func pickByYear(matches []Match, year string) *Match {
 	if len(matches) == 0 {
 		return nil
 	}
-	if year != "" {
-		for i := range matches {
-			if matches[i].Year == year {
-				return &matches[i]
-			}
+	if year == "" {
+		if len(matches) == 1 {
+			return &matches[0]
+		}
+		return nil
+	}
+	// exact-year match wins
+	for i := range matches {
+		if matches[i].Year == year {
+			return &matches[i]
 		}
 	}
-	if year == "" && len(matches) == 1 {
-		return &matches[0]
+	// Tolerance: TMDB's release_date / first_air_date and the user's
+	// folder year occasionally disagree by 1 (e.g. festival run vs wide
+	// release, or split-year shows). Allow ±1 only when a single match
+	// is within tolerance — refuse to guess if multiple compete.
+	yi := atoiSafe(year)
+	if yi == 0 {
+		return nil
 	}
-	return nil
+	var nearest *Match
+	for i := range matches {
+		mi := atoiSafe(matches[i].Year)
+		if mi == 0 {
+			continue
+		}
+		if mi == yi-1 || mi == yi+1 {
+			if nearest != nil {
+				return nil
+			}
+			nearest = &matches[i]
+		}
+	}
+	return nearest
+}
+
+func atoiSafe(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
 }

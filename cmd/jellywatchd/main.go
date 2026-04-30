@@ -583,6 +583,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		controlServer.Register(daemonipc.CmdTasksList, tasksListHandler(db))
 		controlServer.Register(daemonipc.CmdTaskRetry, taskRetryHandler(db))
 		controlServer.Register(daemonipc.CmdTaskCancel, taskCancelHandler(db))
+		controlServer.Register(daemonipc.CmdVerifyFlagged, verifyFlaggedHandler(hkEngine))
 		logger.Info("daemon", "Scheduler + housekeeping engine started")
 	}
 

@@ -213,6 +213,7 @@ func (s *Server) apiRouter() *chi.Mux {
 			r.Get("/tasks", hkH.ListTasks)
 			r.Post("/tasks/{id}/retry", hkH.RetryTask)
 			r.Post("/tasks/{id}/cancel", hkH.CancelTask)
+			r.Post("/verify-flagged", hkH.VerifyFlagged)
 		})
 
 		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}

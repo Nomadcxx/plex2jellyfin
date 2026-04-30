@@ -346,6 +346,101 @@ func chooseCanonical(group []folder) folder {
 	return best
 }
 
+// VerifyFlaggedResult summarises a sweep of flagged year_mismatch tasks
+// through the TMDB verifier.
+type VerifyFlaggedResult struct {
+	Scanned   int
+	Distinct  int
+	Duplicate int
+	Unknown   int
+	Errors    int
+}
+
+// VerifyFlagged re-runs the verifier against every flagged year_mismatch
+// task. Tasks identified as legitimate remakes are downgraded to
+// 'skipped' (visible in the WebUI but inert); tasks identified as real
+// cross-volume duplicates are upgraded to a pending move_merge.
+func (e *Engine) VerifyFlagged(ctx context.Context) (*VerifyFlaggedResult, error) {
+	res := &VerifyFlaggedResult{}
+	if e.verifier == nil || !e.verifier.Available() {
+		return res, fmt.Errorf("verifier unavailable: configure jellyfin or tmdb api key")
+	}
+	tasks, err := e.db.ListHousekeepingTasksByKind(database.TaskKindYearMismatch, database.TaskStatusFlagged, 0)
+	if err != nil {
+		return res, err
+	}
+	for _, t := range tasks {
+		select {
+		case <-ctx.Done():
+			return res, ctx.Err()
+		default:
+		}
+		res.Scanned++
+		title, _ := t.Payload["title"].(string)
+		kind, _ := t.Payload["kind"].(string)
+		srcYear := folderYearFromPath(t.Payload["src_path"])
+		dstYear := folderYearFromPath(t.Payload["dst_path"])
+		mk := tmdb.KindMovie
+		if kind == "tv" {
+			mk = tmdb.KindSeries
+		}
+		vr := e.verifier.Verify(ctx, mk, title, srcYear, title, dstYear)
+		if vr == nil {
+			res.Errors++
+			continue
+		}
+		t.Payload["verification"] = vr
+		switch vr.Verdict {
+		case "distinct":
+			res.Distinct++
+			if err := e.db.UpdateHousekeepingTask(t.ID, database.TaskKindYearMismatch, database.TaskStatusSkipped, t.Payload); err != nil {
+				res.Errors++
+			}
+		case "duplicate":
+			res.Duplicate++
+			if err := e.db.UpdateHousekeepingTask(t.ID, database.TaskKindMoveMerge, database.TaskStatusPending, t.Payload); err != nil {
+				res.Errors++
+			}
+		default:
+			res.Unknown++
+			// keep flagged but persist verification for UI display
+			if err := e.db.UpdateHousekeepingTask(t.ID, database.TaskKindYearMismatch, database.TaskStatusFlagged, t.Payload); err != nil {
+				res.Errors++
+			}
+		}
+	}
+	return res, nil
+}
+
+// folderYearFromPath extracts a 4-digit year from a folder path like
+// "/srv/Movies/Solaris (1972)" → "1972". Returns "" if not found.
+func folderYearFromPath(v any) string {
+	s, _ := v.(string)
+	if s == "" {
+		return ""
+	}
+	base := filepath.Base(s)
+	// look for "(YYYY)"
+	i := strings.LastIndex(base, "(")
+	j := strings.LastIndex(base, ")")
+	if i >= 0 && j > i+4 {
+		inner := base[i+1 : j]
+		if len(inner) == 4 && allDigits(inner) {
+			return inner
+		}
+	}
+	return ""
+}
+
+func allDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (e *Engine) detectOrphanSources(ctx context.Context, res *DetectResult, enqueue func(string, map[string]any, int)) {
 	for _, dir := range e.cfg.WatchDirs {
 		entries, err := os.ReadDir(dir)

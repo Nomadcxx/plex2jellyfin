@@ -6,6 +6,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/housekeeping"
 	"github.com/Nomadcxx/jellywatch/internal/scheduler"
 )
 
@@ -200,5 +201,17 @@ func taskCancelHandler(db *database.MediaDB) ipc.Handler {
 			return
 		}
 		w.Result(req.ID, json.RawMessage(`{"canceled":true}`))
+	}
+}
+
+func verifyFlaggedHandler(eng *housekeeping.Engine) ipc.Handler {
+	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+		res, err := eng.VerifyFlagged(ctx)
+		if err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		data, _ := json.Marshal(res)
+		w.Result(req.ID, data)
 	}
 }

@@ -74,6 +74,7 @@ export type SettingsSection =
   | 'sonarr'
   | 'radarr'
   | 'jellyfin'
+  | 'tmdb'
   | 'ai'
   | 'options'
   | 'logging'
