@@ -772,6 +772,34 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 	}, nil
 }
 
+// OrganizeTVWithParsedAuto routes a parsed TV episode through the smart
+// library selector before organizing. This ensures AI-enhanced moves
+// land on the volume that already holds the series instead of always
+// dropping onto the first configured TV library.
+func (o *Organizer) OrganizeTVWithParsedAuto(sourcePath string, tv naming.TVShowInfo, getFileSize func(string) (int64, error)) (*OrganizationResult, error) {
+	size, err := getFileSize(sourcePath)
+	if err != nil {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			Error:      fmt.Errorf("unable to get file size: %w", err),
+		}, nil
+	}
+
+	selection, err := o.selector.SelectTVShowLibrary(tv.Title, tv.Year, size)
+	if err != nil {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			Error:      fmt.Errorf("unable to select library: %w", err),
+		}, nil
+	}
+
+	log.Printf("[organizer] tv library selected (parsed): title=%q lib=%s reason=%s", tv.Title, selection.Library, selection.Reason)
+
+	return o.OrganizeTVWithParsed(sourcePath, selection.Library, tv)
+}
+
 func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv naming.TVShowInfo) (*OrganizationResult, error) {
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)

@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 16
+const currentSchemaVersion = 18
 
 // SQL migration scripts
 var migrations = []migration{
@@ -553,6 +553,56 @@ var migrations = []migration{
 			  WHERE jellyfin_resolved_at IS NOT NULL`,
 			`CREATE INDEX idx_pd_jellyfin_identified ON parse_decisions(jellyfin_identified)`,
 			`INSERT INTO schema_version (version) VALUES (16)`,
+		},
+	},
+	{
+		version: 17,
+		// Persistent housekeeping task queue. Detection cycles enqueue
+		// fix tasks; a bounded worker pool drains them. dedup_key
+		// prevents duplicate enqueues across cycles for the same fix.
+		up: []string{
+			`CREATE TABLE housekeeping_tasks (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				job_name TEXT NOT NULL,
+				kind TEXT NOT NULL,
+				payload TEXT NOT NULL DEFAULT '{}',
+				dedup_key TEXT NOT NULL,
+				priority INTEGER NOT NULL DEFAULT 100,
+				status TEXT NOT NULL DEFAULT 'pending',
+				attempts INTEGER NOT NULL DEFAULT 0,
+				last_error TEXT,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				started_at DATETIME,
+				finished_at DATETIME,
+				next_attempt_at DATETIME
+			)`,
+			`CREATE UNIQUE INDEX idx_hk_dedup ON housekeeping_tasks(dedup_key) WHERE status IN ('pending','running')`,
+			`CREATE INDEX idx_hk_status ON housekeeping_tasks(status, priority, id)`,
+			`CREATE INDEX idx_hk_kind ON housekeeping_tasks(kind, status)`,
+			`INSERT INTO schema_version (version) VALUES (17)`,
+		},
+	},
+	{
+		version: 18,
+		// Scheduler registry. Each row defines a cron-style recurring job
+		// (HH:MM or @hourly/@continuous). Daemon ticks every minute and
+		// fires due jobs; last_* fields track outcomes for the WebUI.
+		up: []string{
+			`CREATE TABLE scheduled_jobs (
+				name TEXT PRIMARY KEY,
+				schedule TEXT NOT NULL,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				last_run_at DATETIME,
+				last_duration_ms INTEGER,
+				last_result TEXT,
+				last_error TEXT,
+				next_run_at DATETIME,
+				running INTEGER NOT NULL DEFAULT 0,
+				config TEXT NOT NULL DEFAULT '{}',
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`INSERT INTO schema_version (version) VALUES (18)`,
 		},
 	},
 }

@@ -17,6 +17,7 @@ import (
 	daemonipc "github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	daemonreload "github.com/Nomadcxx/jellywatch/internal/daemon/reload"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/housekeeping"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/labeling"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
@@ -24,6 +25,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/scanner"
+	"github.com/Nomadcxx/jellywatch/internal/scheduler"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
@@ -527,6 +529,55 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			}
 		}()
 		logger.Info("daemon", "Jellyfin parse-decision sweeper started")
+	}
+
+	// Housekeeping engine + scheduler: detect cross-volume duplicates,
+	// orphan source dirs, stuck syncs, etc., and drain the queued fix
+	// tasks under bounded concurrency. See internal/housekeeping.
+	if db != nil {
+		hkCfg := housekeeping.DefaultConfig()
+		hkCfg.TVLibraries = cfg.Libraries.TV
+		hkCfg.MovieLibraries = cfg.Libraries.Movies
+		hkCfg.WatchDirs = watchPaths
+		hkEngine := housekeeping.NewEngine(hkCfg, db, logger)
+
+		sched := scheduler.New(db, logger)
+		if err := sched.Register(scheduler.Job{
+			Name:     "housekeeping.detect",
+			Schedule: "@hourly",
+			Run: func(ctx context.Context) (string, error) {
+				res, err := hkEngine.Detect(ctx)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("enqueued=%d cross_volume=%d no_year=%d year_mismatch=%d polluted=%d orphan=%d stuck_sync=%d",
+					res.Enqueued, res.CrossVolumeDupes, res.NoYearMerges, res.YearMismatches, res.PollutedNames, res.OrphanSources, res.StuckSyncs), nil
+			},
+		}); err != nil {
+			logger.Warn("daemon", "register housekeeping.detect failed", logging.F("error", err.Error()))
+		}
+		if err := sched.Register(scheduler.Job{
+			Name:     "housekeeping.drain",
+			Schedule: "@continuous",
+			Run: func(ctx context.Context) (string, error) {
+				if err := hkEngine.Drain(ctx); err != nil && err != context.Canceled {
+					return "", err
+				}
+				return "drain idle", nil
+			},
+		}); err != nil {
+			logger.Warn("daemon", "register housekeeping.drain failed", logging.F("error", err.Error()))
+		}
+		go sched.Run(ctx)
+
+		controlServer.Register(daemonipc.CmdJobsList, jobsListHandler(db))
+		controlServer.Register(daemonipc.CmdJobRun, jobRunHandler(sched, ctx))
+		controlServer.Register(daemonipc.CmdJobStop, jobStopHandler(sched))
+		controlServer.Register(daemonipc.CmdJobUpdate, jobUpdateHandler(db))
+		controlServer.Register(daemonipc.CmdTasksList, tasksListHandler(db))
+		controlServer.Register(daemonipc.CmdTaskRetry, taskRetryHandler(db))
+		controlServer.Register(daemonipc.CmdTaskCancel, taskCancelHandler(db))
+		logger.Info("daemon", "Scheduler + housekeeping engine started")
 	}
 
 	sigChan := make(chan os.Signal, 1)

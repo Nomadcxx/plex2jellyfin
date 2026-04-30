@@ -23,6 +23,13 @@ const (
 	CmdMetadataRefresh Command = "METADATA_REFRESH"
 	CmdSweep           Command = "SWEEP"
 	CmdParsesAudit     Command = "PARSES_AUDIT"
+	CmdJobsList        Command = "JOBS_LIST"
+	CmdJobRun          Command = "JOB_RUN"
+	CmdJobStop         Command = "JOB_STOP"
+	CmdJobUpdate       Command = "JOB_UPDATE"
+	CmdTasksList       Command = "TASKS_LIST"
+	CmdTaskRetry       Command = "TASK_RETRY"
+	CmdTaskCancel      Command = "TASK_CANCEL"
 )
 
 type Request struct {

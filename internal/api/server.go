@@ -200,6 +200,21 @@ func (s *Server) apiRouter() *chi.Mux {
 			r.Post("/parses/audit", opsStream.ParsesAudit)
 		})
 
+		schedH := &SchedulerHandlers{IPC: s.ipc}
+		r.Route("/scheduler", func(r chi.Router) {
+			r.Get("/jobs", schedH.ListJobs)
+			r.Post("/jobs/{name}/run", schedH.RunJob)
+			r.Post("/jobs/{name}/stop", schedH.StopJob)
+			r.Patch("/jobs/{name}", schedH.UpdateJob)
+		})
+
+		hkH := &HousekeepingHandlers{IPC: s.ipc}
+		r.Route("/housekeeping", func(r chi.Router) {
+			r.Get("/tasks", hkH.ListTasks)
+			r.Post("/tasks/{id}/retry", hkH.RetryTask)
+			r.Post("/tasks/{id}/cancel", hkH.CancelTask)
+		})
+
 		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		pathsH := &PathsHandlers{Cfg: s.cfg, IPC: s.ipc}
 		libsH := &LibrariesHandlers{Cfg: s.cfg, IPC: s.ipc}

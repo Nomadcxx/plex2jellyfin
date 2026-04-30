@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Copy, Download, Activity, FolderSync, Settings } from 'lucide-react';
+import { LayoutDashboard, Copy, Download, Activity, FolderSync, Settings, Calendar } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -11,6 +11,7 @@ const navigation = [
   { name: 'Queue', href: '/queue', icon: Download },
   { name: 'Activity', href: '/activity', icon: Activity },
   { name: 'Consolidation', href: '/consolidation', icon: FolderSync },
+  { name: 'Scheduler', href: '/scheduler', icon: Calendar },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

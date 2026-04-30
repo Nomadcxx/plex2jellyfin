@@ -1779,13 +1779,16 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 			tvInfo.Episode = item.TVInfo.Episode
 		}
 
-		// Determine target library (TV auto-selection uses first TV library)
-		targetLib := ""
-		if len(h.tvLibraries) > 0 {
-			targetLib = h.tvLibraries[0]
-		}
-
-		result, err = h.tvOrganizer.OrganizeTVWithParsed(item.Path, targetLib, tvInfo)
+		// Use smart selector instead of hard-coding tvLibraries[0]; this
+		// ensures AI-organized episodes consolidate onto the volume that
+		// already holds the series. Mirrors the regex path above.
+		result, err = h.tvOrganizer.OrganizeTVWithParsedAuto(item.Path, tvInfo, func(p string) (int64, error) {
+			info, err := os.Stat(p)
+			if err != nil {
+				return 0, err
+			}
+			return info.Size(), nil
+		})
 	} else {
 		movieInfo := naming.MovieInfo{
 			Title: aiResult.Title,
