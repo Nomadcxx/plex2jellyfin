@@ -605,6 +605,24 @@ var migrations = []migration{
 			`INSERT INTO schema_version (version) VALUES (18)`,
 		},
 	},
+	{
+		version: 19,
+		// Cache for TMDB / Jellyfin RemoteSearch lookups. Keyed by
+		// normalized title; results_json holds the full match list so
+		// year_mismatch verifier can decide if two folders are the same
+		// film (same tmdb_id) or distinct works (different tmdb_ids).
+		up: []string{
+			`CREATE TABLE tmdb_lookups (
+				normalized_title TEXT NOT NULL,
+				media_kind       TEXT NOT NULL,
+				source           TEXT NOT NULL,
+				results_json     TEXT NOT NULL,
+				fetched_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY (normalized_title, media_kind)
+			)`,
+			`INSERT INTO schema_version (version) VALUES (19)`,
+		},
+	},
 }
 
 type migration struct {

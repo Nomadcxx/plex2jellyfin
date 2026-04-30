@@ -27,9 +27,22 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/jellywatch/internal/tmdb"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
+
+// normalizeFolderTitle lowercases and collapses whitespace WITHOUT
+// stripping trailing 4-digit numbers (which would conflate
+// "Blade Runner" with "Blade Runner 2049"). Library folders are
+// "Title (YYYY)" so the year is already separated by splitFolderName.
+func normalizeFolderTitle(title string) string {
+	t := strings.ToLower(strings.TrimSpace(title))
+	// collapse internal whitespace and punctuation noise that varies
+	// between Sonarr/Radarr renamers (e.g. " & " vs " and ").
+	t = strings.ReplaceAll(t, " and ", " & ")
+	t = strings.Join(strings.Fields(t), " ")
+	return t
+}
 
 // Config controls detector behaviour and worker concurrency.
 type Config struct {
@@ -61,7 +74,12 @@ type Engine struct {
 	db         *database.MediaDB
 	logger     *logging.Logger
 	transferer transfer.Transferer
+	verifier   *tmdb.Verifier
 }
+
+// SetVerifier attaches a TMDB verifier so the detector can distinguish
+// remakes from genuine duplicates before flagging year-mismatches.
+func (e *Engine) SetVerifier(v *tmdb.Verifier) { e.verifier = v }
 
 // NewEngine constructs an Engine.
 func NewEngine(cfg Config, db *database.MediaDB, logger *logging.Logger) *Engine {
@@ -86,6 +104,7 @@ type DetectResult struct {
 	CrossVolumeDupes int
 	NoYearMerges     int
 	YearMismatches   int
+	VerifiedDistinct int
 	PollutedNames    int
 	OrphanSources    int
 	StuckSyncs       int
@@ -164,7 +183,7 @@ func (e *Engine) scanLibraries(libs []string) []folder {
 				library:  lib,
 				path:     filepath.Join(lib, name),
 				name:     name,
-				title:    naming.NormalizeName(title),
+				title:    normalizeFolderTitle(title),
 				year:     year,
 				hasYear:  hasYear,
 				polluted: polluted,
@@ -260,17 +279,45 @@ func (e *Engine) detectDuplicateGroups(ctx context.Context, folders []folder, ki
 				continue
 			}
 			payload := map[string]any{
-				"title":     title,
-				"src_path":  f.path,
-				"dst_path":  canonical.path,
-				"src_lib":   f.library,
-				"dst_lib":   canonical.library,
-				"kind":      kind,
+				"title":    title,
+				"src_path": f.path,
+				"dst_path": canonical.path,
+				"src_lib":  f.library,
+				"dst_lib":  canonical.library,
+				"kind":     kind,
 			}
 			switch {
 			case yearMismatch:
-				res.YearMismatches++
-				enqueue(database.TaskKindYearMismatch, payload, 150)
+				// Try to verify via TMDB before flagging. The verifier
+				// returns one of:
+				//   - "distinct"  → legitimate remakes, skip silently
+				//   - "duplicate" → same TMDB id, treat as merge
+				//   - "unknown"   → flag for human review (current behavior)
+				verdict := "unknown"
+				if e.verifier != nil && e.verifier.Available() {
+					mk := tmdb.KindMovie
+					if kind == "tv" {
+						mk = tmdb.KindSeries
+					}
+					vr := e.verifier.Verify(ctx, mk,
+						title, f.year, title, canonical.year)
+					if vr != nil {
+						verdict = vr.Verdict
+						payload["verification"] = vr
+					}
+				}
+				switch verdict {
+				case "distinct":
+					res.VerifiedDistinct++
+					// no task enqueued — the two folders are
+					// confirmed-different works.
+				case "duplicate":
+					res.CrossVolumeDupes++
+					enqueue(database.TaskKindMoveMerge, payload, 100)
+				default:
+					res.YearMismatches++
+					enqueue(database.TaskKindYearMismatch, payload, 150)
+				}
 			case !f.hasYear && canonical.hasYear:
 				res.NoYearMerges++
 				enqueue(database.TaskKindNoYearMerge, payload, 50)

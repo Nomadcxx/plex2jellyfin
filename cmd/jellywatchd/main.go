@@ -26,6 +26,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/scanner"
 	"github.com/Nomadcxx/jellywatch/internal/scheduler"
+	"github.com/Nomadcxx/jellywatch/internal/tmdb"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
@@ -541,6 +542,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		hkCfg.WatchDirs = watchPaths
 		hkEngine := housekeeping.NewEngine(hkCfg, db, logger)
 
+		// Wire optional verifier (Jellyfin RemoteSearch + TMDB direct).
+		// Either tier may be unavailable; the verifier degrades gracefully.
+		hkVerifier := tmdb.NewVerifier(db, jellyfinClient, cfg.TMDB.APIKey)
+		hkEngine.SetVerifier(hkVerifier)
+
 		sched := scheduler.New(db, logger)
 		if err := sched.Register(scheduler.Job{
 			Name:     "housekeeping.detect",
@@ -550,8 +556,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				if err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("enqueued=%d cross_volume=%d no_year=%d year_mismatch=%d polluted=%d orphan=%d stuck_sync=%d",
-					res.Enqueued, res.CrossVolumeDupes, res.NoYearMerges, res.YearMismatches, res.PollutedNames, res.OrphanSources, res.StuckSyncs), nil
+				return fmt.Sprintf("enqueued=%d cross_volume=%d no_year=%d year_mismatch=%d verified_distinct=%d polluted=%d orphan=%d stuck_sync=%d",
+					res.Enqueued, res.CrossVolumeDupes, res.NoYearMerges, res.YearMismatches, res.VerifiedDistinct, res.PollutedNames, res.OrphanSources, res.StuckSyncs), nil
 			},
 		}); err != nil {
 			logger.Warn("daemon", "register housekeeping.detect failed", logging.F("error", err.Error()))

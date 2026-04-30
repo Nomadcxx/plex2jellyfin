@@ -32,6 +32,7 @@ type Config struct {
 	Sonarr        SonarrConfig      `mapstructure:"sonarr"`
 	Radarr        RadarrConfig      `mapstructure:"radarr"`
 	Jellyfin      JellyfinConfig    `mapstructure:"jellyfin"`
+	TMDB          TMDBConfig        `mapstructure:"tmdb"`
 	Logging       LoggingConfig     `mapstructure:"logging"`
 	Permissions   PermissionsConfig `mapstructure:"permissions"`
 	AI            AIConfig          `mapstructure:"ai"`
@@ -215,6 +216,14 @@ type RadarrConfig struct {
 	URL            string `mapstructure:"url"`
 	APIKey         string `mapstructure:"api_key" secret:"true"`
 	NotifyOnImport bool   `mapstructure:"notify_on_import"`
+}
+
+// TMDBConfig holds optional credentials for TMDB direct lookups. Used
+// by the housekeeping verifier as a fallback when Jellyfin RemoteSearch
+// is unavailable. Free key: themoviedb.org/settings/api.
+type TMDBConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	APIKey  string `mapstructure:"api_key" secret:"true"`
 }
 
 // JellyfinConfig contains Jellyfin integration settings.
