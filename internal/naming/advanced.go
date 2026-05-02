@@ -39,14 +39,10 @@ func init() {
 
 		// Audio formats with channels (most specific first)
 		`\b(DTS-HD\s?MA|DTS-HD\s?HRA|DTS-HD|DTS-X|DTS-ES)\b`, // DTS variants
-		// Codec glued to channel digits: AAC5.1, EAC3.5.1, DDP5.1, DD5.1
-		`\b(?:E?AC3|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d)?\b`,
-		// EAC followed by 1-3 digit groups separated by '.' or ' '.
-		// Catches both legitimate EAC3.5.1 / EAC3 and release-group
-		// shorthand where the 3 is dropped (EAC5.1, EAC7.1, EAC2.0, etc.)
-		// notably TSRG: ...DUAL.EAC5.1-TSRG.mkv.
-		`\bEAC\d(?:[. ]\d){0,2}\b`,
-		`\b(DD\+?|DDP|E?AC3|AAC|AC3)\d\s\d\b`,                // Audio with channels
+		// Codec glued to channel digits. 1-3 digit groups so all of these
+		// strip together: AAC2.0, DDP5.1, DD+5.1, MA5.1, AC3.5.1,
+		// EAC3.5.1, plus TSRG-style shorthand EAC5.1/EAC7.1/EAC2.0.
+		`\b(?:E?AC3?|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d){0,2}\b`,
 		`\b(DD\+?|DDP|E?AC3|AAC|AC3)\b`,                      // Audio without channels
 		`\b(TrueHD|Atmos|FLAC|PCM|Opus|MP3|DTS)\b`,           // Other audio codecs
 		`\d+Audio`,                             // Orphaned audio markers like "3Audio"
@@ -59,7 +55,6 @@ func init() {
 
 		// Audio channels (after audio codecs)
 		`\b\d\s\d\b`, // 7 1, 5 1, 2 0
-		`\b\d[ .]\d\b`, // Matches 5.1, 7.1 (require separator)
 		`\b(Stereo|Mono)\b`,
 		// Commentary markers
 		`\b(Plus Commentary|Commentary|Audio Commentary)\b`,
@@ -75,8 +70,10 @@ func init() {
 		// Streaming platforms
 		`\b(AMZN|NF|DSNP|HMAX|HULU|ATVP|PCOK|PMTP)\b`,
 
-		// Locale/language and subtitle markers
-		`\b(ITA|FRE|FRA|ENG|EN|ESP|ES|SPA|SUB|SUBS|SUBBED|DUB|DUBBED|DUAL|MULTI)\b`,
+		// Locale/language and subtitle markers. 3-letter codes only -
+		// 2-letter codes (EN, ES) collide with real title words ("No
+		// Good Deed", "Es", "En") so they are intentionally excluded.
+		`\b(ITA|FRE|FRA|ENG|ESP|SPA|GER|DEU|POR|RUS|JPN|KOR|CHI|HIN|SUB|SUBS|SUBBED|DUB|DUBBED|DUAL|MULTI)\b`,
 
 		// Video codecs (both spaced and non-spaced variants)
 		`\bH\s?26[456]\b`, // H 264, H264, H 265, H265, etc.

@@ -25,6 +25,14 @@ func TestRealWorldMovieParsing(t *testing.T) {
 		{"Foo.Bar.2024.1080p.WEB-DL.EAC2.0-GROUP.mkv", "Foo Bar", "2024"},
 		{"Baz.Qux.2024.1080p.WEB-DL.EAC9.2-GROUP.mkv", "Baz Qux", "2024"},
 		{"Standalone.EAC.2024.1080p.WEB-DL.EAC3-GROUP.mkv", "Standalone EAC", "2024"},
+		// Generalized codec+channel: AAC/DDP/MA/AC3 with shorthand or 3-digit forms.
+		{"Movie.A.2024.1080p.WEB-DL.AAC2.0-GROUP.mkv", "Movie A", "2024"},
+		{"Movie.B.2024.1080p.WEB-DL.DDP5.1-GROUP.mkv", "Movie B", "2024"},
+		{"Movie.C.2024.1080p.WEB-DL.AC3.5.1-GROUP.mkv", "Movie C", "2024"},
+		{"Movie.D.2024.1080p.WEB-DL.MA7.1-GROUP.mkv", "Movie D", "2024"},
+		// x264/x265 unified pattern still strips both.
+		{"Movie.E.2024.1080p.WEB-DL.x264-GROUP.mkv", "Movie E", "2024"},
+		{"Movie.F.2024.1080p.WEB-DL.x265-GROUP.mkv", "Movie F", "2024"},
 	}
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {

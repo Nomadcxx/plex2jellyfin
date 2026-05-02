@@ -45,15 +45,12 @@ func init() {
 		`\b(4K|UHD)\b`,
 		`\b(HDR10\+?|HDR|DoVi|DV|SDR|HLG)\b`,
 		// Codec glued to channel digits (must come BEFORE bare codec match so the
-		// trailing channel digits get stripped together): AAC5.1, EAC3.5.1, DDP5.1.
-		`\b(?:E?AC3|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d)?\b`,
-		// EAC followed by 1-3 digit groups separated by '.' or ' '.
-		// Catches both the legitimate EAC3.5.1 / EAC3 and release-group
-		// shorthand where the 3 is dropped (EAC5.1, EAC7.1, EAC2.0, etc.)
-		// notably TSRG: ...DUAL.EAC5.1-TSRG.mkv.
-		`\bEAC\d(?:[. ]\d){0,2}\b`,
+		// trailing channel digits get stripped together). Allows 1-3 digit
+		// groups so all of these are stripped:
+		//   AAC2.0, AAC5.1, DDP5.1, DD+5.1, MA5.1, AC3.5.1, EAC3.5.1
+		//   EAC5.1, EAC7.1, EAC2.0 (TSRG-style shorthand: 3 dropped from EAC3)
+		`\b(?:E?AC3?|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d){0,2}\b`,
 		`\b(DTS[ -]?HD|DTS[ -]?X|DTS|TrueHD|Atmos|AAC|AC3|EAC3|DD\+?|DDP|FLAC)\b`,
-		`\bDDP?\d[ .]?\d\b`,
 		// Audio channels alone (require an explicit separator to avoid stripping
 		// 2-digit standalone numbers like "28" in "28 Weeks Later").
 		`\b\d[ .]\d\b`,
@@ -62,8 +59,7 @@ func init() {
 		`\b(BluRay|Blu-ray|BDRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB)\b`,
 		`\b(HDTV|DVDRip|DVD)\b`,
 		`\b(AMZN|NF|ATVP|HULU|DSNP|MAX|PMTP)\b`,
-		`\b[xh][ .]?264\b`,
-		`\b[xh][ .]?265\b`,
+		`\b[xh][ .]?26[45]\b`,
 		`\b(HEVC|AVC|AV1)\b`,
 		`\b(PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED)\b`,
 		`\b(DUAL|DL|MULTI|DUB|SUB|SUBS)\b`,
