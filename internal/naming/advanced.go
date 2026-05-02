@@ -41,6 +41,10 @@ func init() {
 		`\b(DTS-HD\s?MA|DTS-HD\s?HRA|DTS-HD|DTS-X|DTS-ES)\b`, // DTS variants
 		// Codec glued to channel digits: AAC5.1, EAC3.5.1, DDP5.1, DD5.1
 		`\b(?:E?AC3|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d)?\b`,
+		// Release-group shorthand where the "3" is dropped from EAC3, e.g.
+		// "EAC5.1" / "EAC7.1" (notably TSRG: ...DUAL.EAC5.1-TSRG.mkv).
+		// 3 is excluded so legitimate EAC3 stays handled by the prior pattern.
+		`\bEAC[124-9](?:[. ]\d)?\b`,
 		`\b(DD\+?|DDP|E?AC3|AAC|AC3)\d\s\d\b`,                // Audio with channels
 		`\b(DD\+?|DDP|E?AC3|AAC|AC3)\b`,                      // Audio without channels
 		`\b(TrueHD|Atmos|FLAC|PCM|Opus|MP3|DTS)\b`,           // Other audio codecs

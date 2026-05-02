@@ -15,6 +15,13 @@ func TestRealWorldMovieParsing(t *testing.T) {
 		{"How.to.Make.A.Killing.2026.1080p.WEB-DL.AAC5.1.mkv", "How to Make A Killing", "2026"},
 		{"Pretty.Lethal.2026.AMZN.EAC3.@TSRG.mkv", "Pretty Lethal", "2026"},
 		{"Kraven.the.Hunter.2024.1080p.BluRay.mkv", "Kraven the Hunter", "2024"},
+		// Regression: TSRG-style shorthand where the "3" is dropped from
+		// EAC3 so the audio tag reads EAC5.1. Without the EAC3? variant
+		// in the codec regex, "EAC5 1" survives stripping and lands in
+		// the parsed title (Triple.Frontier...EAC5.1-TSRG.mkv -> the
+		// movie was imported into Jellyfin as "Triple Frontier EAC5 1").
+		{"Triple.Frontier.2019.1080p.NF.WEB-DL.H.264.DUAL.EAC5.1-TSRG.mkv", "Triple Frontier", "2019"},
+		{"Some.Movie.2024.1080p.WEB-DL.EAC7.1-GROUP.mkv", "Some Movie", "2024"},
 	}
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
