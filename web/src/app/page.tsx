@@ -62,11 +62,13 @@ export default function DashboardPage() {
                 value={formatBytes(data?.libraryStats?.totalSize || 0)}
                 icon={HardDrive}
               />
-              <StatCard
-                title="Duplicates"
-                value={duplicateGroups.toLocaleString()}
-                icon={Copy}
-              />
+              <Link href="/scheduler?status=flagged" className="block hover:opacity-80 transition-opacity">
+                <StatCard
+                  title="Duplicates"
+                  value={duplicateGroups.toLocaleString()}
+                  icon={Copy}
+                />
+              </Link>
               <StatCard
                 title="Scattered Series"
                 value={(data?.libraryStats?.scatteredSeries ?? 0).toLocaleString()}

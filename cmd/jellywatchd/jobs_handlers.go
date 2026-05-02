@@ -8,6 +8,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/housekeeping"
 	"github.com/Nomadcxx/jellywatch/internal/scheduler"
+	"github.com/Nomadcxx/jellywatch/internal/service"
 )
 
 // jobsListHandler returns all registered scheduled jobs with their last-run
@@ -283,8 +284,10 @@ func tasksBulkHandler(db *database.MediaDB) ipc.Handler {
 			n, err = db.BulkRetryHousekeepingTasks(args.IDs)
 		case "cancel":
 			n, err = db.BulkCancelHousekeepingTasks(args.IDs)
+		case "approve":
+			n, err = db.BulkApproveHousekeepingTasks(args.IDs)
 		default:
-			w.Error(req.ID, ipc.ErrBadRequest, "action must be retry|cancel")
+			w.Error(req.ID, ipc.ErrBadRequest, "action must be retry|cancel|approve")
 			return
 		}
 		if err != nil {
@@ -331,4 +334,135 @@ func taskVerifyHandler(eng *housekeeping.Engine) ipc.Handler {
 		data, _ := json.Marshal(vr)
 		w.Result(req.ID, data)
 	}
+}
+
+// taskGroupHandler returns the duplicate group attached to a flagged
+// task — used by the scheduler UI to render the per-file inspector
+// (path/size/resolution/quality_score) before approval.
+func taskGroupHandler(db *database.MediaDB) ipc.Handler {
+	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+		var args taskIDArgs
+		if err := json.Unmarshal(req.Args, &args); err != nil || args.ID == 0 {
+			w.Error(req.ID, ipc.ErrBadRequest, "id required")
+			return
+		}
+		t, err := db.GetHousekeepingTask(args.ID)
+		if err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		if t == nil {
+			w.Error(req.ID, ipc.ErrNotFound, "task not found")
+			return
+		}
+		mediaType, _ := t.Payload["media_type"].(string)
+		title, _ := t.Payload["normalized_title"].(string)
+		if mediaType == "" || title == "" {
+			w.Error(req.ID, ipc.ErrBadRequest, "task has no duplicate group payload")
+			return
+		}
+		cs := service.NewCleanupService(db)
+		group, err := cs.FindDuplicateGroup(mediaType, title,
+			payloadIntPtrLocal(t.Payload, "year"),
+			payloadIntPtrLocal(t.Payload, "season"),
+			payloadIntPtrLocal(t.Payload, "episode"))
+		if err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		if group == nil {
+			data, _ := json.Marshal(map[string]any{"resolved": true})
+			w.Result(req.ID, data)
+			return
+		}
+		level, reasons := cs.GroupConfidence(*group)
+		files := make([]map[string]any, 0, len(group.Files))
+		for _, f := range group.Files {
+			files = append(files, map[string]any{
+				"id":            f.ID,
+				"path":          f.Path,
+				"size":          f.Size,
+				"resolution":    f.Resolution,
+				"source_type":   f.SourceType,
+				"quality_score": f.QualityScore,
+				"would_keep":    f.ID == group.BestFileID,
+			})
+		}
+		data, _ := json.Marshal(map[string]any{
+			"group_id":          group.ID,
+			"media_type":        group.MediaType,
+			"title":             group.Title,
+			"year":              group.Year,
+			"season":            group.Season,
+			"episode":           group.Episode,
+			"best_file_id":      group.BestFileID,
+			"reclaimable_bytes": group.ReclaimableBytes,
+			"confidence":        level,
+			"confidence_reasons": reasons,
+			"files":             files,
+		})
+		w.Result(req.ID, data)
+	}
+}
+
+// taskApproveHandler converts a flagged duplicate task
+// (cross_volume_duplicate, year_mismatch) into an executable
+// consolidate_duplicate task, resetting status to pending so the
+// housekeeping engine picks it up on the next tick.
+func taskApproveHandler(db *database.MediaDB) ipc.Handler {
+	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+		var args taskIDArgs
+		if err := json.Unmarshal(req.Args, &args); err != nil || args.ID == 0 {
+			w.Error(req.ID, ipc.ErrBadRequest, "id required")
+			return
+		}
+		t, err := db.GetHousekeepingTask(args.ID)
+		if err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		if t == nil {
+			w.Error(req.ID, ipc.ErrNotFound, "task not found")
+			return
+		}
+		switch t.Kind {
+		case database.TaskKindCrossVolumeDuplicate, database.TaskKindYearMismatch:
+			// approvable
+		default:
+			w.Error(req.ID, ipc.ErrBadRequest, "task kind not approvable: "+t.Kind)
+			return
+		}
+		payload := t.Payload
+		if payload == nil {
+			payload = map[string]any{}
+		}
+		payload["approved_from"] = t.Kind
+		if err := db.UpdateHousekeepingTask(args.ID,
+			database.TaskKindConsolidateDuplicate,
+			database.TaskStatusPending, payload); err != nil {
+			w.Error(req.ID, ipc.ErrInternal, err.Error())
+			return
+		}
+		w.Result(req.ID, json.RawMessage(`{"approved":true}`))
+	}
+}
+
+// payloadIntPtrLocal mirrors housekeeping.payloadIntPtr — JSON numbers
+// arrive as float64; coerce to *int.
+func payloadIntPtrLocal(p map[string]any, key string) *int {
+	v, ok := p[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case float64:
+		i := int(x)
+		return &i
+	case int:
+		return &x
+	case int64:
+		i := int(x)
+		return &i
+	}
+	return nil
 }

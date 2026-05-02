@@ -23,13 +23,22 @@ const (
 
 // Task kinds (extend as more detectors are added).
 const (
-	TaskKindMoveMerge       = "move_merge"        // consolidate cross-volume duplicate
-	TaskKindNoYearMerge     = "no_year_merge"     // merge no-year folder into year-bearing twin
-	TaskKindYearMismatch    = "year_mismatch"     // flag-only
-	TaskKindPollutedName    = "polluted_name"     // flag-only
+	TaskKindMoveMerge       = "move_merge"        // legacy folder-walk merge; no longer enqueued by detect, retained for executor compat
+	TaskKindNoYearMerge     = "no_year_merge"     // merge no-year folder into year-bearing twin (same library, naming workflow)
+	TaskKindYearMismatch    = "year_mismatch"     // flag-only, naming workflow
+	TaskKindPollutedName    = "polluted_name"     // flag-only, naming workflow
 	TaskKindOrphanSource    = "orphan_source"     // remove empty watch-dir source dir
 	TaskKindStuckSync       = "stuck_sync"        // mark stuck sync_log row as error
-	TaskKindSubdirMismatch  = "subdir_mismatch"   // flag-only
+	TaskKindSubdirMismatch  = "subdir_mismatch"   // flag-only, naming workflow
+
+	// Convergence (housekeeper ↔ consolidator/cleanup): three workflows.
+	// Duplicate-removal workflow (movies + TV):
+	TaskKindConsolidateDuplicate = "consolidate_duplicate" // auto, delete inferior copies via service.CleanupService
+	TaskKindCrossVolumeDuplicate = "cross_volume_duplicate" // flag, low-confidence duplicate awaiting human approval
+	// Consolidation workflow (TV scatter only):
+	TaskKindSeriesConsolidate    = "series_consolidate"    // auto, move one TV series' scattered episodes onto a single volume
+	// Naming workflow:
+	TaskKindFolderRename         = "folder_rename"         // auto, rename folder in-place to canonical case (no cross-volume work)
 )
 
 // HousekeepingTask is a queued (or completed) housekeeping action.
@@ -47,6 +56,29 @@ type HousekeepingTask struct {
 	StartedAt     sql.NullTime
 	FinishedAt    sql.NullTime
 	NextAttemptAt sql.NullTime
+}
+
+// RequeueStaleRunningTasks resets housekeeping_tasks rows left in 'running'
+// state by a previous daemon process. The running flag is in-memory only;
+// on a clean shutdown each goroutine writes a final status, but on a crash,
+// SIGKILL, or systemd restart the row stays "running" forever, blocking the
+// queue and confusing the UI. Returns the number of rows updated.
+//
+// We requeue (not fail) because the previous attempt did not actually
+// complete — attempts is left untouched so the retry budget is preserved.
+func (m *MediaDB) RequeueStaleRunningTasks() (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res, err := m.db.Exec(`
+		UPDATE housekeeping_tasks
+		   SET status = 'pending',
+		       started_at = NULL,
+		       last_error = COALESCE(last_error, 'requeued: daemon restarted while running')
+		 WHERE status = 'running'`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // EnqueueHousekeepingTask inserts a task. If a pending/running row with the
@@ -68,7 +100,10 @@ func (m *MediaDB) EnqueueHousekeepingTask(jobName, kind string, payload map[stri
 	// in 'flagged' for human review via the WebUI.
 	status := TaskStatusPending
 	switch kind {
-	case TaskKindYearMismatch, TaskKindPollutedName, TaskKindSubdirMismatch:
+	case TaskKindYearMismatch,
+		TaskKindPollutedName,
+		TaskKindSubdirMismatch,
+		TaskKindCrossVolumeDuplicate:
 		status = TaskStatusFlagged
 	}
 
@@ -422,6 +457,45 @@ func (m *MediaDB) BulkCancelHousekeepingTasks(ids []int64) (int64, error) {
 		UPDATE housekeeping_tasks
 		   SET status = 'canceled', finished_at = CURRENT_TIMESTAMP
 		 WHERE id = ? AND status IN ('pending','flagged','failed')`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+	var n int64
+	for _, id := range ids {
+		r, err := stmt.Exec(id)
+		if err != nil {
+			return n, err
+		}
+		c, _ := r.RowsAffected()
+		n += c
+	}
+	return n, tx.Commit()
+}
+
+// BulkApproveHousekeepingTasks promotes flagged review-required tasks
+// (cross_volume_duplicate, year_mismatch) into the auto-execute path by
+// switching their kind to consolidate_duplicate and resetting status to
+// pending. Mirrors the single-task approve flow in taskApproveHandler.
+func (m *MediaDB) BulkApproveHousekeepingTasks(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tx, err := m.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+		UPDATE housekeeping_tasks
+		   SET kind = 'consolidate_duplicate', status = 'pending',
+		       attempts = 0, last_error = NULL,
+		       started_at = NULL, finished_at = NULL, next_attempt_at = NULL
+		 WHERE id = ?
+		   AND status = 'flagged'
+		   AND kind IN ('cross_volume_duplicate','year_mismatch')`)
 	if err != nil {
 		return 0, err
 	}

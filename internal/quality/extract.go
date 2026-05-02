@@ -28,6 +28,33 @@ func ExtractMetadata(path string, fileSize int64, isEpisode bool) QualityMetadat
 	// Parse quality from filename
 	info := Parse(filepath.Base(path))
 
+	// Fallback: many releases store quality markers only in the parent
+	// folder name, e.g. /MOVIES/Movie (2024) 1080p WEB-DL/Movie.mkv.
+	// When the filename alone yields no resolution or source, retry
+	// against the immediate parent (and grandparent) directory names.
+	if info.Resolution == ResolutionUnknown || info.Source == SourceUnknown {
+		dir := filepath.Dir(path)
+		for i := 0; i < 2 && dir != "" && dir != "." && dir != "/"; i++ {
+			parent := filepath.Base(dir)
+			pinfo := Parse(parent)
+			if info.Resolution == ResolutionUnknown && pinfo.Resolution != ResolutionUnknown {
+				info.Resolution = pinfo.Resolution
+			}
+			if info.Source == SourceUnknown && pinfo.Source != SourceUnknown {
+				info.Source = pinfo.Source
+			}
+			if info.HDR == HDRNone && pinfo.HDR != HDRNone {
+				info.HDR = pinfo.HDR
+			}
+			if info.Resolution != ResolutionUnknown && info.Source != SourceUnknown {
+				break
+			}
+			dir = filepath.Dir(dir)
+		}
+		// Recompute score with enriched info
+		info.Score = info.ComputeScore()
+	}
+
 	// Compute CONDOR quality score (resolution + source + size)
 	score := ScoreFile(info, fileSize, isEpisode)
 

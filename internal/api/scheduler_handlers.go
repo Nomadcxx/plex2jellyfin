@@ -215,3 +215,39 @@ func (h *HousekeepingHandlers) VerifyTask(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(body)
 }
+
+// GetTaskGroup returns the duplicate group attached to a task — files
+// with size/resolution/quality_score plus the would_keep flag — used
+// by the scheduler UI to render the inspector panel before approval.
+func (h *HousekeepingHandlers) GetTaskGroup(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	body, err := h.IPC.Call(r.Context(), ipc.CmdTaskGroup, map[string]int64{"id": id})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
+}
+
+// ApproveTask converts a flagged duplicate task (cross_volume_duplicate
+// or year_mismatch) into a pending consolidate_duplicate task so the
+// housekeeping engine will resolve it on the next tick.
+func (h *HousekeepingHandlers) ApproveTask(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	body, err := h.IPC.Call(r.Context(), ipc.CmdTaskApprove, map[string]int64{"id": id})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
+}

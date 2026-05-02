@@ -623,6 +623,31 @@ var migrations = []migration{
 			`INSERT INTO schema_version (version) VALUES (19)`,
 		},
 	},
+	{
+		version: 20,
+		// Re-create the housekeeping dedup unique index to also cover
+		// 'flagged' status. Without this, every detect cycle re-flags
+		// the same duplicate group and the operator sees N×K duplicate
+		// flags growing unbounded. Also delete pre-existing duplicate
+		// flagged rows (keep lowest id per dedup_key).
+		up: []string{
+			// Drop the existing index first so we can clean rows
+			// with conflicts before re-adding it.
+			`DROP INDEX IF EXISTS idx_hk_dedup`,
+			// Within each dedup_key group, keep only the lowest id
+			// across all non-terminal statuses. Prefer keeping a
+			// flagged row over a pending one (more informative).
+			`DELETE FROM housekeeping_tasks
+			   WHERE status IN ('pending','running','flagged')
+			     AND id NOT IN (
+			       SELECT MIN(id) FROM housekeeping_tasks
+			        WHERE status IN ('pending','running','flagged')
+			        GROUP BY dedup_key
+			     )`,
+			`CREATE UNIQUE INDEX idx_hk_dedup ON housekeeping_tasks(dedup_key) WHERE status IN ('pending','running','flagged')`,
+			`INSERT INTO schema_version (version) VALUES (20)`,
+		},
+	},
 }
 
 type migration struct {

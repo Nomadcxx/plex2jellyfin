@@ -541,6 +541,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		hkCfg.MovieLibraries = cfg.Libraries.Movies
 		hkCfg.WatchDirs = watchPaths
 		hkEngine := housekeeping.NewEngine(hkCfg, db, logger)
+		hkEngine.SetOpRegistry(controlServer.Registry())
 
 		// Wire optional verifier (Jellyfin RemoteSearch + TMDB direct).
 		// Either tier may be unavailable; the verifier degrades gracefully.
@@ -556,8 +557,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				if err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("enqueued=%d cross_volume=%d no_year=%d year_mismatch=%d verified_distinct=%d polluted=%d orphan=%d stuck_sync=%d",
-					res.Enqueued, res.CrossVolumeDupes, res.NoYearMerges, res.YearMismatches, res.VerifiedDistinct, res.PollutedNames, res.OrphanSources, res.StuckSyncs), nil
+				return fmt.Sprintf("enqueued=%d auto_dup=%d cross_volume=%d folder_rename=%d no_year=%d year_mismatch=%d verified_distinct=%d polluted=%d orphan=%d stuck_sync=%d",
+					res.Enqueued, res.AutoDupes, res.CrossVolumeDupes, res.FolderRenames, res.NoYearMerges, res.YearMismatches, res.VerifiedDistinct, res.PollutedNames, res.OrphanSources, res.StuckSyncs), nil
 			},
 		}); err != nil {
 			logger.Warn("daemon", "register housekeeping.detect failed", logging.F("error", err.Error()))
@@ -574,6 +575,20 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		}); err != nil {
 			logger.Warn("daemon", "register housekeeping.drain failed", logging.F("error", err.Error()))
 		}
+		// Recovery: prior daemon may have died with rows still in 'running'
+		// state (in-memory flag, not persisted). Clear them so the queue
+		// can drain and the scheduler can re-fire continuous jobs.
+		if n, err := db.RequeueStaleRunningTasks(); err != nil {
+			logger.Warn("daemon", "requeue stale running tasks failed", logging.F("error", err.Error()))
+		} else if n > 0 {
+			logger.Info("daemon", "requeued stale housekeeping tasks", logging.F("count", n))
+		}
+		if n, err := db.ClearAllRunningJobs(); err != nil {
+			logger.Warn("daemon", "clear stale scheduled job running flags failed", logging.F("error", err.Error()))
+		} else if n > 0 {
+			logger.Info("daemon", "cleared stale scheduled job running flags", logging.F("count", n))
+		}
+
 		go sched.Run(ctx)
 
 		controlServer.Register(daemonipc.CmdJobsList, jobsListHandler(db))
@@ -588,6 +603,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		controlServer.Register(daemonipc.CmdTasksBulk, tasksBulkHandler(db))
 		controlServer.Register(daemonipc.CmdTasksPurge, tasksPurgeHandler(db))
 		controlServer.Register(daemonipc.CmdTaskVerify, taskVerifyHandler(hkEngine))
+		controlServer.Register(daemonipc.CmdTaskGroup, taskGroupHandler(db))
+		controlServer.Register(daemonipc.CmdTaskApprove, taskApproveHandler(db))
 		logger.Info("daemon", "Scheduler + housekeeping engine started")
 	}
 

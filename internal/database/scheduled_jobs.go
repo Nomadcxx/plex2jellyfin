@@ -98,6 +98,20 @@ func (m *MediaDB) MarkScheduledJobRunning(name string, running bool) error {
 	return err
 }
 
+// ClearAllRunningJobs resets every scheduled_jobs.running flag to 0. Called
+// at daemon startup because the flag is in-memory state owned by the
+// previous process — if it crashed or was SIGKILLed, jobs would otherwise
+// remain "running" forever and the scheduler would never re-fire them.
+func (m *MediaDB) ClearAllRunningJobs() (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res, err := m.db.Exec(`UPDATE scheduled_jobs SET running = 0 WHERE running != 0`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // RecordScheduledJobRun stores the outcome of a completed run.
 func (m *MediaDB) RecordScheduledJobRun(name, result, errStr string, duration time.Duration, nextRun time.Time) error {
 	m.mu.Lock()

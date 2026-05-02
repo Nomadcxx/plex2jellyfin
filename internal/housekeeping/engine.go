@@ -25,8 +25,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/Nomadcxx/jellywatch/internal/tmdb"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
@@ -75,11 +77,20 @@ type Engine struct {
 	logger     *logging.Logger
 	transferer transfer.Transferer
 	verifier   *tmdb.Verifier
+	cleanup    *service.CleanupService
+	// registry is optional: when set, every executing task registers an
+	// IPC op named "hk-task-<id>" and emits FrameProgress events that the
+	// WebUI subscribes to for live progress bars. Nil-safe.
+	registry *ipc.OpRegistry
 }
 
 // SetVerifier attaches a TMDB verifier so the detector can distinguish
 // remakes from genuine duplicates before flagging year-mismatches.
 func (e *Engine) SetVerifier(v *tmdb.Verifier) { e.verifier = v }
+
+// SetOpRegistry wires the daemon's IPC OpRegistry into the engine so
+// tasks can publish live progress frames consumable via SSE.
+func (e *Engine) SetOpRegistry(r *ipc.OpRegistry) { e.registry = r }
 
 // NewEngine constructs an Engine.
 func NewEngine(cfg Config, db *database.MediaDB, logger *logging.Logger) *Engine {
@@ -96,18 +107,26 @@ func NewEngine(cfg Config, db *database.MediaDB, logger *logging.Logger) *Engine
 		cfg.StuckSyncAfter = 24 * time.Hour
 	}
 	tr, _ := transfer.New(transfer.BackendRsync)
-	return &Engine{cfg: cfg, db: db, logger: logger, transferer: tr}
+	return &Engine{
+		cfg:        cfg,
+		db:         db,
+		logger:     logger,
+		transferer: tr,
+		cleanup:    service.NewCleanupService(db),
+	}
 }
 
 // DetectResult summarises one detect cycle.
 type DetectResult struct {
-	CrossVolumeDupes int
+	CrossVolumeDupes int // duplicate workflow: low-confidence flags
+	AutoDupes        int // duplicate workflow: high-confidence auto-delete tasks
 	NoYearMerges     int
 	YearMismatches   int
 	VerifiedDistinct int
 	PollutedNames    int
 	OrphanSources    int
 	StuckSyncs       int
+	FolderRenames    int
 	Enqueued         int
 	Skipped          int
 }
@@ -140,6 +159,12 @@ func (e *Engine) Detect(ctx context.Context) (*DetectResult, error) {
 	// 1+2+3+4: same-title grouping for TV and movies
 	e.detectDuplicateGroups(ctx, tvFolders, "tv", res, enqueue)
 	e.detectDuplicateGroups(ctx, movieFolders, "movie", res, enqueue)
+
+	// File-level duplicate detection (movies + TV episodes), using the
+	// same service.CleanupService the CLI uses. High-confidence groups
+	// are queued for auto-delete-of-inferior; low-confidence groups are
+	// flagged for human review.
+	e.detectFileDuplicates(ctx, res, enqueue)
 
 	// 5: orphan source dirs in watch directories
 	e.detectOrphanSources(ctx, res, enqueue)
@@ -232,8 +257,11 @@ func looksPolluted(name string) bool {
 	return false
 }
 
-// detectDuplicateGroups groups folders by normalized title and enqueues
-// merges/flags for groups with >1 entry.
+// detectDuplicateGroups groups folders by normalized title and emits
+// **naming-workflow** tasks only (folder rename, year mismatch flag,
+// no-year merge, polluted name flag). Cross-volume file-level duplicate
+// detection is handled separately by detectFileDuplicates so it can
+// reuse the consolidator's quality-aware logic.
 func (e *Engine) detectDuplicateGroups(ctx context.Context, folders []folder, kind string, res *DetectResult, enqueue func(string, map[string]any, int)) {
 	groups := map[string][]folder{}
 	for _, f := range folders {
@@ -260,12 +288,8 @@ func (e *Engine) detectDuplicateGroups(ctx context.Context, folders []folder, ki
 			return
 		}
 
-		// Pick canonical: prefer year-bearing, then largest by entry count
-		// (proxy for "main" location). Real episode count would be more
-		// accurate but a directory walk per group is too expensive here.
 		canonical := chooseCanonical(group)
 
-		// Bucket the rest by reason.
 		yearMismatch := false
 		for _, f := range group {
 			if f.hasYear && canonical.hasYear && f.year != canonical.year {
@@ -288,45 +312,62 @@ func (e *Engine) detectDuplicateGroups(ctx context.Context, folders []folder, ki
 			}
 			switch {
 			case yearMismatch:
-				// Try to verify via TMDB before flagging. The verifier
-				// returns one of:
-				//   - "distinct"  → legitimate remakes, skip silently
-				//   - "duplicate" → same TMDB id, treat as merge
-				//   - "unknown"   → flag for human review (current behavior)
-				verdict := "unknown"
+				// Naming workflow: ALWAYS flag year mismatches for human
+				// review. Even when the TMDB verifier reports "duplicate"
+				// (which historically auto-promoted to move_merge and
+				// caused the Clerks 1994→2022 incident), we now only
+				// attach the verifier evidence to the flag — never act
+				// on it automatically. Year mismatches are by definition
+				// low confidence; remakes/sequels share titles.
 				if e.verifier != nil && e.verifier.Available() {
 					mk := tmdb.KindMovie
 					if kind == "tv" {
 						mk = tmdb.KindSeries
 					}
-					vr := e.verifier.Verify(ctx, mk,
-						title, f.year, title, canonical.year)
-					if vr != nil {
-						verdict = vr.Verdict
+					if vr := e.verifier.Verify(ctx, mk,
+						title, f.year, title, canonical.year); vr != nil {
 						payload["verification"] = vr
+						if vr.Verdict == "distinct" {
+							res.VerifiedDistinct++
+							continue // legitimate remakes — don't even flag
+						}
 					}
 				}
-				switch verdict {
-				case "distinct":
-					res.VerifiedDistinct++
-					// no task enqueued — the two folders are
-					// confirmed-different works.
-				case "duplicate":
-					res.CrossVolumeDupes++
-					enqueue(database.TaskKindMoveMerge, payload, 100)
-				default:
-					res.YearMismatches++
-					enqueue(database.TaskKindYearMismatch, payload, 150)
-				}
+				res.YearMismatches++
+				enqueue(database.TaskKindYearMismatch, payload, 150)
 			case !f.hasYear && canonical.hasYear:
+				// Naming workflow: a no-year folder that has a clear
+				// year-bearing twin in the same library is safe to
+				// merge in-place (existing no_year_merge behaviour).
 				res.NoYearMerges++
 				enqueue(database.TaskKindNoYearMerge, payload, 50)
+			case sameLibraryCaseFoldOnly(f, canonical):
+				// Naming workflow: same library, identical content
+				// modulo case/whitespace — auto rename in place. Risk-
+				// free because the canonical folder already exists and
+				// we're just folding the duplicate into it.
+				res.FolderRenames++
+				enqueue(database.TaskKindFolderRename, payload, 75)
 			default:
-				res.CrossVolumeDupes++
-				enqueue(database.TaskKindMoveMerge, payload, 100)
+				// Cross-volume same-title pair: do NOT enqueue a folder
+				// merge here. The duplicate workflow (detectFileDuplicates
+				// below) will pick this up at the file level via the
+				// consolidator's quality-aware delete logic.
 			}
 		}
 	}
+}
+
+// sameLibraryCaseFoldOnly returns true when two folders live in the
+// same library root and their basenames differ only by case/whitespace.
+// Used to identify the risk-free folder-rename case (naming workflow).
+func sameLibraryCaseFoldOnly(a, b folder) bool {
+	if a.library != b.library {
+		return false
+	}
+	na := strings.ToLower(strings.Join(strings.Fields(a.name), " "))
+	nb := strings.ToLower(strings.Join(strings.Fields(b.name), " "))
+	return na == nb && a.name != b.name
 }
 
 func chooseCanonical(group []folder) folder {
@@ -542,6 +583,133 @@ func (e *Engine) detectStuckSync(ctx context.Context, res *DetectResult, enqueue
 	}
 }
 
+// detectFileDuplicates finds duplicate movies/episodes at the file level
+// (not folder level) using the same service.CleanupService the CLI uses.
+// For each duplicate group it classifies confidence:
+//   - "high" → enqueue TaskKindConsolidateDuplicate (auto-deletes the
+//     inferior copies via the consolidator's delete logic).
+//   - "low"  → enqueue TaskKindCrossVolumeDuplicate (flag for human
+//     review in the WebUI).
+//
+// This is the entry point for the **duplicate-removal workflow** —
+// distinct from the **naming workflow** in detectDuplicateGroups and
+// from the **TV-scatter consolidation workflow** (future).
+func (e *Engine) detectFileDuplicates(ctx context.Context, res *DetectResult, enqueue func(string, map[string]any, int)) {
+	if e.cleanup == nil {
+		return
+	}
+	analysis, err := e.cleanup.AnalyzeDuplicates()
+	if err != nil {
+		e.logf("warn", "duplicate analysis failed err=%v", err)
+		return
+	}
+	for i := range analysis.Groups {
+		if ctx.Err() != nil {
+			return
+		}
+		group := &analysis.Groups[i]
+		if len(group.Files) < 2 {
+			continue
+		}
+
+		// Filter parser-failure groups. Titles like "season", "season1",
+		// pure digits, or empties are not real duplicates — they're
+		// folders the parser couldn't classify. Grouping them auto-
+		// merges unrelated shows into one bogus duplicate group.
+		if isParseFailureTitle(group.Title) {
+			res.Skipped++
+			continue
+		}
+
+		level, reasons := e.cleanup.GroupConfidence(*group)
+
+		// Payload carries the natural key so the executor can re-fetch
+		// the group at execute-time (state may have changed since
+		// detection — files deleted, re-scanned, etc.).
+		payload := map[string]any{
+			"group_id":         group.ID,
+			"media_type":       group.MediaType,
+			"normalized_title": group.Title,
+			"reclaimable":      group.ReclaimableBytes,
+			"file_count":       len(group.Files),
+			"best_file_id":     group.BestFileID,
+			"confidence":       level,
+		}
+		if group.Year != nil {
+			payload["year"] = *group.Year
+		}
+		if group.Season != nil {
+			payload["season"] = *group.Season
+		}
+		if group.Episode != nil {
+			payload["episode"] = *group.Episode
+		}
+		if len(reasons) > 0 {
+			payload["reasons"] = reasons
+		}
+
+		switch level {
+		case service.ConfidenceHigh:
+			res.AutoDupes++
+			enqueue(database.TaskKindConsolidateDuplicate, payload, 60)
+		default:
+			res.CrossVolumeDupes++
+			enqueue(database.TaskKindCrossVolumeDuplicate, payload, 140)
+		}
+	}
+}
+
+// isParseFailureTitle returns true if the normalized title looks like
+// a parser failure — a string with no information content. These
+// false-grouping seeds (e.g. "season", "season1", "season01",
+// "specials", "extras", "1080", "720", or pure numbers) cause
+// unrelated shows to be lumped into one bogus "duplicate" group.
+func isParseFailureTitle(t string) bool {
+	t = strings.ToLower(strings.TrimSpace(t))
+	if len(t) <= 1 {
+		return true
+	}
+	if isAllDigitsOrPunct(t) {
+		return true
+	}
+	switch t {
+	case "season", "specials", "extras", "featurettes",
+		"behindthescenes", "deletedscenes", "interviews",
+		"trailers", "scenes", "shorts", "1080p", "720p", "2160p",
+		"4k", "uhd", "bluray", "remux":
+		return true
+	}
+	if strings.HasPrefix(t, "season") {
+		rest := strings.TrimPrefix(t, "season")
+		if rest == "" || isAllDigitsOrPunct(rest) {
+			return true
+		}
+	}
+	if strings.HasPrefix(t, "disc") {
+		rest := strings.TrimPrefix(t, "disc")
+		if rest == "" || isAllDigitsOrPunct(rest) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAllDigitsOrPunct(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '.' || r == '-' || r == '_' || r == ' ' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // Drain processes pending housekeeping_tasks with bounded concurrency
 // until the queue is empty or ctx is cancelled.
 func (e *Engine) Drain(ctx context.Context) error {
@@ -607,11 +775,26 @@ func (e *Engine) executeTask(ctx context.Context, t *database.HousekeepingTask) 
 	case database.TaskKindStuckSync:
 		return e.execStuckSync(t)
 	case database.TaskKindMoveMerge, database.TaskKindNoYearMerge:
+		// Naming-workflow folder merges. TaskKindMoveMerge is no longer
+		// enqueued by detect (the duplicate workflow handles that via
+		// TaskKindConsolidateDuplicate) but the handler is retained so
+		// any legacy queued or human-approved merges still execute.
 		return e.execMergeMove(ctx, t)
-	case database.TaskKindYearMismatch:
-		// Flagged-then-approved: human OK'd the merge despite the year
-		// difference, so execute it like a normal cross-volume merge.
+	case database.TaskKindFolderRename:
+		// Naming workflow: in-place rename of a folder whose name only
+		// differs from its canonical twin by case/whitespace. Performed
+		// as a folder merge because the canonical folder already exists
+		// in the same library (no cross-volume work).
 		return e.execMergeMove(ctx, t)
+	case database.TaskKindConsolidateDuplicate:
+		// Duplicate workflow: delete the inferior copies of a known
+		// high-confidence duplicate group via the same logic the CLI
+		// uses (service.CleanupService.DeleteDuplicateFiles).
+		return e.execConsolidateDuplicate(ctx, t)
+	case database.TaskKindYearMismatch, database.TaskKindCrossVolumeDuplicate:
+		// Flag kinds. Reaching the executor means a human approved them
+		// in the WebUI; treat them as duplicate-resolution requests.
+		return e.execConsolidateDuplicate(ctx, t)
 	case database.TaskKindPollutedName, database.TaskKindSubdirMismatch:
 		// These have no deterministic target — a human must rename
 		// manually; reaching the executor is an error.
@@ -662,6 +845,96 @@ func (e *Engine) execStuckSync(t *database.HousekeepingTask) error {
 		       error_message = COALESCE(error_message, '') || ' [marked stuck by housekeeping]'
 		 WHERE id = ? AND status = 'running'`, id)
 	return err
+}
+
+// execConsolidateDuplicate resolves a duplicate group by deleting its
+// inferior copies, keeping the file flagged as `BestFile`. Reuses the
+// same service.CleanupService logic the CLI's `jellywatch duplicates
+// execute` uses, so the daemon and CLI cannot diverge on what "the
+// inferior copy" means.
+//
+// Re-fetches the group at execute time using the natural key persisted
+// in the task payload (group_id + media_type + title + year[+S/E]) so
+// that any state drift since detection (manual deletes, rescans, file
+// regenerations) is reflected. If the group no longer exists or no
+// longer qualifies as high-confidence, the task is treated as a no-op
+// success — the queue should not be poisoned by stale tasks.
+func (e *Engine) execConsolidateDuplicate(ctx context.Context, t *database.HousekeepingTask) error {
+	if e.cleanup == nil {
+		return fmt.Errorf("cleanup service not configured")
+	}
+	mediaType, _ := t.Payload["media_type"].(string)
+	title, _ := t.Payload["normalized_title"].(string)
+	if mediaType == "" || title == "" {
+		return fmt.Errorf("payload missing media_type/normalized_title")
+	}
+	year := payloadIntPtr(t.Payload, "year")
+	season := payloadIntPtr(t.Payload, "season")
+	episode := payloadIntPtr(t.Payload, "episode")
+
+	group, err := e.cleanup.FindDuplicateGroup(mediaType, title, year, season, episode)
+	if err != nil {
+		return fmt.Errorf("lookup duplicate group: %w", err)
+	}
+	if group == nil {
+		e.logf("info", "duplicate group already resolved id=%d title=%q — no-op", t.ID, title)
+		return nil
+	}
+
+	// Re-check confidence at execute time. A group that was high-conf
+	// at detection may have changed (e.g. a rescan picked up a stale
+	// record). For approved-flag tasks (year_mismatch, cross_volume_*)
+	// the human has already authorised the action so we don't re-gate.
+	if t.Kind == database.TaskKindConsolidateDuplicate {
+		if level, reasons := e.cleanup.GroupConfidence(*group); level != service.ConfidenceHigh {
+			return fmt.Errorf("group no longer high-confidence at execute time: %v", reasons)
+		}
+	}
+
+	deleted, reclaimed, derr := e.cleanup.ResolveDuplicateGroup(group)
+	if derr != nil {
+		return fmt.Errorf("resolve duplicate group: %w", derr)
+	}
+	// Audit: emit one log line per deleted file path so future
+	// post-mortems can answer "what did housekeeping touch?".
+	keptPath := ""
+	for _, f := range group.Files {
+		if f.ID == group.BestFileID {
+			keptPath = f.Path
+			break
+		}
+	}
+	for _, f := range group.Files {
+		if f.ID == group.BestFileID {
+			continue
+		}
+		e.logf("info", "duplicate-deleted task=%d kind=%s group=%s file_id=%d size=%d path=%q kept_id=%d kept_path=%q",
+			t.ID, t.Kind, group.ID, f.ID, f.Size, f.Path, group.BestFileID, keptPath)
+	}
+	e.logf("info", "duplicate-resolved id=%d kind=%s title=%q deleted=%d reclaimed=%d",
+		t.ID, t.Kind, title, deleted, reclaimed)
+	return nil
+}
+
+// payloadIntPtr extracts an int from a JSON-decoded payload (where
+// numeric values arrive as float64) and returns it as *int. Returns
+// nil if the key is missing or not numeric.
+func payloadIntPtr(p map[string]any, key string) *int {
+	v, ok := p[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case float64:
+		i := int(x)
+		return &i
+	case int:
+		return &x
+	case int64:
+		i := int(x)
+		return &i
+	}
+	return nil
 }
 
 func (e *Engine) logf(level, format string, args ...any) {
@@ -716,8 +989,25 @@ if _, err := os.Stat(dst); err != nil {
 return fmt.Errorf("stat dst: %w", err)
 }
 
+// Pre-walk to compute total byte budget — drives the progress bar in
+// the WebUI. Cheap (stat-only) compared to the upcoming move work.
+var totalBytes int64
+var totalFiles int
+_ = filepath.Walk(src, func(p string, fi os.FileInfo, werr error) error {
+if werr != nil || fi == nil || fi.IsDir() {
+return nil
+}
+totalBytes += fi.Size()
+totalFiles++
+return nil
+})
+
+prog := e.startTaskOp(t.ID, src, dst, totalFiles, totalBytes)
+defer prog.finish(nil)
+
 moved := 0
 skipped := 0
+var doneBytes int64
 walkErr := filepath.Walk(src, func(path string, info os.FileInfo, werr error) error {
 if werr != nil {
 return werr
@@ -740,6 +1030,8 @@ if err := os.Remove(path); err != nil {
 return fmt.Errorf("remove dup src %s: %w", path, err)
 }
 skipped++
+doneBytes += info.Size()
+prog.fileSkipped(rel, info.Size(), doneBytes, totalBytes)
 return nil
 }
 return fmt.Errorf("size mismatch at %s (src=%d dst=%d) — manual review required",
@@ -750,15 +1042,22 @@ if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
 }
 
+prog.fileStarted(rel, info.Size(), doneBytes, totalBytes)
+fileSize := info.Size()
 res, err := e.transferer.Move(path, target, transfer.TransferOptions{
 Timeout:   30 * time.Minute,
 TargetUID: -1,
 TargetGID: -1,
+Progress: func(cur, _ int64) {
+prog.fileBytes(rel, cur, fileSize, doneBytes+cur, totalBytes)
+},
 })
 if err != nil {
+prog.fileFailed(rel, err)
 return fmt.Errorf("move %s -> %s: %w", path, target, err)
 }
 if res != nil && res.Error != nil {
+prog.fileFailed(rel, res.Error)
 return fmt.Errorf("move %s -> %s: %w", path, target, res.Error)
 }
 
@@ -769,10 +1068,13 @@ _ = e.db.UpsertMediaFile(file)
 }
 
 moved++
+doneBytes += fileSize
+prog.fileCompleted(rel, fileSize, doneBytes, totalBytes)
 return nil
 })
 
 if walkErr != nil {
+prog.finish(walkErr)
 return walkErr
 }
 
@@ -782,6 +1084,7 @@ e.logf("warn", "merge: source not fully empty after move src=%s err=%v", src, er
 
 e.logf("info", "merged %d file(s), skipped %d duplicate(s) src=%s dst=%s",
 moved, skipped, src, dst)
+prog.summary(moved, skipped, doneBytes, totalBytes)
 return nil
 }
 

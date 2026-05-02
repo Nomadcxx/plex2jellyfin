@@ -35,6 +35,8 @@ const (
 	CmdTasksBulk       Command = "TASKS_BULK"
 	CmdTasksPurge      Command = "TASKS_PURGE"
 	CmdTaskVerify      Command = "TASK_VERIFY"
+	CmdTaskGroup       Command = "TASK_GROUP"
+	CmdTaskApprove     Command = "TASK_APPROVE"
 )
 
 type Request struct {

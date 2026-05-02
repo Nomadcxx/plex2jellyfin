@@ -217,6 +217,8 @@ func (s *Server) apiRouter() *chi.Mux {
 			r.Post("/tasks/{id}/retry", hkH.RetryTask)
 			r.Post("/tasks/{id}/cancel", hkH.CancelTask)
 			r.Post("/tasks/{id}/verify", hkH.VerifyTask)
+			r.Get("/tasks/{id}/group", hkH.GetTaskGroup)
+			r.Post("/tasks/{id}/approve", hkH.ApproveTask)
 			r.Post("/verify-flagged", hkH.VerifyFlagged)
 		})
 

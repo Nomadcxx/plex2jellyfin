@@ -56,6 +56,31 @@ type Task = {
   finished_at?: string;
 };
 
+type DupeFile = {
+  id: number;
+  path: string;
+  size: number;
+  resolution: string;
+  source_type: string;
+  quality_score: number;
+  would_keep: boolean;
+};
+
+type DupeGroup = {
+  group_id?: string;
+  media_type?: string;
+  title?: string;
+  year?: number;
+  season?: number;
+  episode?: number;
+  best_file_id?: number;
+  reclaimable_bytes?: number;
+  confidence?: string;
+  confidence_reasons?: string[];
+  files?: DupeFile[];
+  resolved?: boolean;
+};
+
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   pending: { label: 'Pending', color: 'bg-zinc-700 text-zinc-100' },
   running: { label: 'Running', color: 'bg-blue-600 text-white' },
@@ -76,21 +101,153 @@ function pathOf(t: Task): string {
   );
 }
 
-function titleOf(t: Task): string {
+function summaryOf(t: Task): string {
+  const path = pathOf(t);
+  if (path) return path;
+  // Duplicate-kind tasks have no path field — show a meaningful
+  // human-readable summary instead so the row isn't blank.
   const p = t.payload || {};
-  return (p.title as string) || '';
+  const title =
+    (p.normalized_title as string) || (p.title as string) || '';
+  if (!title) return '';
+  let s = title;
+  const yr = p.year;
+  if (typeof yr === 'number' && yr > 0) s += ` (${yr})`;
+  const season = p.season;
+  const ep = p.episode;
+  if (typeof season === 'number' && typeof ep === 'number') {
+    s += ` S${String(season).padStart(2, '0')}E${String(ep).padStart(2, '0')}`;
+  }
+  if (typeof p.file_count === 'number') s += ` · ${p.file_count} files`;
+  if (typeof p.reclaimable === 'number' && p.reclaimable > 0) {
+    s += ` · ${(p.reclaimable / 1024 / 1024 / 1024).toFixed(2)}GB reclaimable`;
+  }
+  return s;
+}
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms) || ms < 0) return '';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+function TaskProgress({ taskId, startedAt }: { taskId: number; startedAt?: string }) {
+  const [phase, setPhase] = useState<string>('');
+  const [msg, setMsg] = useState<string>('');
+  const [current, setCurrent] = useState<number>(0);
+  const [total, setTotal] = useState<number>(0);
+  const [lastFrameAt, setLastFrameAt] = useState<number>(Date.now());
+  const [done, setDone] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+    const es = new EventSource(`/api/v1/events/op/hk-task-${taskId}`);
+    es.onmessage = (ev) => {
+      try {
+        const f = JSON.parse(ev.data);
+        setLastFrameAt(Date.now());
+        if (f.type === 'progress') {
+          if (f.phase) setPhase(f.phase);
+          if (typeof f.msg === 'string') setMsg(f.msg);
+          if (typeof f.current === 'number') setCurrent(f.current);
+          if (typeof f.total === 'number') setTotal(f.total);
+        } else if (f.type === 'done' || f.type === 'error') {
+          setDone(true);
+          es.close();
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    es.onerror = () => {
+      // server returns 404 if op not yet registered (task just claimed) —
+      // browser will auto-retry, harmless.
+    };
+    return () => es.close();
+  }, [taskId]);
+
+  // Stale detector: row marked running but we haven't seen a progress
+  // frame in 10 minutes. Either rsync is on a single huge file or the
+  // worker is genuinely wedged.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(t);
+  }, []);
+  const startedMs = startedAt ? new Date(startedAt).getTime() : now;
+  const elapsedSec = Math.max(0, Math.floor((now - startedMs) / 1000));
+  const sinceFrameSec = Math.floor((now - lastFrameAt) / 1000);
+  const possiblyStuck = sinceFrameSec > 600 && !done;
+
+  const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+
+  return (
+    <div className="text-xs text-zinc-400 space-y-1">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-1.5 bg-zinc-800 rounded overflow-hidden">
+          <div
+            className={`h-full transition-all ${
+              possiblyStuck ? 'bg-amber-600' : 'bg-blue-500'
+            }`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="font-mono w-10 text-right text-zinc-500">{pct}%</span>
+      </div>
+      <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+        {phase && <span className="text-fuchsia-400">{phase}</span>}
+        {total > 0 && (
+          <span>
+            {current}/{total} MB
+          </span>
+        )}
+        <span>· {formatDuration(elapsedSec)}</span>
+        {possiblyStuck && (
+          <span className="text-amber-400">
+            ⚠ no progress {Math.floor(sinceFrameSec / 60)}m
+          </span>
+        )}
+      </div>
+      {msg && (
+        <div className="truncate text-[10px] text-zinc-600" title={msg}>
+          {msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatDuration(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  if (m < 60) return `${m}m ${sec % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
 }
 
 export default function SchedulerPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    const u = new URL(window.location.href);
+    return u.searchParams.get('status') || '';
+  });
   const [kindFilter, setKindFilter] = useState<string>('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [detail, setDetail] = useState<Task | null>(null);
+  const [detailGroup, setDetailGroup] = useState<DupeGroup | null>(null);
+  const [limit, setLimit] = useState<number>(200);
   const [confirmAction, setConfirmAction] = useState<null | {
     title: string;
     description: string;
@@ -100,11 +257,12 @@ export default function SchedulerPage() {
 
   const refresh = async () => {
     try {
+      const params = new URLSearchParams();
+      if (statusFilter) params.set('status', statusFilter);
+      params.set('limit', String(limit));
       const [jobsRes, tasksRes] = await Promise.all([
         fetch('/api/v1/scheduler/jobs').then((r) => r.json()),
-        fetch(`/api/v1/housekeeping/tasks${statusFilter ? `?status=${statusFilter}` : ''}`).then((r) =>
-          r.json()
-        ),
+        fetch(`/api/v1/housekeeping/tasks?${params}`).then((r) => r.json()),
       ]);
       setJobs(jobsRes.jobs || []);
       setTasks(tasksRes.tasks || []);
@@ -118,17 +276,38 @@ export default function SchedulerPage() {
 
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, 5000);
+    // Pause polling while a detail dialog is open or the user is editing
+    // an input/select. Polling races with typed values and forces React
+    // to re-mount inputs mid-keystroke.
+    const tick = () => {
+      if (detail !== null) return;
+      const a = document.activeElement;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) {
+        return;
+      }
+      refresh();
+    };
+    const t = setInterval(tick, 5000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+  }, [statusFilter, limit, detail]);
 
   const filteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tasks.filter((t) => {
       if (kindFilter && t.kind !== kindFilter) return false;
       if (!q) return true;
-      const haystack = `${t.id} ${t.kind} ${titleOf(t)} ${pathOf(t)}`.toLowerCase();
+      const reasons = (t.payload?.reasons as string[] | undefined) || [];
+      const haystack = [
+        String(t.id),
+        t.kind,
+        t.status,
+        summaryOf(t),
+        t.last_error || '',
+        reasons.join(' '),
+      ]
+        .join(' ')
+        .toLowerCase();
       return haystack.includes(q);
     });
   }, [tasks, kindFilter, search]);
@@ -167,6 +346,24 @@ export default function SchedulerPage() {
   };
   const cancelTask = async (id: number) => {
     await fetch(`/api/v1/housekeeping/tasks/${id}/cancel`, { method: 'POST' });
+    refresh();
+  };
+  const approveTask = async (id: number) => {
+    const res = await fetch(`/api/v1/housekeeping/tasks/${id}/approve`, { method: 'POST' });
+    if (!res.ok) {
+      const txt = await res.text();
+      toast.error(`Approve failed: ${txt}`);
+      return;
+    }
+    toast.success('Approved — will execute on next housekeeping tick');
+    // Refresh the open detail in place so the badge flips to Pending
+    // immediately and the user sees the result without re-opening.
+    if (detail && detail.id === id) {
+      try {
+        const r = await fetch(`/api/v1/housekeeping/tasks/${id}`);
+        if (r.ok) setDetail(await r.json());
+      } catch (_) { /* best-effort */ }
+    }
     refresh();
   };
   const verifyTask = async (id: number) => {
@@ -209,7 +406,21 @@ export default function SchedulerPage() {
       toast.error('Failed to load task');
       return;
     }
-    setDetail(await res.json());
+    const task: Task = await res.json();
+    setDetail(task);
+    setDetailGroup(null);
+    if (
+      task.kind === 'cross_volume_duplicate' ||
+      task.kind === 'year_mismatch' ||
+      task.kind === 'consolidate_duplicate'
+    ) {
+      try {
+        const gr = await fetch(`/api/v1/housekeeping/tasks/${id}/group`);
+        if (gr.ok) setDetailGroup(await gr.json());
+      } catch (_) {
+        /* group lookup is best-effort */
+      }
+    }
   };
 
   // Bulk
@@ -226,7 +437,7 @@ export default function SchedulerPage() {
     next.has(id) ? next.delete(id) : next.add(id);
     setSelected(next);
   };
-  const bulk = async (action: 'retry' | 'cancel') => {
+  const bulk = async (action: 'retry' | 'cancel' | 'approve') => {
     if (selectedIds.length === 0) return;
     const res = await fetch('/api/v1/housekeeping/tasks/bulk', {
       method: 'POST',
@@ -267,12 +478,19 @@ export default function SchedulerPage() {
           <h1 className="text-2xl font-bold">Scheduler</h1>
         </div>
 
-        {/* Counts widget */}
+        {/* Counts widget — clickable to filter the task list */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {headlineCounts.map((s) => {
             const lab = STATUS_LABELS[s];
+            const active = statusFilter === s;
             return (
-              <Card key={s}>
+              <Card
+                key={s}
+                onClick={() => setStatusFilter(active ? '' : s)}
+                className={`cursor-pointer transition-colors ${
+                  active ? 'border-fuchsia-500/60 bg-fuchsia-950/20' : 'hover:border-zinc-700'
+                }`}
+              >
                 <CardContent className="p-4">
                   <div className="text-xs text-zinc-400 uppercase">{lab.label}</div>
                   <div className="text-2xl font-semibold">{counts[s] ?? 0}</div>
@@ -437,8 +655,17 @@ export default function SchedulerPage() {
               <div className="flex items-center gap-2 bg-zinc-900 border border-fuchsia-800/40 rounded px-3 py-2 text-sm">
                 <span className="text-fuchsia-300 font-medium">{selectedIds.length} selected</span>
                 <div className="flex-1" />
-                <Button size="sm" variant="default" onClick={() => bulk('retry')}>
-                  <Check className="h-3 w-3 mr-1" /> Approve / retry
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => bulk('approve')}
+                  className="bg-emerald-600 hover:bg-emerald-500"
+                  title="Promote flagged duplicates to auto-delete queue"
+                >
+                  <Check className="h-3 w-3 mr-1" /> Approve flagged
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => bulk('retry')} title="Reset to pending">
+                  <RotateCw className="h-3 w-3 mr-1" /> Retry
                 </Button>
                 <Button
                   size="sm"
@@ -478,7 +705,7 @@ export default function SchedulerPage() {
                       <th className="p-2 text-left">ID</th>
                       <th className="p-2 text-left">Kind</th>
                       <th className="p-2 text-left">Status</th>
-                      <th className="p-2 text-left">Path</th>
+                      <th className="p-2 text-left">Item</th>
                       <th className="p-2 text-left">Notes</th>
                       <th className="p-2 text-left">Attempts</th>
                       <th className="p-2 text-left">Created</th>
@@ -489,17 +716,25 @@ export default function SchedulerPage() {
                     {filteredTasks.length === 0 && (
                       <tr>
                         <td colSpan={9} className="p-6 text-center text-zinc-500">
-                          No tasks.
+                          {tasks.length === 0
+                            ? 'No tasks.'
+                            : `No tasks match the current filter${
+                                kindFilter ? ` (kind=${kindFilter})` : ''
+                              }${search ? ` (search="${search}")` : ''}.`}
                         </td>
                       </tr>
                     )}
                     {filteredTasks.map((t) => {
                       const lab = STATUS_LABELS[t.status] ?? { label: t.status, color: 'bg-zinc-700' };
-                      const path = pathOf(t);
+                      const path = summaryOf(t);
                       const verification = t.payload?.verification as
                         | { verdict?: string; source?: string; reason?: string }
                         | undefined;
-                      const note = verification?.reason || t.last_error || '';
+                      const reasonsArr = (t.payload?.reasons as string[] | undefined) || [];
+                      const note =
+                        verification?.reason ||
+                        t.last_error ||
+                        (reasonsArr.length > 0 ? reasonsArr.join(' · ') : '');
                       const isSelected = selected.has(t.id);
                       return (
                         <tr
@@ -533,14 +768,20 @@ export default function SchedulerPage() {
                             {path}
                           </td>
                           <td className="p-2 text-xs text-zinc-500 truncate max-w-xs" title={note}>
-                            {verification?.source && (
-                              <span className="text-fuchsia-400">[{verification.source}] </span>
+                            {t.status === 'running' ? (
+                              <TaskProgress taskId={t.id} startedAt={t.started_at} />
+                            ) : (
+                              <>
+                                {verification?.source && (
+                                  <span className="text-fuchsia-400">[{verification.source}] </span>
+                                )}
+                                {note}
+                              </>
                             )}
-                            {note}
                           </td>
                           <td className="p-2">{t.attempts}</td>
-                          <td className="p-2 text-zinc-500 text-xs">
-                            {new Date(t.created_at).toLocaleString()}
+                          <td className="p-2 text-zinc-500 text-xs" title={new Date(t.created_at).toLocaleString()}>
+                            {relativeTime(t.created_at)}
                           </td>
                           <td className="p-2 text-right whitespace-nowrap">
                             <Button
@@ -565,7 +806,16 @@ export default function SchedulerPage() {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => retryTask(t.id)}
+                                onClick={() => {
+                                  if (
+                                    t.kind === 'cross_volume_duplicate' ||
+                                    t.kind === 'year_mismatch'
+                                  ) {
+                                    approveTask(t.id);
+                                  } else {
+                                    retryTask(t.id);
+                                  }
+                                }}
                                 title="Approve and execute"
                               >
                                 <Check className="h-3 w-3 text-emerald-500" />
@@ -601,12 +851,40 @@ export default function SchedulerPage() {
                 </table>
               </CardContent>
             </Card>
+
+            {/* Pagination footer: server returns up to `limit` rows but
+                counts reflects the full DB. Show how much we are seeing
+                vs how much exists, and a Load more button. */}
+            <div className="flex items-center justify-between text-xs text-zinc-500 px-1">
+              <div>
+                Showing <span className="text-zinc-300">{filteredTasks.length}</span>
+                {filteredTasks.length !== tasks.length && (
+                  <> of <span className="text-zinc-300">{tasks.length}</span> loaded</>
+                )}
+                {totalTasks > tasks.length && (
+                  <> · <span className="text-zinc-400">{totalTasks - tasks.length} older not loaded</span></>
+                )}
+                {totalTasks > 0 && <> · {totalTasks} total in queue</>}
+              </div>
+              <div className="flex items-center gap-2">
+                {totalTasks > tasks.length && (
+                  <Button size="sm" variant="outline" onClick={() => setLimit((l) => l + 200)}>
+                    Load 200 more
+                  </Button>
+                )}
+                {tasks.length > 200 && (
+                  <Button size="sm" variant="ghost" onClick={() => setLimit(200)}>
+                    Reset
+                  </Button>
+                )}
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
 
       {/* Task detail modal */}
-      <Dialog open={detail !== null} onOpenChange={(o) => !o && setDetail(null)}>
+      <Dialog open={detail !== null} onOpenChange={(o) => { if (!o) { setDetail(null); setDetailGroup(null); } }}>
         <DialogContent className="bg-zinc-900 border-zinc-800 max-w-3xl">
           <DialogHeader>
             <DialogTitle>
@@ -639,6 +917,81 @@ export default function SchedulerPage() {
                   {JSON.stringify(detail.payload, null, 2)}
                 </pre>
               </div>
+              {detailGroup && !detailGroup.resolved && detailGroup.files && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs text-zinc-400">
+                      Duplicate group ({detailGroup.files.length} files
+                      {detailGroup.confidence ? ` · ${detailGroup.confidence} confidence` : ''})
+                    </div>
+                    {(detail.kind === 'cross_volume_duplicate' ||
+                      detail.kind === 'year_mismatch') &&
+                      detail.status === 'flagged' && (
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            approveTask(detail.id);
+                            setDetail(null);
+                            setDetailGroup(null);
+                          }}
+                          className="bg-emerald-600 hover:bg-emerald-500"
+                        >
+                          <Check className="h-3 w-3 mr-1" /> Approve & queue delete
+                        </Button>
+                      )}
+                  </div>
+                  {detailGroup.confidence_reasons && detailGroup.confidence_reasons.length > 0 && (
+                    <div className="text-xs text-amber-300 mb-2">
+                      {detailGroup.confidence_reasons.join(' · ')}
+                    </div>
+                  )}
+                  <table className="w-full text-xs border border-zinc-800 rounded">
+                    <thead className="bg-zinc-900 text-zinc-400">
+                      <tr>
+                        <th className="p-2 text-left">Action</th>
+                        <th className="p-2 text-left">Path</th>
+                        <th className="p-2 text-right">Size</th>
+                        <th className="p-2 text-left">Res</th>
+                        <th className="p-2 text-left">Source</th>
+                        <th className="p-2 text-right">Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailGroup.files.map((f) => (
+                        <tr
+                          key={f.id}
+                          className={f.would_keep ? 'bg-emerald-950/30' : 'bg-red-950/20'}
+                        >
+                          <td className="p-2 whitespace-nowrap">
+                            {f.would_keep ? (
+                              <span className="text-emerald-400">KEEP</span>
+                            ) : (
+                              <span className="text-red-400">DELETE</span>
+                            )}
+                          </td>
+                          <td className="p-2 font-mono break-all">{f.path}</td>
+                          <td className="p-2 text-right whitespace-nowrap">
+                            {(f.size / 1024 / 1024).toFixed(0)} MB
+                          </td>
+                          <td className="p-2">{f.resolution || '-'}</td>
+                          <td className="p-2">{f.source_type || '-'}</td>
+                          <td className="p-2 text-right">{f.quality_score}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {detailGroup.reclaimable_bytes && detailGroup.reclaimable_bytes > 0 && (
+                    <div className="text-xs text-zinc-500 mt-2">
+                      Reclaimable: {(detailGroup.reclaimable_bytes / 1024 / 1024 / 1024).toFixed(2)} GB
+                    </div>
+                  )}
+                </div>
+              )}
+              {detailGroup && detailGroup.resolved && (
+                <div className="text-xs text-zinc-500 italic">
+                  Duplicate group already resolved (files removed or merged).
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
