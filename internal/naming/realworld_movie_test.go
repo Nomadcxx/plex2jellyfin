@@ -22,6 +22,9 @@ func TestRealWorldMovieParsing(t *testing.T) {
 		// movie was imported into Jellyfin as "Triple Frontier EAC5 1").
 		{"Triple.Frontier.2019.1080p.NF.WEB-DL.H.264.DUAL.EAC5.1-TSRG.mkv", "Triple Frontier", "2019"},
 		{"Some.Movie.2024.1080p.WEB-DL.EAC7.1-GROUP.mkv", "Some Movie", "2024"},
+		{"Foo.Bar.2024.1080p.WEB-DL.EAC2.0-GROUP.mkv", "Foo Bar", "2024"},
+		{"Baz.Qux.2024.1080p.WEB-DL.EAC9.2-GROUP.mkv", "Baz Qux", "2024"},
+		{"Standalone.EAC.2024.1080p.WEB-DL.EAC3-GROUP.mkv", "Standalone EAC", "2024"},
 	}
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {

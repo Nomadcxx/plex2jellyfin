@@ -47,11 +47,11 @@ func init() {
 		// Codec glued to channel digits (must come BEFORE bare codec match so the
 		// trailing channel digits get stripped together): AAC5.1, EAC3.5.1, DDP5.1.
 		`\b(?:E?AC3|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d)?\b`,
-		// Release-group shorthand where the "3" is dropped from EAC3, e.g.
-		// "EAC5.1" / "EAC7.1" (notably TSRG: ...DUAL.EAC5.1-TSRG.mkv).
-		// Excluding 3 here keeps the legitimate EAC3 form for the prior
-		// pattern, which expects a separate channel digit after EAC3.
-		`\bEAC[124-9](?:[. ]\d)?\b`,
+		// EAC followed by 1-3 digit groups separated by '.' or ' '.
+		// Catches both the legitimate EAC3.5.1 / EAC3 and release-group
+		// shorthand where the 3 is dropped (EAC5.1, EAC7.1, EAC2.0, etc.)
+		// notably TSRG: ...DUAL.EAC5.1-TSRG.mkv.
+		`\bEAC\d(?:[. ]\d){0,2}\b`,
 		`\b(DTS[ -]?HD|DTS[ -]?X|DTS|TrueHD|Atmos|AAC|AC3|EAC3|DD\+?|DDP|FLAC)\b`,
 		`\bDDP?\d[ .]?\d\b`,
 		// Audio channels alone (require an explicit separator to avoid stripping
