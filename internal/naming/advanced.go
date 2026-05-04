@@ -41,8 +41,9 @@ func init() {
 		`\b(DTS-HD\s?MA|DTS-HD\s?HRA|DTS-HD|DTS-X|DTS-ES)\b`, // DTS variants
 		// Codec glued to channel digits. 1-3 digit groups so all of these
 		// strip together: AAC2.0, DDP5.1, DD+5.1, MA5.1, AC3.5.1,
-		// EAC3.5.1, plus TSRG-style shorthand EAC5.1/EAC7.1/EAC2.0.
-		`\b(?:E?AC3?|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d){0,2}\b`,
+		// EAC3.5.1, plus TSRG-style shorthand EAC5.1/EAC7.1/EAC2.0,
+		// OPUS5.1 (YorMama), AV1.5.1, HEVC/AVC variants.
+		`\b(?:E?AC3?|AAC|DDP?|DD\+?|MA|OPUS|FLAC|AV1|HEVC|AVC|TrueHD|Atmos)\d(?:[. ]\d){0,2}\b`,
 		`\b(DD\+?|DDP|E?AC3|AAC|AC3)\b`,                      // Audio without channels
 		`\b(TrueHD|Atmos|FLAC|PCM|Opus|MP3|DTS)\b`,           // Other audio codecs
 		`\d+Audio`,                             // Orphaned audio markers like "3Audio"
@@ -103,7 +104,7 @@ func init() {
 		`\[.*?\]`,
 
 		// Bit depth
-		`\b(8bit|10bit|12bit)\b`,
+		`\b(8bits?|10bits?|12bits?)\b`,
 	}
 
 	advReleasePatterns = make([]*regexp.Regexp, 0, len(patterns))

@@ -136,6 +136,24 @@ func (n *NegativeCache) Forget(path string) {
 	delete(n.entries, path)
 }
 
+// HydrateEntry pre-populates a cache slot from persistent history. Used at
+// daemon startup so prior deterministic failures survive restarts; without
+// this, a season-pack-only release like Supergirl.S03 (no episode marker)
+// produces a fresh attempt every time the daemon comes up, which over a
+// day's worth of build-deploys looks like an event-storm in the audit.
+func (n *NegativeCache) HydrateEntry(path, errMsg string, failedAt time.Time, failures int) {
+	if n == nil || failures <= 0 {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.entries[path] = &negEntry{
+		failedAt: failedAt,
+		failures: failures,
+		errMsg:   errMsg,
+	}
+}
+
 // Snapshot returns a stable copy of current entries, suitable for surfacing
 // via the API. Each entry includes the path, current failure count, last
 // error, time of last attempt, and remaining backoff.

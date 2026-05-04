@@ -625,6 +625,72 @@ func (m *MediaDB) GetMostRecentDecisionBySourcePath(sourcePath string) (*ParseDe
 	return d, err
 }
 
+// DeterministicFailureRow is a minimal projection for hydrating the in-memory
+// negative cache from persistent history at daemon startup. Each row
+// represents the latest failed organize attempt for a given source path.
+type DeterministicFailureRow struct {
+	SourcePath string
+	Failures   int
+	LastError  string
+	LastAt     time.Time
+}
+
+// GetRecentDeterministicFailures returns the most recent failed organize
+// attempts whose source path appears more than once with a failure outcome
+// and whose latest failure is within the given lookback window. The caller
+// applies its own pattern filter (e.g. IsDeterministicUnparseable) on the
+// returned LastError to decide whether to seed the cache. Aggregating in SQL
+// keeps the result small even when parse_decisions has many rows.
+func (m *MediaDB) GetRecentDeterministicFailures(lookback time.Duration) ([]DeterministicFailureRow, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cutoff := time.Now().UTC().Add(-lookback)
+	rows, err := m.db.Query(`
+		SELECT source_path,
+		       COUNT(1) AS failures,
+		       MAX(event_at) AS last_at,
+		       (SELECT organize_error
+		          FROM parse_decisions p2
+		         WHERE p2.source_path = p1.source_path
+		           AND p2.organize_outcome = 'failed'
+		         ORDER BY p2.event_at DESC LIMIT 1) AS last_error
+		FROM parse_decisions p1
+		WHERE organize_outcome = 'failed'
+		  AND event_at >= ?
+		GROUP BY source_path
+		HAVING failures >= 1`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("GetRecentDeterministicFailures: %w", err)
+	}
+	defer rows.Close()
+
+	var out []DeterministicFailureRow
+	for rows.Next() {
+		var (
+			r        DeterministicFailureRow
+			lastAtRaw string
+			lastErr   sql.NullString
+		)
+		if err := rows.Scan(&r.SourcePath, &r.Failures, &lastAtRaw, &lastErr); err != nil {
+			return nil, fmt.Errorf("GetRecentDeterministicFailures scan: %w", err)
+		}
+		r.LastError = lastErr.String
+		// SQLite returns MAX(event_at) as a string; parse it back. We try
+		// the canonical RFC3339 layout first (how InsertDecision writes it
+		// via time.Now().UTC()) then fall back to SQLite's default
+		// "2006-01-02 15:04:05" format for older rows.
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05"} {
+			if t, perr := time.Parse(layout, lastAtRaw); perr == nil {
+				r.LastAt = t
+				break
+			}
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // MarkDecisionQueued sets organize_outcome = 'queued' for a decision row that
 // has been handed off to the AI enhancement queue, distinguishing it from
 // rows that have not yet been organize-attempted (NULL) or that have failed.

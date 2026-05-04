@@ -49,8 +49,9 @@ func init() {
 		// groups so all of these are stripped:
 		//   AAC2.0, AAC5.1, DDP5.1, DD+5.1, MA5.1, AC3.5.1, EAC3.5.1
 		//   EAC5.1, EAC7.1, EAC2.0 (TSRG-style shorthand: 3 dropped from EAC3)
-		`\b(?:E?AC3?|AAC|DDP?|DD\+?|MA)\d(?:[. ]\d){0,2}\b`,
-		`\b(DTS[ -]?HD|DTS[ -]?X|DTS|TrueHD|Atmos|AAC|AC3|EAC3|DD\+?|DDP|FLAC)\b`,
+		//   OPUS5.1, AV1.5.1, HEVC5.1 (release-group shorthand without separator)
+		`\b(?:E?AC3?|AAC|DDP?|DD\+?|MA|OPUS|FLAC|AV1|HEVC|AVC|TrueHD|Atmos)\d(?:[. ]\d){0,2}\b`,
+		`\b(DTS[ -]?HD|DTS[ -]?X|DTS|TrueHD|Atmos|AAC|AC3|EAC3|DD\+?|DDP|FLAC|OPUS)\b`,
 		// Audio channels alone (require an explicit separator to avoid stripping
 		// 2-digit standalone numbers like "28" in "28 Weeks Later").
 		`\b\d[ .]\d\b`,
@@ -71,7 +72,7 @@ func init() {
 		`\b(RARBG|YTS|YIFY|FLUX|ETHEL|Kitsune|NTb|CMRG|SPARKS|FGT|BZ|TSRG)\b`,
 		`\bv\d+\b`,
 		`\[.*?\]`,
-		`\b(8bit|10bit|12bit)\b`,
+		`\b(8bits?|10bits?|12bits?)\b`,
 		// Note: release group suffix (-SPARKS, -postbot) handled separately in stripReleaseMarkers
 		// REMOVED: `\b[A-Z]{2,5}\d*$` - too broad, strips last word of short titles (e.g., "Pitt" from "The Pitt")
 		// Release groups are already handled by the explicit group list above and releaseGroupSuffix regex

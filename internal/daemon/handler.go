@@ -314,7 +314,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		return nil, fmt.Errorf("failed to create Movie organizer: %w", err)
 	}
 
-	return &MediaHandler{
+	handler := &MediaHandler{
 		tvOrganizer:      tvOrganizer,
 		movieOrganizer:   movieOrganizer,
 		notifyManager:    cfg.NotifyManager,
@@ -346,7 +346,39 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		loggedErrors:      make(map[string]struct{}),
 		targetHealthState: make(map[string]bool),
 		unparseableCache:  NewNegativeCache(),
-	}, nil
+	}
+	hydrateNegativeCacheFromDB(handler.unparseableCache, cfg.Database, cfg.Logger)
+	return handler, nil
+}
+
+// hydrateNegativeCacheFromDB pre-populates the in-memory deterministic-defer
+// cache from prior parse_decisions rows so daemon restarts don't reset the
+// backoff. We pull failures over the past 7 days, count them per source path,
+// and only seed entries whose latest error matches IsDeterministicUnparseable
+// (so transient errors like missing-file races don't get spuriously deferred).
+func hydrateNegativeCacheFromDB(cache *NegativeCache, db *database.MediaDB, logger *logging.Logger) {
+	if cache == nil || db == nil {
+		return
+	}
+	rows, err := db.GetRecentDeterministicFailures(7 * 24 * time.Hour)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("handler", "failed to hydrate negative cache", logging.F("error", err.Error()))
+		}
+		return
+	}
+	hydrated := 0
+	for _, r := range rows {
+		if !IsDeterministicUnparseable(r.LastError) {
+			continue
+		}
+		cache.HydrateEntry(r.SourcePath, r.LastError, r.LastAt, r.Failures)
+		hydrated++
+	}
+	if logger != nil && hydrated > 0 {
+		logger.Info("handler", "Hydrated negative cache from prior failures",
+			logging.F("entries", hydrated))
+	}
 }
 
 // UnparseableCache returns the deterministic-unparseable defer cache. Used

@@ -33,6 +33,10 @@ func TestRealWorldMovieParsing(t *testing.T) {
 		// x264/x265 unified pattern still strips both.
 		{"Movie.E.2024.1080p.WEB-DL.x264-GROUP.mkv", "Movie E", "2024"},
 		{"Movie.F.2024.1080p.WEB-DL.x265-GROUP.mkv", "Movie F", "2024"},
+		// OPUS audio with channel suffix shorthand (YorMama-style).
+		{"2.Guns.2013.1080p.BluRay.OPUS5.1.AV1-YorMama.mkv", "2 Guns", "2013"},
+		// 10bits plural (Rapta-style); previously only "10bit" was stripped.
+		{"Greenland.2.Migration.2026.1080p.WEBRip.AAC5.1.10bits.x265-Rapta.mkv", "Greenland 2 Migration", "2026"},
 	}
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
