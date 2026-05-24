@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"time"
 
@@ -94,16 +95,35 @@ func (s *PeriodicScanner) publish(ev ScanEvent) {
 
 // NewPeriodicScanner creates a new scanner with the given config
 func NewPeriodicScanner(cfg ScannerConfig) *PeriodicScanner {
+	orphanCheck := cfg.OrphanCheck
+	if isNilOrphanChecker(orphanCheck) {
+		orphanCheck = nil
+	}
+
 	return &PeriodicScanner{
 		interval:     cfg.Interval,
 		watchPaths:   cfg.WatchPaths,
 		handler:      cfg.Handler,
 		logger:       cfg.Logger,
 		activityDir:  cfg.ActivityDir,
-		orphanCheck:  cfg.OrphanCheck,
+		orphanCheck:  orphanCheck,
 		sonarrClient: cfg.SonarrClient,
 		radarrClient: cfg.RadarrClient,
 		healthy:      true,
+	}
+}
+
+func isNilOrphanChecker(checker OrphanChecker) bool {
+	if checker == nil {
+		return true
+	}
+
+	v := reflect.ValueOf(checker)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
 	}
 }
 
@@ -234,7 +254,7 @@ func (s *PeriodicScanner) runScan() (err error) {
 }
 
 func (s *PeriodicScanner) checkOrphans() {
-	if s.orphanCheck == nil {
+	if isNilOrphanChecker(s.orphanCheck) {
 		return
 	}
 

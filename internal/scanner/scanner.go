@@ -308,7 +308,11 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 	if isEpisode {
 		tv, err := naming.ParseTVShowName(filename)
 		if err != nil {
-			return fmt.Errorf("parse TV show: %w", err)
+			tv, err = parseTVShowFromParentFolders(filePath)
+			if err != nil {
+				return fmt.Errorf("parse TV show: %w", err)
+			}
+			parseMethod = "folder"
 		}
 		rawTitle = tv.Title
 		normalizedTitle = database.NormalizeTitle(tv.Title)
@@ -431,12 +435,50 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 		result.NeedsReview++
 	}
 
+	var parentSeriesID *int64
+	var parentEpisodeID *int64
+	if isEpisode && season != nil && episode != nil {
+		yearValue := 0
+		if year != nil {
+			yearValue = *year
+		}
+		series := &database.Series{
+			Title:          rawTitle,
+			Year:           yearValue,
+			CanonicalPath:  deriveSeriesPath(filePath, libraryRoot),
+			LibraryRoot:    libraryRoot,
+			Source:         "filesystem",
+			SourcePriority: 50,
+			EpisodeCount:   1,
+			LastEpisodeAdded: func() *time.Time {
+				t := info.ModTime()
+				return &t
+			}(),
+		}
+		if _, err := s.db.UpsertSeries(series); err != nil {
+			return fmt.Errorf("upsert series: %w", err)
+		}
+		parentSeriesID = &series.ID
+
+		ep := &database.Episode{
+			SeriesID: series.ID,
+			Season:   *season,
+			Episode:  *episode,
+		}
+		if err := s.db.UpsertEpisode(ep); err != nil {
+			return fmt.Errorf("upsert episode: %w", err)
+		}
+		parentEpisodeID = &ep.ID
+	}
+
 	// Create MediaFile record
 	file := &database.MediaFile{
 		Path:                filePath,
 		Size:                info.Size(),
 		ModifiedAt:          info.ModTime(),
 		MediaType:           mediaType,
+		ParentSeriesID:      parentSeriesID,
+		ParentEpisodeID:     parentEpisodeID,
 		NormalizedTitle:     normalizedTitle,
 		Year:                year,
 		Season:              season,
@@ -457,7 +499,47 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 	}
 
 	// Upsert to database
-	return s.db.UpsertMediaFile(file)
+	if err := s.db.UpsertMediaFile(file); err != nil {
+		return err
+	}
+
+	if parentEpisodeID != nil {
+		if err := s.db.UpdateEpisodeBestFile(*parentEpisodeID, &file.ID); err != nil {
+			return fmt.Errorf("update episode best file: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func parseTVShowFromParentFolders(path string) (*naming.TVShowInfo, error) {
+	if tv, err := naming.ParseTVShowFromPath(path); err == nil {
+		return tv, nil
+	}
+
+	dir := filepath.Dir(path)
+	for i := 0; i < 3; i++ {
+		if dir == "/" || dir == "." || dir == "" {
+			break
+		}
+
+		folderName := filepath.Base(dir)
+		if tv, err := naming.ParseTVShowName(folderName); err == nil {
+			return tv, nil
+		}
+
+		dir = filepath.Dir(dir)
+	}
+
+	return naming.ParseTVShowName(filepath.Base(path))
+}
+
+func deriveSeriesPath(filePath, libraryRoot string) string {
+	seasonDir := filepath.Dir(filePath)
+	if strings.HasPrefix(strings.ToLower(filepath.Base(seasonDir)), "season ") {
+		return filepath.Dir(seasonDir)
+	}
+	return filepath.Dir(filePath)
 }
 
 // shouldIncludeFile determines if a file should be indexed

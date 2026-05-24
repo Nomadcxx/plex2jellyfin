@@ -131,6 +131,14 @@ func TestParseTVShowFromPath(t *testing.T) {
 			wantErr:     false,
 		},
 		{
+			name:        "release folder fallback when leaf filename has no episode marker",
+			path:        "/downloads/Euphoria.US.S02E02.1080p.HMAX.WEB-DL.DD5.1.x264-NTb-AsRequested/r2Wy7PaRxoEn0Q5WHNLI (1_0).mkv",
+			wantTitle:   "Euphoria US",
+			wantSeason:  2,
+			wantEpisode: 2,
+			wantErr:     false,
+		},
+		{
 			name:    "obfuscated with no valid parent",
 			path:    "/downloads/random/30e2dc4173fc4798bbe5fd40137ed621.mkv",
 			wantErr: true,

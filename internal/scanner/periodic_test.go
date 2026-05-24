@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/activity"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 )
@@ -123,6 +124,19 @@ func TestPeriodicScanner_ScanWatchDirectoriesForwardsFullPath(t *testing.T) {
 	}
 	if handler.events[0].Path != filePath {
 		t.Fatalf("expected full path %q, got %q", filePath, handler.events[0].Path)
+	}
+}
+
+func TestPeriodicScanner_RunScanIgnoresTypedNilOrphanChecker(t *testing.T) {
+	var checker *jellyfin.Client
+	s := NewPeriodicScanner(ScannerConfig{
+		Handler:     &recordingHandler{},
+		Logger:      logging.Nop(),
+		OrphanCheck: checker,
+	})
+
+	if err := s.runScan(); err != nil {
+		t.Fatalf("expected typed nil orphan checker to be disabled, got %v", err)
 	}
 }
 

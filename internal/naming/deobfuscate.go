@@ -133,8 +133,9 @@ func ParseTVShowFromPath(path string) (*TVShowInfo, error) {
 // ParseTVShowFromPathVerbose extracts TV info from path and returns stripped tokens.
 func ParseTVShowFromPathVerbose(path string) (*TVShowInfo, []string, error) {
 	filename := filepath.Base(path)
-	if !IsObfuscatedFilename(filename) {
-		return ParseTVShowNameVerbose(filename)
+	filenameInfo, filenameTokens, filenameErr := ParseTVShowNameVerbose(filename)
+	if filenameErr == nil {
+		return filenameInfo, filenameTokens, nil
 	}
 
 	dir := filepath.Dir(path)
@@ -144,11 +145,16 @@ func ParseTVShowFromPathVerbose(path string) (*TVShowInfo, []string, error) {
 		}
 
 		folderName := filepath.Base(dir)
-		if IsTVEpisodeFilename(folderName) {
-			return ParseTVShowNameVerbose(folderName)
+		info, tokens, err := ParseTVShowNameVerbose(folderName)
+		if err == nil {
+			return info, tokens, nil
 		}
 
 		dir = filepath.Dir(dir)
+	}
+
+	if !IsObfuscatedFilename(filename) {
+		return nil, nil, filenameErr
 	}
 
 	return nil, nil, &ParseError{
