@@ -876,15 +876,16 @@ func (m *MediaDB) ListIdentificationItems(status IdentificationStatusFilter, lim
 	}
 	return out, rows.Err()
 }
+
 // Used by the streaming parses-audit op to compute progress totals.
 func (m *MediaDB) CountParseDecisions() (int, error) {
-m.mu.RLock()
-defer m.mu.RUnlock()
-var n int
-if err := m.db.QueryRow(`SELECT COUNT(*) FROM parse_decisions`).Scan(&n); err != nil {
-return 0, fmt.Errorf("CountParseDecisions: %w", err)
-}
-return n, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var n int
+	if err := m.db.QueryRow(`SELECT COUNT(*) FROM parse_decisions`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("CountParseDecisions: %w", err)
+	}
+	return n, nil
 }
 
 // AuditParseDecisionsPage performs a no-op pass over a slice of rows. The
@@ -894,22 +895,22 @@ return n, nil
 // while the labeler ticker runs separately. Returns the number of rows
 // inspected (0 when offset is past the end).
 func (m *MediaDB) AuditParseDecisionsPage(offset, limit int) (int, error) {
-m.mu.RLock()
-defer m.mu.RUnlock()
-rows, err := m.db.Query(
-`SELECT id FROM parse_decisions ORDER BY id LIMIT ? OFFSET ?`,
-limit, offset)
-if err != nil {
-return 0, fmt.Errorf("AuditParseDecisionsPage: %w", err)
-}
-defer rows.Close()
-n := 0
-for rows.Next() {
-var id int64
-if err := rows.Scan(&id); err != nil {
-return n, err
-}
-n++
-}
-return n, rows.Err()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	rows, err := m.db.Query(
+		`SELECT id FROM parse_decisions ORDER BY id LIMIT ? OFFSET ?`,
+		limit, offset)
+	if err != nil {
+		return 0, fmt.Errorf("AuditParseDecisionsPage: %w", err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, rows.Err()
 }

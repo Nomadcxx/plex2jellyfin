@@ -44,8 +44,8 @@ func init() {
 		// EAC3.5.1, plus TSRG-style shorthand EAC5.1/EAC7.1/EAC2.0,
 		// OPUS5.1 (YorMama), AV1.5.1, HEVC/AVC variants.
 		`\b(?:E?AC3?|AAC|DDP?|DD\+?|MA|OPUS|FLAC|AV1|HEVC|AVC|TrueHD|Atmos)\d(?:[. ]\d){0,2}\b`,
-		`\b(DD\+?|DDP|E?AC3|AAC|AC3)\b`,                      // Audio without channels
-		`\b(TrueHD|Atmos|FLAC|PCM|Opus|MP3|DTS)\b`,           // Other audio codecs
+		`\b(DD\+?|DDP|E?AC3|AAC|AC3)\b`,            // Audio without channels
+		`\b(TrueHD|Atmos|FLAC|PCM|Opus|MP3|DTS)\b`, // Other audio codecs
 		`\d+Audio`,                             // Orphaned audio markers like "3Audio"
 		`MA\d+\s\d+`,                           // Orphaned MA markers like "MA5 1"
 		`\b\d+CH\b`,                            // Channel-count tokens like 6CH, 8CH

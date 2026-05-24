@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 18
+const currentSchemaVersion = 20
 
 // SQL migration scripts
 var migrations = []migration{

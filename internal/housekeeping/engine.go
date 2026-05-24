@@ -184,12 +184,12 @@ func (e *Engine) Detect(ctx context.Context) (*DetectResult, error) {
 
 // folder represents a library subdirectory.
 type folder struct {
-	library string
-	path    string // absolute
-	name    string // basename
-	title   string // normalized
-	year    string
-	hasYear bool
+	library  string
+	path     string // absolute
+	name     string // basename
+	title    string // normalized
+	year     string
+	hasYear  bool
 	polluted bool
 }
 
@@ -1180,152 +1180,152 @@ func (e *Engine) logf(level, format string, args ...any) {
 // skipped (assumed duplicate). If sizes differ, the source copy is left
 // in place and an error is returned so a human can adjudicate.
 func (e *Engine) execMergeMove(ctx context.Context, t *database.HousekeepingTask) error {
-srcAny, ok1 := t.Payload["src_path"]
-dstAny, ok2 := t.Payload["dst_path"]
-if !ok1 || !ok2 {
-return fmt.Errorf("payload missing src_path/dst_path")
-}
-src, _ := srcAny.(string)
-dst, _ := dstAny.(string)
-if src == "" || dst == "" {
-return fmt.Errorf("empty src or dst path")
-}
-if src == dst {
-return fmt.Errorf("src == dst (%s)", src)
-}
-if e.transferer == nil {
-return fmt.Errorf("no transferer configured")
-}
+	srcAny, ok1 := t.Payload["src_path"]
+	dstAny, ok2 := t.Payload["dst_path"]
+	if !ok1 || !ok2 {
+		return fmt.Errorf("payload missing src_path/dst_path")
+	}
+	src, _ := srcAny.(string)
+	dst, _ := dstAny.(string)
+	if src == "" || dst == "" {
+		return fmt.Errorf("empty src or dst path")
+	}
+	if src == dst {
+		return fmt.Errorf("src == dst (%s)", src)
+	}
+	if e.transferer == nil {
+		return fmt.Errorf("no transferer configured")
+	}
 
-srcInfo, err := os.Stat(src)
-if err != nil {
-return fmt.Errorf("stat src: %w", err)
-}
-if !srcInfo.IsDir() {
-return fmt.Errorf("src not a directory: %s", src)
-}
-if _, err := os.Stat(dst); err != nil {
-return fmt.Errorf("stat dst: %w", err)
-}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("stat src: %w", err)
+	}
+	if !srcInfo.IsDir() {
+		return fmt.Errorf("src not a directory: %s", src)
+	}
+	if _, err := os.Stat(dst); err != nil {
+		return fmt.Errorf("stat dst: %w", err)
+	}
 
-// Pre-walk to compute total byte budget — drives the progress bar in
-// the WebUI. Cheap (stat-only) compared to the upcoming move work.
-var totalBytes int64
-var totalFiles int
-_ = filepath.Walk(src, func(p string, fi os.FileInfo, werr error) error {
-if werr != nil || fi == nil || fi.IsDir() {
-return nil
-}
-totalBytes += fi.Size()
-totalFiles++
-return nil
-})
+	// Pre-walk to compute total byte budget — drives the progress bar in
+	// the WebUI. Cheap (stat-only) compared to the upcoming move work.
+	var totalBytes int64
+	var totalFiles int
+	_ = filepath.Walk(src, func(p string, fi os.FileInfo, werr error) error {
+		if werr != nil || fi == nil || fi.IsDir() {
+			return nil
+		}
+		totalBytes += fi.Size()
+		totalFiles++
+		return nil
+	})
 
-prog := e.startTaskOp(t.ID, src, dst, totalFiles, totalBytes)
-defer prog.finish(nil)
+	prog := e.startTaskOp(t.ID, src, dst, totalFiles, totalBytes)
+	defer prog.finish(nil)
 
-moved := 0
-skipped := 0
-var doneBytes int64
-walkErr := filepath.Walk(src, func(path string, info os.FileInfo, werr error) error {
-if werr != nil {
-return werr
-}
-if ctx.Err() != nil {
-return ctx.Err()
-}
-if info.IsDir() {
-return nil
-}
-rel, err := filepath.Rel(src, path)
-if err != nil {
-return err
-}
-target := filepath.Join(dst, rel)
+	moved := 0
+	skipped := 0
+	var doneBytes int64
+	walkErr := filepath.Walk(src, func(path string, info os.FileInfo, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
 
-if existing, err := os.Stat(target); err == nil && !existing.IsDir() {
-if existing.Size() == info.Size() {
-if err := os.Remove(path); err != nil {
-return fmt.Errorf("remove dup src %s: %w", path, err)
-}
-skipped++
-doneBytes += info.Size()
-prog.fileSkipped(rel, info.Size(), doneBytes, totalBytes)
-return nil
-}
-return fmt.Errorf("size mismatch at %s (src=%d dst=%d) — manual review required",
-target, info.Size(), existing.Size())
-}
+		if existing, err := os.Stat(target); err == nil && !existing.IsDir() {
+			if existing.Size() == info.Size() {
+				if err := os.Remove(path); err != nil {
+					return fmt.Errorf("remove dup src %s: %w", path, err)
+				}
+				skipped++
+				doneBytes += info.Size()
+				prog.fileSkipped(rel, info.Size(), doneBytes, totalBytes)
+				return nil
+			}
+			return fmt.Errorf("size mismatch at %s (src=%d dst=%d) — manual review required",
+				target, info.Size(), existing.Size())
+		}
 
-if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
-}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
+		}
 
-prog.fileStarted(rel, info.Size(), doneBytes, totalBytes)
-fileSize := info.Size()
-res, err := e.transferer.Move(path, target, transfer.TransferOptions{
-Timeout:   30 * time.Minute,
-TargetUID: -1,
-TargetGID: -1,
-Progress: func(cur, _ int64) {
-prog.fileBytes(rel, cur, fileSize, doneBytes+cur, totalBytes)
-},
-})
-if err != nil {
-prog.fileFailed(rel, err)
-return fmt.Errorf("move %s -> %s: %w", path, target, err)
-}
-if res != nil && res.Error != nil {
-prog.fileFailed(rel, res.Error)
-return fmt.Errorf("move %s -> %s: %w", path, target, res.Error)
-}
+		prog.fileStarted(rel, info.Size(), doneBytes, totalBytes)
+		fileSize := info.Size()
+		res, err := e.transferer.Move(path, target, transfer.TransferOptions{
+			Timeout:   30 * time.Minute,
+			TargetUID: -1,
+			TargetGID: -1,
+			Progress: func(cur, _ int64) {
+				prog.fileBytes(rel, cur, fileSize, doneBytes+cur, totalBytes)
+			},
+		})
+		if err != nil {
+			prog.fileFailed(rel, err)
+			return fmt.Errorf("move %s -> %s: %w", path, target, err)
+		}
+		if res != nil && res.Error != nil {
+			prog.fileFailed(rel, res.Error)
+			return fmt.Errorf("move %s -> %s: %w", path, target, res.Error)
+		}
 
-if file, gerr := e.db.GetMediaFile(path); gerr == nil && file != nil {
-_ = e.db.DeleteMediaFile(path)
-file.Path = target
-_ = e.db.UpsertMediaFile(file)
-}
+		if file, gerr := e.db.GetMediaFile(path); gerr == nil && file != nil {
+			_ = e.db.DeleteMediaFile(path)
+			file.Path = target
+			_ = e.db.UpsertMediaFile(file)
+		}
 
-moved++
-doneBytes += fileSize
-prog.fileCompleted(rel, fileSize, doneBytes, totalBytes)
-return nil
-})
+		moved++
+		doneBytes += fileSize
+		prog.fileCompleted(rel, fileSize, doneBytes, totalBytes)
+		return nil
+	})
 
-if walkErr != nil {
-prog.finish(walkErr)
-return walkErr
-}
+	if walkErr != nil {
+		prog.finish(walkErr)
+		return walkErr
+	}
 
-if err := removeIfEmptyTree(src); err != nil {
-e.logf("warn", "merge: source not fully empty after move src=%s err=%v", src, err)
-}
+	if err := removeIfEmptyTree(src); err != nil {
+		e.logf("warn", "merge: source not fully empty after move src=%s err=%v", src, err)
+	}
 
-e.logf("info", "merged %d file(s), skipped %d duplicate(s) src=%s dst=%s",
-moved, skipped, src, dst)
-prog.summary(moved, skipped, doneBytes, totalBytes)
-return nil
+	e.logf("info", "merged %d file(s), skipped %d duplicate(s) src=%s dst=%s",
+		moved, skipped, src, dst)
+	prog.summary(moved, skipped, doneBytes, totalBytes)
+	return nil
 }
 
 // removeIfEmptyTree removes a directory tree only if it contains no files.
 // Empty subdirectories are removed bottom-up.
 func removeIfEmptyTree(root string) error {
-var dirs []string
-err := filepath.Walk(root, func(path string, info os.FileInfo, werr error) error {
-if werr != nil {
-return werr
-}
-if info.IsDir() {
-dirs = append(dirs, path)
-return nil
-}
-return fmt.Errorf("non-empty: %s", path)
-})
-if err != nil {
-return err
-}
-for i := len(dirs) - 1; i >= 0; i-- {
-_ = os.Remove(dirs[i])
-}
-return nil
+	var dirs []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if info.IsDir() {
+			dirs = append(dirs, path)
+			return nil
+		}
+		return fmt.Errorf("non-empty: %s", path)
+	})
+	if err != nil {
+		return err
+	}
+	for i := len(dirs) - 1; i >= 0; i-- {
+		_ = os.Remove(dirs[i])
+	}
+	return nil
 }

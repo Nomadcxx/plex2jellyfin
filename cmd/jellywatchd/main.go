@@ -26,9 +26,9 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/scanner"
 	"github.com/Nomadcxx/jellywatch/internal/scheduler"
-	"github.com/Nomadcxx/jellywatch/internal/tmdb"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/jellywatch/internal/tmdb"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 	"github.com/spf13/cobra"
@@ -276,31 +276,31 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	handler, err := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
-		TVLibraries:     cfg.Libraries.TV,
-		MovieLibs:       cfg.Libraries.Movies,
-		TVWatchPaths:    cfg.Watch.TV,
-		MovieWatchPaths: cfg.Watch.Movies,
-		DebounceTime:    10 * time.Second,
-		DryRun:          false, // Daemon always processes files automatically
-		Timeout:         5 * time.Minute,
-		Backend:         transfer.ParseBackend(backendName),
-		NotifyManager:   notifyMgr,
-		Logger:          logger,
-		TargetUID:       targetUID,
-		TargetGID:       targetGID,
-		FileMode:        fileMode,
-		DirMode:         dirMode,
-		SonarrClient:    sonarrClient,
-		JellyfinClient:  jellyfinClient,
-		PlaybackSafety:  cfg.Jellyfin.PlaybackSafety,
-		Database:        db,
-		ConfigDir:       configDir,
-		PlaybackLocks:   playbackLocks,
-		DeferredQueue:   deferredQueue,
-		PathTranslator:  pathTranslator,
-		AIEnabled:       cfg.AI.Enabled && aiMatcher != nil,
-		AIMatcher:       aiMatcher,
-		AIConfig:        cfg.AI,
+		TVLibraries:                  cfg.Libraries.TV,
+		MovieLibs:                    cfg.Libraries.Movies,
+		TVWatchPaths:                 cfg.Watch.TV,
+		MovieWatchPaths:              cfg.Watch.Movies,
+		DebounceTime:                 10 * time.Second,
+		DryRun:                       false, // Daemon always processes files automatically
+		Timeout:                      5 * time.Minute,
+		Backend:                      transfer.ParseBackend(backendName),
+		NotifyManager:                notifyMgr,
+		Logger:                       logger,
+		TargetUID:                    targetUID,
+		TargetGID:                    targetGID,
+		FileMode:                     fileMode,
+		DirMode:                      dirMode,
+		SonarrClient:                 sonarrClient,
+		JellyfinClient:               jellyfinClient,
+		PlaybackSafety:               cfg.Jellyfin.PlaybackSafety,
+		Database:                     db,
+		ConfigDir:                    configDir,
+		PlaybackLocks:                playbackLocks,
+		DeferredQueue:                deferredQueue,
+		PathTranslator:               pathTranslator,
+		AIEnabled:                    cfg.AI.Enabled && aiMatcher != nil,
+		AIMatcher:                    aiMatcher,
+		AIConfig:                     cfg.AI,
 		TransferConcurrencyPerVolume: cfg.Options.TransferConcurrencyPerVolume,
 	})
 	if err != nil {
