@@ -153,6 +153,71 @@ func TestParseTVShowName(t *testing.T) {
 	}
 }
 
+func TestParseTVSeasonPackName(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantTitle  string
+		wantYear   string
+		wantSeason int
+		wantErr    bool
+	}{
+		{
+			name:       "dotted season pack",
+			input:      "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD",
+			wantTitle:  "Supergirl",
+			wantSeason: 3,
+		},
+		{
+			name:       "spaced season pack",
+			input:      "Obliterated S01 1080p NF WEB-DL DDP5 1 Atmos H 264-FLUX. unpack",
+			wantTitle:  "Obliterated",
+			wantSeason: 1,
+		},
+		{
+			name:       "season pack with year",
+			input:      "Worst.Ex.Ever.2026.S02.1080p.NF.WEB-DL",
+			wantTitle:  "Worst Ex Ever",
+			wantYear:   "2026",
+			wantSeason: 2,
+		},
+		{
+			name:    "episode is not season pack",
+			input:   "Supergirl.S03E01.1080p.BluRay.x264-YELLOWBiRD.mkv",
+			wantErr: true,
+		},
+		{
+			name:    "movie is not season pack",
+			input:   "The.Mummy.2026.720p.WEB.h264-JFF.mkv",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _, err := ParseTVSeasonPackNameVerbose(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ParseTVSeasonPackNameVerbose(%q) expected error, got nil", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseTVSeasonPackNameVerbose(%q) unexpected error: %v", tt.input, err)
+			}
+			if got.Title != tt.wantTitle {
+				t.Errorf("Title = %q, want %q", got.Title, tt.wantTitle)
+			}
+			if got.Year != tt.wantYear {
+				t.Errorf("Year = %q, want %q", got.Year, tt.wantYear)
+			}
+			if got.Season != tt.wantSeason {
+				t.Errorf("Season = %d, want %d", got.Season, tt.wantSeason)
+			}
+		})
+	}
+}
+
 func TestFormatTVEpisodeFilenameFromInfo_DateBased(t *testing.T) {
 	info := &TVShowInfo{
 		Title:       "The Daily Show",
@@ -313,12 +378,12 @@ func mustErr[T any](_ *T, err error) error {
 
 func TestParseTVShowNameVerbose(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		wantTitle   string
-		wantSeason  int
-		wantEp      int
-		wantTokens  []string // subset that must be present
+		name       string
+		input      string
+		wantTitle  string
+		wantSeason int
+		wantEp     int
+		wantTokens []string // subset that must be present
 	}{
 		{
 			name:       "common release markers",

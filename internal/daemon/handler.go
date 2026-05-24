@@ -315,33 +315,33 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	}
 
 	handler := &MediaHandler{
-		tvOrganizer:      tvOrganizer,
-		movieOrganizer:   movieOrganizer,
-		notifyManager:    cfg.NotifyManager,
-		tvLibraries:      cfg.TVLibraries,
-		movieLibs:        cfg.MovieLibs,
-		tvWatchPaths:     cfg.TVWatchPaths,
-		movieWatchPaths:  cfg.MovieWatchPaths,
-		debounceTime:     cfg.DebounceTime,
-		pending:          make(map[string]*time.Timer),
-		transientRetries: make(map[string]int),
-		transientWarned:  make(map[string]bool),
-		dryRun:           cfg.DryRun,
-		stats:            NewStats(),
-		logger:           cfg.Logger,
-		sonarrClient:     cfg.SonarrClient,
-		db:               cfg.Database,
-		activityLogger:   activityLogger,
-		playbackLocks:    cfg.PlaybackLocks,
-		deferredQueue:    cfg.DeferredQueue,
-		pathTranslator:   cfg.PathTranslator,
-		pendingAI:        make(map[string]*PendingItem),
-		pendingAICap:     100,
-		aiMatcher:        cfg.AIMatcher,
-		aiCache:          aiCache,
-		aiConfig:         cfg.AIConfig,
-		aiRateLimiter:    rateLimiter,
-		enhanceLogger:    enhanceLog,
+		tvOrganizer:       tvOrganizer,
+		movieOrganizer:    movieOrganizer,
+		notifyManager:     cfg.NotifyManager,
+		tvLibraries:       cfg.TVLibraries,
+		movieLibs:         cfg.MovieLibs,
+		tvWatchPaths:      cfg.TVWatchPaths,
+		movieWatchPaths:   cfg.MovieWatchPaths,
+		debounceTime:      cfg.DebounceTime,
+		pending:           make(map[string]*time.Timer),
+		transientRetries:  make(map[string]int),
+		transientWarned:   make(map[string]bool),
+		dryRun:            cfg.DryRun,
+		stats:             NewStats(),
+		logger:            cfg.Logger,
+		sonarrClient:      cfg.SonarrClient,
+		db:                cfg.Database,
+		activityLogger:    activityLogger,
+		playbackLocks:     cfg.PlaybackLocks,
+		deferredQueue:     cfg.DeferredQueue,
+		pathTranslator:    cfg.PathTranslator,
+		pendingAI:         make(map[string]*PendingItem),
+		pendingAICap:      100,
+		aiMatcher:         cfg.AIMatcher,
+		aiCache:           aiCache,
+		aiConfig:          cfg.AIConfig,
+		aiRateLimiter:     rateLimiter,
+		enhanceLogger:     enhanceLog,
 		aiEnabled:         cfg.AIEnabled,
 		loggedErrors:      make(map[string]struct{}),
 		targetHealthState: make(map[string]bool),
@@ -721,6 +721,10 @@ func (h *MediaHandler) processFile(path string) {
 	}
 
 	if isTVEpisode {
+		if h.processTVSeasonPackIfApplicable(path, decisionID, startTime) {
+			return
+		}
+
 		if len(h.tvLibraries) == 0 {
 			h.logger.Warn("handler", "No TV libraries configured, skipping", logging.F("filename", filename))
 			h.updateDecisionOrganize(decisionID, nil, fmt.Errorf("no TV libraries configured"))
@@ -921,6 +925,134 @@ func (h *MediaHandler) shouldQueueForAI(path, filename string, tvInfo *naming.TV
 		return false
 	}
 	return true
+}
+
+func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID int64, startTime time.Time) bool {
+	releaseDir := filepath.Dir(path)
+	packInfo, strippedTokens, err := naming.ParseTVSeasonPackNameVerbose(filepath.Base(releaseDir))
+	if err != nil {
+		return false
+	}
+
+	year := 0
+	var parsedYear *int
+	if packInfo.Year != "" {
+		if _, err := fmt.Sscanf(packInfo.Year, "%d", &year); err == nil {
+			parsedYear = &year
+		}
+	}
+
+	if h.db != nil && decisionID != 0 {
+		season := packInfo.Season
+		u := database.ParseUpdate{
+			ParseMethod:      string(activity.MethodSeasonPack),
+			ParsedTitle:      packInfo.Title,
+			ParsedYear:       parsedYear,
+			ParsedSeason:     &season,
+			MediaTypeGuessed: "tv",
+		}
+		if b, jerr := json.Marshal(strippedTokens); jerr == nil {
+			u.ParserStrippedTokens = string(b)
+		}
+		if updateErr := h.db.UpdateParse(decisionID, u); updateErr != nil {
+			h.logger.Warn("handler", "failed to update season-pack parse decision",
+				logging.F("path", path),
+				logging.F("error", updateErr.Error()))
+		}
+	}
+
+	packResult, err := h.tvOrganizer.OrganizeTVSeasonPackAuto(releaseDir, func(p string) (int64, error) {
+		info, err := os.Stat(p)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	})
+
+	result := h.seasonPackOrganizationResult(path, releaseDir, packResult, err)
+	h.updateDecisionOrganize(decisionID, result, nil)
+
+	sonarrNotified := false
+	if packResult != nil {
+		for _, imported := range packResult.Imported {
+			if imported == nil || !imported.Success {
+				continue
+			}
+			h.stats.RecordTV(imported.BytesCopied)
+			tv, parseErr := naming.ParseTVShowFromPath(imported.TargetPath)
+			season, episode := packInfo.Season, 0
+			if parseErr == nil {
+				season = tv.Season
+				episode = tv.Episode
+			}
+			notified, _ := h.sendNotificationsWithTracking(imported, notify.MediaTypeTVEpisode, packInfo.Title, packInfo.Year, season, episode)
+			sonarrNotified = sonarrNotified || notified
+		}
+	}
+
+	if result.Success {
+		h.logger.Info("handler", "Season pack organized",
+			logging.F("dir", releaseDir),
+			logging.F("imported", len(packResult.Imported)),
+			logging.F("unresolved", len(packResult.Unresolved)))
+		h.unparseableCache.Forget(path)
+		h.unparseableCache.Forget(releaseDir)
+	} else if result.Skipped {
+		if result.Error != nil && IsDeterministicUnparseable(result.Error.Error()) {
+			h.unparseableCache.Record(path, result.Error.Error())
+		}
+		h.logger.Info("handler", "Season pack requires review",
+			logging.F("dir", releaseDir),
+			logging.F("reason", result.SkipReason))
+	} else {
+		h.stats.RecordError()
+		if result.Error != nil && h.shouldLogError(path, result.Error.Error()) {
+			h.logger.Error("handler", "Season pack organization failed", result.Error, logging.F("dir", releaseDir))
+		}
+	}
+
+	h.logEntry(result, notify.MediaTypeTVEpisode, packInfo.Title, parsedYear, activity.MethodSeasonPack, 0, time.Since(startTime), sonarrNotified, false)
+	return true
+}
+
+func (h *MediaHandler) seasonPackOrganizationResult(path, releaseDir string, packResult *organizer.SeasonPackResult, err error) *organizer.OrganizationResult {
+	if err != nil {
+		return &organizer.OrganizationResult{
+			Success:    false,
+			SourcePath: path,
+			Error:      err,
+		}
+	}
+	if packResult == nil {
+		return &organizer.OrganizationResult{
+			Success:    false,
+			SourcePath: path,
+			Error:      fmt.Errorf("season pack processor returned nil result"),
+		}
+	}
+	if packResult.Skipped {
+		return &organizer.OrganizationResult{
+			Success:    false,
+			SourcePath: path,
+			Skipped:    true,
+			SkipReason: packResult.SkipReason,
+			Error:      fmt.Errorf("%s: %s", packResult.SkipReason, releaseDir),
+		}
+	}
+	targetPath := ""
+	for _, imported := range packResult.Imported {
+		if imported != nil && imported.TargetPath != "" {
+			targetPath = imported.TargetPath
+			break
+		}
+	}
+	return &organizer.OrganizationResult{
+		Success:     packResult.Success,
+		SourcePath:  releaseDir,
+		TargetPath:  targetPath,
+		BytesCopied: packResult.BytesCopied,
+		Error:       packResult.Error,
+	}
 }
 
 func hasDeterministicTVEpisodeIdentity(path string, tvInfo *naming.TVShowInfo) bool {
@@ -1772,6 +1904,11 @@ func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.Organi
 	case result.Skipped:
 		u.OrganizeOutcome = "skipped"
 		u.TargetPath = result.TargetPath
+		if result.Error != nil {
+			u.OrganizeError = result.Error.Error()
+		} else {
+			u.OrganizeError = result.SkipReason
+		}
 		// l1: leave TargetAt nil for skipped paths.  No write happened, so
 		// stamping target_at would mislead the auditor into thinking a copy
 		// landed at this path at this moment.

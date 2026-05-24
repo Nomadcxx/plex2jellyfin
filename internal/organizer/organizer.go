@@ -35,6 +35,17 @@ type OrganizationResult struct {
 	ExistingQuality *quality.QualityInfo
 }
 
+type SeasonPackResult struct {
+	Success     bool
+	SourceDir   string
+	Imported    []*OrganizationResult
+	Unresolved  []string
+	Skipped     bool
+	SkipReason  string
+	Error       error
+	BytesCopied int64
+}
+
 type Organizer struct {
 	dryRun         bool
 	keepSource     bool
@@ -989,6 +1000,81 @@ func (o *Organizer) OrganizeTVEpisodeAuto(sourcePath string, getFileSize func(st
 	log.Printf("[organizer] tv library selected: title=%q lib=%s reason=%s", tv.Title, selection.Library, selection.Reason)
 
 	return o.OrganizeTVEpisode(sourcePath, selection.Library)
+}
+
+func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func(string) (int64, error)) (*SeasonPackResult, error) {
+	releaseDir = filepath.Clean(releaseDir)
+	packInfo, err := naming.ParseTVSeasonPackName(filepath.Base(releaseDir))
+	if err != nil {
+		return nil, err
+	}
+
+	videoFiles, err := collectVideoFiles(releaseDir)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &SeasonPackResult{SourceDir: releaseDir}
+	for _, path := range videoFiles {
+		tv, err := naming.ParseTVShowFromPath(path)
+		if err != nil || tv.Season <= 0 || tv.Episode <= 0 {
+			result.Unresolved = append(result.Unresolved, path)
+			continue
+		}
+		if tv.Title == "" {
+			tv.Title = packInfo.Title
+		}
+		if tv.Year == "" {
+			tv.Year = packInfo.Year
+		}
+
+		itemResult, err := o.OrganizeTVWithParsedAuto(path, *tv, getFileSize)
+		if err != nil {
+			result.Error = err
+			return result, err
+		}
+		result.Imported = append(result.Imported, itemResult)
+		if itemResult != nil {
+			result.BytesCopied += itemResult.BytesCopied
+			if itemResult.Error != nil && !itemResult.Skipped {
+				result.Error = itemResult.Error
+			}
+		}
+	}
+
+	if len(result.Imported) == 0 {
+		result.Skipped = true
+		result.SkipReason = "season_pack_unresolved"
+		result.Error = fmt.Errorf("season pack has no episode-numbered video files: %s", releaseDir)
+		return result, nil
+	}
+
+	result.Success = result.Error == nil
+	if !result.Success && result.SkipReason == "" {
+		result.SkipReason = "season_pack_partial_failure"
+	}
+	return result, nil
+}
+
+func collectVideoFiles(root string) ([]string, error) {
+	videoExtensions := map[string]bool{
+		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
+		".wmv": true, ".m4v": true, ".ts": true, ".m2ts": true, ".webm": true,
+	}
+	var files []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if videoExtensions[strings.ToLower(filepath.Ext(path))] {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
 }
 
 // findExistingMediaFile scans a directory for existing video files and returns

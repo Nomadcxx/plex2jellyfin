@@ -178,6 +178,57 @@ func ParseTVShowNameVerbose(filename string) (*TVShowInfo, []string, error) {
 	return info, tokens, err
 }
 
+var seasonPackRegex = regexp.MustCompile(`(?i)(^|[._\s-])S(\d{1,2})($|[._\s-])`)
+
+func IsTVSeasonPackName(name string) bool {
+	_, err := ParseTVSeasonPackName(name)
+	return err == nil
+}
+
+func ParseTVSeasonPackName(name string) (*TVSeasonPackInfo, error) {
+	info, _, err := ParseTVSeasonPackNameVerbose(name)
+	return info, err
+}
+
+func ParseTVSeasonPackNameVerbose(name string) (*TVSeasonPackInfo, []string, error) {
+	baseName := strings.TrimSuffix(filepath.Base(name), filepath.Ext(name))
+	tokens := collectStrippedTokens(baseName)
+
+	if IsTVEpisodeFilename(baseName) {
+		return nil, tokens, fmt.Errorf("%w: episode release is not a season pack: %s", ErrParseFailed, name)
+	}
+
+	match := seasonPackRegex.FindStringSubmatchIndex(baseName)
+	if match == nil {
+		return nil, tokens, fmt.Errorf("%w: no season-pack marker found in: %s", ErrParseFailed, name)
+	}
+
+	seasonText := baseName[match[4]:match[5]]
+	season := 0
+	if _, err := fmt.Sscanf(seasonText, "%d", &season); err != nil || season <= 0 {
+		return nil, tokens, fmt.Errorf("%w: invalid season-pack marker in: %s", ErrParseFailed, name)
+	}
+
+	titlePart := baseName[:match[0]]
+	titlePart = stripReleaseMarkers(titlePart)
+	year := extractYear(baseName)
+	if year != "" {
+		titlePart = removeYear(titlePart, year)
+		titlePart = strings.TrimSuffix(strings.TrimSpace(titlePart), year)
+	}
+	titlePart = normalizeSpaces(titlePart)
+	titlePart = strings.TrimSpace(titlePart)
+	if titlePart == "" || IsGarbageTitle(titlePart) {
+		return nil, tokens, fmt.Errorf("%w: could not extract season-pack title from: %s", ErrParseFailed, name)
+	}
+
+	return &TVSeasonPackInfo{
+		Title:  titlePart,
+		Year:   year,
+		Season: season,
+	}, tokens, nil
+}
+
 func parseTVShowFromBaseName(baseName, filename string) (*TVShowInfo, error) {
 	episodeMatch := findEpisodeMatch(baseName)
 	if !episodeMatch.found {

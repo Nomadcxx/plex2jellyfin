@@ -20,3 +20,9 @@ func (h SourceHint) String() string {
 		return "unknown"
 	}
 }
+
+type TVSeasonPackInfo struct {
+	Title  string
+	Year   string
+	Season int
+}

@@ -529,8 +529,8 @@ func TestFindExistingSeasonDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create various season folder formats
-	os.MkdirAll(filepath.Join(tmpDir, "Season 1"), 0755)    // non-padded
-	os.MkdirAll(filepath.Join(tmpDir, "Season 02"), 0755)   // correctly padded
+	os.MkdirAll(filepath.Join(tmpDir, "Season 1"), 0755)  // non-padded
+	os.MkdirAll(filepath.Join(tmpDir, "Season 02"), 0755) // correctly padded
 	os.MkdirAll(filepath.Join(tmpDir, "Season 10"), 0755) // two digits
 
 	tests := []struct {
@@ -736,6 +736,65 @@ func TestOrganizeTVEpisode_DateBased(t *testing.T) {
 	assert.FileExists(t, incoming, "skipped incoming source must not be moved or deleted")
 }
 
+func TestOrganizeTVSeasonPackAuto_ImportsEpisodeFiles(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	packDir := filepath.Join(sourceDir, "Supergirl.S03.1080p.BluRay.x264-GROUP")
+	require.NoError(t, os.MkdirAll(packDir, 0755))
+	ep1 := filepath.Join(packDir, "Supergirl.S03E01.1080p.BluRay.x264-GROUP.mkv")
+	ep2 := filepath.Join(packDir, "Supergirl.S03E02.1080p.BluRay.x264-GROUP.mkv")
+	createTestFile(t, ep1, 1024)
+	createTestFile(t, ep2, 1024)
+
+	org, err := NewOrganizer([]string{libraryDir}, WithBackend(transfer.BackendNative))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVSeasonPackAuto(packDir, func(p string) (int64, error) {
+		info, err := os.Stat(p)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	})
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Len(t, result.Imported, 2)
+	assert.Empty(t, result.Unresolved)
+	assert.FileExists(t, filepath.Join(libraryDir, "Supergirl", "Season 03", "Supergirl S03E01.mkv"))
+	assert.FileExists(t, filepath.Join(libraryDir, "Supergirl", "Season 03", "Supergirl S03E02.mkv"))
+	assert.NoFileExists(t, ep1)
+	assert.NoFileExists(t, ep2)
+}
+
+func TestOrganizeTVSeasonPackAuto_SkipsUnresolvedSeasonOnlyFile(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	packDir := filepath.Join(sourceDir, "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD")
+	require.NoError(t, os.MkdirAll(packDir, 0755))
+	seasonOnly := filepath.Join(packDir, "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD.mkv")
+	createTestFile(t, seasonOnly, 1024)
+
+	org, err := NewOrganizer([]string{libraryDir}, WithBackend(transfer.BackendNative))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVSeasonPackAuto(packDir, func(p string) (int64, error) {
+		info, err := os.Stat(p)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	})
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.True(t, result.Skipped)
+	assert.Equal(t, "season_pack_unresolved", result.SkipReason)
+	assert.Len(t, result.Unresolved, 1)
+	assert.Empty(t, result.Imported)
+	assert.FileExists(t, seasonOnly)
+}
+
 // ---------------------------------------------------------------------------
 // Task 3.3: stem-matching subtitle copy tests
 // ---------------------------------------------------------------------------
@@ -752,12 +811,12 @@ func TestCopySubtitles_OnlyStemMatching(t *testing.T) {
 		name   string
 		copied bool
 	}{
-		{"Show.S01E01.srt", true},         // exact stem match
-		{"Show.S01E01.eng.srt", true},     // stem match after stripping language suffix
-		{"Show.S01E01.en.srt", true},      // stem match after stripping short lang suffix
-		{"Show.S01E01.forced.srt", true},  // stem match after stripping flag suffix
-		{"OtherShow.S01E01.srt", false},   // different show — must not be copied
-		{"random.srt", false},             // no relation to video — must not be copied
+		{"Show.S01E01.srt", true},        // exact stem match
+		{"Show.S01E01.eng.srt", true},    // stem match after stripping language suffix
+		{"Show.S01E01.en.srt", true},     // stem match after stripping short lang suffix
+		{"Show.S01E01.forced.srt", true}, // stem match after stripping flag suffix
+		{"OtherShow.S01E01.srt", false},  // different show — must not be copied
+		{"random.srt", false},            // no relation to video — must not be copied
 	}
 
 	var subFiles []analyzer.FileInfo

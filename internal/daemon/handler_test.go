@@ -837,6 +837,168 @@ func TestProcessFile_WritesParseDecision(t *testing.T) {
 	assert.NotEmpty(t, d.OrganizeOutcome)
 }
 
+func TestProcessFile_SeasonPackUnresolvedIsSkippedForReview(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	packDir := filepath.Join(watchDir, "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD")
+	require.NoError(t, os.MkdirAll(packDir, 0755))
+	srcFile := filepath.Join(packDir, "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0644))
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       false,
+		Database:        db,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	handler.processFile(srcFile)
+
+	rows, err := db.QueryDecisions(database.QueryFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	d := rows[0]
+	assert.Equal(t, "season_pack", d.ParseMethod)
+	assert.Equal(t, "Supergirl", d.ParsedTitle)
+	require.NotNil(t, d.ParsedSeason)
+	assert.Equal(t, 3, *d.ParsedSeason)
+	assert.Nil(t, d.ParsedEpisode)
+	assert.Equal(t, "skipped", d.OrganizeOutcome)
+	assert.Contains(t, d.OrganizeError, "season_pack_unresolved")
+	assert.FileExists(t, srcFile)
+}
+
+func TestProcessFile_SeasonPackUnresolvedIsDeferredAfterSkip(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	packDir := filepath.Join(watchDir, "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD")
+	require.NoError(t, os.MkdirAll(packDir, 0755))
+	srcFile := filepath.Join(packDir, "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0644))
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       false,
+		Database:        db,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	handler.processFile(srcFile)
+	handler.processFile(srcFile)
+
+	rows, err := db.QueryDecisions(database.QueryFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "second pass should be suppressed by negative cache")
+	assert.Equal(t, "skipped", rows[0].OrganizeOutcome)
+	assert.Contains(t, rows[0].OrganizeError, "season_pack_unresolved")
+}
+
+func TestNewMediaHandler_HydratesSeasonPackUnresolvedNegativeCache(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	packDir := filepath.Join(watchDir, "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD")
+	require.NoError(t, os.MkdirAll(packDir, 0755))
+	srcFile := filepath.Join(packDir, "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0644))
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:       srcFile,
+		SourceFilename:   filepath.Base(srcFile),
+		EventAt:          time.Now().UTC(),
+		MediaTypeGuessed: "tv",
+		ParseMethod:      "season_pack",
+		ParsedTitle:      "Supergirl",
+		OrganizeOutcome:  "skipped",
+		OrganizeError:    "season_pack_unresolved: " + packDir,
+	})
+	require.NoError(t, err)
+	require.NotZero(t, id)
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       false,
+		Database:        db,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	deferred, remaining, lastErr := handler.unparseableCache.IsDeferred(srcFile)
+	assert.True(t, deferred)
+	assert.Greater(t, remaining, time.Duration(0))
+	assert.Contains(t, lastErr, "season_pack_unresolved")
+}
+
+func TestProcessFile_SeasonPackImportsEpisodeSiblings(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	packDir := filepath.Join(watchDir, "Supergirl.S03.1080p.BluRay.x264-GROUP")
+	require.NoError(t, os.MkdirAll(packDir, 0755))
+	srcFile := filepath.Join(packDir, "Supergirl.S03E01.1080p.BluRay.x264-GROUP.mkv")
+	sibling := filepath.Join(packDir, "Supergirl.S03E02.1080p.BluRay.x264-GROUP.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0644))
+	require.NoError(t, os.WriteFile(sibling, []byte("test"), 0644))
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       false,
+		Database:        db,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	handler.processFile(srcFile)
+
+	assert.FileExists(t, filepath.Join(tmpLib, "Supergirl", "Season 03", "Supergirl S03E01.mkv"))
+	assert.FileExists(t, filepath.Join(tmpLib, "Supergirl", "Season 03", "Supergirl S03E02.mkv"))
+	assert.NoFileExists(t, srcFile)
+	assert.NoFileExists(t, sibling)
+	assert.False(t, handler.containsVideoFilesRecursive(packDir), "pack cleanup must not leave videos behind")
+
+	rows, err := db.QueryDecisions(database.QueryFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "season_pack", rows[0].ParseMethod)
+	assert.Equal(t, "success", rows[0].OrganizeOutcome)
+}
+
 func TestAIItemHasParseDecisionID(t *testing.T) {
 	tmpLib := t.TempDir()
 	watchDir := t.TempDir()
@@ -924,98 +1086,98 @@ func TestRegexFallback_WritesParseDecision(t *testing.T) {
 }
 
 func TestHandleJellyfinWebhookEvent_ItemAddedUpdatesParseDecision(t *testing.T) {
-dbPath := filepath.Join(t.TempDir(), "handler-test.db")
-db, err := database.OpenPath(dbPath)
-require.NoError(t, err)
-defer db.Close()
+	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
 
-targetPath := "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv"
-now := time.Now().UTC()
-id, err := db.InsertDecision(database.ParseDecision{
-SourcePath:      "/downloads/the.matrix.1999.mkv",
-SourceFilename:  "the.matrix.1999.mkv",
-EventAt:         now,
-TargetPath:      targetPath,
-OrganizeOutcome: "success",
-})
-require.NoError(t, err)
+	targetPath := "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv"
+	now := time.Now().UTC()
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/the.matrix.1999.mkv",
+		SourceFilename:  "the.matrix.1999.mkv",
+		EventAt:         now,
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+	})
+	require.NoError(t, err)
 
-handler := &MediaHandler{
-db:            db,
-playbackLocks: jellyfin.NewPlaybackLockManager(),
-deferredQueue: jellyfin.NewDeferredQueue(),
-}
+	handler := &MediaHandler{
+		db:            db,
+		playbackLocks: jellyfin.NewPlaybackLockManager(),
+		deferredQueue: jellyfin.NewDeferredQueue(),
+	}
 
-event := jellyfin.WebhookEvent{
-NotificationType: jellyfin.EventItemAdded,
-ItemID:           "jf-item-001",
-ItemPath:         targetPath,
-ItemName:         "The Matrix",
-ItemType:         "Movie",
-ProviderImdb:     "tt0133093",
-ProviderTmdb:     "603",
-}
+	event := jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventItemAdded,
+		ItemID:           "jf-item-001",
+		ItemPath:         targetPath,
+		ItemName:         "The Matrix",
+		ItemType:         "Movie",
+		ProviderImdb:     "tt0133093",
+		ProviderTmdb:     "603",
+	}
 
-handler.HandleJellyfinWebhookEvent(event)
+	handler.HandleJellyfinWebhookEvent(event)
 
-dec, err := db.GetDecision(id)
-require.NoError(t, err)
-require.NotNil(t, dec)
-assert.Equal(t, "jf-item-001", dec.JellyfinItemID)
-assert.Equal(t, "tt0133093", dec.JellyfinImdbID)
-assert.Equal(t, "603", dec.JellyfinTmdbID)
-assert.NotNil(t, dec.JellyfinResolvedAt)
+	dec, err := db.GetDecision(id)
+	require.NoError(t, err)
+	require.NotNil(t, dec)
+	assert.Equal(t, "jf-item-001", dec.JellyfinItemID)
+	assert.Equal(t, "tt0133093", dec.JellyfinImdbID)
+	assert.Equal(t, "603", dec.JellyfinTmdbID)
+	assert.NotNil(t, dec.JellyfinResolvedAt)
 }
 
 func TestHandleJellyfinWebhookEvent_ItemAddedSkipsResolved(t *testing.T) {
-dbPath := filepath.Join(t.TempDir(), "handler-test.db")
-db, err := database.OpenPath(dbPath)
-require.NoError(t, err)
-defer db.Close()
+	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
 
-targetPath := "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv"
-now := time.Now().UTC().Add(-1 * time.Hour)
-resolvedAt := now
-resolvedID, err := db.InsertDecision(database.ParseDecision{
-SourcePath:         "/downloads/old.mkv",
-SourceFilename:     "old.mkv",
-EventAt:            now,
-TargetPath:         targetPath,
-OrganizeOutcome:    "success",
-JellyfinItemID:     "old-jf-id",
-JellyfinResolvedAt: &resolvedAt,
-})
-require.NoError(t, err)
+	targetPath := "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv"
+	now := time.Now().UTC().Add(-1 * time.Hour)
+	resolvedAt := now
+	resolvedID, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:         "/downloads/old.mkv",
+		SourceFilename:     "old.mkv",
+		EventAt:            now,
+		TargetPath:         targetPath,
+		OrganizeOutcome:    "success",
+		JellyfinItemID:     "old-jf-id",
+		JellyfinResolvedAt: &resolvedAt,
+	})
+	require.NoError(t, err)
 
-unresolvedID, err := db.InsertDecision(database.ParseDecision{
-SourcePath:      "/downloads/the.matrix.1999.mkv",
-SourceFilename:  "the.matrix.1999.mkv",
-EventAt:         time.Now().UTC(),
-TargetPath:      targetPath,
-OrganizeOutcome: "success",
-})
-require.NoError(t, err)
+	unresolvedID, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/the.matrix.1999.mkv",
+		SourceFilename:  "the.matrix.1999.mkv",
+		EventAt:         time.Now().UTC(),
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+	})
+	require.NoError(t, err)
 
-handler := &MediaHandler{
-db:            db,
-playbackLocks: jellyfin.NewPlaybackLockManager(),
-deferredQueue: jellyfin.NewDeferredQueue(),
-}
+	handler := &MediaHandler{
+		db:            db,
+		playbackLocks: jellyfin.NewPlaybackLockManager(),
+		deferredQueue: jellyfin.NewDeferredQueue(),
+	}
 
-handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
-NotificationType: jellyfin.EventItemAdded,
-ItemID:           "new-jf-id",
-ItemPath:         targetPath,
-ItemName:         "The Matrix",
-ItemType:         "Movie",
-})
+	handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventItemAdded,
+		ItemID:           "new-jf-id",
+		ItemPath:         targetPath,
+		ItemName:         "The Matrix",
+		ItemType:         "Movie",
+	})
 
-resolved, err := db.GetDecision(resolvedID)
-require.NoError(t, err)
-assert.Equal(t, "old-jf-id", resolved.JellyfinItemID, "resolved row must not be touched")
+	resolved, err := db.GetDecision(resolvedID)
+	require.NoError(t, err)
+	assert.Equal(t, "old-jf-id", resolved.JellyfinItemID, "resolved row must not be touched")
 
-updated, err := db.GetDecision(unresolvedID)
-require.NoError(t, err)
-assert.Equal(t, "new-jf-id", updated.JellyfinItemID)
-assert.NotNil(t, updated.JellyfinResolvedAt)
+	updated, err := db.GetDecision(unresolvedID)
+	require.NoError(t, err)
+	assert.Equal(t, "new-jf-id", updated.JellyfinItemID)
+	assert.NotNil(t, updated.JellyfinResolvedAt)
 }

@@ -14,9 +14,10 @@ import (
 type ParseMethod string
 
 const (
-	MethodRegex ParseMethod = "regex"
-	MethodAI    ParseMethod = "ai"
-	MethodCache ParseMethod = "cache"
+	MethodRegex      ParseMethod = "regex"
+	MethodAI         ParseMethod = "ai"
+	MethodCache      ParseMethod = "cache"
+	MethodSeasonPack ParseMethod = "season_pack"
 )
 
 type Entry struct {
