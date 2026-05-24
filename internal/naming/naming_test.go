@@ -37,6 +37,27 @@ func TestParseMovieName(t *testing.T) {
 			wantYear:  "2024",
 			wantErr:   false,
 		},
+		{
+			name:      "Strips DCP marker",
+			input:     "The.Devil.Wears.Prada.2.2026.1080p.DCP.WEBRIP.AC3.x264-AOC.mkv",
+			wantTitle: "The Devil Wears Prada 2",
+			wantYear:  "2026",
+			wantErr:   false,
+		},
+		{
+			name:      "Strips full HDR10 plus marker",
+			input:     "Tom.Clancys.Jack.Ryan.Ghost.War.2026.2160p.AMZN.WEB-DL.HDR10+.H.265.10bit.DDP5.1.Atmos-UBWEB.mkv",
+			wantTitle: "Tom Clancys Jack Ryan Ghost War",
+			wantYear:  "2026",
+			wantErr:   false,
+		},
+		{
+			name:      "Preserves roman numeral sequel",
+			input:     "Mortal.Kombat.II.2026.1080p.WEBRip.x264.AAC-LAMA.mp4",
+			wantTitle: "Mortal Kombat II",
+			wantYear:  "2026",
+			wantErr:   false,
+		},
 	}
 
 	for _, tt := range tests {

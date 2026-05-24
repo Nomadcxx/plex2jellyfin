@@ -35,7 +35,7 @@ func init() {
 		`\b(4K|UHD)\b`,    // 4K, UHD
 
 		// HDR formats (before generic HDR to catch specific variants)
-		`\b(HDR10\+?|HDR10Plus|Dolby\s?Vision|DoVi|DV|HDR|HLG|PQ|SDR)\b`,
+		`\bHDR10\+|\b(HDR10|HDR10Plus|Dolby\s?Vision|DoVi|DV|HDR|HLG|PQ|SDR)\b`,
 
 		// Audio formats with channels (most specific first)
 		`\b(DTS-HD\s?MA|DTS-HD\s?HRA|DTS-HD|DTS-X|DTS-ES)\b`, // DTS variants
@@ -64,7 +64,7 @@ func init() {
 		`\b(NORDiC|NF|ATVP|HULU)\b`,
 
 		// Source types
-		`\b(BluRay|Blu-ray|BDRip|BRRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB)\b`,
+		`\b(BluRay|Blu-ray|BDRip|BRRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
 		`\b(HDTV|PDTV|SDTV|DVDRip|DVD|DVDSCR)\b`,
 		`\b(CAM|HDTS|TS|TC|SCR|R5)\b`,
 
@@ -407,6 +407,15 @@ func removeSpecificYear(name, year string) string {
 	return name
 }
 
+func isRomanNumeralTitleToken(word string) bool {
+	switch strings.ToUpper(strings.TrimSpace(word)) {
+	case "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X":
+		return true
+	default:
+		return false
+	}
+}
+
 // stripOrphanedReleaseGroups removes common release group names that remain after stripping markers
 // These are typically alphanumeric strings with mixed case (e.g., "D3FiL3R", "RARBG", "YTS")
 func stripOrphanedReleaseGroups(name string) string {
@@ -421,6 +430,10 @@ func stripOrphanedReleaseGroups(name string) string {
 
 		last := words[len(words)-1]
 		lastLower := strings.ToLower(last)
+
+		if isRomanNumeralTitleToken(last) {
+			break
+		}
 
 		// Don't remove if it's a preserved acronym
 		if IsPreservedAcronym(lastLower) {
@@ -566,6 +579,10 @@ func IsGarbageTitle(title string) bool {
 	garbageCount := 0
 	for _, word := range words {
 		wordLower := strings.ToLower(word)
+
+		if isRomanNumeralTitleToken(word) {
+			continue
+		}
 
 		// Skip stopwords from garbage count (e.g., 'the', 'a', 'of')
 		if len(words) > 1 {

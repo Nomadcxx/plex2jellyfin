@@ -204,6 +204,70 @@ func TestQueryDecisions_OrganizeOutcome(t *testing.T) {
 	assert.Equal(t, id1, results[0].ID)
 }
 
+func TestQueryRecentSuccessfulMovieImports(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	targetAt := now
+
+	recentMovie := makeDecision()
+	recentMovie.SourcePath = "/watch/movies/Mortal.Kombat.II.2026.1080p.WEB-DL.mp4"
+	recentMovie.SourceFilename = "Mortal.Kombat.II.2026.1080p.WEB-DL.mp4"
+	recentMovie.EventAt = now
+	recentMovie.MediaTypeGuessed = "movie"
+	id, err := db.InsertDecision(recentMovie)
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(id, OrganizeUpdate{
+		TargetPath:      "/library/MOVIES/Mortal Kombat (2026)/Mortal Kombat (2026).mp4",
+		TargetAt:        &targetAt,
+		OrganizeOutcome: "success",
+	}))
+
+	oldMovie := makeDecision()
+	oldMovie.SourcePath = "/watch/movies/Old.Movie.2020.mkv"
+	oldMovie.SourceFilename = "Old.Movie.2020.mkv"
+	oldMovie.EventAt = now.Add(-10 * 24 * time.Hour)
+	oldMovie.MediaTypeGuessed = "movie"
+	oldID, err := db.InsertDecision(oldMovie)
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(oldID, OrganizeUpdate{
+		TargetPath:      "/library/MOVIES/Old Movie (2020)/Old Movie (2020).mkv",
+		TargetAt:        &targetAt,
+		OrganizeOutcome: "success",
+	}))
+
+	tv := makeDecision()
+	tv.SourceFilename = "Show.S01E01.mkv"
+	tv.EventAt = now
+	tv.MediaTypeGuessed = "tv"
+	tvID, err := db.InsertDecision(tv)
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(tvID, OrganizeUpdate{
+		TargetPath:      "/library/TV/Show/Season 01/Show - S01E01.mkv",
+		TargetAt:        &targetAt,
+		OrganizeOutcome: "success",
+	}))
+
+	failedMovie := makeDecision()
+	failedMovie.SourceFilename = "Failed.Movie.2026.mkv"
+	failedMovie.EventAt = now
+	failedMovie.MediaTypeGuessed = "movie"
+	failedID, err := db.InsertDecision(failedMovie)
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(failedID, OrganizeUpdate{
+		OrganizeOutcome: "failed",
+		OrganizeError:   "boom",
+	}))
+
+	rows, err := db.QueryRecentSuccessfulMovieImports(7*24*time.Hour, 50)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, id, rows[0].ID)
+	assert.Equal(t, recentMovie.SourceFilename, rows[0].SourceFilename)
+	assert.Equal(t, "/library/MOVIES/Mortal Kombat (2026)/Mortal Kombat (2026).mp4", rows[0].TargetPath)
+}
+
 func TestQueryDecisions_AutoLabel(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

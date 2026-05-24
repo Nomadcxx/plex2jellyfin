@@ -18,6 +18,7 @@ package housekeeping
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/Nomadcxx/jellywatch/internal/tmdb"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
@@ -118,17 +120,18 @@ func NewEngine(cfg Config, db *database.MediaDB, logger *logging.Logger) *Engine
 
 // DetectResult summarises one detect cycle.
 type DetectResult struct {
-	CrossVolumeDupes int // duplicate workflow: low-confidence flags
-	AutoDupes        int // duplicate workflow: high-confidence auto-delete tasks
-	NoYearMerges     int
-	YearMismatches   int
-	VerifiedDistinct int
-	PollutedNames    int
-	OrphanSources    int
-	StuckSyncs       int
-	FolderRenames    int
-	Enqueued         int
-	Skipped          int
+	CrossVolumeDupes   int // duplicate workflow: low-confidence flags
+	AutoDupes          int // duplicate workflow: high-confidence auto-delete tasks
+	NoYearMerges       int
+	YearMismatches     int
+	VerifiedDistinct   int
+	PollutedNames      int
+	OrphanSources      int
+	StuckSyncs         int
+	FolderRenames      int
+	ParserDriftRenames int
+	Enqueued           int
+	Skipped            int
 }
 
 // Detect scans the configured libraries and watch dirs, enqueueing any
@@ -171,6 +174,10 @@ func (e *Engine) Detect(ctx context.Context) (*DetectResult, error) {
 
 	// 6: stuck sync_log rows
 	e.detectStuckSync(ctx, res, enqueue)
+
+	// 7: parser drift repairs for successful movie imports created by
+	// JellyWatch before parser fixes landed.
+	e.detectParserDriftRepairs(ctx, res, enqueue)
 
 	return res, nil
 }
@@ -583,6 +590,100 @@ func (e *Engine) detectStuckSync(ctx context.Context, res *DetectResult, enqueue
 	}
 }
 
+func (e *Engine) detectParserDriftRepairs(ctx context.Context, res *DetectResult, enqueue func(string, map[string]any, int)) {
+	if e.db == nil {
+		return
+	}
+	rows, err := e.db.QueryRecentSuccessfulMovieImports(14*24*time.Hour, 500)
+	if err != nil {
+		e.logf("warn", "parser drift query failed err=%v", err)
+		return
+	}
+	for _, d := range rows {
+		if ctx.Err() != nil {
+			return
+		}
+		srcPath, dstPath, ok := e.parserDriftMovieRename(d)
+		if !ok {
+			continue
+		}
+		res.ParserDriftRenames++
+		enqueue(database.TaskKindParserDriftRename, map[string]any{
+			"parse_decision_id": d.ID,
+			"src_path":          srcPath,
+			"dst_path":          dstPath,
+			"source_filename":   d.SourceFilename,
+		}, 70)
+	}
+}
+
+func (e *Engine) parserDriftMovieRename(d *database.ParseDecision) (srcPath, dstPath string, ok bool) {
+	if d == nil || d.SourceFilename == "" || d.TargetPath == "" {
+		return "", "", false
+	}
+	libRoot := containingLibrary(d.TargetPath, e.cfg.MovieLibraries)
+	if libRoot == "" {
+		return "", "", false
+	}
+	info, err := naming.ParseMovieName(d.SourceFilename)
+	if err != nil || info == nil || info.Title == "" {
+		return "", "", false
+	}
+	cleanName := naming.NormalizeMovieName(info.Title, info.Year)
+	ext := filepath.Ext(d.TargetPath)
+	if ext == "" {
+		ext = filepath.Ext(d.SourceFilename)
+	}
+	if cleanName == "" || ext == "" {
+		return "", "", false
+	}
+	srcPath = filepath.Clean(d.TargetPath)
+	dstPath = filepath.Join(libRoot, cleanName, cleanName+ext)
+	if srcPath == filepath.Clean(dstPath) {
+		return "", "", false
+	}
+	srcExists := false
+	if _, err := os.Stat(srcPath); err == nil {
+		srcExists = true
+	} else if !os.IsNotExist(err) {
+		return "", "", false
+	}
+	dstExists := false
+	if _, err := os.Stat(dstPath); err == nil {
+		dstExists = true
+	} else if !os.IsNotExist(err) {
+		return "", "", false
+	}
+	if srcExists && dstExists {
+		return "", "", false
+	}
+	if srcExists {
+		if _, err := os.Stat(filepath.Dir(srcPath)); err != nil {
+			return "", "", false
+		}
+		if _, err := os.Stat(filepath.Dir(dstPath)); err == nil {
+			return "", "", false
+		} else if !os.IsNotExist(err) {
+			return "", "", false
+		}
+	}
+	if !srcExists && !dstExists {
+		return "", "", false
+	}
+	return srcPath, dstPath, true
+}
+
+func containingLibrary(path string, libs []string) string {
+	cleanPath := filepath.Clean(path)
+	for _, lib := range libs {
+		cleanLib := filepath.Clean(lib)
+		if cleanPath == cleanLib || strings.HasPrefix(cleanPath, cleanLib+string(filepath.Separator)) {
+			return cleanLib
+		}
+	}
+	return ""
+}
+
 // detectFileDuplicates finds duplicate movies/episodes at the file level
 // (not folder level) using the same service.CleanupService the CLI uses.
 // For each duplicate group it classifies confidence:
@@ -786,6 +887,11 @@ func (e *Engine) executeTask(ctx context.Context, t *database.HousekeepingTask) 
 		// as a folder merge because the canonical folder already exists
 		// in the same library (no cross-volume work).
 		return e.execMergeMove(ctx, t)
+	case database.TaskKindParserDriftRename:
+		// Naming workflow: JellyWatch previously organized a movie to a
+		// path derived from an older parser. The current parser now derives
+		// a better same-library path, so rename the folder/file in place.
+		return e.execParserDriftRename(t)
 	case database.TaskKindConsolidateDuplicate:
 		// Duplicate workflow: delete the inferior copies of a known
 		// high-confidence duplicate group via the same logic the CLI
@@ -801,6 +907,119 @@ func (e *Engine) executeTask(ctx context.Context, t *database.HousekeepingTask) 
 		return fmt.Errorf("flag-only task kind %q requires manual action", t.Kind)
 	default:
 		return fmt.Errorf("unknown task kind %q", t.Kind)
+	}
+}
+
+func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) error {
+	src, _ := t.Payload["src_path"].(string)
+	dst, _ := t.Payload["dst_path"].(string)
+	if src == "" || dst == "" {
+		return fmt.Errorf("payload missing src_path/dst_path")
+	}
+	src = filepath.Clean(src)
+	dst = filepath.Clean(dst)
+	if src == dst {
+		return fmt.Errorf("src == dst (%s)", src)
+	}
+	srcDir := filepath.Dir(src)
+	dstDir := filepath.Dir(dst)
+	if srcDir == dstDir {
+		return fmt.Errorf("parser drift rename requires folder rename: %s", srcDir)
+	}
+	srcExists := false
+	if _, err := os.Stat(src); err == nil {
+		srcExists = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat src: %w", err)
+	}
+	dstExists := false
+	if _, err := os.Stat(dst); err == nil {
+		dstExists = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat dst: %w", err)
+	}
+	if srcExists && dstExists {
+		return fmt.Errorf("source and destination both exist: %s -> %s", src, dst)
+	}
+	if !srcExists && !dstExists {
+		return fmt.Errorf("source and destination both missing: %s -> %s", src, dst)
+	}
+	if srcExists {
+		if _, err := os.Stat(dstDir); err == nil {
+			return fmt.Errorf("destination directory already exists: %s", dstDir)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("stat dst dir: %w", err)
+		}
+		if err := os.Rename(srcDir, dstDir); err != nil {
+			return fmt.Errorf("rename folder %s -> %s: %w", srcDir, dstDir, err)
+		}
+		movedPath := filepath.Join(dstDir, filepath.Base(src))
+		if filepath.Base(src) != filepath.Base(dst) {
+			if err := os.Rename(movedPath, dst); err != nil {
+				return fmt.Errorf("rename file %s -> %s: %w", movedPath, dst, err)
+			}
+		}
+	}
+
+	if file, err := e.db.GetMediaFile(src); err == nil && file != nil {
+		_ = e.db.DeleteMediaFile(src)
+		file.Path = dst
+		file.LibraryRoot = containingLibrary(dst, e.cfg.MovieLibraries)
+		_ = e.db.UpsertMediaFile(file)
+	}
+
+	if id, ok := payloadInt64(t.Payload, "parse_decision_id"); ok && id > 0 {
+		now := time.Now().UTC()
+		_ = e.db.UpdateOrganize(id, database.OrganizeUpdate{
+			TargetPath:      dst,
+			TargetAt:        &now,
+			OrganizeOutcome: "success",
+		})
+		if sourceFilename, _ := t.Payload["source_filename"].(string); sourceFilename != "" {
+			if info, tokens, err := naming.ParseMovieNameVerbose(sourceFilename); err == nil && info != nil {
+				var parsedYear *int
+				if info.Year != "" {
+					year := 0
+					if _, err := fmt.Sscanf(info.Year, "%d", &year); err == nil {
+						parsedYear = &year
+					}
+				}
+				tokenJSON := ""
+				if b, err := json.Marshal(tokens); err == nil {
+					tokenJSON = string(b)
+				}
+				_ = e.db.UpdateParse(id, database.ParseUpdate{
+					ParseMethod:          "regex",
+					ParsedTitle:          info.Title,
+					ParsedYear:           parsedYear,
+					ParserStrippedTokens: tokenJSON,
+					MediaTypeGuessed:     "movie",
+				})
+			}
+		}
+	}
+
+	e.logf("info", "parser-drift renamed src=%s dst=%s", src, dst)
+	return nil
+}
+
+func payloadInt64(payload map[string]any, key string) (int64, bool) {
+	v, ok := payload[key]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch x := v.(type) {
+	case int64:
+		return x, true
+	case int:
+		return int64(x), true
+	case float64:
+		return int64(x), true
+	case json.Number:
+		n, err := x.Int64()
+		return n, err == nil
+	default:
+		return 0, false
 	}
 }
 

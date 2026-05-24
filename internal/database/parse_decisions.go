@@ -460,6 +460,46 @@ func (m *MediaDB) HasRecentSuccessForSource(sourcePath string, lookback time.Dur
 	return n > 0, nil
 }
 
+// QueryRecentSuccessfulMovieImports returns recent movie organize successes
+// that JellyWatch can use as repair candidates. Rows must have both a source
+// filename and target path so callers can reparse the original release name
+// and compare it against the current library location.
+func (m *MediaDB) QueryRecentSuccessfulMovieImports(lookback time.Duration, limit int) ([]*ParseDecision, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 500
+	}
+	cutoff := time.Now().UTC().Add(-lookback)
+	rows, err := m.db.Query(`
+		SELECT `+decisionColumns+`
+		FROM parse_decisions
+		WHERE organize_outcome = 'success'
+		  AND media_type_guessed = 'movie'
+		  AND source_filename IS NOT NULL
+		  AND source_filename != ''
+		  AND target_path IS NOT NULL
+		  AND target_path != ''
+		  AND event_at >= ?
+		ORDER BY event_at DESC, id DESC
+		LIMIT ?`, cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("QueryRecentSuccessfulMovieImports: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*ParseDecision
+	for rows.Next() {
+		d, err := scanDecision(rows)
+		if err != nil {
+			return nil, fmt.Errorf("QueryRecentSuccessfulMovieImports scan: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // scanner abstracts *sql.Row and *sql.Rows for scanDecision.
 type scanner interface {
 	Scan(dest ...any) error

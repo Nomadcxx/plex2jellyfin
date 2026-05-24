@@ -557,8 +557,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				if err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("enqueued=%d auto_dup=%d cross_volume=%d folder_rename=%d no_year=%d year_mismatch=%d verified_distinct=%d polluted=%d orphan=%d stuck_sync=%d",
-					res.Enqueued, res.AutoDupes, res.CrossVolumeDupes, res.FolderRenames, res.NoYearMerges, res.YearMismatches, res.VerifiedDistinct, res.PollutedNames, res.OrphanSources, res.StuckSyncs), nil
+				return fmt.Sprintf("enqueued=%d auto_dup=%d cross_volume=%d folder_rename=%d parser_drift=%d no_year=%d year_mismatch=%d verified_distinct=%d polluted=%d orphan=%d stuck_sync=%d",
+					res.Enqueued, res.AutoDupes, res.CrossVolumeDupes, res.FolderRenames, res.ParserDriftRenames, res.NoYearMerges, res.YearMismatches, res.VerifiedDistinct, res.PollutedNames, res.OrphanSources, res.StuckSyncs), nil
 			},
 		}); err != nil {
 			logger.Warn("daemon", "register housekeeping.detect failed", logging.F("error", err.Error()))

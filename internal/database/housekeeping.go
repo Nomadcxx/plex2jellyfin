@@ -23,22 +23,23 @@ const (
 
 // Task kinds (extend as more detectors are added).
 const (
-	TaskKindMoveMerge       = "move_merge"        // legacy folder-walk merge; no longer enqueued by detect, retained for executor compat
-	TaskKindNoYearMerge     = "no_year_merge"     // merge no-year folder into year-bearing twin (same library, naming workflow)
-	TaskKindYearMismatch    = "year_mismatch"     // flag-only, naming workflow
-	TaskKindPollutedName    = "polluted_name"     // flag-only, naming workflow
-	TaskKindOrphanSource    = "orphan_source"     // remove empty watch-dir source dir
-	TaskKindStuckSync       = "stuck_sync"        // mark stuck sync_log row as error
-	TaskKindSubdirMismatch  = "subdir_mismatch"   // flag-only, naming workflow
+	TaskKindMoveMerge      = "move_merge"      // legacy folder-walk merge; no longer enqueued by detect, retained for executor compat
+	TaskKindNoYearMerge    = "no_year_merge"   // merge no-year folder into year-bearing twin (same library, naming workflow)
+	TaskKindYearMismatch   = "year_mismatch"   // flag-only, naming workflow
+	TaskKindPollutedName   = "polluted_name"   // flag-only, naming workflow
+	TaskKindOrphanSource   = "orphan_source"   // remove empty watch-dir source dir
+	TaskKindStuckSync      = "stuck_sync"      // mark stuck sync_log row as error
+	TaskKindSubdirMismatch = "subdir_mismatch" // flag-only, naming workflow
 
 	// Convergence (housekeeper ↔ consolidator/cleanup): three workflows.
 	// Duplicate-removal workflow (movies + TV):
-	TaskKindConsolidateDuplicate = "consolidate_duplicate" // auto, delete inferior copies via service.CleanupService
+	TaskKindConsolidateDuplicate = "consolidate_duplicate"  // auto, delete inferior copies via service.CleanupService
 	TaskKindCrossVolumeDuplicate = "cross_volume_duplicate" // flag, low-confidence duplicate awaiting human approval
 	// Consolidation workflow (TV scatter only):
-	TaskKindSeriesConsolidate    = "series_consolidate"    // auto, move one TV series' scattered episodes onto a single volume
+	TaskKindSeriesConsolidate = "series_consolidate" // auto, move one TV series' scattered episodes onto a single volume
 	// Naming workflow:
-	TaskKindFolderRename         = "folder_rename"         // auto, rename folder in-place to canonical case (no cross-volume work)
+	TaskKindFolderRename      = "folder_rename"       // auto, rename folder in-place to canonical case (no cross-volume work)
+	TaskKindParserDriftRename = "parser_drift_rename" // auto, repair JellyWatch-created path after parser fixes
 )
 
 // HousekeepingTask is a queued (or completed) housekeeping action.

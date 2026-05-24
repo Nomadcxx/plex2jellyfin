@@ -43,7 +43,7 @@ func init() {
 	patterns := []string{
 		`\b\d{3,4}[pi]\b`,
 		`\b(4K|UHD)\b`,
-		`\b(HDR10\+?|HDR|DoVi|DV|SDR|HLG)\b`,
+		`\bHDR10\+|\b(HDR10|HDR|DoVi|DV|SDR|HLG)\b`,
 		// Codec glued to channel digits (must come BEFORE bare codec match so the
 		// trailing channel digits get stripped together). Allows 1-3 digit
 		// groups so all of these are stripped:
@@ -57,7 +57,7 @@ func init() {
 		`\b\d[ .]\d\b`,
 		// Channel-count tokens like "6CH", "8CH"
 		`\b\d+CH\b`,
-		`\b(BluRay|Blu-ray|BDRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB)\b`,
+		`\b(BluRay|Blu-ray|BDRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
 		`\b(HDTV|DVDRip|DVD)\b`,
 		`\b(AMZN|NF|ATVP|HULU|DSNP|MAX|PMTP)\b`,
 		`\b[xh][ .]?26[45]\b`,
