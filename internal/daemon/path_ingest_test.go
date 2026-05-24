@@ -46,6 +46,13 @@ func TestNormalizeEventPath(t *testing.T) {
 			wantAction: ingestDefer,
 		},
 		{
+			name:       "sab unpack suffix directory",
+			rawPath:    "/watch/tv/Obliterated S01 1080p NF WEB-DL DDP5 1 Atmos H 264-FLUX. unpack.1/Obliterated S01 1080p NF WEB-DL DDP5 1 Atmos H 264-FLUX. unpack.mkv",
+			watchRoots: []string{"/watch/tv"},
+			wantReason: "transient_unpack_path",
+			wantAction: ingestDefer,
+		},
+		{
 			name:       "valid path under root",
 			rawPath:    "/watch/movies/movie.mkv",
 			watchRoots: []string{"/watch"},

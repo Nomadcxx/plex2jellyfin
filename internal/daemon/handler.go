@@ -514,7 +514,7 @@ func (h *MediaHandler) logEntry(
 
 	if !result.Success && result.Error != nil {
 		entry.Error = result.Error.Error()
-		if errors.Is(result.Error, naming.ErrParseFailed) {
+		if errors.Is(result.Error, naming.ErrParseFailed) || IsDeterministicUnparseable(entry.Error) {
 			entry.Deterministic = true
 			if result.SourcePath != "" {
 				if st, serr := os.Stat(result.SourcePath); serr == nil {
@@ -614,10 +614,10 @@ func (h *MediaHandler) isInsideLibrary(path string) bool {
 }
 
 func (h *MediaHandler) processFile(path string) {
-	// Skip files still inside Sabnzbd's _UNPACK_ staging folder.
+	// Skip files still inside Sabnzbd's transient unpack staging folders.
 	// After extraction, Sabnzbd renames the folder and the watcher/scanner picks up the real path.
-	if strings.Contains(path, string(os.PathSeparator)+"_UNPACK_") {
-		h.logger.Info("handler", "Skipping _UNPACK_ path — extraction still in progress",
+	if isSABTransientUnpackPath(path) {
+		h.logger.Info("handler", "Skipping SAB transient unpack path — extraction still in progress",
 			logging.F("path", path))
 		h.mu.Lock()
 		delete(h.pending, path)

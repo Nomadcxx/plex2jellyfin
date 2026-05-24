@@ -70,12 +70,13 @@ func TestNegativeCache_BackoffEscalates(t *testing.T) {
 
 func TestIsDeterministicUnparseable(t *testing.T) {
 	cases := map[string]bool{
-		"could not extract TV show info from path: /foo/bar":                               true,
-		"transfer failed: all backends failed: rsync: timed out":                           false,
+		"could not extract TV show info from path: /foo/bar":                                                                                 true,
+		"transfer failed: all backends failed: rsync: timed out":                                                                             false,
 		"unable to parse TV show name: could not extract TV show info from path (obfuscated filename, no episode markers in parent folders)": true,
-		"":                            false,
-		"open /foo: no such file":     false,
-		"unable to parse movie name":  true,
+		"season_pack_unresolved: /downloads/tv/Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD":                                                   true,
+		"":                           false,
+		"open /foo: no such file":    false,
+		"unable to parse movie name": true,
 	}
 	for msg, want := range cases {
 		got := IsDeterministicUnparseable(msg)

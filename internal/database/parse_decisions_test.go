@@ -127,6 +127,30 @@ func TestParseDecisionUpdateOrganizeFailed(t *testing.T) {
 	assert.Equal(t, "no match found", got.OrganizeError)
 }
 
+func TestGetRecentDeterministicFailures_IncludesSeasonPackSkipped(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	d := makeDecision()
+	d.SourcePath = "/downloads/tv/Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD/Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD.mkv"
+	d.SourceFilename = "Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD.mkv"
+	d.EventAt = time.Now().UTC()
+	d.ParseMethod = "season_pack"
+	d.MediaTypeGuessed = "tv"
+	d.OrganizeOutcome = "skipped"
+	d.OrganizeError = "season_pack_unresolved: /downloads/tv/Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD"
+	_, err := db.InsertDecision(d)
+	require.NoError(t, err)
+
+	rows, err := db.GetRecentDeterministicFailures(7 * 24 * time.Hour)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, d.SourcePath, rows[0].SourcePath)
+	assert.Equal(t, 1, rows[0].Failures)
+	assert.Equal(t, d.OrganizeError, rows[0].LastError)
+	assert.False(t, rows[0].LastAt.IsZero())
+}
+
 func TestParseDecisionUpdateOutcome(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

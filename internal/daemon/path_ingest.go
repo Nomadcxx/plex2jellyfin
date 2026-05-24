@@ -25,7 +25,7 @@ func normalizeEventPath(rawPath string, watchRoots []string) (string, string, in
 		return "", "not_absolute", ingestReject
 	}
 
-	if strings.Contains(path, string(os.PathSeparator)+"_UNPACK_") {
+	if isSABTransientUnpackPath(path) {
 		return path, "transient_unpack_path", ingestDefer
 	}
 
@@ -48,4 +48,30 @@ func normalizeEventPath(rawPath string, watchRoots []string) (string, string, in
 	}
 
 	return "", "outside_watch_roots", ingestReject
+}
+
+func isSABTransientUnpackPath(path string) bool {
+	cleaned := filepath.Clean(path)
+	parts := strings.Split(cleaned, string(os.PathSeparator))
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if i == len(parts)-1 && filepath.Ext(part) != "" {
+			continue
+		}
+		lower := strings.ToLower(part)
+		if strings.HasPrefix(lower, "_unpack_") {
+			return true
+		}
+		tokens := strings.FieldsFunc(lower, func(r rune) bool {
+			return r == '.' || r == '_' || r == '-' || r == ' '
+		})
+		for _, token := range tokens {
+			if token == "unpack" {
+				return true
+			}
+		}
+	}
+	return false
 }

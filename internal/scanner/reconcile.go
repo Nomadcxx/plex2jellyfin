@@ -143,7 +143,7 @@ func (s *PeriodicScanner) processActivityFile(path string, retryWindow, cleanupW
 		// entry is deterministic and due for a periodic re-check.
 		withinRetryWindow := entry.Timestamp.After(retryWindow)
 
-		if entry.Deterministic {
+		if entry.Deterministic || isDeterministicActivityFailure(entry) {
 			if !s.deterministicDueForRetry(entry, deterministicCutoff) {
 				continue
 			}
@@ -174,11 +174,36 @@ func (s *PeriodicScanner) deterministicDueForRetry(entry activity.Entry, cutoff 
 	if entry.Source == "" {
 		return false
 	}
+	if entry.SourceMtime == 0 {
+		return false
+	}
 	st, err := os.Stat(entry.Source)
 	if err != nil {
 		return false
 	}
 	return st.ModTime().Unix() != entry.SourceMtime
+}
+
+func isDeterministicActivityFailure(entry activity.Entry) bool {
+	if entry.Error == "" {
+		return false
+	}
+	msg := strings.ToLower(entry.Error)
+	patterns := []string{
+		"could not extract tv show info from path",
+		"obfuscated filename, no episode markers",
+		"no episode markers in parent folders",
+		"season_pack_unresolved",
+		"unable to parse tv show name",
+		"could not extract movie info from path",
+		"unable to parse movie name",
+	}
+	for _, p := range patterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *PeriodicScanner) retryTransfer(entry activity.Entry) error {

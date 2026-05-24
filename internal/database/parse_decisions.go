@@ -675,12 +675,11 @@ type DeterministicFailureRow struct {
 	LastAt     time.Time
 }
 
-// GetRecentDeterministicFailures returns the most recent failed organize
-// attempts whose source path appears more than once with a failure outcome
-// and whose latest failure is within the given lookback window. The caller
-// applies its own pattern filter (e.g. IsDeterministicUnparseable) on the
-// returned LastError to decide whether to seed the cache. Aggregating in SQL
-// keeps the result small even when parse_decisions has many rows.
+// GetRecentDeterministicFailures returns recent organize attempts that may be
+// deterministic enough to hydrate the negative cache. This includes failed
+// attempts plus skipped season-pack rows that intentionally preserve
+// unresolved season-only files for review. The caller applies its own pattern
+// filter (e.g. IsDeterministicUnparseable) on LastError before seeding.
 func (m *MediaDB) GetRecentDeterministicFailures(lookback time.Duration) ([]DeterministicFailureRow, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -693,10 +692,12 @@ func (m *MediaDB) GetRecentDeterministicFailures(lookback time.Duration) ([]Dete
 		       (SELECT organize_error
 		          FROM parse_decisions p2
 		         WHERE p2.source_path = p1.source_path
-		           AND p2.organize_outcome = 'failed'
+		           AND (p2.organize_outcome = 'failed'
+		                OR (p2.organize_outcome = 'skipped' AND p2.organize_error LIKE 'season_pack_unresolved:%'))
 		         ORDER BY p2.event_at DESC LIMIT 1) AS last_error
 		FROM parse_decisions p1
-		WHERE organize_outcome = 'failed'
+		WHERE (organize_outcome = 'failed'
+		       OR (organize_outcome = 'skipped' AND organize_error LIKE 'season_pack_unresolved:%'))
 		  AND event_at >= ?
 		GROUP BY source_path
 		HAVING failures >= 1`, cutoff)
@@ -708,7 +709,7 @@ func (m *MediaDB) GetRecentDeterministicFailures(lookback time.Duration) ([]Dete
 	var out []DeterministicFailureRow
 	for rows.Next() {
 		var (
-			r        DeterministicFailureRow
+			r         DeterministicFailureRow
 			lastAtRaw string
 			lastErr   sql.NullString
 		)
@@ -720,7 +721,7 @@ func (m *MediaDB) GetRecentDeterministicFailures(lookback time.Duration) ([]Dete
 		// the canonical RFC3339 layout first (how InsertDecision writes it
 		// via time.Now().UTC()) then fall back to SQLite's default
 		// "2006-01-02 15:04:05" format for older rows.
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05"} {
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05 -0700 MST", "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05"} {
 			if t, perr := time.Parse(layout, lastAtRaw); perr == nil {
 				r.LastAt = t
 				break

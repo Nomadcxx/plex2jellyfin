@@ -234,16 +234,20 @@ func TestProcessFile_SkipsUnpackPaths(t *testing.T) {
 		t.Fatalf("failed to create handler: %v", err)
 	}
 
-	// Path still inside an _UNPACK_ folder — should be silently skipped
-	unpackPath := filepath.Join(tmpLib, "_UNPACK_Show.S01E01.1080p.WEB.mkv", "Show.S01E01.1080p.WEB.mkv")
-	handler.processFile(unpackPath)
+	paths := []string{
+		filepath.Join(tmpLib, "_UNPACK_Show.S01E01.1080p.WEB.mkv", "Show.S01E01.1080p.WEB.mkv"),
+		filepath.Join(tmpLib, "Obliterated S01 1080p NF WEB-DL DDP5 1 Atmos H 264-FLUX. unpack.1", "Obliterated S01 1080p NF WEB-DL DDP5 1 Atmos H 264-FLUX. unpack.mkv"),
+	}
+	for _, unpackPath := range paths {
+		handler.processFile(unpackPath)
+	}
 
 	snap := handler.stats.Snapshot()
 	if snap.Errors > 0 {
-		t.Errorf("processFile recorded %d errors for _UNPACK_ path — should skip without error", snap.Errors)
+		t.Errorf("processFile recorded %d errors for transient unpack paths — should skip without error", snap.Errors)
 	}
 	if snap.TVProcessed > 0 || snap.MoviesProcessed > 0 {
-		t.Errorf("processFile should not have processed an _UNPACK_ path")
+		t.Errorf("processFile should not have processed transient unpack paths")
 	}
 }
 
