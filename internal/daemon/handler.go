@@ -38,6 +38,8 @@ type MediaHandler struct {
 	pending          map[string]*time.Timer
 	transientRetries map[string]int
 	transientWarned  map[string]bool
+	seasonPackActive map[string]struct{}
+	seasonPackDone   map[string]time.Time
 	mu               sync.Mutex
 	dryRun           bool
 	stats            *Stats
@@ -115,6 +117,7 @@ func aiRetryBackoff(attempt int) time.Duration {
 }
 
 var transientRetryDelay = 2 * time.Second
+var seasonPackEventSuppressWindow = 30 * time.Minute
 
 type Stats struct {
 	mu               sync.RWMutex
@@ -326,6 +329,8 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		pending:           make(map[string]*time.Timer),
 		transientRetries:  make(map[string]int),
 		transientWarned:   make(map[string]bool),
+		seasonPackActive:  make(map[string]struct{}),
+		seasonPackDone:    make(map[string]time.Time),
 		dryRun:            cfg.DryRun,
 		stats:             NewStats(),
 		logger:            cfg.Logger,
@@ -613,6 +618,43 @@ func (h *MediaHandler) isInsideLibrary(path string) bool {
 	return false
 }
 
+func seasonPackReleaseDir(path string) (string, bool) {
+	releaseDir := filepath.Clean(filepath.Dir(path))
+	if _, _, err := naming.ParseTVSeasonPackNameVerbose(filepath.Base(releaseDir)); err != nil {
+		return "", false
+	}
+	return releaseDir, true
+}
+
+func (h *MediaHandler) beginSeasonPack(releaseDir string, now time.Time) (bool, string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for dir, completedAt := range h.seasonPackDone {
+		if now.Sub(completedAt) > seasonPackEventSuppressWindow {
+			delete(h.seasonPackDone, dir)
+		}
+	}
+	if _, ok := h.seasonPackActive[releaseDir]; ok {
+		return false, "active"
+	}
+	if completedAt, ok := h.seasonPackDone[releaseDir]; ok && now.Sub(completedAt) <= seasonPackEventSuppressWindow {
+		return false, "recently_completed"
+	}
+	h.seasonPackActive[releaseDir] = struct{}{}
+	return true, ""
+}
+
+func (h *MediaHandler) finishSeasonPack(releaseDir string, completed bool, now time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	delete(h.seasonPackActive, releaseDir)
+	if completed {
+		h.seasonPackDone[releaseDir] = now
+	}
+}
+
 func (h *MediaHandler) processFile(path string) {
 	// Skip files still inside Sabnzbd's transient unpack staging folders.
 	// After extraction, Sabnzbd renames the folder and the watcher/scanner picks up the real path.
@@ -692,6 +734,29 @@ func (h *MediaHandler) processFile(path string) {
 	sourceHint := h.getSourceHint(path)
 	isTVEpisode := naming.IsTVEpisodeFromPath(path, sourceHint)
 
+	seasonPackDir := ""
+	seasonPackCompleted := false
+	if isTVEpisode {
+		if releaseDir, ok := seasonPackReleaseDir(path); ok {
+			started, reason := h.beginSeasonPack(releaseDir, startTime)
+			if !started {
+				h.logger.Info("handler", "Skipping duplicate season-pack event",
+					logging.F("dir", releaseDir),
+					logging.F("path", path),
+					logging.F("reason", reason))
+				h.mu.Lock()
+				delete(h.pending, path)
+				delete(h.transientRetries, path)
+				h.mu.Unlock()
+				return
+			}
+			seasonPackDir = releaseDir
+			defer func() {
+				h.finishSeasonPack(seasonPackDir, seasonPackCompleted, time.Now())
+			}()
+		}
+	}
+
 	// Insert one parse decision row per debounced processing attempt.  We
 	// look up any prior decision for this source path so the audit can
 	// surface how the same file was previously parsed (ExistingMatchMethod).
@@ -721,7 +786,9 @@ func (h *MediaHandler) processFile(path string) {
 	}
 
 	if isTVEpisode {
-		if h.processTVSeasonPackIfApplicable(path, decisionID, startTime) {
+		handled, completed := h.processTVSeasonPackIfApplicable(path, decisionID, startTime)
+		if handled {
+			seasonPackCompleted = completed
 			return
 		}
 
@@ -927,11 +994,11 @@ func (h *MediaHandler) shouldQueueForAI(path, filename string, tvInfo *naming.TV
 	return true
 }
 
-func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID int64, startTime time.Time) bool {
+func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID int64, startTime time.Time) (bool, bool) {
 	releaseDir := filepath.Dir(path)
 	packInfo, strippedTokens, err := naming.ParseTVSeasonPackNameVerbose(filepath.Base(releaseDir))
 	if err != nil {
-		return false
+		return false, false
 	}
 
 	year := 0
@@ -1012,7 +1079,7 @@ func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID i
 	}
 
 	h.logEntry(result, notify.MediaTypeTVEpisode, packInfo.Title, parsedYear, activity.MethodSeasonPack, 0, time.Since(startTime), sonarrNotified, false)
-	return true
+	return true, result.Success || result.Skipped
 }
 
 func (h *MediaHandler) seasonPackOrganizationResult(path, releaseDir string, packResult *organizer.SeasonPackResult, err error) *organizer.OrganizationResult {

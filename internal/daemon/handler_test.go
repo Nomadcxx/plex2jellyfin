@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -995,6 +996,58 @@ func TestProcessFile_SeasonPackImportsEpisodeSiblings(t *testing.T) {
 	rows, err := db.QueryDecisions(database.QueryFilter{})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
+	assert.Equal(t, "season_pack", rows[0].ParseMethod)
+	assert.Equal(t, "success", rows[0].OrganizeOutcome)
+}
+
+func TestProcessFile_SeasonPackConcurrentEventsSingleFlight(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	packDir := filepath.Join(watchDir, "The.Boroughs.S01.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-MWeb")
+	require.NoError(t, os.MkdirAll(packDir, 0755))
+	ep1 := filepath.Join(packDir, "The.Boroughs.S01E01.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-MWeb.mkv")
+	ep2 := filepath.Join(packDir, "The.Boroughs.S01E02.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-MWeb.mkv")
+	require.NoError(t, os.WriteFile(ep1, []byte("episode-1"), 0644))
+	require.NoError(t, os.WriteFile(ep2, []byte("episode-2"), 0644))
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       false,
+		Database:        db,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, path := range []string{ep1, ep2} {
+		path := path
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			handler.processFile(path)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	assert.FileExists(t, filepath.Join(tmpLib, "The Boroughs", "Season 01", "The Boroughs S01E01.mkv"))
+	assert.FileExists(t, filepath.Join(tmpLib, "The Boroughs", "Season 01", "The Boroughs S01E02.mkv"))
+	assert.False(t, handler.containsVideoFilesRecursive(packDir), "pack cleanup must not leave videos behind")
+
+	rows, err := db.QueryDecisions(database.QueryFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "concurrent events for one season pack should share one organizer run")
 	assert.Equal(t, "season_pack", rows[0].ParseMethod)
 	assert.Equal(t, "success", rows[0].OrganizeOutcome)
 }

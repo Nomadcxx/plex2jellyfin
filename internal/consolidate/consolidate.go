@@ -102,6 +102,9 @@ func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) 
 		// Get files at source location
 		ops, err := c.getFilesToMove(sourcePath, targetPath, conflict)
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			plan.CanProceed = false
 			plan.Reasons = append(plan.Reasons, fmt.Sprintf("Failed to list files at %s: %v", sourcePath, err))
 			return plan, nil
@@ -114,6 +117,10 @@ func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) 
 	for _, op := range plan.Operations {
 		plan.TotalFiles++
 		plan.TotalBytes += op.Size
+	}
+	if plan.TotalFiles == 0 {
+		plan.CanProceed = false
+		plan.Reasons = append(plan.Reasons, "No files to move")
 	}
 
 	c.stats.PlansGenerated++

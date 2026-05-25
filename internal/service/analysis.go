@@ -3,8 +3,12 @@ package service
 import (
 	"crypto/sha256"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
+
+const minConsolidationFileSize = 100 * 1024 * 1024
 
 // DuplicateGroup represents files that are duplicates of each other
 type DuplicateGroup struct {
@@ -170,33 +174,100 @@ func (s *CleanupService) AnalyzeScattered() (*ScatteredAnalysis, error) {
 			continue
 		}
 
+		locations := existingDirectories(c.Locations)
+		if len(locations) < 2 {
+			continue
+		}
+
+		targetLocation := chooseScatteredTarget(locations)
 		item := ScatteredItem{
-			ID:        c.ID,
-			Title:     c.Title,
-			Year:      c.Year,
-			MediaType: c.MediaType,
-			Locations: c.Locations,
+			ID:             c.ID,
+			Title:          c.Title,
+			Year:           c.Year,
+			MediaType:      c.MediaType,
+			Locations:      locations,
+			TargetLocation: targetLocation,
 		}
 
-		// Determine target location (one with most files)
-		if len(c.Locations) > 0 {
-			item.TargetLocation = c.Locations[0] // Default to first
-			// Could enhance to pick location with most files
-		}
-
-		// Count files to move (from non-target locations)
-		for _, loc := range c.Locations {
-			if loc != item.TargetLocation {
-				// Count would need filesystem access or DB query
-				item.FilesToMove++ // Simplified: 1 per location for now
+		for _, loc := range locations {
+			if loc == targetLocation {
+				continue
 			}
+			files, bytes := countConsolidatableFiles(loc)
+			item.FilesToMove += files
+			item.BytesToMove += bytes
+		}
+		if item.FilesToMove == 0 {
+			continue
 		}
 
 		analysis.Items = append(analysis.Items, item)
+		analysis.TotalMoves += item.FilesToMove
+		analysis.TotalBytes += item.BytesToMove
 	}
 
 	analysis.TotalItems = len(analysis.Items)
 	return analysis, nil
+}
+
+func existingDirectories(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	existing := make([]string, 0, len(paths))
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		info, err := os.Stat(clean)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		seen[clean] = struct{}{}
+		existing = append(existing, clean)
+	}
+	return existing
+}
+
+func chooseScatteredTarget(locations []string) string {
+	target := locations[0]
+	maxFiles := -1
+	for _, loc := range locations {
+		files, _ := countConsolidatableFiles(loc)
+		if files > maxFiles {
+			maxFiles = files
+			target = loc
+		}
+	}
+	return target
+}
+
+func countConsolidatableFiles(root string) (int, int64) {
+	files := 0
+	var bytes int64
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		if info.Size() <= minConsolidationFileSize {
+			return nil
+		}
+		if !isScatteredMediaFile(filepath.Ext(path)) {
+			return nil
+		}
+		files++
+		bytes += info.Size()
+		return nil
+	})
+	return files, bytes
+}
+
+func isScatteredMediaFile(ext string) bool {
+	switch strings.ToLower(ext) {
+	case ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".m2ts", ".ts":
+		return true
+	default:
+		return false
+	}
 }
 
 // generateGroupID creates a unique ID for a duplicate group

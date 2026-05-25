@@ -69,6 +69,87 @@ func TestConsolidatorGeneratePlan(t *testing.T) {
 	}
 }
 
+func TestGeneratePlanSkipsMissingSourceLocation(t *testing.T) {
+	tempDir, err := ioutil.TempDir("", "jellywatch_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	target := filepath.Join(tempDir, "storage1", "Silo (2023)")
+	source := filepath.Join(tempDir, "storage2", "Silo (2023)")
+	missing := filepath.Join(tempDir, "storage3", "Silo (2023)")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatalf("failed to create source: %v", err)
+	}
+	for _, name := range []string{"Silo S01E01.mkv", "Silo S01E02.mkv"} {
+		f, err := os.Create(filepath.Join(target, name))
+		if err != nil {
+			t.Fatalf("failed to create target file: %v", err)
+		}
+		if err := f.Truncate(MinConsolidationFileSize + 1); err != nil {
+			f.Close()
+			t.Fatalf("failed to size target file: %v", err)
+		}
+		f.Close()
+	}
+	sourceFile := filepath.Join(source, "Silo S01E03.mkv")
+	f, err := os.Create(sourceFile)
+	if err != nil {
+		t.Fatalf("failed to create source file: %v", err)
+	}
+	if err := f.Truncate(MinConsolidationFileSize + 1); err != nil {
+		f.Close()
+		t.Fatalf("failed to size source file: %v", err)
+	}
+	f.Close()
+
+	year := 2023
+	conflict := &database.Conflict{
+		ID:              42,
+		MediaType:       "series",
+		Title:           "Silo",
+		TitleNormalized: "silo",
+		Year:            &year,
+		Locations:       []string{missing, target, source},
+	}
+	cfg := &config.Config{
+		Options: config.OptionsConfig{
+			DryRun:          false,
+			VerifyChecksums: false,
+			DeleteSource:    true,
+		},
+	}
+
+	cons := NewConsolidator(db, cfg)
+	plan, err := cons.GeneratePlan(conflict)
+	if err != nil {
+		t.Fatalf("GeneratePlan failed: %v", err)
+	}
+	if !plan.CanProceed {
+		t.Fatalf("plan should proceed despite missing source dir: %v", plan.Reasons)
+	}
+	if plan.TargetPath != target {
+		t.Fatalf("TargetPath = %q, want %q", plan.TargetPath, target)
+	}
+	if plan.TotalFiles != 1 {
+		t.Fatalf("TotalFiles = %d, want 1", plan.TotalFiles)
+	}
+	if len(plan.Operations) != 1 || plan.Operations[0].SourcePath != sourceFile {
+		t.Fatalf("unexpected operations: %#v", plan.Operations)
+	}
+}
+
 func TestConsolidatorChooseTargetPath(t *testing.T) {
 	// Create temporary database
 	tempDir, err := ioutil.TempDir("", "jellywatch_test")
@@ -128,7 +209,7 @@ func TestSizeFilter(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(result.operations) > 0 {
+		if len(result) > 0 {
 			t.Error("Expected no operations for files under 100MB")
 		}
 	})
@@ -154,7 +235,7 @@ func TestSizeFilter(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(result.operations) == 0 {
+		if len(result) == 0 {
 			t.Error("Expected operations for files over 100MB")
 		}
 	})
@@ -180,7 +261,7 @@ func TestSizeFilter(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(result.operations) > 0 {
+		if len(result) > 0 {
 			t.Error("Expected no operations for files exactly 100MB")
 		}
 	})
