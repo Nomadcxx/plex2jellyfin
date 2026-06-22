@@ -1,13 +1,18 @@
 'use client';
 
+import { useState } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { DuplicateGroup } from '@/components/duplicates/DuplicateGroup';
 import { useDuplicates } from '@/hooks/useDashboard';
-import { AlertTriangle, Copy } from 'lucide-react';
+import { AlertTriangle, Copy, Search } from 'lucide-react';
 import { formatBytes } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { filterDuplicateGroups, sortDuplicateGroups, type DuplicateSort } from './duplicateFilters';
 
 export default function DuplicatesPage() {
   const { data, isLoading, error } = useDuplicates();
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<DuplicateSort>('reclaimable');
 
   if (isLoading) {
     return (
@@ -33,11 +38,12 @@ export default function DuplicatesPage() {
 
   const groups = data?.groups || [];
   const totalReclaimable = data?.reclaimableBytes || 0;
+  const visibleGroups = sortDuplicateGroups(filterDuplicateGroups(groups, query), sort);
 
   return (
     <AppShell>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="space-y-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-2">
               <Copy className="h-8 w-8" />
@@ -52,6 +58,27 @@ export default function DuplicatesPage() {
               )}
             </p>
           </div>
+          <div className="grid gap-2 sm:grid-cols-[minmax(220px,360px)_160px]">
+            <label className="relative">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="pl-9"
+                placeholder="Search title or path"
+              />
+            </label>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as DuplicateSort)}
+              className="h-10 rounded-md border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100"
+              aria-label="Sort duplicates"
+            >
+              <option value="reclaimable">Most reclaimable</option>
+              <option value="files">Most files</option>
+              <option value="title">Title</option>
+            </select>
+          </div>
         </div>
 
         {groups.length === 0 ? (
@@ -62,9 +89,16 @@ export default function DuplicatesPage() {
               Run a scan to detect duplicate files
             </p>
           </div>
+        ) : visibleGroups.length === 0 ? (
+          <div className="rounded border border-zinc-800 bg-zinc-950/50 p-6 text-sm text-zinc-400">
+            No duplicate groups match the current filter.
+          </div>
         ) : (
-          <div className="space-y-4">
-            {groups.map((group) => (
+          <div className="space-y-3">
+            <p className="text-xs text-zinc-500">
+              Showing {visibleGroups.length} of {groups.length} groups
+            </p>
+            {visibleGroups.map((group) => (
               <DuplicateGroup key={group.id} group={group} />
             ))}
           </div>

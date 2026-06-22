@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
@@ -14,13 +15,16 @@ func (c *Consolidator) ExecutePlan(plan *Plan, dryRun bool) error {
 	if !plan.CanProceed {
 		return fmt.Errorf("cannot execute plan: %v", plan.Reasons)
 	}
+	if issues := SafetyIssues(plan); len(issues) > 0 {
+		return fmt.Errorf("unsafe consolidation plan: %v", issues)
+	}
 
 	var failures []string
 
 	// Ensure target directory exists
 	if !dryRun {
-		if err := os.MkdirAll(plan.TargetPath, 0755); err != nil {
-			return fmt.Errorf("failed to create target directory: %w", err)
+		if err := ensureTargetWritable(plan.TargetPath); err != nil {
+			return err
 		}
 	}
 
@@ -29,6 +33,13 @@ func (c *Consolidator) ExecutePlan(plan *Plan, dryRun bool) error {
 		if err := c.executeOperation(op, dryRun); err != nil {
 			failures = append(failures, fmt.Sprintf("%s -> %s: %v", op.SourcePath, op.DestinationPath, err))
 			continue
+		}
+
+		if !dryRun {
+			if err := c.recordMovedMediaFile(op, plan.TargetPath); err != nil {
+				failures = append(failures, fmt.Sprintf("%s -> %s: failed to update database: %v", op.SourcePath, op.DestinationPath, err))
+				continue
+			}
 		}
 
 		if !dryRun {
@@ -49,6 +60,98 @@ func (c *Consolidator) ExecutePlan(plan *Plan, dryRun bool) error {
 	}
 
 	return nil
+}
+
+func ensureTargetWritable(targetPath string) error {
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		return fmt.Errorf("target path is not writable: failed to create target directory %s: %w", targetPath, err)
+	}
+
+	checkFile, err := os.CreateTemp(targetPath, ".jellywatch_write_check_")
+	if err != nil {
+		return fmt.Errorf("target path is not writable: %s: %w", targetPath, err)
+	}
+	checkPath := checkFile.Name()
+	if err := checkFile.Close(); err != nil {
+		_ = os.Remove(checkPath)
+		return fmt.Errorf("target path is not writable: failed to close write check %s: %w", checkPath, err)
+	}
+	if err := os.Remove(checkPath); err != nil {
+		return fmt.Errorf("target path is not writable: failed to remove write check %s: %w", checkPath, err)
+	}
+
+	return nil
+}
+
+func (c *Consolidator) recordMovedMediaFile(op *Operation, targetSeriesPath string) error {
+	if c.db == nil {
+		return nil
+	}
+
+	file, err := c.db.GetMediaFile(op.SourcePath)
+	if err != nil {
+		return err
+	}
+	if file == nil {
+		return nil
+	}
+
+	if err := c.db.DeleteMediaFile(op.SourcePath); err != nil {
+		return err
+	}
+
+	file.Path = op.DestinationPath
+	if info, err := os.Stat(op.DestinationPath); err == nil {
+		file.Size = info.Size()
+		file.ModifiedAt = info.ModTime()
+	}
+	file.LibraryRoot = c.libraryRootForPath(op.DestinationPath, op.Type, file.LibraryRoot)
+
+	if err := c.db.UpsertMediaFile(file); err != nil {
+		return err
+	}
+
+	if file.ParentSeriesID != nil && targetSeriesPath != "" {
+		if err := c.db.UpdateSeriesCanonicalPath(*file.ParentSeriesID, targetSeriesPath, file.LibraryRoot); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Consolidator) libraryRootForPath(path, mediaType, fallback string) string {
+	if c.cfg == nil {
+		return fallback
+	}
+
+	var roots []string
+	switch mediaType {
+	case "series", "episode":
+		roots = append(roots, c.cfg.Libraries.TV...)
+	case "movie":
+		roots = append(roots, c.cfg.Libraries.Movies...)
+	default:
+		roots = append(roots, c.cfg.Libraries.TV...)
+		roots = append(roots, c.cfg.Libraries.Movies...)
+	}
+
+	cleanPath := filepath.Clean(path)
+	best := fallback
+	bestLen := -1
+	for _, root := range roots {
+		cleanRoot := filepath.Clean(root)
+		if cleanRoot == "." || cleanRoot == string(filepath.Separator) {
+			continue
+		}
+		if cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+string(filepath.Separator)) {
+			if len(cleanRoot) > bestLen {
+				best = cleanRoot
+				bestLen = len(cleanRoot)
+			}
+		}
+	}
+	return best
 }
 
 // executeOperation executes a single move operation

@@ -39,20 +39,37 @@ func TestScoreFile_ResolutionDominance(t *testing.T) {
 	}
 }
 
+func TestScoreFile_576pAnd4320pResolutions(t *testing.T) {
+	size := int64(2 * 1024 * 1024 * 1024)
+
+	score480p := ScoreFile(&QualityInfo{Resolution: Resolution480p}, size, false)
+	score576p := ScoreFile(&QualityInfo{Resolution: Resolution576p}, size, false)
+	score720p := ScoreFile(&QualityInfo{Resolution: Resolution720p}, size, false)
+	score2160p := ScoreFile(&QualityInfo{Resolution: Resolution2160p}, size, false)
+	score4320p := ScoreFile(&QualityInfo{Resolution: Resolution4320p}, size, false)
+
+	if !(score480p < score576p && score576p < score720p) {
+		t.Fatalf("576p score should sit between 480p and 720p: 480p=%d 576p=%d 720p=%d", score480p, score576p, score720p)
+	}
+	if score4320p <= score2160p {
+		t.Fatalf("4320p score should exceed 2160p: 4320p=%d 2160p=%d", score4320p, score2160p)
+	}
+}
+
 func TestScoreFile_SourceQuality(t *testing.T) {
 	// Test that source type matters: REMUX > BluRay > WEB-DL > WEBRip
 
 	tests := []struct {
-		source       Source
-		expectedMin  int
-		expectedMax  int
+		source      Source
+		expectedMin int
+		expectedMax int
 	}{
-		{SourceREMUX, 400, 420},   // Very high
-		{SourceBluRay, 380, 400},  // High
-		{SourceWEBDL, 360, 380},   // Medium-high
-		{SourceWEBRip, 350, 370},  // Medium
-		{SourceHDTV, 340, 360},    // Medium-low
-		{SourceDVDRip, 325, 345},  // Low
+		{SourceREMUX, 400, 420},  // Very high
+		{SourceBluRay, 380, 400}, // High
+		{SourceWEBDL, 360, 380},  // Medium-high
+		{SourceWEBRip, 350, 370}, // Medium
+		{SourceHDTV, 340, 360},   // Medium-low
+		{SourceDVDRip, 325, 345}, // Low
 	}
 
 	for _, tt := range tests {
@@ -282,10 +299,10 @@ func TestFindBestFile(t *testing.T) {
 	// Test finding best file from a map
 
 	files := map[string]int64{
-		"/test/Movie.720p.mkv":            3 * 1024 * 1024 * 1024,  // 3GB 720p
-		"/test/Movie.1080p.WEB-DL.mkv":    5 * 1024 * 1024 * 1024,  // 5GB 1080p WEB-DL
-		"/test/Movie.1080p.BluRay.mkv":    8 * 1024 * 1024 * 1024,  // 8GB 1080p BluRay (best)
-		"/test/Movie.1080p.WEBRip.mkv":    4 * 1024 * 1024 * 1024,  // 4GB 1080p WEBRip
+		"/test/Movie.720p.mkv":         3 * 1024 * 1024 * 1024, // 3GB 720p
+		"/test/Movie.1080p.WEB-DL.mkv": 5 * 1024 * 1024 * 1024, // 5GB 1080p WEB-DL
+		"/test/Movie.1080p.BluRay.mkv": 8 * 1024 * 1024 * 1024, // 8GB 1080p BluRay (best)
+		"/test/Movie.1080p.WEBRip.mkv": 4 * 1024 * 1024 * 1024, // 4GB 1080p WEBRip
 	}
 
 	best := FindBestFile(files, false)

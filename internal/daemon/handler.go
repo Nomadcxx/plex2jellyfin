@@ -1452,6 +1452,12 @@ func (h *MediaHandler) DeferredQueue() *jellyfin.DeferredQueue {
 	return h.deferredQueue
 }
 
+func identifiedFromJellyfinEvent(event jellyfin.WebhookEvent) bool {
+	return strings.TrimSpace(event.ProviderImdb) != "" ||
+		strings.TrimSpace(event.ProviderTmdb) != "" ||
+		strings.TrimSpace(event.ProviderTvdb) != ""
+}
+
 // HandleJellyfinWebhookEvent mutates playback state from webhook events.
 func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 	rawPath := strings.TrimSpace(event.ItemPath)
@@ -1497,12 +1503,15 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 				}
 			} else if dec != nil {
 				now := time.Now().UTC()
+				identified := identifiedFromJellyfinEvent(event)
 				if updateErr := h.db.UpdateOutcome(dec.ID, database.OutcomeUpdate{
-					JellyfinItemID:     itemID,
-					JellyfinImdbID:     event.ProviderImdb,
-					JellyfinTmdbID:     event.ProviderTmdb,
-					JellyfinTvdbID:     event.ProviderTvdb,
-					JellyfinResolvedAt: &now,
+					JellyfinItemID:      itemID,
+					JellyfinImdbID:      event.ProviderImdb,
+					JellyfinTmdbID:      event.ProviderTmdb,
+					JellyfinTvdbID:      event.ProviderTvdb,
+					JellyfinResolvedAt:  &now,
+					JellyfinIdentified:  &identified,
+					JellyfinFirstSeenAt: &now,
 				}); updateErr != nil {
 					if h.logger != nil {
 						h.logger.Warn("handler", "Failed to update parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", updateErr.Error()))
@@ -1512,6 +1521,55 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 		}
 		if h.logger != nil {
 			h.logger.Info("handler", "Jellyfin item added", logging.F("path", path), logging.F("item_id", itemID), logging.F("name", event.ItemName), logging.F("type", event.ItemType))
+		}
+	case jellyfin.EventItemUpdated:
+		itemID := strings.TrimSpace(event.ItemID)
+		if h.db != nil && path != "" && itemID != "" {
+			if err := h.db.UpsertJellyfinItem(path, itemID, event.ItemName, event.ItemType); err != nil {
+				if h.logger != nil {
+					h.logger.Warn("handler", "Failed to upsert Jellyfin item", logging.F("path", path), logging.F("item_id", itemID), logging.F("error", err.Error()))
+				}
+				return
+			}
+			if dec, err := h.db.GetDecisionByTargetPath(path); err != nil {
+				if h.logger != nil {
+					h.logger.Warn("handler", "Failed to query parse decision for path", logging.F("path", path), logging.F("error", err.Error()))
+				}
+			} else if dec != nil {
+				now := time.Now().UTC()
+				identified := identifiedFromJellyfinEvent(event)
+				if updateErr := h.db.UpgradeOutcome(dec.ID, database.OutcomeUpdate{
+					JellyfinItemID:      itemID,
+					JellyfinImdbID:      event.ProviderImdb,
+					JellyfinTmdbID:      event.ProviderTmdb,
+					JellyfinTvdbID:      event.ProviderTvdb,
+					JellyfinResolvedAt:  &now,
+					JellyfinIdentified:  &identified,
+					JellyfinFirstSeenAt: &now,
+				}); updateErr != nil {
+					if h.logger != nil {
+						h.logger.Warn("handler", "Failed to upgrade parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", updateErr.Error()))
+					}
+				}
+			}
+		}
+		if h.logger != nil {
+			h.logger.Info("handler", "Jellyfin item updated", logging.F("path", path), logging.F("item_id", itemID), logging.F("name", event.ItemName), logging.F("type", event.ItemType))
+		}
+	case jellyfin.EventItemRemoved:
+		if h.db != nil && path != "" {
+			if dec, err := h.db.GetDecisionByTargetPath(path); err != nil {
+				if h.logger != nil {
+					h.logger.Warn("handler", "Failed to query parse decision for removed path", logging.F("path", path), logging.F("error", err.Error()))
+				}
+			} else if dec != nil {
+				if clearErr := h.db.ClearOutcome(dec.ID); clearErr != nil && h.logger != nil {
+					h.logger.Warn("handler", "Failed to clear parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", clearErr.Error()))
+				}
+			}
+		}
+		if h.logger != nil {
+			h.logger.Info("handler", "Jellyfin item removed", logging.F("path", path), logging.F("name", event.ItemName), logging.F("type", event.ItemType))
 		}
 	case jellyfin.EventTaskCompleted:
 		if h.logger != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
@@ -83,5 +84,22 @@ func TestDaemonStopCommandCallsStop(t *testing.T) {
 	case <-called:
 	default:
 		t.Fatal("stop handler not invoked")
+	}
+}
+
+func TestDaemonStatusCommandReportsActionableMissingDaemon(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "missing.sock")
+	var buf bytes.Buffer
+	cmd := newDaemonStatusCmd(sock, &buf)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing daemon socket")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "jellywatchd does not appear to be running") {
+		t.Fatalf("expected actionable daemon message, got %q", msg)
+	}
+	if strings.Contains(msg, "dial unix") {
+		t.Fatalf("expected raw dial error to be wrapped, got %q", msg)
 	}
 }

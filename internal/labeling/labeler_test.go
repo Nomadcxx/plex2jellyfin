@@ -15,6 +15,7 @@ func decWithProviderID(parsedTitle string) database.ParseDecision {
 		EventAt:        time.Now().Add(-1 * time.Hour),
 		ParsedTitle:    parsedTitle,
 		JellyfinItemID: "item-abc",
+		JellyfinTvdbID: "tvdb-abc",
 	}
 }
 

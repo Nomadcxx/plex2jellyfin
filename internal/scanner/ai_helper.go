@@ -44,6 +44,28 @@ func NewAIHelper(cfg config.AIConfig, db *sql.DB, matcher *ai.Matcher) *AIHelper
 // TryParse attempts to parse filename with AI, respecting circuit breaker and cache
 // Returns: result, fromCache, error
 func (h *AIHelper) TryParse(ctx context.Context, filename, mediaType string) (*ai.Result, bool, error) {
+	return h.tryParse(ctx, filename, mediaType, func() (*ai.Result, error) {
+		return h.matcher.ParseWithRetry(ctx, filename)
+	})
+}
+
+func (h *AIHelper) TryParseWithContext(ctx context.Context, filename, mediaType, folderPath, currentTitle string, currentConfidence float64) (*ai.Result, bool, error) {
+	cacheInput := filename
+	if folderPath != "" {
+		cacheInput = folderPath + "/" + filename
+	}
+	return h.tryParse(ctx, cacheInput, mediaType, func() (*ai.Result, error) {
+		libraryType := "media library"
+		if mediaType == "episode" {
+			libraryType = "TV show library"
+		} else if mediaType == "movie" {
+			libraryType = "movie library"
+		}
+		return h.matcher.ParseWithContext(ctx, filename, libraryType, folderPath, currentTitle, currentConfidence)
+	})
+}
+
+func (h *AIHelper) tryParse(ctx context.Context, cacheInput, mediaType string, parse func() (*ai.Result, error)) (*ai.Result, bool, error) {
 	// Check circuit breaker
 	if h.IsCircuitOpen() {
 		return nil, false, ErrCircuitOpen
@@ -51,7 +73,7 @@ func (h *AIHelper) TryParse(ctx context.Context, filename, mediaType string) (*a
 
 	// Check cache first
 	if h.cache != nil {
-		normalized := ai.NormalizeInput(filename)
+		normalized := ai.NormalizeInput(cacheInput)
 		cached, err := h.cache.Get(normalized, mediaType, h.cfg.Model)
 		if err == nil && cached != nil {
 			return cached, true, nil
@@ -63,7 +85,7 @@ func (h *AIHelper) TryParse(ctx context.Context, filename, mediaType string) (*a
 		return nil, false, errors.New("AI matcher not initialized")
 	}
 
-	result, err := h.matcher.ParseWithRetry(ctx, filename)
+	result, err := parse()
 	if err != nil {
 		h.RecordFailure()
 		return nil, false, err
@@ -71,7 +93,7 @@ func (h *AIHelper) TryParse(ctx context.Context, filename, mediaType string) (*a
 
 	// Cache successful result
 	if h.cache != nil {
-		normalized := ai.NormalizeInput(filename)
+		normalized := ai.NormalizeInput(cacheInput)
 		h.cache.Put(normalized, mediaType, h.cfg.Model, result, 0)
 	}
 

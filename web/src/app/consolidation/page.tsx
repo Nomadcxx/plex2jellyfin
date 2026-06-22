@@ -8,10 +8,10 @@ import {
   type ConsolidationPreview,
 } from '@/hooks/useConsolidation';
 import Image from 'next/image';
-import { FolderSync, ArrowRight, Layers, Tv, CheckCircle2, ArrowDown, Eye } from 'lucide-react';
+import { FolderSync, ArrowRight, ArrowDown, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -21,17 +21,22 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { formatBytes } from '@/lib/utils';
-import { useState } from 'react';
+import { displayErrorMessage } from '@/lib/errorMessage';
+import { useRef, useState } from 'react';
+import { filterConsolidationItems } from './consolidationFilters';
 
 export default function ConsolidationPage() {
   const { data, isLoading, error } = useScattered();
   const consolidateMutation = useConsolidateItem();
   const previewMutation = usePreviewConsolidation();
   const [activeConsolidations, setActiveConsolidations] = useState<Set<number>>(new Set());
+  const activeConsolidationsRef = useRef<Set<number>>(new Set());
   const [previewItemId, setPreviewItemId] = useState<number | null>(null);
   const [previewData, setPreviewData] = useState<ConsolidationPreview | null>(null);
+  const [query, setQuery] = useState('');
   // G10: confirm before firing a direct consolidation (without preview).
   const [confirmItemId, setConfirmItemId] = useState<number | null>(null);
 
@@ -42,8 +47,8 @@ export default function ConsolidationPage() {
       onSuccess: (data) => {
         setPreviewData(data);
       },
-      onError: () => {
-        toast.error('Failed to generate preview');
+      onError: (err) => {
+        toast.error(displayErrorMessage(err, 'Failed to generate preview'));
         setPreviewItemId(null);
       },
     });
@@ -61,18 +66,22 @@ export default function ConsolidationPage() {
   };
 
   const handleConsolidate = (itemId: number) => {
+    if (activeConsolidationsRef.current.has(itemId)) return;
+    activeConsolidationsRef.current.add(itemId);
     setActiveConsolidations(prev => new Set(prev).add(itemId));
     consolidateMutation.mutate(itemId, {
       onSuccess: () => {
         toast.success('Consolidation completed');
+        activeConsolidationsRef.current.delete(itemId);
         setActiveConsolidations(prev => {
           const next = new Set(prev);
           next.delete(itemId);
           return next;
         });
       },
-      onError: () => {
-        toast.error('Failed to consolidate');
+      onError: (err) => {
+        toast.error(displayErrorMessage(err, 'Failed to consolidate'));
+        activeConsolidationsRef.current.delete(itemId);
         setActiveConsolidations(prev => {
           const next = new Set(prev);
           next.delete(itemId);
@@ -122,10 +131,11 @@ export default function ConsolidationPage() {
       ? data.totalBytes
       : items.reduce((sum, it) => sum + (it.bytesToMove || 0), 0);
   const confirmItem = confirmItemId !== null ? items.find((it) => it.id === confirmItemId) : null;
+  const visibleItems = filterConsolidationItems(items, query);
 
   return (
     <AppShell>
-      <div className="space-y-8 max-w-5xl mx-auto pb-12">
+      <div className="space-y-6 pb-12">
         {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
@@ -142,12 +152,12 @@ export default function ConsolidationPage() {
           </div>
           
           {items.length > 0 && (
-            <div className="flex gap-4">
-              <div className="bg-zinc-900/50 p-4 rounded-xl border border-zinc-800 text-right">
+            <div className="flex gap-3">
+              <div className="bg-zinc-950/60 p-3 rounded border border-zinc-800 text-right">
                 <p className="text-sm font-medium text-zinc-500">Series to Fix</p>
                 <p className="text-2xl font-bold text-sky-400">{items.length}</p>
               </div>
-              <div className="bg-zinc-900/50 p-4 rounded-xl border border-zinc-800 text-right">
+              <div className="bg-zinc-950/60 p-3 rounded border border-zinc-800 text-right">
                 <p className="text-sm font-medium text-zinc-500">Files to Move</p>
                 <p className="text-2xl font-bold text-emerald-400">{totalMoves}</p>
               </div>
@@ -155,7 +165,6 @@ export default function ConsolidationPage() {
           )}
         </div>
 
-        {/* Content Section */}
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-12 bg-zinc-900/30 rounded-2xl border border-zinc-800/50 text-center min-h-[400px]">
             <div className="h-48 w-48 mb-6 relative">
@@ -172,23 +181,29 @@ export default function ConsolidationPage() {
             </p>
           </div>
         ) : (
-          <div className="grid gap-6">
-            {items.map((item) => {
+          <div className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search title, source, or target path"
+                className="sm:max-w-md"
+              />
+              <p className="text-xs text-zinc-500">
+                Showing {visibleItems.length} of {items.length} items
+              </p>
+            </div>
+            {visibleItems.length === 0 ? (
+              <div className="rounded border border-zinc-800 bg-zinc-950/50 p-6 text-sm text-zinc-400">
+                No scattered media items match the current filter.
+              </div>
+            ) : visibleItems.map((item) => {
               const isConsolidating = item.id !== undefined && activeConsolidations.has(item.id);
               
               return (
-                <Card key={item.id} className="overflow-hidden border-zinc-800/60 bg-zinc-950/50 hover:border-zinc-700 hover:bg-zinc-900/50 transition-all duration-300">
-                  <div className="flex flex-col md:flex-row h-full">
-                    {/* Poster Placeholder Side */}
-                    <div className="w-full md:w-48 flex-shrink-0 flex items-center justify-center border-r border-zinc-800 p-6 md:p-0 bg-gradient-to-br from-sky-500/10 via-indigo-500/10 to-zinc-900">
-                      <div className="flex flex-col items-center justify-center text-sky-300">
-                        <Tv className="h-14 w-14 mb-3" strokeWidth={1.5} />
-                        <span className="text-xs font-semibold uppercase tracking-wider text-sky-300/80">{item.mediaType || 'SERIES'}</span>
-                      </div>
-                    </div>
-                    
-                    {/* Content Side */}
-                    <div className="flex-1 p-6">
+                <Card key={item.id} className="overflow-hidden border-zinc-800/60 bg-zinc-950/50 hover:border-zinc-700 transition-colors">
+                  <div className="flex h-full">
+                    <div className="flex-1 p-4">
                       <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
                         <div className="flex-1 space-y-4">
                           <div>
@@ -207,7 +222,7 @@ export default function ConsolidationPage() {
                           </div>
 
                           {/* Path Visualization */}
-                          <div className="space-y-3 bg-zinc-950/50 p-4 rounded-lg border border-zinc-800/50">
+                          <div className="space-y-3 bg-zinc-950/50 p-3 rounded border border-zinc-800/50">
                             <div>
                               <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Current Locations</p>
                               <div className="space-y-1.5">
@@ -236,7 +251,6 @@ export default function ConsolidationPage() {
                           </div>
                         </div>
 
-                        {/* Action Button */}
                         <div className="flex-shrink-0 flex items-center md:items-end flex-col justify-end pt-2 gap-2">
                           <Button
                             variant="outline"

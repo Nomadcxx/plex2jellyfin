@@ -2,9 +2,11 @@ package plans
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
@@ -142,6 +144,9 @@ func LoadConsolidatePlans() (*ConsolidatePlan, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("failed to read plans file: %w", err)
 	}
 
@@ -296,7 +301,8 @@ type AuditItem struct {
 
 // AuditAction represents an AI-suggested correction
 type AuditAction struct {
-	Action     string  `json:"action"` // "rename" or "delete"
+	ItemIndex  int     `json:"item_index"` // index into AuditPlan.Items for correct pairing
+	Action     string  `json:"action"`     // "rename" or "delete"
 	NewTitle   string  `json:"new_title,omitempty"`
 	NewYear    *int    `json:"new_year,omitempty"`
 	NewSeason  *int    `json:"new_season,omitempty"`
@@ -316,8 +322,11 @@ type AuditSummary struct {
 
 	// AI processing statistics
 	AITotalCalls          int `json:"ai_total_calls"`
+	AICandidateCount      int `json:"ai_candidate_count"`
 	AISuccessCount        int `json:"ai_success_count"`
 	AIErrorCount          int `json:"ai_error_count"`
+	DeterministicSkipped  int `json:"deterministic_skipped"`
+	ManualReviewSkipped   int `json:"manual_review_skipped"`
 	TypeMismatchesSkipped int `json:"type_mismatches_skipped"`
 	ConfidenceTooLow      int `json:"confidence_too_low"`
 	TitleUnchanged        int `json:"title_unchanged"`
@@ -488,21 +497,48 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 		return nil
 	}
 
-	// Perform filesystem move using transfer package (handles cross-device)
-	transferer, err := transfer.New(transfer.BackendAuto)
-	if err != nil {
-		return fmt.Errorf("failed to create transferer: %w", err)
+	// Fast path: for normal in-place renames, os.Rename is atomic and should
+	// complete in milliseconds. The generic transfer backend may copy the whole
+	// file, which is only appropriate for cross-device moves.
+	if err := os.MkdirAll(filepath.Dir(action.NewPath), 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+	transferOpts := transfer.OptionsFromConfig(cfg)
+	if err := os.Rename(file.Path, action.NewPath); err == nil {
+		if permErr := transfer.ApplyPermissions(action.NewPath, transferOpts); permErr != nil {
+			return fmt.Errorf("file renamed but permission application failed: %w", permErr)
+		}
+	} else {
+		if !errors.Is(err, syscall.EXDEV) {
+			return fmt.Errorf("failed to rename file: %w", err)
+		}
+		start := time.Now()
+		fmt.Printf("  Cross-device rename detected; using transfer fallback...\n")
+
+		// Perform filesystem move using transfer package (handles cross-device)
+		transferer, transferErr := transfer.New(transfer.BackendAuto)
+		if transferErr != nil {
+			return fmt.Errorf("failed to create transferer: %w", transferErr)
+		}
+
+		result, transferErr := transferer.Move(file.Path, action.NewPath, transferOpts)
+		if transferErr != nil {
+			return fmt.Errorf("failed to move file: %w", transferErr)
+		}
+		if !result.Success {
+			return fmt.Errorf("file transfer failed: %v", result.Error)
+		}
+		duration := result.Duration
+		if duration == 0 {
+			duration = time.Since(start)
+		}
+		fmt.Printf("  Transfer fallback completed via %s in %s (%d bytes, %d attempt(s))\n",
+			transferer.Name(), duration.Round(time.Millisecond), result.BytesCopied, result.Attempts)
 	}
 
-	result, err := transferer.Move(file.Path, action.NewPath, transfer.OptionsFromConfig(cfg))
-	if err != nil {
-		return fmt.Errorf("failed to move file: %w", err)
-	}
-	if !result.Success {
-		return fmt.Errorf("file transfer failed: %v", result.Error)
-	}
+	var originalPath string
+	originalPath = file.Path
 
-	// Update database record
 	file.Path = action.NewPath
 	file.NormalizedTitle = action.NewTitle
 	if action.NewYear != nil {
@@ -514,14 +550,16 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 	if action.NewEpisode != nil {
 		file.Episode = action.NewEpisode
 	}
+	if action.Confidence > 0 {
+		file.Confidence = action.Confidence
+		file.ParseMethod = "audit"
+		file.NeedsReview = action.Confidence < 0.8
+	}
 
 	if err := db.UpdateMediaFile(file); err != nil {
 		// Attempt rollback on DB failure
-		rollbackResult, rollbackErr := transferer.Move(action.NewPath, file.Path, transfer.OptionsFromConfig(cfg))
-		if rollbackErr != nil {
+		if rollbackErr := os.Rename(action.NewPath, originalPath); rollbackErr != nil {
 			fmt.Printf("Failed to rollback file move: %v\n", rollbackErr)
-		} else if !rollbackResult.Success {
-			fmt.Printf("Rollback transfer failed: %v\n", rollbackResult.Error)
 		}
 		return fmt.Errorf("failed to update database: %w", err)
 	}

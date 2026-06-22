@@ -2,13 +2,16 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/api"
+	"github.com/Nomadcxx/jellywatch/internal/config"
 )
 
 const (
@@ -18,7 +21,12 @@ const (
 	SessionDuration = 24 * time.Hour
 	// SessionTokenLength is the number of bytes in a session token
 	SessionTokenLength = 32
+	maxLoginFailures   = 5
+	loginWindow        = 5 * time.Minute
+	loginLockout       = 15 * time.Minute
 )
+
+var secureRandomRead = rand.Read
 
 // Session represents an active user session
 type Session struct {
@@ -33,6 +41,57 @@ type SessionStore struct {
 	sessions map[string]*Session
 	stopCh   chan struct{}
 	once     sync.Once
+}
+
+type loginAttemptState struct {
+	failures    int
+	firstFailed time.Time
+	lockedUntil time.Time
+}
+
+type loginRateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string]loginAttemptState
+}
+
+func newLoginRateLimiter() *loginRateLimiter {
+	return &loginRateLimiter{attempts: map[string]loginAttemptState{}}
+}
+
+func (l *loginRateLimiter) allow(key string, now time.Time) bool {
+	if key == "" {
+		key = "unknown"
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	state := l.attempts[key]
+	return state.lockedUntil.IsZero() || now.After(state.lockedUntil)
+}
+
+func (l *loginRateLimiter) recordFailure(key string, now time.Time) {
+	if key == "" {
+		key = "unknown"
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	state := l.attempts[key]
+	if state.firstFailed.IsZero() || now.Sub(state.firstFailed) > loginWindow {
+		state = loginAttemptState{firstFailed: now}
+	}
+	state.failures++
+	if state.failures >= maxLoginFailures {
+		state.lockedUntil = now.Add(loginLockout)
+	}
+	l.attempts[key] = state
+}
+
+func (l *loginRateLimiter) recordSuccess(key string) {
+	if key == "" {
+		key = "unknown"
+	}
+	l.mu.Lock()
+	delete(l.attempts, key)
+	l.mu.Unlock()
 }
 
 // NewSessionStore creates a new session store
@@ -54,8 +113,11 @@ func (s *SessionStore) Close() {
 }
 
 // Create creates a new session and returns the token
-func (s *SessionStore) Create() string {
-	token := generateToken()
+func (s *SessionStore) Create() (string, error) {
+	token, err := generateToken()
+	if err != nil {
+		return "", err
+	}
 	session := &Session{
 		Token:     token,
 		CreatedAt: time.Now(),
@@ -66,7 +128,7 @@ func (s *SessionStore) Create() string {
 	s.sessions[token] = session
 	s.mu.Unlock()
 
-	return token
+	return token, nil
 }
 
 // Get returns the session if it exists and is not expired
@@ -117,18 +179,17 @@ func (s *SessionStore) cleanupExpiredSessions() {
 }
 
 // generateToken creates a secure random token
-func generateToken() string {
+func generateToken() (string, error) {
 	bytes := make([]byte, SessionTokenLength)
-	if _, err := rand.Read(bytes); err != nil {
-		// Fall back to timestamp-based token if crypto/rand fails
-		return hex.EncodeToString([]byte(time.Now().String()))
+	if _, err := secureRandomRead(bytes); err != nil {
+		return "", err
 	}
-	return hex.EncodeToString(bytes)
+	return hex.EncodeToString(bytes), nil
 }
 
 // AuthEnabled checks if authentication is required
 func (s *Server) AuthEnabled() bool {
-	return s.cfg != nil && s.cfg.Password != ""
+	return s.cfg != nil && (s.cfg.Password != "" || s.cfg.PasswordHash != "")
 }
 
 // IsAuthenticated checks if the request has a valid session
@@ -195,18 +256,35 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limiter := s.ensureLoginLimiter()
+	remoteKey := loginRateLimitKey(r)
+	if !limiter.allow(remoteKey, time.Now()) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "Too many failed login attempts",
+		})
+		return
+	}
+
 	// Validate password
-	if req.Password != s.cfg.Password {
+	if !s.verifyLoginPassword(req.Password) {
+		limiter.recordFailure(remoteKey, time.Now())
 		writeJSON(w, http.StatusUnauthorized, map[string]string{
 			"error": "Invalid password",
 		})
 		return
 	}
+	limiter.recordSuccess(remoteKey)
 
 	// Create session (race-safe lazy initialization)
 	s.ensureSessionStore()
 
-	token := s.sessions.Create()
+	token, err := s.sessions.Create()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Could not create secure session",
+		})
+		return
+	}
 
 	// Set secure cookie
 	http.SetCookie(w, &http.Cookie{
@@ -222,6 +300,31 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 	})
+}
+
+func (s *Server) verifyLoginPassword(password string) bool {
+	if s == nil || s.cfg == nil {
+		return false
+	}
+	if s.cfg.PasswordHash != "" {
+		return config.VerifyPassword(password, s.cfg.PasswordHash)
+	}
+	return subtle.ConstantTimeCompare([]byte(password), []byte(s.cfg.Password)) == 1
+}
+
+func loginRateLimitKey(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || host == "" {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func (s *Server) ensureLoginLimiter() *loginRateLimiter {
+	s.loginLimiterOnce.Do(func() {
+		s.loginLimiter = newLoginRateLimiter()
+	})
+	return s.loginLimiter
 }
 
 // Logout implements api.ServerInterface

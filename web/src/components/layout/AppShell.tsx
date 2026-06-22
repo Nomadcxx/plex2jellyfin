@@ -1,6 +1,6 @@
 import { ScanButton } from '@/components/scan/ScanButton';
 import { JobsTray } from './JobsTray';
-import { Sidebar } from './Sidebar';
+import { MobileNav, Sidebar } from './Sidebar';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -11,10 +11,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <JobsTray />
           <ScanButton />
         </header>
-        <main className="flex-1 p-6 overflow-auto">
+        <main className="flex-1 p-4 pb-24 overflow-auto md:p-6 md:pb-6">
           {children}
         </main>
       </div>
+      <MobileNav />
     </div>
   );
 }

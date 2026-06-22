@@ -186,7 +186,7 @@ func (m *MediaDB) getMediaFilesForGroup(title string, year int, season, episode 
 		query += " AND episode IS NULL"
 	}
 
-	query += " ORDER BY quality_score DESC"
+	query += " ORDER BY quality_score DESC, size DESC, id ASC"
 
 	rows, err := m.db.Query(query, args...)
 	if err != nil {

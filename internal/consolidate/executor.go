@@ -91,25 +91,29 @@ func (e *Executor) ExecutePlans(ctx context.Context) (*ExecutionResult, error) {
 		}
 
 		var execErr error
-		switch plan.Action {
-		case "delete":
-			execErr = e.executeDelete(ctx, plan)
-			if execErr == nil {
-				result.FilesDeleted++
-				result.SpaceReclaimed += fileSizeToReclaim
+		if reason := DBPlanSafetyIssue(plan); reason != "" {
+			execErr = fmt.Errorf("unsafe consolidation plan: %s", reason)
+		} else {
+			switch plan.Action {
+			case "delete":
+				execErr = e.executeDelete(ctx, plan)
+				if execErr == nil {
+					result.FilesDeleted++
+					result.SpaceReclaimed += fileSizeToReclaim
+				}
+			case "move":
+				execErr = e.executeMove(ctx, plan)
+				if execErr == nil {
+					result.FilesMoved++
+				}
+			case "rename":
+				execErr = e.executeRename(ctx, plan)
+				if execErr == nil {
+					result.FilesRenamed++
+				}
+			default:
+				execErr = fmt.Errorf("unknown action: %s", plan.Action)
 			}
-		case "move":
-			execErr = e.executeMove(ctx, plan)
-			if execErr == nil {
-				result.FilesMoved++
-			}
-		case "rename":
-			execErr = e.executeRename(ctx, plan)
-			if execErr == nil {
-				result.FilesRenamed++
-			}
-		default:
-			execErr = fmt.Errorf("unknown action: %s", plan.Action)
 		}
 
 		// Update plan status in database
@@ -136,6 +140,11 @@ func (e *Executor) ExecutePlan(ctx context.Context, planID int64) error {
 
 	if plan.Status != "pending" {
 		return fmt.Errorf("plan is not pending (status: %s)", plan.Status)
+	}
+	if reason := DBPlanSafetyIssue(plan); reason != "" {
+		err := fmt.Errorf("unsafe consolidation plan: %s", reason)
+		e.markPlanFailed(plan.ID, err.Error())
+		return err
 	}
 
 	var execErr error

@@ -443,7 +443,8 @@ func TestParseMediaDir(t *testing.T) {
 		{"with year", "Fallout (2024)", "Fallout", 2024},
 		{"with year and spaces", "For All Mankind (2019)", "For All Mankind", 2019},
 		{"without year", "Breaking Bad", "Breaking Bad", 0},
-		{"year not at end", "Star Trek (2009) Remastered", "Star Trek (2009) Remastered", 0},
+		{"year followed by release tag", "Star Trek (2009) Remastered", "Star Trek", 2009},
+		{"release tag before year", "Final Destination 5 HMAX (2011)", "Final Destination 5", 2011},
 		{"multiple parens at end", "M*A*S*H (1972)", "M*A*S*H", 1972},
 	}
 

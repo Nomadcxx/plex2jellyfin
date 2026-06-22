@@ -1,5 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api/client';
+import {
+  api,
+  reconcileJellyfinMetadata,
+  repairJellyfinMetadata,
+  repairJellyfinMetadataItem,
+} from '@/lib/api/client';
 import type { components } from '@/types/api';
 
 type DuplicateAnalysis = components['schemas']['DuplicateAnalysis'];
@@ -58,6 +63,7 @@ export const queryKeys = {
   scattered: ['scattered'] as const,
   auth: ['auth', 'status'] as const,
   jellyfinIdentification: ['jellyfin', 'identification'] as const,
+  jellyfinIdentificationItems: (status: string) => ['jellyfin', 'identification', 'items', status] as const,
 };
 
 export type JellyfinIdentificationStatus = {
@@ -75,6 +81,38 @@ export function useJellyfinIdentification() {
     queryKey: queryKeys.jellyfinIdentification,
     queryFn: () => api.get('/jellyfin/identification'),
     refetchInterval: 60 * 1000,
+  });
+}
+
+function invalidateJellyfinIdentification(queryClient: ReturnType<typeof useQueryClient>, status: string) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.jellyfinIdentification });
+  queryClient.invalidateQueries({ queryKey: queryKeys.jellyfinIdentificationItems(status) });
+}
+
+export function useReconcileJellyfinMetadata(status: string, limit = 25) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => reconcileJellyfinMetadata(limit),
+    onSuccess: () => invalidateJellyfinIdentification(queryClient, status),
+  });
+}
+
+export function useRepairVisibleJellyfinMetadata(status: string, decisionIds: number[]) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => repairJellyfinMetadata(decisionIds),
+    onSuccess: () => invalidateJellyfinIdentification(queryClient, status),
+  });
+}
+
+export function useRepairJellyfinMetadataItem(status: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: number) => repairJellyfinMetadataItem(id),
+    onSuccess: () => invalidateJellyfinIdentification(queryClient, status),
   });
 }
 

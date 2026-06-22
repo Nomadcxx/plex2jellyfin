@@ -61,21 +61,28 @@ func (h *JellyfinHandlers) Identification(w http.ResponseWriter, r *http.Request
 
 // IdentificationItem is the per-row JSON shape returned by /jellyfin/identification/items.
 type IdentificationItem struct {
-	ID            int64   `json:"id"`
-	SourcePath    string  `json:"source_path"`
-	TargetPath    string  `json:"target_path"`
-	ParsedTitle   string  `json:"parsed_title,omitempty"`
-	ParsedYear    *int    `json:"parsed_year,omitempty"`
-	MediaType     string  `json:"media_type,omitempty"`
-	JellyfinItem  string  `json:"jellyfin_item_id,omitempty"`
-	ImdbID        string  `json:"imdb_id,omitempty"`
-	TmdbID        string  `json:"tmdb_id,omitempty"`
-	TvdbID        string  `json:"tvdb_id,omitempty"`
-	ResolvedAt    string  `json:"resolved_at,omitempty"`
-	FirstSeenAt   string  `json:"first_seen_at,omitempty"`
-	TargetAt      string  `json:"target_at,omitempty"`
-	AutoLabel     string  `json:"auto_label,omitempty"`
-	Identified    *bool   `json:"identified,omitempty"`
+	ID                   int64  `json:"id"`
+	SourcePath           string `json:"source_path"`
+	TargetPath           string `json:"target_path"`
+	ParsedTitle          string `json:"parsed_title,omitempty"`
+	ParsedYear           *int   `json:"parsed_year,omitempty"`
+	MediaType            string `json:"media_type,omitempty"`
+	JellyfinItem         string `json:"jellyfin_item_id,omitempty"`
+	ImdbID               string `json:"imdb_id,omitempty"`
+	TmdbID               string `json:"tmdb_id,omitempty"`
+	TvdbID               string `json:"tvdb_id,omitempty"`
+	ResolvedAt           string `json:"resolved_at,omitempty"`
+	FirstSeenAt          string `json:"first_seen_at,omitempty"`
+	TargetAt             string `json:"target_at,omitempty"`
+	AutoLabel            string `json:"auto_label,omitempty"`
+	Identified           *bool  `json:"identified,omitempty"`
+	MetadataState        string `json:"metadata_state,omitempty"`
+	MetadataError        string `json:"metadata_error,omitempty"`
+	MetadataCheckCount   int    `json:"metadata_check_count,omitempty"`
+	MetadataRepairCount  int    `json:"metadata_repair_count,omitempty"`
+	LastMetadataCheckAt  string `json:"last_metadata_check_at,omitempty"`
+	NextMetadataCheckAt  string `json:"next_metadata_check_at,omitempty"`
+	LastMetadataRepairAt string `json:"last_metadata_repair_at,omitempty"`
 }
 
 // IdentificationItems lists parse_decisions rows for one of the
@@ -102,18 +109,22 @@ func (h *JellyfinHandlers) IdentificationItems(w http.ResponseWriter, r *http.Re
 	out := make([]IdentificationItem, 0, len(rows))
 	for _, d := range rows {
 		item := IdentificationItem{
-			ID:           d.ID,
-			SourcePath:   d.SourcePath,
-			TargetPath:   d.TargetPath,
-			ParsedTitle:  d.ParsedTitle,
-			ParsedYear:   d.ParsedYear,
-			MediaType:    d.MediaTypeGuessed,
-			JellyfinItem: d.JellyfinItemID,
-			ImdbID:       d.JellyfinImdbID,
-			TmdbID:       d.JellyfinTmdbID,
-			TvdbID:       d.JellyfinTvdbID,
-			AutoLabel:    d.AutoLabel,
-			Identified:   d.JellyfinIdentified,
+			ID:                  d.ID,
+			SourcePath:          d.SourcePath,
+			TargetPath:          d.TargetPath,
+			ParsedTitle:         d.ParsedTitle,
+			ParsedYear:          d.ParsedYear,
+			MediaType:           d.MediaTypeGuessed,
+			JellyfinItem:        d.JellyfinItemID,
+			ImdbID:              d.JellyfinImdbID,
+			TmdbID:              d.JellyfinTmdbID,
+			TvdbID:              d.JellyfinTvdbID,
+			AutoLabel:           d.AutoLabel,
+			Identified:          d.JellyfinIdentified,
+			MetadataState:       d.MetadataState,
+			MetadataError:       d.MetadataError,
+			MetadataCheckCount:  d.MetadataCheckCount,
+			MetadataRepairCount: d.MetadataRepairCount,
 		}
 		if d.JellyfinResolvedAt != nil {
 			item.ResolvedAt = d.JellyfinResolvedAt.Format(time.RFC3339)
@@ -123,6 +134,15 @@ func (h *JellyfinHandlers) IdentificationItems(w http.ResponseWriter, r *http.Re
 		}
 		if d.TargetAt != nil {
 			item.TargetAt = d.TargetAt.Format(time.RFC3339)
+		}
+		if d.LastMetadataCheckAt != nil {
+			item.LastMetadataCheckAt = d.LastMetadataCheckAt.Format(time.RFC3339)
+		}
+		if d.NextMetadataCheckAt != nil {
+			item.NextMetadataCheckAt = d.NextMetadataCheckAt.Format(time.RFC3339)
+		}
+		if d.LastMetadataRepairAt != nil {
+			item.LastMetadataRepairAt = d.LastMetadataRepairAt.Format(time.RFC3339)
 		}
 		out = append(out, item)
 	}

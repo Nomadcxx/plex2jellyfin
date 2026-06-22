@@ -142,4 +142,31 @@ export async function testSettingsConnection(service: 'sonarr' | 'radarr' | 'jel
   return api.post<ConnectionTestResult>(`/settings/${service}/test`, payload);
 }
 
+export type OperationAcceptedResponse = {
+  op_id: string;
+};
+
+export async function startDatabaseRescan(paths: string[], dryRun: boolean) {
+  return api.post<OperationAcceptedResponse>('/database/rescan', { paths, dry_run: dryRun });
+}
+
+export async function startDatabaseReset(preserve: string[] = ['audit_log']) {
+  return api.post<OperationAcceptedResponse>('/database/reset', {
+    confirm: 'media.db',
+    preserve,
+  });
+}
+
+export async function reconcileJellyfinMetadata(limit: number) {
+  return api.post<OperationAcceptedResponse>('/jellyfin/metadata/reconcile', { limit });
+}
+
+export async function repairJellyfinMetadata(decisionIds: number[]) {
+  return api.post<OperationAcceptedResponse>('/jellyfin/metadata/repair', { decision_ids: decisionIds });
+}
+
+export async function repairJellyfinMetadataItem(id: number) {
+  return api.post<OperationAcceptedResponse>(`/jellyfin/metadata/repair/${id}`, {});
+}
+
 export * from './errors';

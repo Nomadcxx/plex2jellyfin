@@ -23,17 +23,19 @@ import (
 
 // Server implements the API
 type Server struct {
-	db             *database.MediaDB
-	cfg            *config.Config
-	service        *service.CleanupService
-	activityLogger *activity.Logger
-	sessions       *SessionStore
-	sessionOnce    sync.Once
-	playbackLocks  *jellyfin.PlaybackLockManager
-	deferredQueue  *jellyfin.DeferredQueue
-	pathTranslator *jellyfin.PathTranslator
-	ipc            IPCCaller
-	launcher       *daemonctl.Launcher
+	db               *database.MediaDB
+	cfg              *config.Config
+	service          *service.CleanupService
+	activityLogger   *activity.Logger
+	sessions         *SessionStore
+	sessionOnce      sync.Once
+	loginLimiter     *loginRateLimiter
+	loginLimiterOnce sync.Once
+	playbackLocks    *jellyfin.PlaybackLockManager
+	deferredQueue    *jellyfin.DeferredQueue
+	pathTranslator   *jellyfin.PathTranslator
+	ipc              IPCCaller
+	launcher         *daemonctl.Launcher
 }
 
 // NewServer creates a new API server
@@ -138,6 +140,7 @@ func (s *Server) apiRouter() *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Use(middleware.SetHeader("Content-Type", "application/json"))
+	r.Use(limitRequestBody(maxRequestBodyBytes))
 	r.Use(s.authMiddleware)
 
 	// Webhooks are intentionally mounted outside generated OpenAPI handlers.
@@ -184,13 +187,16 @@ func (s *Server) apiRouter() *chi.Mux {
 		deferredH := &DeferredHandlers{IPC: s.ipc}
 		r.Get("/deferred", deferredH.List)
 
+		opsStream := &StreamingOpHandlers{IPC: s.ipc}
 		jfH := &JellyfinHandlers{DB: s.db}
 		r.Route("/jellyfin", func(r chi.Router) {
 			r.Get("/identification", jfH.Identification)
 			r.Get("/identification/items", jfH.IdentificationItems)
+			r.Post("/metadata/reconcile", opsStream.MetadataReconcile)
+			r.Post("/metadata/repair", opsStream.MetadataRepair)
+			r.Post("/metadata/repair/{id}", opsStream.MetadataRepairItem)
 		})
 
-		opsStream := &StreamingOpHandlers{IPC: s.ipc}
 		r.Route("/jobs", func(r chi.Router) {
 			r.Post("/consolidate", opsStream.Consolidate)
 			r.Post("/duplicates/scan", opsStream.DupScan)
@@ -247,6 +253,23 @@ func (s *Server) apiRouter() *chi.Mux {
 	api.HandlerFromMux(s, r)
 
 	return r
+}
+
+const maxRequestBodyBytes int64 = 1 << 20
+
+func limitRequestBody(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > maxBytes {
+				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+					"error": "Request body too large",
+				})
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // authMiddleware checks if authentication is required and validates session

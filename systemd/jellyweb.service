@@ -18,12 +18,12 @@ SyslogIdentifier=jellyweb
 
 # Security hardening
 NoNewPrivileges=true
-ProtectSystem=strict
+ProtectSystem=full
 # ProtectHome left unset: jellyweb needs RW on the user's config dir
 # (config.toml + lock files + media.db live under ~/.config/jellywatch).
-# ReadWritePaths over a ProtectHome=read-only mount has proven unreliable
-# in practice (config saves return EROFS), so we leave /home accessible.
-ReadWritePaths=/home
+# Jellyweb also executes user-triggered library maintenance actions such as
+# consolidation, so non-system media mounts must remain writable according to
+# their normal filesystem permissions rather than a hardcoded allow-list.
 PrivateTmp=true
 
 [Install]

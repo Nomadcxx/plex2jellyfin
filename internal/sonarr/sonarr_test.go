@@ -220,3 +220,22 @@ func TestUpdateDownloadClientConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, result.EnableCompletedDownloadHandling)
 }
+
+func TestSeasonSearchPayloadIncludesSeasonNumber(t *testing.T) {
+	var received Command
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v3/command", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&received))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CommandResponse{ID: 10, Name: "SeasonSearch"})
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{URL: server.URL, APIKey: "test"})
+	_, err := client.SeasonSearch(42, 3)
+	require.NoError(t, err)
+	assert.Equal(t, "SeasonSearch", received.Name)
+	assert.Equal(t, 42, received.SeriesID)
+	assert.Equal(t, 3, received.SeasonNumber)
+}

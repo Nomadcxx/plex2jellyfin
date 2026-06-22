@@ -95,6 +95,9 @@ var knownMediaTitles = map[string]bool{
 	"seal":        true, // "SEAL Team"
 	"champion":    true, // Netflix series
 	"kingdom":     true, // Netflix/AT&T series
+
+	// Common English words that appear in the release group blacklist
+	"universe": true,
 }
 
 // IsKnownMediaTitle checks if a title is a known legitimate media title

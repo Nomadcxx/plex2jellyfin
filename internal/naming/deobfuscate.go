@@ -25,6 +25,10 @@ var (
 func IsObfuscatedFilename(filename string) bool {
 	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
 
+	if isShortRandomAlphanumeric(baseName) {
+		return true
+	}
+
 	if len(baseName) < 8 {
 		return false
 	}
@@ -53,11 +57,34 @@ func IsObfuscatedFilename(filename string) bool {
 		return true
 	}
 
+	if isRandomAlphaToken(baseName) {
+		return true
+	}
+
 	if base64LikeRegex.MatchString(baseName) && hasHighEntropy(baseName) {
 		return true
 	}
 
 	return false
+}
+
+func isShortRandomAlphanumeric(s string) bool {
+	if len(s) < 4 || len(s) > 7 {
+		return false
+	}
+	if !isPlainAlphanumeric(s) || yearRegex.MatchString(s) {
+		return false
+	}
+	hasUpper, hasLower, hasDigit := characterClasses(s)
+	return hasUpper && hasLower && hasDigit && vowelRatio(s) == 0
+}
+
+func isRandomAlphaToken(s string) bool {
+	if len(s) < 16 || !isPlainAlphanumeric(s) {
+		return false
+	}
+	hasUpper, hasLower, hasDigit := characterClasses(s)
+	return hasUpper && hasLower && !hasDigit && hasHighEntropy(s) && vowelRatio(s) < 0.15
 }
 
 func isRandomAlphanumeric(s string) bool {
@@ -105,6 +132,43 @@ func isRandomAlphanumeric(s string) bool {
 	}
 
 	return hasHighEntropy(s)
+}
+
+func isPlainAlphanumeric(s string) bool {
+	for _, r := range s {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return s != ""
+}
+
+func characterClasses(s string) (hasUpper, hasLower, hasDigit bool) {
+	for _, r := range s {
+		switch {
+		case unicode.IsUpper(r):
+			hasUpper = true
+		case unicode.IsLower(r):
+			hasLower = true
+		case unicode.IsDigit(r):
+			hasDigit = true
+		}
+	}
+	return hasUpper, hasLower, hasDigit
+}
+
+func vowelRatio(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	vowels := 0
+	for _, r := range strings.ToLower(s) {
+		switch r {
+		case 'a', 'e', 'i', 'o', 'u':
+			vowels++
+		}
+	}
+	return float64(vowels) / float64(len(s))
 }
 
 // hasHighEntropy returns true if string has high character variance (randomness).
@@ -192,7 +256,7 @@ func ParseMovieFromPathVerbose(path string) (*MovieInfo, []string, error) {
 
 		if !IsTVEpisodeFilename(folderName) {
 			info, tokens, err := ParseMovieNameVerbose(folderName)
-			if err == nil && !IsGarbageTitle(info.Title) {
+			if err == nil && isUsableMovieFolderCandidate(folderName, info) {
 				return info, tokens, nil
 			}
 		}
@@ -203,6 +267,30 @@ func ParseMovieFromPathVerbose(path string) (*MovieInfo, []string, error) {
 	return nil, nil, &ParseError{
 		Filename: path,
 		Message:  "could not extract movie info from path (obfuscated filename, no valid movie name in parent folders)",
+	}
+}
+
+func isUsableMovieFolderCandidate(folderName string, info *MovieInfo) bool {
+	if info == nil || strings.TrimSpace(info.Title) == "" {
+		return false
+	}
+	if isGenericMovieContainerFolder(folderName) {
+		return false
+	}
+	if info.Year != "" {
+		return !isStandaloneReleaseArtifact(info.Title)
+	}
+	return !IsGarbageTitle(info.Title)
+}
+
+func isGenericMovieContainerFolder(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	normalized = strings.Trim(normalized, " ._-")
+	switch normalized {
+	case "movie", "movies", "film", "films", "cinema":
+		return true
+	default:
+		return false
 	}
 }
 

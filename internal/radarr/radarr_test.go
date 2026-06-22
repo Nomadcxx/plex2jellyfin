@@ -1,6 +1,7 @@
 package radarr
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -65,6 +66,27 @@ func TestGetMediaManagementConfig(t *testing.T) {
 	}
 	if config.ID != 1 {
 		t.Errorf("expected ID=1, got %d", config.ID)
+	}
+}
+
+func TestGetSystemStatusContextHonorsCancelledContext(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		t.Fatal("server should not receive request for cancelled context")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{URL: server.URL, APIKey: "test-key"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := client.GetSystemStatusContext(ctx)
+	if err == nil {
+		t.Fatal("expected cancelled context error")
+	}
+	if requests != 0 {
+		t.Fatalf("server received %d requests, want 0", requests)
 	}
 }
 

@@ -124,11 +124,19 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 	}
 	defer srcFile.Close()
 
-	dstFile, err := OpenWithTimeout(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644, 10*time.Second)
+	dstDir := filepath.Dir(dst)
+	tmpFile, err := os.CreateTemp(dstDir, "."+filepath.Base(dst)+".tmp-*")
 	if err != nil {
-		return 0, fmt.Errorf("failed to create destination: %w", err)
+		return 0, fmt.Errorf("failed to create temporary destination: %w", err)
 	}
-	defer dstFile.Close()
+	tmpPath := tmpFile.Name()
+	committed := false
+	defer func() {
+		_ = tmpFile.Close()
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
 	var bytesCopied int64
 	var lastProgress atomic.Int64
@@ -162,7 +170,7 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 
 		nr, readErr := srcFile.Read(buf)
 		if nr > 0 {
-			nw, writeErr := dstFile.Write(buf[:nr])
+			nw, writeErr := tmpFile.Write(buf[:nr])
 			if nw > 0 {
 				bytesCopied += int64(nw)
 				lastProgress.Store(time.Now().UnixNano())
@@ -187,9 +195,16 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 		}
 	}
 
-	if err := dstFile.Sync(); err != nil {
+	if err := tmpFile.Sync(); err != nil {
 		return bytesCopied, fmt.Errorf("sync error: %w", err)
 	}
+	if err := tmpFile.Close(); err != nil {
+		return bytesCopied, fmt.Errorf("close error: %w", err)
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return bytesCopied, fmt.Errorf("commit temporary destination: %w", err)
+	}
+	committed = true
 
 	return bytesCopied, nil
 }

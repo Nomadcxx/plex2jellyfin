@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,6 +151,237 @@ func TestGeneratePlanSkipsMissingSourceLocation(t *testing.T) {
 	}
 }
 
+func TestGeneratePlanBlocksDestinationCollisions(t *testing.T) {
+	tempDir := t.TempDir()
+
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	target := filepath.Join(tempDir, "storage1", "Silo (2023)")
+	source := filepath.Join(tempDir, "storage2", "Silo (2023)")
+	if err := os.MkdirAll(filepath.Join(target, "Season 01"), 0755); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(source, "Season 01"), 0755); err != nil {
+		t.Fatalf("failed to create source: %v", err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(target, "Season 01", "Silo S01E01.mkv"),
+		filepath.Join(source, "Season 01", "Silo S01E01.mkv"),
+	} {
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatalf("failed to create file: %v", err)
+		}
+		if err := f.Truncate(MinConsolidationFileSize + 1); err != nil {
+			f.Close()
+			t.Fatalf("failed to size file: %v", err)
+		}
+		f.Close()
+	}
+
+	year := 2023
+	plan, err := NewConsolidator(db, &config.Config{}).GeneratePlan(&database.Conflict{
+		ID:              42,
+		MediaType:       "series",
+		Title:           "Silo",
+		TitleNormalized: "silo",
+		Year:            &year,
+		Locations:       []string{target, source},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan failed: %v", err)
+	}
+
+	if plan.CanProceed {
+		t.Fatalf("plan should not proceed when source files collide with existing target paths")
+	}
+	if len(plan.Collisions) != 1 {
+		t.Fatalf("Collisions = %d, want 1", len(plan.Collisions))
+	}
+	if !strings.Contains(strings.Join(plan.Reasons, " "), "already exist at target") {
+		t.Fatalf("Reasons = %v, want destination collision reason", plan.Reasons)
+	}
+}
+
+func TestGeneratePlanNormalizesNestedSeriesLocations(t *testing.T) {
+	tempDir := t.TempDir()
+
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tvRoot1 := filepath.Join(tempDir, "storage1", "TV")
+	tvRoot2 := filepath.Join(tempDir, "storage2", "TV")
+	target := filepath.Join(tvRoot1, "Show (2020)")
+	source := filepath.Join(tvRoot2, "Show (2020)")
+	targetRelease := filepath.Join(target, "Season 01", "Show.S01E01.Release")
+	sourceRelease := filepath.Join(source, "Season 01", "Show.S01E02.Release")
+	if err := os.MkdirAll(targetRelease, 0755); err != nil {
+		t.Fatalf("failed to create target release: %v", err)
+	}
+	if err := os.MkdirAll(sourceRelease, 0755); err != nil {
+		t.Fatalf("failed to create source release: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(targetRelease, "hash1.mkv"),
+		filepath.Join(sourceRelease, "hash2.mkv"),
+	} {
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatalf("failed to create file: %v", err)
+		}
+		if err := f.Truncate(MinConsolidationFileSize + 1); err != nil {
+			f.Close()
+			t.Fatalf("failed to size file: %v", err)
+		}
+		f.Close()
+	}
+
+	year := 2020
+	plan, err := NewConsolidator(db, &config.Config{
+		Libraries: config.LibrariesConfig{TV: []string{tvRoot1, tvRoot2}},
+	}).GeneratePlan(&database.Conflict{
+		ID:              42,
+		MediaType:       "series",
+		Title:           "Show",
+		TitleNormalized: "show",
+		Year:            &year,
+		Locations:       []string{targetRelease, sourceRelease},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan failed: %v", err)
+	}
+	if !plan.CanProceed {
+		t.Fatalf("plan should proceed after normalizing nested locations: %v", plan.Reasons)
+	}
+	if plan.TargetPath != target {
+		t.Fatalf("TargetPath = %q, want series root %q", plan.TargetPath, target)
+	}
+	if len(plan.Operations) != 1 {
+		t.Fatalf("operations = %d, want 1", len(plan.Operations))
+	}
+	wantDestination := filepath.Join(target, "Season 01", "Show.S01E02.Release", "hash2.mkv")
+	if plan.Operations[0].DestinationPath != wantDestination {
+		t.Fatalf("DestinationPath = %q, want %q", plan.Operations[0].DestinationPath, wantDestination)
+	}
+	if issues := SafetyIssues(plan); len(issues) != 0 {
+		t.Fatalf("plan should be safe, got %#v", issues)
+	}
+}
+
+func TestGeneratePlanSkipsNestedLocationsAlreadyUnderTarget(t *testing.T) {
+	tempDir := t.TempDir()
+
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tvRoot := filepath.Join(tempDir, "storage1", "TV")
+	target := filepath.Join(tvRoot, "Show (2020)")
+	nested := filepath.Join(target, "Season 01", "Show.S01E01.Release")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatalf("failed to create nested release: %v", err)
+	}
+	file := filepath.Join(nested, "hash1.mkv")
+	f, err := os.Create(file)
+	if err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+	if err := f.Truncate(MinConsolidationFileSize + 1); err != nil {
+		f.Close()
+		t.Fatalf("failed to size file: %v", err)
+	}
+	f.Close()
+
+	year := 2020
+	plan, err := NewConsolidator(db, &config.Config{
+		Libraries: config.LibrariesConfig{TV: []string{tvRoot}},
+	}).GeneratePlan(&database.Conflict{
+		ID:              42,
+		MediaType:       "series",
+		Title:           "Show",
+		TitleNormalized: "show",
+		Year:            &year,
+		Locations:       []string{target, nested},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan failed: %v", err)
+	}
+	if plan.CanProceed {
+		t.Fatalf("plan should not proceed when all locations normalize to one root")
+	}
+	if len(plan.Operations) != 0 {
+		t.Fatalf("operations = %d, want 0", len(plan.Operations))
+	}
+	if !strings.Contains(strings.Join(plan.Reasons, " "), "No files to move") {
+		t.Fatalf("Reasons = %v, want no files to move", plan.Reasons)
+	}
+}
+
+func TestGeneratePlanSkipsJellywatchQuarantineLocations(t *testing.T) {
+	tempDir := t.TempDir()
+
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tvRoot1 := filepath.Join(tempDir, "storage1", "TV")
+	tvRoot2 := filepath.Join(tempDir, "storage2", "TV")
+	target := filepath.Join(tvRoot1, "Farscape (1999)")
+	quarantine := filepath.Join(tvRoot2, "_jellywatch_quarantine_20260607", "teneighty farscape duplicate S04E21")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(quarantine, "Season 04"), 0755); err != nil {
+		t.Fatalf("failed to create quarantine: %v", err)
+	}
+	quarantineFile := filepath.Join(quarantine, "Season 04", "teneighty farscape S04E21.mkv")
+	f, err := os.Create(quarantineFile)
+	if err != nil {
+		t.Fatalf("failed to create quarantine file: %v", err)
+	}
+	if err := f.Truncate(MinConsolidationFileSize + 1); err != nil {
+		f.Close()
+		t.Fatalf("failed to size quarantine file: %v", err)
+	}
+	f.Close()
+
+	year := 1999
+	plan, err := NewConsolidator(db, &config.Config{
+		Libraries: config.LibrariesConfig{TV: []string{tvRoot1, tvRoot2}},
+	}).GeneratePlan(&database.Conflict{
+		ID:              42,
+		MediaType:       "series",
+		Title:           "Farscape",
+		TitleNormalized: "farscape",
+		Year:            &year,
+		Locations:       []string{target, quarantine},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan failed: %v", err)
+	}
+	if plan.CanProceed {
+		t.Fatalf("plan should not proceed when only source candidate is quarantined")
+	}
+	if len(plan.SourcePaths) != 1 || plan.SourcePaths[0] != target {
+		t.Fatalf("SourcePaths = %#v, want only non-quarantine target", plan.SourcePaths)
+	}
+	if len(plan.Operations) != 0 {
+		t.Fatalf("operations = %d, want 0", len(plan.Operations))
+	}
+}
+
 func TestConsolidatorChooseTargetPath(t *testing.T) {
 	// Create temporary database
 	tempDir, err := ioutil.TempDir("", "jellywatch_test")
@@ -204,7 +436,7 @@ func TestSizeFilter(t *testing.T) {
 		consolidator := &Consolidator{}
 
 		// getFilesToMove should skip small files
-		result, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
+		result, _, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -230,7 +462,7 @@ func TestSizeFilter(t *testing.T) {
 		consolidator := &Consolidator{}
 
 		// getFilesToMove should process large files
-		result, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
+		result, _, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -256,7 +488,7 @@ func TestSizeFilter(t *testing.T) {
 		consolidator := &Consolidator{}
 
 		// getFilesToMove should skip files exactly at 100MB (inclusive filter)
-		result, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
+		result, _, err := consolidator.getFilesToMove(tmpDir, "/target", conflict)
 		if err != nil {
 			t.Fatal(err)
 		}

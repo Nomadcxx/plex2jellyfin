@@ -19,13 +19,13 @@ var _ api.ServerInterface = (*Server)(nil)
 
 // ScanState tracks the current scan status
 type ScanState struct {
-	mu          sync.RWMutex
-	status      string    // "idle", "scanning", "completed", "failed"
-	progress    int       // 0-100
-	message     string    // status message
-	startTime   time.Time // when the scan started
-	lastScan    time.Time // when the last scan completed
-	filesScanned int64    // number of files scanned
+	mu           sync.RWMutex
+	status       string    // "idle", "scanning", "completed", "failed"
+	progress     int       // 0-100
+	message      string    // status message
+	startTime    time.Time // when the scan started
+	lastScan     time.Time // when the last scan completed
+	filesScanned int64     // number of files scanned
 }
 
 // scanState is a package-level variable to track scan status
@@ -93,8 +93,9 @@ func (s *Server) DeleteDuplicate(w http.ResponseWriter, r *http.Request, groupId
 
 	fileID := *params.FileId
 
-	// Delete the specific file
-	err := s.service.DeleteFileByID(fileID)
+	// Delete the specific duplicate file. The service validates group
+	// membership and treats stale retry deletes as already complete.
+	err := s.service.DeleteDuplicateFile(groupId, fileID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "delete_failed", fmt.Sprintf("Failed to delete file: %v", err))
 		return
@@ -160,6 +161,16 @@ func (s *Server) ConsolidateItem(w http.ResponseWriter, r *http.Request, itemId 
 		writeError(w, http.StatusNotFound, "not_found", fmt.Sprintf("Conflict %d not found", itemId))
 		return
 	}
+	if conflict.Resolved {
+		filesMoved := 0
+		bytesMoved := int64(0)
+		writeJSON(w, http.StatusOK, api.ConsolidationResult{
+			Success:    ptrBool(true),
+			FilesMoved: &filesMoved,
+			BytesMoved: &bytesMoved,
+		})
+		return
+	}
 
 	// Create consolidator
 	consolidator := consolidate.NewConsolidator(s.db, s.cfg)
@@ -173,6 +184,10 @@ func (s *Server) ConsolidateItem(w http.ResponseWriter, r *http.Request, itemId 
 
 	if !plan.CanProceed {
 		writeError(w, http.StatusBadRequest, "cannot_consolidate", fmt.Sprintf("Cannot consolidate: %v", plan.Reasons))
+		return
+	}
+	if issues := consolidate.SafetyIssues(plan); len(issues) > 0 {
+		writeError(w, http.StatusBadRequest, "unsafe_consolidation_plan", fmt.Sprintf("Unsafe consolidation plan: %v", issues))
 		return
 	}
 

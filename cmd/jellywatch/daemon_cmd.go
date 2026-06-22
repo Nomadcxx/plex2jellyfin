@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
 	"github.com/Nomadcxx/jellywatch/internal/paths"
@@ -37,12 +40,33 @@ func newDaemonStatusCmd(sock string, out io.Writer) *cobra.Command {
 			cli := ipc.NewClient(path)
 			body, err := cli.Call(context.Background(), ipc.CmdStatus, nil)
 			if err != nil {
-				return err
+				return formatDaemonIPCError(err, path)
 			}
 			fmt.Fprintln(out, string(body))
 			return nil
 		},
 	}
+}
+
+func formatDaemonIPCError(err error, path string) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	var opErr *net.OpError
+	if os.IsNotExist(err) || strings.Contains(msg, "no such file or directory") {
+		return fmt.Errorf("jellywatchd does not appear to be running: control socket not found at %s", path)
+	}
+	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "connection reset by peer") {
+		return fmt.Errorf("jellywatchd control socket at %s is stale or unhealthy: %w", path, err)
+	}
+	if strings.Contains(msg, "i/o timeout") {
+		return fmt.Errorf("jellywatchd control socket at %s did not respond before timeout: %w", path, err)
+	}
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return fmt.Errorf("unable to contact jellywatchd control socket at %s: %w", path, err)
+	}
+	return err
 }
 
 func newDaemonReloadCmd(sock string, out io.Writer) *cobra.Command {
@@ -57,7 +81,7 @@ func newDaemonReloadCmd(sock string, out io.Writer) *cobra.Command {
 			cli := ipc.NewClient(path)
 			body, err := cli.Call(context.Background(), ipc.CmdReload, nil)
 			if err != nil {
-				return err
+				return formatDaemonIPCError(err, path)
 			}
 			fmt.Fprintln(out, string(body))
 			return nil
@@ -77,7 +101,7 @@ func newDaemonStopCmd(sock string, out io.Writer) *cobra.Command {
 			cli := ipc.NewClient(path)
 			body, err := cli.Call(context.Background(), ipc.CmdStop, nil)
 			if err != nil {
-				return err
+				return formatDaemonIPCError(err, path)
 			}
 			if len(body) > 0 {
 				fmt.Fprintln(out, string(body))

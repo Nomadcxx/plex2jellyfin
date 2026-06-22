@@ -233,7 +233,7 @@ func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
 		s.logger.Info("syncing movie to Radarr", "id", req.ID, "radarr_id", *movie.RadarrID, "path", movie.CanonicalPath)
 
 		err = retryWithBackoff(ctx, 3, func() error {
-			return s.radarr.UpdateMoviePath(*movie.RadarrID, movie.CanonicalPath)
+			return s.radarr.UpdateMoviePathContext(ctx, *movie.RadarrID, movie.CanonicalPath)
 		})
 
 		if err != nil {
@@ -337,7 +337,7 @@ func (s *SyncService) syncDirtyRecords(ctx context.Context) error {
 				s.logger.Info("syncing dirty movie to Radarr", "id", movie.ID, "radarr_id", *movie.RadarrID, "path", movie.CanonicalPath)
 
 				err := retryWithBackoff(ctx, 3, func() error {
-					return s.radarr.UpdateMoviePath(*movie.RadarrID, movie.CanonicalPath)
+					return s.radarr.UpdateMoviePathContext(ctx, *movie.RadarrID, movie.CanonicalPath)
 				})
 
 				if err != nil {
@@ -402,7 +402,7 @@ func (s *SyncService) UpdateRadarrPath(ctx context.Context, radarrID int, newPat
 
 	s.logger.Info("updating Radarr path", "radarr_id", radarrID, "new_path", newPath)
 
-	if err := s.radarr.UpdateMoviePath(radarrID, newPath); err != nil {
+	if err := s.radarr.UpdateMoviePathContext(ctx, radarrID, newPath); err != nil {
 		return fmt.Errorf("failed to update Radarr path: %w", err)
 	}
 

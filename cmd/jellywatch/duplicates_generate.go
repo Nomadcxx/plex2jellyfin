@@ -3,12 +3,18 @@ package main
 import (
 	"fmt"
 
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
 	"github.com/Nomadcxx/jellywatch/internal/service"
 )
 
 func runDuplicatesGenerate() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
 	if err := checkDatabasePopulated(); err != nil {
 		return err
 	}
@@ -33,7 +39,6 @@ func runDuplicatesGenerate() error {
 	}
 
 	fmt.Printf("\nFound %d duplicate groups\n", len(analysis.Groups))
-	fmt.Printf("Total space reclaimable: %s\n\n", formatBytes(analysis.ReclaimableBytes))
 
 	// Convert to plan format
 	plan := &plans.DuplicatePlan{
@@ -41,12 +46,17 @@ func runDuplicatesGenerate() error {
 		Summary: plans.DuplicateSummary{
 			TotalGroups:      len(analysis.Groups),
 			FilesToDelete:    0,
-			SpaceReclaimable: analysis.ReclaimableBytes,
+			SpaceReclaimable: 0,
 		},
 	}
+	var skippedUnsafe []string
 
 	for _, group := range analysis.Groups {
 		if len(group.Files) < 2 {
+			continue
+		}
+		if duplicateGroupLooksUnsafeTVMovie(group, cfg) {
+			skippedUnsafe = append(skippedUnsafe, group.Title)
 			continue
 		}
 
@@ -91,6 +101,17 @@ func runDuplicatesGenerate() error {
 
 		plan.Plans = append(plan.Plans, item)
 		plan.Summary.FilesToDelete++
+		plan.Summary.SpaceReclaimable += deleteFile.Size
+	}
+
+	if len(plan.Plans) == 0 {
+		_ = plans.DeleteDuplicatePlans()
+		fmt.Println("No safe duplicate deletion plan was generated.")
+		if len(skippedUnsafe) > 0 {
+			fmt.Printf("\nSkipped %d unsafe duplicate groups because they are marked as movies but live under TV library roots.\n", len(skippedUnsafe))
+			fmt.Println("Run a scan or targeted scan to repair the media type before deleting anything.")
+		}
+		return nil
 	}
 
 	// Save plan
@@ -106,6 +127,20 @@ func runDuplicatesGenerate() error {
 	fmt.Println("  jellywatch duplicates execute   # Execute deletions")
 
 	return nil
+}
+
+func duplicateGroupLooksUnsafeTVMovie(group service.DuplicateGroup, cfg *config.Config) bool {
+	if cfg == nil || group.MediaType != "movie" {
+		return false
+	}
+	for _, file := range group.Files {
+		for _, tvRoot := range cfg.Libraries.TV {
+			if pathIsUnderRoot(file.Path, tvRoot) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func runDuplicatesDryRun() error {

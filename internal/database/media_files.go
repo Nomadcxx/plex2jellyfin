@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 )
 
@@ -119,7 +120,7 @@ func (m *MediaDB) UpsertMediaFile(file *MediaFile) error {
 		needsReviewInt = 1
 	}
 
-	result, err := m.db.Exec(
+	_, err = m.db.Exec(
 		query,
 		file.Path, file.Size, file.ModifiedAt,
 		file.MediaType, file.ParentMovieID, file.ParentSeriesID, file.ParentEpisodeID,
@@ -133,12 +134,8 @@ func (m *MediaDB) UpsertMediaFile(file *MediaFile) error {
 		return fmt.Errorf("failed to upsert media file: %w", err)
 	}
 
-	// Get ID if this was an insert
-	if file.ID == 0 {
-		id, err := result.LastInsertId()
-		if err == nil {
-			file.ID = id
-		}
+	if err := m.db.QueryRow(`SELECT id FROM media_files WHERE path = ?`, file.Path).Scan(&file.ID); err != nil {
+		return fmt.Errorf("failed to read media file id after upsert: %w", err)
 	}
 
 	return nil
@@ -339,6 +336,64 @@ func (m *MediaDB) DeleteMediaFileByID(id int64) error {
 	return nil
 }
 
+// GetAllMediaFiles retrieves every tracked media file row.
+func (m *MediaDB) GetAllMediaFiles() ([]*MediaFile, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	query := `
+		SELECT
+			id, path, size, modified_at,
+			media_type, parent_movie_id, parent_series_id, parent_episode_id,
+			normalized_title, year, season, episode,
+			resolution, source_type, codec, audio_format, quality_score,
+			confidence, parse_method, needs_review,
+			is_jellyfin_compliant, compliance_issues,
+			source, source_priority, library_root,
+			created_at, updated_at
+		FROM media_files
+		ORDER BY id
+	`
+
+	rows, err := m.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query media files: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*MediaFile
+	for rows.Next() {
+		var file MediaFile
+		var complianceJSON string
+		var needsReviewInt int
+
+		err := rows.Scan(
+			&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
+			&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
+			&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
+			&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
+			&file.Confidence, &file.ParseMethod, &needsReviewInt,
+			&file.IsJellyfinCompliant, &complianceJSON,
+			&file.Source, &file.SourcePriority, &file.LibraryRoot,
+			&file.CreatedAt, &file.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan media file: %w", err)
+		}
+
+		file.NeedsReview = needsReviewInt != 0
+		if complianceJSON != "" {
+			if err := json.Unmarshal([]byte(complianceJSON), &file.ComplianceIssues); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal compliance issues: %w", err)
+			}
+		}
+
+		files = append(files, &file)
+	}
+
+	return files, rows.Err()
+}
+
 // GetMediaFilesByNormalizedKey retrieves all files matching a normalized key
 func (m *MediaDB) GetMediaFilesByNormalizedKey(title string, year int, season, episode *int) ([]*MediaFile, error) {
 	m.mu.RLock()
@@ -507,6 +562,16 @@ func (m *MediaDB) UpdateEpisodeBestFile(episodeID int64, fileID *int64) error {
 
 // GetLowConfidenceFiles retrieves files with confidence below threshold
 func (m *MediaDB) GetLowConfidenceFiles(threshold float64, limit int) ([]*MediaFile, error) {
+	return m.getLowConfidenceFiles(threshold, limit, "")
+}
+
+// GetLowConfidenceFilesUnderPath retrieves low-confidence files scoped to an
+// exact file path or any file below a directory path.
+func (m *MediaDB) GetLowConfidenceFilesUnderPath(threshold float64, limit int, scopePath string) ([]*MediaFile, error) {
+	return m.getLowConfidenceFiles(threshold, limit, filepath.Clean(scopePath))
+}
+
+func (m *MediaDB) getLowConfidenceFiles(threshold float64, limit int, scopePath string) ([]*MediaFile, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -518,16 +583,20 @@ func (m *MediaDB) GetLowConfidenceFiles(threshold float64, limit int) ([]*MediaF
 			media_type, parent_movie_id, parent_series_id, parent_episode_id,
 			normalized_title, year, season, episode,
 			resolution, source_type, codec, audio_format, quality_score,
-			confidence, needs_review,
+			confidence, parse_method, needs_review,
 			is_jellyfin_compliant, compliance_issues,
 			source, source_priority, library_root,
 			created_at, updated_at
 		FROM media_files
 		WHERE confidence < ?
-		ORDER BY confidence ASC
 	`
 
 	args := []interface{}{threshold}
+	if scopePath != "" && scopePath != "." {
+		query += " AND (path = ? OR path LIKE ?)"
+		args = append(args, scopePath, scopePath+string(filepath.Separator)+"%")
+	}
+	query += " ORDER BY confidence ASC"
 	if limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit)
@@ -548,7 +617,7 @@ func (m *MediaDB) GetLowConfidenceFiles(threshold float64, limit int) ([]*MediaF
 			&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
 			&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
 			&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
-			&file.Confidence, &file.NeedsReview,
+			&file.Confidence, &file.ParseMethod, &file.NeedsReview,
 			&file.IsJellyfinCompliant, &complianceJSON,
 			&file.Source, &file.SourcePriority, &file.LibraryRoot,
 			&file.CreatedAt, &file.UpdatedAt,
@@ -571,21 +640,21 @@ func (m *MediaDB) GetLowConfidenceFiles(threshold float64, limit int) ([]*MediaF
 
 // AICoverageStats holds per-volume AI parse coverage statistics
 type AICoverageStats struct {
-LibraryRoot  string
-TotalFiles   int
-AIParsed     int
-RegexParsed  int
-FolderParsed int
-TotalSize    int64
-AIParsedSize int64
+	LibraryRoot  string
+	TotalFiles   int
+	AIParsed     int
+	RegexParsed  int
+	FolderParsed int
+	TotalSize    int64
+	AIParsedSize int64
 }
 
 // GetAICoverageStats returns AI parse coverage statistics grouped by library root
 func (m *MediaDB) GetAICoverageStats() ([]AICoverageStats, error) {
-m.mu.RLock()
-defer m.mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-query := `
+	query := `
 SELECT
 library_root,
 COUNT(*) as total_files,
@@ -600,30 +669,30 @@ GROUP BY library_root
 ORDER BY total_files DESC
 `
 
-rows, err := m.db.Query(query)
-if err != nil {
-return nil, fmt.Errorf("failed to query AI coverage stats: %w", err)
-}
-defer rows.Close()
+	rows, err := m.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query AI coverage stats: %w", err)
+	}
+	defer rows.Close()
 
-var stats []AICoverageStats
-for rows.Next() {
-var s AICoverageStats
-if err := rows.Scan(&s.LibraryRoot, &s.TotalFiles, &s.AIParsed, &s.RegexParsed, &s.FolderParsed, &s.TotalSize, &s.AIParsedSize); err != nil {
-return nil, fmt.Errorf("failed to scan coverage stats: %w", err)
-}
-stats = append(stats, s)
-}
+	var stats []AICoverageStats
+	for rows.Next() {
+		var s AICoverageStats
+		if err := rows.Scan(&s.LibraryRoot, &s.TotalFiles, &s.AIParsed, &s.RegexParsed, &s.FolderParsed, &s.TotalSize, &s.AIParsedSize); err != nil {
+			return nil, fmt.Errorf("failed to scan coverage stats: %w", err)
+		}
+		stats = append(stats, s)
+	}
 
-return stats, rows.Err()
+	return stats, rows.Err()
 }
 
 // GetFilesNeverAIParsed returns files that have never been processed by AI, optionally filtered by library root
 func (m *MediaDB) GetFilesNeverAIParsed(libraryRoot string, limit int) ([]*MediaFile, error) {
-m.mu.RLock()
-defer m.mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-query := `
+	query := `
 SELECT
 id, path, size, modified_at,
 media_type, parent_movie_id, parent_series_id, parent_episode_id,
@@ -637,44 +706,44 @@ FROM media_files
 WHERE (parse_method IS NULL OR parse_method != 'ai')
 `
 
-args := []interface{}{}
-if libraryRoot != "" {
-query += " AND library_root = ?"
-args = append(args, libraryRoot)
-}
-query += " ORDER BY confidence ASC LIMIT ?"
-args = append(args, limit)
+	args := []interface{}{}
+	if libraryRoot != "" {
+		query += " AND library_root = ?"
+		args = append(args, libraryRoot)
+	}
+	query += " ORDER BY confidence ASC LIMIT ?"
+	args = append(args, limit)
 
-rows, err := m.db.Query(query, args...)
-if err != nil {
-return nil, fmt.Errorf("failed to query files never AI parsed: %w", err)
-}
-defer rows.Close()
+	rows, err := m.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files never AI parsed: %w", err)
+	}
+	defer rows.Close()
 
-var files []*MediaFile
-for rows.Next() {
-var file MediaFile
-var complianceJSON string
-err := rows.Scan(
-&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
-&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
-&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
-&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
-&file.Confidence, &file.ParseMethod, &file.NeedsReview,
-&file.IsJellyfinCompliant, &complianceJSON,
-&file.Source, &file.SourcePriority, &file.LibraryRoot,
-&file.CreatedAt, &file.UpdatedAt,
-)
-if err != nil {
-return nil, fmt.Errorf("failed to scan media file: %w", err)
-}
-if complianceJSON != "" {
-if err := json.Unmarshal([]byte(complianceJSON), &file.ComplianceIssues); err != nil {
-return nil, fmt.Errorf("failed to unmarshal compliance issues: %w", err)
-}
-}
-files = append(files, &file)
-}
+	var files []*MediaFile
+	for rows.Next() {
+		var file MediaFile
+		var complianceJSON string
+		err := rows.Scan(
+			&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
+			&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
+			&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
+			&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
+			&file.Confidence, &file.ParseMethod, &file.NeedsReview,
+			&file.IsJellyfinCompliant, &complianceJSON,
+			&file.Source, &file.SourcePriority, &file.LibraryRoot,
+			&file.CreatedAt, &file.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan media file: %w", err)
+		}
+		if complianceJSON != "" {
+			if err := json.Unmarshal([]byte(complianceJSON), &file.ComplianceIssues); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal compliance issues: %w", err)
+			}
+		}
+		files = append(files, &file)
+	}
 
-return files, rows.Err()
+	return files, rows.Err()
 }

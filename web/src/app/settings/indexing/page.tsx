@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { ConfirmDestructive } from '@/components/settings/ConfirmDestructive';
 import { ProgressCard } from '@/components/settings/ProgressCard';
 import { useOpStream } from '@/hooks/useOpStream';
-import { api } from '@/lib/api/client';
+import { api, startDatabaseRescan, startDatabaseReset } from '@/lib/api/client';
 
 type LastEntry = {
   id: string;
@@ -121,13 +121,7 @@ export default function IndexingPage() {
         throw new Error(`No paths configured for ${scope}; set them in Settings → Paths/Libraries.`);
       }
 
-      const r = await fetch('/api/v1/database/rescan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths, dry_run: dryRun }),
-      });
-      if (!r.ok) throw new Error(`Server error ${r.status}`);
-      const { op_id } = await r.json();
+      const { op_id } = await startDatabaseRescan(paths, dryRun);
       setOpID(op_id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to start re-scan');
@@ -140,13 +134,7 @@ export default function IndexingPage() {
     setConfirmReset(false);
     setIsStarting(true);
     try {
-      const r = await fetch('/api/v1/database/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: 'media.db', preserve: ['audit_log'] }),
-      });
-      if (!r.ok) throw new Error(`Server error ${r.status}`);
-      const { op_id } = await r.json();
+      const { op_id } = await startDatabaseReset();
       setOpID(op_id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to start reset');

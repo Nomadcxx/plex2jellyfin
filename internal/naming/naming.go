@@ -42,8 +42,9 @@ var (
 func init() {
 	patterns := []string{
 		`\b\d{3,4}[pi]\b`,
+		`\b(?:2160|1080|720|480)\b`,
 		`\b(4K|UHD)\b`,
-		`\bHDR10\+|\b(HDR10|HDR|DoVi|DV|SDR|HLG)\b`,
+		`\bHDR10\+|\bHDR10(?:Plus)?\b|\b(HDR|DoVi|DV|SDR|HLG)\b`,
 		// Codec glued to channel digits (must come BEFORE bare codec match so the
 		// trailing channel digits get stripped together). Allows 1-3 digit
 		// groups so all of these are stripped:
@@ -57,13 +58,14 @@ func init() {
 		`\b\d[ .]\d\b`,
 		// Channel-count tokens like "6CH", "8CH"
 		`\b\d+CH\b`,
-		`\b(BluRay|Blu-ray|BDRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
+		`\bBlu[ .-]?Ray[ .-]+MA\b`,
+		`\b(Blu[ .-]?Ray|BDRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
 		`\b(HDTV|DVDRip|DVD)\b`,
-		`\b(AMZN|NF|ATVP|HULU|DSNP|MAX|PMTP)\b`,
+		`\b(AMZN|NF|ATVP|HULU|DSNP|HMAX|MAX|PMTP)\b`,
 		`\b[xh][ .]?26[45]\b`,
 		`\b(HEVC|AVC|AV1)\b`,
-		`\b(PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED)\b`,
-		`\b(DUAL|DL|MULTI|DUB|SUB|SUBS)\b`,
+		`\b(PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED|REMASTERED|REMASTER)\b`,
+		`\b(DUAL|DL|MULTI|DUB|DUBBED|RODUBBED|SUB|SUBS|VOSTFR|DCPRIP|HDLight|TrueFrench|VOST|VF)\b`,
 		// Language/locale tags (e.g., iTA-ENG, FRE, MULTi). 3-letter codes
 		// only — 2-letter codes (EN, NO, ES) collide too often with real
 		// title words ("No Good Deed", "Es", "En").
@@ -241,7 +243,7 @@ func parseTVShowFromBaseName(baseName, filename string) (*TVShowInfo, error) {
 
 	year := ""
 	if episodeMatch.kind != "date" {
-		year = extractYear(baseName)
+		year = extractYear(titlePart)
 	}
 	if year != "" {
 		titlePart = removeYear(titlePart, year)
@@ -324,6 +326,8 @@ var knownReleaseGroups = map[string]bool{
 	"pcok": true, "playready": true, "decibel": true, "epsilon": true,
 	"sigma": true, "tepes": true, "truffle": true, "nero": true, "group": true,
 	"amiable": true, "markii": true, "tabular": true, "tabularía": true, "tabularasa": true,
+	"vostfr": true, "dcprip": true, "hmax": true, "remastered": true, "rodubbed": true,
+	"hdlight": true, "truefrench": true, "french": true, "vost": true, "vf": true,
 }
 
 // qualityMarkerDetect detects if a string contains codec/quality markers,

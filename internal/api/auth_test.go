@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,20 @@ import (
 	"github.com/Nomadcxx/jellywatch/api"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 )
+
+func TestAPIRouterRejectsLargeBodies(t *testing.T) {
+	server := &Server{cfg: &config.Config{}}
+	body := strings.NewReader(`{"password":"` + strings.Repeat("x", int(maxRequestBodyBytes)) + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.apiRouter().ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized API body, got %d body %s", w.Code, w.Body.String())
+	}
+}
 
 func TestAuthEnabled(t *testing.T) {
 	tests := []struct {
@@ -45,7 +60,10 @@ func TestSessionStore(t *testing.T) {
 	store := NewSessionStore()
 
 	// Test create session
-	token := store.Create()
+	token, err := store.Create()
+	if err != nil {
+		t.Fatalf("Create() unexpected error: %v", err)
+	}
 	if token == "" {
 		t.Error("Create() returned empty token")
 	}
@@ -67,34 +85,46 @@ func TestSessionStore(t *testing.T) {
 	}
 }
 
+func TestGenerateTokenFailsClosedWhenRandomFails(t *testing.T) {
+	orig := secureRandomRead
+	secureRandomRead = func([]byte) (int, error) {
+		return 0, errors.New("entropy unavailable")
+	}
+	defer func() { secureRandomRead = orig }()
+
+	if token, err := generateToken(); err == nil || token != "" {
+		t.Fatalf("expected no token when random fails, got token=%q err=%v", token, err)
+	}
+}
+
 func TestGetAuthStatus(t *testing.T) {
 	tests := []struct {
-		name         string
-		password     string
-		cookieValue  string
-		wantEnabled  bool
-		wantAuthed   bool
+		name        string
+		password    string
+		cookieValue string
+		wantEnabled bool
+		wantAuthed  bool
 	}{
 		{
-			name:         "auth disabled - always authenticated",
-			password:     "",
-			cookieValue:  "",
-			wantEnabled:  false,
-			wantAuthed:   true,
+			name:        "auth disabled - always authenticated",
+			password:    "",
+			cookieValue: "",
+			wantEnabled: false,
+			wantAuthed:  true,
 		},
 		{
-			name:         "auth enabled - no cookie - not authenticated",
-			password:     "secret",
-			cookieValue:  "",
-			wantEnabled:  true,
-			wantAuthed:   false,
+			name:        "auth enabled - no cookie - not authenticated",
+			password:    "secret",
+			cookieValue: "",
+			wantEnabled: true,
+			wantAuthed:  false,
 		},
 		{
-			name:         "auth enabled - invalid cookie - not authenticated",
-			password:     "secret",
-			cookieValue:  "invalid-token",
-			wantEnabled:  true,
-			wantAuthed:   false,
+			name:        "auth enabled - invalid cookie - not authenticated",
+			password:    "secret",
+			cookieValue: "invalid-token",
+			wantEnabled: true,
+			wantAuthed:  false,
 		},
 	}
 
@@ -138,11 +168,11 @@ func TestGetAuthStatus(t *testing.T) {
 
 func TestLogin(t *testing.T) {
 	tests := []struct {
-		name         string
-		password     string
-		loginPass    string
-		wantStatus   int
-		wantSuccess  bool
+		name        string
+		password    string
+		loginPass   string
+		wantStatus  int
+		wantSuccess bool
 	}{
 		{
 			name:        "auth disabled - any password works",
@@ -207,10 +237,60 @@ func TestLogin(t *testing.T) {
 	}
 }
 
+func TestLoginAcceptsPasswordHash(t *testing.T) {
+	hash, err := config.HashPassword("secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{
+		cfg:      &config.Config{PasswordHash: hash},
+		sessions: NewSessionStore(),
+	}
+
+	req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.Login(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected hashed password login to succeed, got %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLoginRateLimitsFailedAttempts(t *testing.T) {
+	server := &Server{
+		cfg:      &config.Config{Password: "secret"},
+		sessions: NewSessionStore(),
+	}
+
+	for i := 0; i < maxLoginFailures; i++ {
+		req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))
+		req.RemoteAddr = "192.0.2.10:12345"
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		server.Login(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401, got %d", i+1, w.Code)
+		}
+	}
+
+	req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))
+	req.RemoteAddr = "192.0.2.10:12345"
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.Login(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after repeated failures, got %d body %s", w.Code, w.Body.String())
+	}
+}
+
 func TestLogout(t *testing.T) {
 	cfg := &config.Config{Password: "secret"}
 	store := NewSessionStore()
-	token := store.Create()
+	token, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
 	server := &Server{
 		cfg:      cfg,
 		sessions: store,
@@ -296,7 +376,11 @@ func TestAuthMiddleware(t *testing.T) {
 
 			// If we need a valid cookie, create a session
 			if tt.cookie == "valid" {
-				tt.cookie = store.Create()
+				token, err := store.Create()
+				if err != nil {
+					t.Fatal(err)
+				}
+				tt.cookie = token
 			}
 
 			server := &Server{

@@ -32,7 +32,8 @@ func init() {
 	patterns := []string{
 		// Resolution markers
 		`\b\d{3,4}[pi]\b`, // 1080p, 720p, 2160p, 480i, 576i
-		`\b(4K|UHD)\b`,    // 4K, UHD
+		`\b(?:2160|1080|720|480)\b`,
+		`\b(4K|UHD)\b`, // 4K, UHD
 
 		// HDR formats (before generic HDR to catch specific variants)
 		`\bHDR10\+|\b(HDR10|HDR10Plus|Dolby\s?Vision|DoVi|DV|HDR|HLG|PQ|SDR)\b`,
@@ -64,7 +65,8 @@ func init() {
 		`\b(NORDiC|NF|ATVP|HULU)\b`,
 
 		// Source types
-		`\b(BluRay|Blu-ray|BDRip|BRRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
+		`\bBlu[ .-]?Ray[ .-]+MA\b`,
+		`\b(Blu[ .-]?Ray|BDRip|BRRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
 		`\b(HDTV|PDTV|SDTV|DVDRip|DVD|DVDSCR)\b`,
 		`\b(CAM|HDTS|TS|TC|SCR|R5)\b`,
 
@@ -445,7 +447,7 @@ func stripOrphanedReleaseGroups(name string) string {
 			"you": true, "me": true, "we": true, "us": true, "of": true, "the": true,
 			"and": true, "or": true, "but": true, "for": true, "to": true, "in": true,
 			"on": true, "at": true, "by": true, "up": true, "so": true, "it": true,
-			"as": true, "if": true, "an": true, "my": true, "go": true, "do": true,
+			"as": true, "if": true, "an": true, "my": true, "go": true, "do": true, "all": true,
 			"no": true, "be": true, "he": true, "she": true, "him": true, "her": true,
 		}
 		if commonWords[lastLower] {

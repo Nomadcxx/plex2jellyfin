@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Nomadcxx/jellywatch/internal/database"
 )
 
 const minConsolidationFileSize = 100 * 1024 * 1024
@@ -53,6 +55,12 @@ type DuplicateAnalysis struct {
 	ReclaimableBytes int64
 }
 
+// MissingMediaPruneResult summarizes stale media rows removed from the DB.
+type MissingMediaPruneResult struct {
+	Checked int
+	Pruned  int
+}
+
 // ScatteredAnalysis contains scattered media analysis results
 type ScatteredAnalysis struct {
 	Items      []ScatteredItem
@@ -67,6 +75,10 @@ func (s *CleanupService) AnalyzeDuplicates() (*DuplicateAnalysis, error) {
 		Groups: []DuplicateGroup{},
 	}
 
+	if _, err := s.PruneMissingMediaFiles(); err != nil {
+		return nil, err
+	}
+
 	// Get movie duplicates
 	movieGroups, err := s.db.FindDuplicateMovies()
 	if err != nil {
@@ -74,20 +86,23 @@ func (s *CleanupService) AnalyzeDuplicates() (*DuplicateAnalysis, error) {
 	}
 
 	for _, mg := range movieGroups {
-		if len(mg.Files) < 2 {
+		files, err := s.pruneMissingMediaFiles(mg.Files)
+		if err != nil {
+			return nil, err
+		}
+		if len(files) < 2 {
 			continue
 		}
 
 		group := DuplicateGroup{
-			ID:               generateGroupID(mg.NormalizedTitle, mg.Year, nil, nil),
-			Title:            mg.NormalizedTitle,
-			Year:             mg.Year,
-			MediaType:        "movie",
-			Files:            make([]MediaFile, len(mg.Files)),
-			ReclaimableBytes: mg.SpaceReclaimable,
+			ID:        generateGroupID(mg.NormalizedTitle, mg.Year, nil, nil),
+			Title:     mg.NormalizedTitle,
+			Year:      mg.Year,
+			MediaType: "movie",
+			Files:     make([]MediaFile, len(files)),
 		}
 
-		for i, f := range mg.Files {
+		for i, f := range files {
 			group.Files[i] = MediaFile{
 				ID:           f.ID,
 				Path:         f.Path,
@@ -98,13 +113,14 @@ func (s *CleanupService) AnalyzeDuplicates() (*DuplicateAnalysis, error) {
 			}
 		}
 
-		if mg.BestFile != nil {
-			group.BestFileID = mg.BestFile.ID
+		group.BestFileID = files[0].ID
+		for _, f := range files[1:] {
+			group.ReclaimableBytes += f.Size
 		}
 
 		analysis.Groups = append(analysis.Groups, group)
-		analysis.TotalFiles += len(mg.Files)
-		analysis.ReclaimableBytes += mg.SpaceReclaimable
+		analysis.TotalFiles += len(files)
+		analysis.ReclaimableBytes += group.ReclaimableBytes
 	}
 
 	// Get episode duplicates
@@ -114,22 +130,25 @@ func (s *CleanupService) AnalyzeDuplicates() (*DuplicateAnalysis, error) {
 	}
 
 	for _, eg := range episodeGroups {
-		if len(eg.Files) < 2 {
+		files, err := s.pruneMissingMediaFiles(eg.Files)
+		if err != nil {
+			return nil, err
+		}
+		if len(files) < 2 {
 			continue
 		}
 
 		group := DuplicateGroup{
-			ID:               generateGroupID(eg.NormalizedTitle, eg.Year, eg.Season, eg.Episode),
-			Title:            eg.NormalizedTitle,
-			Year:             eg.Year,
-			MediaType:        "series",
-			Season:           eg.Season,
-			Episode:          eg.Episode,
-			Files:            make([]MediaFile, len(eg.Files)),
-			ReclaimableBytes: eg.SpaceReclaimable,
+			ID:        generateGroupID(eg.NormalizedTitle, eg.Year, eg.Season, eg.Episode),
+			Title:     eg.NormalizedTitle,
+			Year:      eg.Year,
+			MediaType: "series",
+			Season:    eg.Season,
+			Episode:   eg.Episode,
+			Files:     make([]MediaFile, len(files)),
 		}
 
-		for i, f := range eg.Files {
+		for i, f := range files {
 			group.Files[i] = MediaFile{
 				ID:           f.ID,
 				Path:         f.Path,
@@ -140,17 +159,73 @@ func (s *CleanupService) AnalyzeDuplicates() (*DuplicateAnalysis, error) {
 			}
 		}
 
-		if eg.BestFile != nil {
-			group.BestFileID = eg.BestFile.ID
+		group.BestFileID = files[0].ID
+		for _, f := range files[1:] {
+			group.ReclaimableBytes += f.Size
 		}
 
 		analysis.Groups = append(analysis.Groups, group)
-		analysis.TotalFiles += len(eg.Files)
-		analysis.ReclaimableBytes += eg.SpaceReclaimable
+		analysis.TotalFiles += len(files)
+		analysis.ReclaimableBytes += group.ReclaimableBytes
 	}
 
 	analysis.TotalGroups = len(analysis.Groups)
 	return analysis, nil
+}
+
+func (s *CleanupService) pruneMissingMediaFiles(files []*database.MediaFile) ([]*database.MediaFile, error) {
+	existing := make([]*database.MediaFile, 0, len(files))
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+
+		info, err := os.Stat(file.Path)
+		if err == nil && !info.IsDir() {
+			existing = append(existing, file)
+			continue
+		}
+		if err == nil {
+			continue
+		}
+		if os.IsNotExist(err) {
+			if err := s.db.DeleteMediaFileByID(file.ID); err != nil {
+				return nil, fmt.Errorf("pruning missing media file %d: %w", file.ID, err)
+			}
+			continue
+		}
+	}
+	return existing, nil
+}
+
+func (s *CleanupService) PruneMissingMediaFiles() (*MissingMediaPruneResult, error) {
+	files, err := s.db.GetAllMediaFiles()
+	if err != nil {
+		return nil, fmt.Errorf("loading media files for missing-file repair: %w", err)
+	}
+
+	result := &MissingMediaPruneResult{Checked: len(files)}
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+		info, err := os.Stat(file.Path)
+		if err == nil && !info.IsDir() {
+			continue
+		}
+		if err == nil {
+			continue
+		}
+		if !os.IsNotExist(err) {
+			continue
+		}
+		if err := s.db.DeleteMediaFileByID(file.ID); err != nil {
+			return nil, fmt.Errorf("pruning missing media file %d: %w", file.ID, err)
+		}
+		result.Pruned++
+	}
+
+	return result, nil
 }
 
 // AnalyzeScattered finds media scattered across multiple locations

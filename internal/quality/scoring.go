@@ -8,18 +8,20 @@ package quality
 
 const (
 	// Resolution scores (highest priority)
+	ScoreResolution4320p = 500
 	ScoreResolution2160p = 400
 	ScoreResolution1080p = 300
 	ScoreResolution720p  = 200
+	ScoreResolution576p  = 150
 	ScoreResolution480p  = 100
 
 	// Source type scores (second priority)
-	ScoreSourceREMUX   = 100
-	ScoreSourceBluRay  = 80
-	ScoreSourceWEBDL   = 60
-	ScoreSourceWEBRip  = 50
-	ScoreSourceHDTV    = 40
-	ScoreSourceDVDRip  = 20
+	ScoreSourceREMUX  = 100
+	ScoreSourceBluRay = 80
+	ScoreSourceWEBDL  = 60
+	ScoreSourceWEBRip = 50
+	ScoreSourceHDTV   = 40
+	ScoreSourceDVDRip = 20
 
 	// Size bonus (per GB, capped)
 	MaxSizeBonusGB   = 50 // Movies
@@ -64,12 +66,16 @@ func ScoreFile(info *QualityInfo, fileSize int64, isEpisode bool) int {
 
 	// Resolution scoring (highest weight)
 	switch info.Resolution {
+	case Resolution4320p:
+		score += ScoreResolution4320p
 	case Resolution2160p:
 		score += ScoreResolution2160p
 	case Resolution1080p:
 		score += ScoreResolution1080p
 	case Resolution720p:
 		score += ScoreResolution720p
+	case Resolution576p:
+		score += ScoreResolution576p
 	case Resolution480p:
 		score += ScoreResolution480p
 	case ResolutionUnknown:

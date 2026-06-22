@@ -55,6 +55,7 @@ type Plan struct {
 
 	// Files to move
 	Operations []*Operation
+	Collisions []*Collision
 
 	// Statistics
 	TotalFiles int
@@ -71,6 +72,15 @@ type Operation struct {
 	Type            string // "movie", "episode"
 }
 
+// Collision represents a source file that cannot be consolidated because the
+// computed destination already exists.
+type Collision struct {
+	SourcePath      string
+	DestinationPath string
+	Size            int64
+	Type            string
+}
+
 // GeneratePlan creates a consolidation plan for a conflict
 func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) {
 	plan := &Plan{
@@ -79,12 +89,14 @@ func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) 
 		Title:           conflict.Title,
 		TitleNormalized: conflict.TitleNormalized,
 		Year:            conflict.Year,
-		SourcePaths:     conflict.Locations,
 		CanProceed:      true,
 	}
+	planningConflict := *conflict
+	planningConflict.Locations = c.normalizedConflictLocations(conflict)
+	plan.SourcePaths = planningConflict.Locations
 
 	// Determine target path (choose the location with most content)
-	targetPath, err := c.chooseTargetPath(conflict)
+	targetPath, err := c.chooseTargetPath(&planningConflict)
 	if err != nil {
 		plan.CanProceed = false
 		plan.Reasons = append(plan.Reasons, fmt.Sprintf("Failed to choose target path: %v", err))
@@ -94,13 +106,13 @@ func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) 
 	plan.TargetPath = targetPath
 
 	// Find all files to move from other locations to target
-	for _, sourcePath := range conflict.Locations {
-		if sourcePath == targetPath {
+	for _, sourcePath := range planningConflict.Locations {
+		if sourcePath == targetPath || pathIsWithin(targetPath, sourcePath) {
 			continue // Skip target location
 		}
 
 		// Get files at source location
-		ops, err := c.getFilesToMove(sourcePath, targetPath, conflict)
+		ops, collisions, err := c.getFilesToMove(sourcePath, targetPath, &planningConflict)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -111,6 +123,7 @@ func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) 
 		}
 
 		plan.Operations = append(plan.Operations, ops...)
+		plan.Collisions = append(plan.Collisions, collisions...)
 	}
 
 	// Calculate totals
@@ -122,9 +135,96 @@ func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) 
 		plan.CanProceed = false
 		plan.Reasons = append(plan.Reasons, "No files to move")
 	}
+	if len(plan.Collisions) > 0 {
+		plan.CanProceed = false
+		plan.Reasons = append(plan.Reasons, fmt.Sprintf("%d files already exist at target; resolve duplicates before consolidation", len(plan.Collisions)))
+	}
 
 	c.stats.PlansGenerated++
 	return plan, nil
+}
+
+func (c *Consolidator) normalizedConflictLocations(conflict *database.Conflict) []string {
+	if conflict.MediaType != "series" {
+		return cleanUniquePaths(conflict.Locations)
+	}
+
+	locations := make([]string, 0, len(conflict.Locations))
+	seen := make(map[string]struct{}, len(conflict.Locations))
+	for _, location := range conflict.Locations {
+		if isJellywatchQuarantinePath(location) {
+			continue
+		}
+		root := c.seriesRootForPath(location)
+		if root == "" || isJellywatchQuarantinePath(root) {
+			continue
+		}
+		root = filepath.Clean(root)
+		if _, ok := seen[root]; ok {
+			continue
+		}
+		seen[root] = struct{}{}
+		locations = append(locations, root)
+	}
+	return locations
+}
+
+func cleanUniquePaths(paths []string) []string {
+	cleaned := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		path = filepath.Clean(path)
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		cleaned = append(cleaned, path)
+	}
+	return cleaned
+}
+
+func (c *Consolidator) seriesRootForPath(path string) string {
+	clean := filepath.Clean(path)
+	if c != nil && c.cfg != nil {
+		for _, libraryRoot := range c.cfg.Libraries.TV {
+			root := filepath.Clean(libraryRoot)
+			rel, err := filepath.Rel(root, clean)
+			if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+				continue
+			}
+			parts := strings.Split(rel, string(filepath.Separator))
+			if len(parts) > 0 && parts[0] != "" {
+				return filepath.Join(root, parts[0])
+			}
+		}
+	}
+
+	for current := clean; current != "." && current != string(filepath.Separator); current = filepath.Dir(current) {
+		if isSeasonDirectoryName(filepath.Base(current)) {
+			return filepath.Dir(current)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+	}
+	return clean
+}
+
+func isJellywatchQuarantinePath(path string) bool {
+	for _, part := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
+		if strings.HasPrefix(part, "_jellywatch_quarantine") {
+			return true
+		}
+	}
+	return false
+}
+
+func isSeasonDirectoryName(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(lower, "season ") ||
+		strings.HasPrefix(lower, "season_") ||
+		strings.HasPrefix(lower, "season-")
 }
 
 // chooseTargetPath selects the best location to consolidate into
@@ -159,8 +259,9 @@ func (c *Consolidator) chooseTargetPath(conflict *database.Conflict) (string, er
 }
 
 // getFilesToMove finds all files to move from source to target
-func (c *Consolidator) getFilesToMove(sourcePath, targetPath string, conflict *database.Conflict) ([]*Operation, error) {
+func (c *Consolidator) getFilesToMove(sourcePath, targetPath string, conflict *database.Conflict) ([]*Operation, []*Collision, error) {
 	var operations []*Operation
+	var collisions []*Collision
 
 	// Walk the source directory
 	err := filepath.Walk(sourcePath, func(path string, info os.FileInfo, err error) error {
@@ -193,7 +294,12 @@ func (c *Consolidator) getFilesToMove(sourcePath, targetPath string, conflict *d
 
 		// Check if destination already exists
 		if _, err := os.Stat(destPath); err == nil {
-			// File already exists at destination, skip
+			collisions = append(collisions, &Collision{
+				SourcePath:      path,
+				DestinationPath: destPath,
+				Size:            info.Size(),
+				Type:            conflict.MediaType,
+			})
 			return nil
 		}
 
@@ -208,7 +314,7 @@ func (c *Consolidator) getFilesToMove(sourcePath, targetPath string, conflict *d
 		return nil
 	})
 
-	return operations, err
+	return operations, collisions, err
 }
 
 // countFilesInPath counts media files in a directory

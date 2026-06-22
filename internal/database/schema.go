@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 20
+const currentSchemaVersion = 22
 
 // SQL migration scripts
 var migrations = []migration{
@@ -646,6 +646,48 @@ var migrations = []migration{
 			     )`,
 			`CREATE UNIQUE INDEX idx_hk_dedup ON housekeeping_tasks(dedup_key) WHERE status IN ('pending','running','flagged')`,
 			`INSERT INTO schema_version (version) VALUES (20)`,
+		},
+	},
+	{
+		version: 21,
+		// Persist metadata reconciliation/repair state for parse decisions so
+		// Jellywatch can retry with bounded backoff across daemon restarts.
+		up: []string{
+			`ALTER TABLE parse_decisions ADD COLUMN metadata_state TEXT`,
+			`ALTER TABLE parse_decisions ADD COLUMN metadata_error TEXT`,
+			`ALTER TABLE parse_decisions ADD COLUMN metadata_check_count INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE parse_decisions ADD COLUMN metadata_repair_count INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE parse_decisions ADD COLUMN last_metadata_check_at DATETIME`,
+			`ALTER TABLE parse_decisions ADD COLUMN next_metadata_check_at DATETIME`,
+			`ALTER TABLE parse_decisions ADD COLUMN last_metadata_repair_at DATETIME`,
+			`CREATE INDEX IF NOT EXISTS idx_parse_decisions_metadata_due
+				ON parse_decisions(metadata_state, next_metadata_check_at, jellyfin_identified)`,
+			`INSERT INTO schema_version (version) VALUES (21)`,
+		},
+	},
+	{
+		version: 22,
+		// Durable audit trail for automatic repair decisions. Postmortem
+		// reports consume this table so every daemon-side repair can be
+		// reviewed with the evidence that justified it.
+		up: []string{
+			`CREATE TABLE IF NOT EXISTS repair_events (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				event_at DATETIME NOT NULL,
+				action TEXT NOT NULL,
+				safety_class TEXT NOT NULL,
+				confidence REAL NOT NULL DEFAULT 0,
+				source_path TEXT,
+				target_path TEXT,
+				outcome TEXT NOT NULL,
+				error TEXT,
+				llm_consulted BOOLEAN NOT NULL DEFAULT 0,
+				evidence_json TEXT,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_repair_events_event_at ON repair_events(event_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_repair_events_action ON repair_events(action, outcome)`,
+			`INSERT INTO schema_version (version) VALUES (22)`,
 		},
 	},
 }

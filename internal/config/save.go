@@ -12,6 +12,7 @@ func AtomicWriteWithLock(path string, content []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
+	uid, gid, haveOwner := writeOwner(path)
 
 	lockPath := path + ".lock"
 	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
@@ -19,6 +20,9 @@ func AtomicWriteWithLock(path string, content []byte, mode os.FileMode) error {
 		return err
 	}
 	defer lf.Close()
+	if haveOwner && os.Geteuid() == 0 {
+		_ = os.Chown(lockPath, uid, gid)
+	}
 
 	if err := acquireLock(lf, 2*time.Second); err != nil {
 		return err
@@ -42,6 +46,13 @@ func AtomicWriteWithLock(path string, content []byte, mode os.FileMode) error {
 		cleanup()
 		return err
 	}
+	if haveOwner && os.Geteuid() == 0 {
+		if err := tmp.Chown(uid, gid); err != nil {
+			_ = tmp.Close()
+			cleanup()
+			return err
+		}
+	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		cleanup()
@@ -62,6 +73,21 @@ func AtomicWriteWithLock(path string, content []byte, mode os.FileMode) error {
 		_ = dir.Close()
 	}
 	return nil
+}
+
+func writeOwner(path string) (uid int, gid int, ok bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		info, err = os.Stat(filepath.Dir(path))
+	}
+	if err != nil {
+		return 0, 0, false
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, 0, false
+	}
+	return int(st.Uid), int(st.Gid), true
 }
 
 func acquireLock(f *os.File, timeout time.Duration) error {

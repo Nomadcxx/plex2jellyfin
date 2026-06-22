@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,6 +42,27 @@ func TestNormalizeTitle(t *testing.T) {
 				t.Errorf("NormalizeTitle(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestOpenPathAppliesSQLiteConcurrencyPragmas(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	var busyTimeout int
+	if err := db.DB().QueryRow(`PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+		t.Fatalf("query busy_timeout: %v", err)
+	}
+	if busyTimeout < 30000 {
+		t.Fatalf("busy_timeout = %d, want at least 30000", busyTimeout)
+	}
+
+	var journalMode string
+	if err := db.DB().QueryRow(`PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+		t.Fatalf("query journal_mode: %v", err)
+	}
+	if journalMode != "wal" {
+		t.Fatalf("journal_mode = %q, want wal", journalMode)
 	}
 }
 
@@ -422,7 +444,7 @@ func TestConcurrentAccess(t *testing.T) {
 			series := &Series{
 				Title:          "Concurrent Series",
 				Year:           2020 + n,
-				CanonicalPath:  "/test",
+				CanonicalPath:  fmt.Sprintf("/test/Concurrent Series (%d)", 2020+n),
 				LibraryRoot:    "/test",
 				Source:         "jellywatch",
 				SourcePriority: 100,
@@ -671,6 +693,40 @@ func TestConflictDetectionMovie(t *testing.T) {
 	t.Logf("Movie conflict recorded: %v", conflicts[0].Locations)
 }
 
+func TestUpsertConflictWithoutUniqueConstraint(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	year := 2005
+	first := Conflict{
+		MediaType:       "series",
+		Title:           "Example",
+		TitleNormalized: "example",
+		Year:            &year,
+		Locations:       []string{"/library/a/Example", "/library/b/Example"},
+	}
+	if err := db.upsertConflict(first); err != nil {
+		t.Fatalf("first upsertConflict failed: %v", err)
+	}
+
+	second := first
+	second.Locations = append(second.Locations, "/library/c/Example")
+	if err := db.upsertConflict(second); err != nil {
+		t.Fatalf("second upsertConflict failed: %v", err)
+	}
+
+	conflicts, err := db.GetUnresolvedConflicts()
+	if err != nil {
+		t.Fatalf("GetUnresolvedConflicts failed: %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("expected one unresolved conflict, got %d", len(conflicts))
+	}
+	if len(conflicts[0].Locations) != 3 {
+		t.Fatalf("expected updated conflict locations, got %v", conflicts[0].Locations)
+	}
+}
+
 // TestNoConflictOnHigherPriorityUpdate verifies no conflict recorded when
 // higher priority source overwrites lower priority (this is expected behavior)
 func TestNoConflictOnHigherPriorityUpdate(t *testing.T) {
@@ -726,19 +782,19 @@ func TestNoConflictOnHigherPriorityUpdate(t *testing.T) {
 }
 
 func TestMediaDBSQLReturnsHandle(t *testing.T) {
-db, err := OpenPath(filepath.Join(t.TempDir(), "media.db"))
-if err != nil {
-t.Fatal(err)
-}
-defer db.Close()
-if db.SQL() == nil {
-t.Fatal("SQL() returned nil")
-}
-var n int
-if err := db.SQL().QueryRow("SELECT 1").Scan(&n); err != nil {
-t.Fatal(err)
-}
-if n != 1 {
-t.Errorf("got %d, want 1", n)
-}
+	db, err := OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if db.SQL() == nil {
+		t.Fatal("SQL() returned nil")
+	}
+	var n int
+	if err := db.SQL().QueryRow("SELECT 1").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("got %d, want 1", n)
+	}
 }

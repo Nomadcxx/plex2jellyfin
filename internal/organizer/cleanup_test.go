@@ -70,19 +70,7 @@ func TestPurgeNonAllowed_NestedDirWithAllowedFilePreserved(t *testing.T) {
 	assert.NoError(t, err, "subtitle in nested dir should survive")
 }
 
-func TestPurgeNonAllowed_UnreadablePathDoesNotAbort(t *testing.T) {
-	dir := t.TempDir()
-	lockedDir := filepath.Join(dir, "locked")
-	require.NoError(t, os.MkdirAll(lockedDir, 0000))
-	defer os.Chmod(lockedDir, 0755) //nolint:errcheck
-
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("junk"), 0644))
-
-	// Should not return error even though locked subdir is unreadable.
-	err := PurgeNonAllowed(dir)
-	assert.NoError(t, err)
-
-	// The readable junk file should still be removed.
-	_, statErr := os.Stat(filepath.Join(dir, "readme.txt"))
-	assert.True(t, os.IsNotExist(statErr), "readme.txt should be removed despite locked sibling dir")
+func TestPurgeNonAllowed_ReportsWalkErrors(t *testing.T) {
+	err := PurgeNonAllowed(filepath.Join(t.TempDir(), "missing"))
+	assert.Error(t, err)
 }

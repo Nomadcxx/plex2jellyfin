@@ -80,8 +80,9 @@ func (c *Client) EpisodeSearch(episodeIDs []int) (*CommandResponse, error) {
 
 func (c *Client) SeasonSearch(seriesID, seasonNumber int) (*CommandResponse, error) {
 	cmd := Command{
-		Name:     "SeasonSearch",
-		SeriesID: seriesID,
+		Name:         "SeasonSearch",
+		SeasonNumber: seasonNumber,
+		SeriesID:     seriesID,
 	}
 	return c.ExecuteCommand(cmd)
 }

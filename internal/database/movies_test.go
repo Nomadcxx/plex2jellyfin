@@ -134,3 +134,62 @@ func TestGetAllMovies_Empty(t *testing.T) {
 		t.Errorf("expected 0 movies, got %d", len(allMovies))
 	}
 }
+
+func TestPruneFilesystemMoviesWithoutMediaFiles(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	stale := &Movie{
+		Title:          "Bad Parse",
+		Year:           2025,
+		CanonicalPath:  "/movies/Bad Parse (2025)",
+		LibraryRoot:    "/movies",
+		Source:         "filesystem",
+		SourcePriority: 50,
+	}
+	if _, err := db.UpsertMovie(stale); err != nil {
+		t.Fatalf("failed to insert stale movie: %v", err)
+	}
+
+	kept := &Movie{
+		Title:          "Kept Movie",
+		Year:           2025,
+		CanonicalPath:  "/movies/Kept Movie (2025)",
+		LibraryRoot:    "/movies",
+		Source:         "filesystem",
+		SourcePriority: 50,
+	}
+	if _, err := db.UpsertMovie(kept); err != nil {
+		t.Fatalf("failed to insert kept movie: %v", err)
+	}
+	year := 2025
+	file := &MediaFile{
+		Path:            "/movies/Kept Movie (2025)/Kept Movie (2025).mkv",
+		MediaType:       "movie",
+		ParentMovieID:   &kept.ID,
+		NormalizedTitle: "keptmovie",
+		Year:            &year,
+		Size:            100,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("failed to insert kept media file: %v", err)
+	}
+
+	pruned, err := db.PruneFilesystemMoviesWithoutMediaFiles()
+	if err != nil {
+		t.Fatalf("PruneFilesystemMoviesWithoutMediaFiles failed: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("pruned = %d, want 1", pruned)
+	}
+	if got, err := db.GetMovieByID(stale.ID); err != nil {
+		t.Fatalf("GetMovieByID stale failed: %v", err)
+	} else if got != nil {
+		t.Fatalf("stale filesystem movie should be pruned")
+	}
+	if got, err := db.GetMovieByID(kept.ID); err != nil {
+		t.Fatalf("GetMovieByID kept failed: %v", err)
+	} else if got == nil {
+		t.Fatalf("movie with media files should remain")
+	}
+}

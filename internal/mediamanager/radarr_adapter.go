@@ -38,13 +38,13 @@ func (r *RadarrAdapter) Info() ManagerInfo {
 }
 
 func (r *RadarrAdapter) Ping(ctx context.Context) error {
-	return r.client.Ping()
+	return r.client.PingContext(ctx)
 }
 
 func (r *RadarrAdapter) Status(ctx context.Context) (*ServiceStatus, error) {
 	status := &ServiceStatus{}
 
-	sysStatus, err := r.client.GetSystemStatus()
+	sysStatus, err := r.client.GetSystemStatusContext(ctx)
 	if err != nil {
 		status.Online = false
 		status.Error = err.Error()
@@ -54,12 +54,12 @@ func (r *RadarrAdapter) Status(ctx context.Context) (*ServiceStatus, error) {
 	status.Online = true
 	status.Version = sysStatus.Version
 
-	queue, err := r.client.GetQueue(1, 1)
+	queue, err := r.client.GetQueueContext(ctx, 1, 1)
 	if err == nil {
 		status.QueueSize = queue.TotalRecords
 	}
 
-	stuck, err := r.client.GetStuckItems()
+	stuck, err := r.client.GetStuckItemsContext(ctx)
 	if err == nil {
 		status.StuckCount = len(stuck)
 	}
@@ -73,7 +73,7 @@ func (r *RadarrAdapter) GetQueue(ctx context.Context, filter QueueFilter) ([]Que
 		limit = 50
 	}
 
-	queue, err := r.client.GetQueue(1, limit)
+	queue, err := r.client.GetQueueContext(ctx, 1, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Radarr queue: %w", err)
 	}
@@ -109,7 +109,7 @@ func (r *RadarrAdapter) GetQueue(ctx context.Context, filter QueueFilter) ([]Que
 }
 
 func (r *RadarrAdapter) GetStuckItems(ctx context.Context) ([]QueueItem, error) {
-	stuck, err := r.client.GetStuckItems()
+	stuck, err := r.client.GetStuckItemsContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stuck items: %w", err)
 	}
@@ -131,7 +131,7 @@ func (r *RadarrAdapter) GetStuckItems(ctx context.Context) ([]QueueItem, error) 
 }
 
 func (r *RadarrAdapter) GetQueueItem(ctx context.Context, id int64) (*QueueItem, error) {
-	item, err := r.client.GetQueueItem(int(id))
+	item, err := r.client.GetQueueItemContext(ctx, int(id))
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (r *RadarrAdapter) GetQueueItem(ctx context.Context, id int64) (*QueueItem,
 }
 
 func (r *RadarrAdapter) ClearItem(ctx context.Context, id int64, blocklist bool) error {
-	return r.client.RemoveFromQueue(int(id), blocklist, false)
+	return r.client.RemoveFromQueueContext(ctx, int(id), blocklist, false)
 }
 
 func (r *RadarrAdapter) ClearStuckItems(ctx context.Context, blocklist bool) (int, error) {
@@ -164,17 +164,17 @@ func (r *RadarrAdapter) RetryItem(ctx context.Context, id int64) error {
 }
 
 func (r *RadarrAdapter) TriggerImportScan(ctx context.Context, path string) error {
-	_, err := r.client.TriggerDownloadedMoviesScan(path)
+	_, err := r.client.TriggerDownloadedMoviesScanContext(ctx, path)
 	return err
 }
 
 func (r *RadarrAdapter) ForceSync(ctx context.Context) error {
-	_, err := r.client.RefreshAllMovies()
+	_, err := r.client.RefreshAllMoviesContext(ctx)
 	return err
 }
 
 func (r *RadarrAdapter) GetRootFolders(ctx context.Context) ([]RootFolder, error) {
-	folders, err := r.client.GetRootFolders()
+	folders, err := r.client.GetRootFoldersContext(ctx)
 	if err != nil {
 		return nil, err
 	}

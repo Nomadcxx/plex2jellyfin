@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/scanner"
 )
 
@@ -258,10 +260,28 @@ func parseMediaDir(dirName string) (title string, year int) {
 	if year > 0 {
 		title = database.StripYear(dirName)
 		title = strings.TrimSpace(title)
+		if title == dirName || containsDirectoryReleaseMarker(title) || containsDirectoryReleaseMarker(dirName) {
+			if info, err := naming.ParseMovieName(dirName); err == nil {
+				parsedYear, _ := strconv.Atoi(info.Year)
+				if parsedYear == year && strings.TrimSpace(info.Title) != "" {
+					title = strings.TrimSpace(info.Title)
+				}
+			}
+		}
 	} else {
 		title = dirName
 	}
 	return
+}
+
+func containsDirectoryReleaseMarker(title string) bool {
+	upper := strings.ToUpper(title)
+	for _, marker := range []string{"HMAX", "REMASTERED", "REMASTER"} {
+		if strings.Contains(upper, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // countVideoFiles counts video files recursively in a directory

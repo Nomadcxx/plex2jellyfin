@@ -87,6 +87,16 @@ func PlansDir() (string, error) {
 	return filepath.Join(dir, "plans"), nil
 }
 
+// ReportsDir returns the directory for postmortem report bundles.
+// This is ~/.config/jellywatch/reports for the actual user.
+func ReportsDir() (string, error) {
+	dir, err := JellyWatchDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "reports"), nil
+}
+
 // ActualUser returns the actual username (not root when using sudo).
 func ActualUser() string {
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && sudoUser != "root" {

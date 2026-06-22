@@ -202,6 +202,71 @@ func metadataRefreshHandler(client *jellyfin.Client, log *ipc.OpLog) ipc.Streami
 	}
 }
 
+// ----- B4b: METADATA_RECONCILE / METADATA_REPAIR -----
+
+type metadataRecoveryArgs struct {
+	Limit       int     `json:"limit,omitempty"`
+	DecisionID  int64   `json:"decision_id,omitempty"`
+	DecisionIDs []int64 `json:"decision_ids,omitempty"`
+	DryRun      bool    `json:"dry_run,omitempty"`
+}
+
+func metadataReconcileHandler(reconciler *jellyfin.MetadataReconciler, log *ipc.OpLog) ipc.StreamingHandler {
+	return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
+		if reconciler == nil {
+			w.Error(op.ID, ipc.ErrBadRequest, "metadata reconciler not configured")
+			return
+		}
+		var args metadataRecoveryArgs
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &args)
+		}
+		streamRunner(ctx, ipc.CmdMetadataReconcile,
+			map[string]any{"limit": args.Limit}, op, w, log,
+			func(progress chan<- database.ProgressEvent) error {
+				_, err := reconciler.RunPassive(ctx, args.Limit, progress)
+				return err
+			})
+	}
+}
+
+func metadataRepairHandler(reconciler *jellyfin.MetadataReconciler, log *ipc.OpLog) ipc.StreamingHandler {
+	return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
+		if reconciler == nil {
+			w.Error(op.ID, ipc.ErrBadRequest, "metadata reconciler not configured")
+			return
+		}
+		var args metadataRecoveryArgs
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &args)
+		}
+		streamRunner(ctx, ipc.CmdMetadataRepair,
+			map[string]any{
+				"limit":        args.Limit,
+				"decision_id":  args.DecisionID,
+				"decision_ids": len(args.DecisionIDs),
+				"dry_run":      args.DryRun,
+			}, op, w, log,
+			func(progress chan<- database.ProgressEvent) error {
+				if args.DryRun {
+					progress <- database.ProgressEvent{Phase: "checking", Msg: "dry run: checking metadata only"}
+					_, err := reconciler.RunPassive(ctx, args.Limit, progress)
+					return err
+				}
+				if len(args.DecisionIDs) > 0 {
+					_, err := reconciler.RepairDecisions(ctx, args.DecisionIDs, progress)
+					return err
+				}
+				if args.DecisionID > 0 {
+					_, err := reconciler.RepairDecision(ctx, args.DecisionID, progress)
+					return err
+				}
+				_, err := reconciler.RunRepair(ctx, args.Limit, progress)
+				return err
+			})
+	}
+}
+
 // ----- B5: SWEEP (manual sweeper run) -----
 
 type sweepArgs struct {

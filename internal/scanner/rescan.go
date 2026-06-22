@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ func (s *FileScanner) FullRescan(ctx context.Context, roots []string, dryRun boo
 		root string
 	}
 	var files []fileEntry
+	var errs []error
 	for i, root := range roots {
 		select {
 		case <-ctx.Done():
@@ -28,6 +30,7 @@ func (s *FileScanner) FullRescan(ctx context.Context, roots []string, dryRun boo
 		progress <- database.ProgressEvent{Phase: "walking", Msg: root, Current: i + 1, Total: len(roots)}
 		walkErr := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 			if err != nil {
+				errs = append(errs, fmt.Errorf("walk %s: %w", p, err))
 				return nil
 			}
 			if info.IsDir() {
@@ -52,25 +55,28 @@ func (s *FileScanner) FullRescan(ctx context.Context, roots []string, dryRun boo
 		if dryRun {
 			continue
 		}
-		s.indexOneBestEffort(fe.path, fe.root)
+		if err := s.indexOne(fe.path, fe.root); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	progress <- database.ProgressEvent{Phase: "complete"}
-	return nil
+	return errors.Join(errs...)
 }
 
-// indexOneBestEffort calls processFile with an inferred media type. Errors
-// are swallowed so a single bad file doesn't abort the whole rescan; the
-// caller's progress stream is the source of truth.
-func (s *FileScanner) indexOneBestEffort(path, root string) {
+// indexOne calls processFile with an inferred media type.
+func (s *FileScanner) indexOne(path, root string) error {
 	info, err := os.Stat(path)
 	if err != nil {
-		return
+		return fmt.Errorf("stat %s: %w", path, err)
 	}
 	mediaType := "movie"
 	if naming.IsTVEpisodeFilename(filepath.Base(path)) {
 		mediaType = "episode"
 	}
 	result := &ScanResult{}
-	_ = s.processFile(path, info, root, mediaType, result)
+	if err := s.processFile(path, info, root, mediaType, result); err != nil {
+		return fmt.Errorf("index %s: %w", path, err)
+	}
+	return nil
 }

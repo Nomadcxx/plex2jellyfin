@@ -35,6 +35,13 @@ type ParseDecision struct {
 	AutoLabel            string
 	AutoLabelAt          *time.Time
 	HumanLabelOverride   string
+	MetadataState        string
+	MetadataError        string
+	MetadataCheckCount   int
+	MetadataRepairCount  int
+	LastMetadataCheckAt  *time.Time
+	NextMetadataCheckAt  *time.Time
+	LastMetadataRepairAt *time.Time
 }
 
 // ParseUpdate carries updated parse metadata for a decision row.
@@ -191,7 +198,8 @@ func (m *MediaDB) UpdateOutcome(id int64, u OutcomeUpdate) error {
 			jellyfin_tvdb_id = ?,
 			jellyfin_resolved_at = ?,
 			jellyfin_identified = COALESCE(?, jellyfin_identified),
-			jellyfin_first_seen_at = COALESCE(jellyfin_first_seen_at, ?)
+			jellyfin_first_seen_at = COALESCE(jellyfin_first_seen_at, ?),
+			auto_label = NULL
 		WHERE id = ? AND jellyfin_resolved_at IS NULL`,
 		nullStr(u.JellyfinItemID), nullStr(u.JellyfinImdbID),
 		nullStr(u.JellyfinTmdbID), nullStr(u.JellyfinTvdbID),
@@ -223,13 +231,15 @@ func (m *MediaDB) UpgradeOutcome(id int64, u OutcomeUpdate) error {
 			jellyfin_tvdb_id      = COALESCE(NULLIF(?, ''), jellyfin_tvdb_id),
 			jellyfin_resolved_at  = COALESCE(?, jellyfin_resolved_at),
 			jellyfin_identified   = COALESCE(?, jellyfin_identified),
-			jellyfin_first_seen_at = COALESCE(jellyfin_first_seen_at, ?)
+			jellyfin_first_seen_at = COALESCE(jellyfin_first_seen_at, ?),
+			auto_label = CASE WHEN ? IS NOT NULL THEN NULL ELSE auto_label END
 		WHERE id = ?`,
 		nullStr(u.JellyfinItemID), nullStr(u.JellyfinImdbID),
 		nullStr(u.JellyfinTmdbID), nullStr(u.JellyfinTvdbID),
 		nullTimePtr(u.JellyfinResolvedAt),
 		nullBoolPtr(u.JellyfinIdentified),
 		nullTimePtr(u.JellyfinFirstSeenAt),
+		nullTimePtr(u.JellyfinResolvedAt),
 		id,
 	)
 	if err != nil {
@@ -500,6 +510,46 @@ func (m *MediaDB) QueryRecentSuccessfulMovieImports(lookback time.Duration, limi
 	return out, rows.Err()
 }
 
+// QueryRecentSuccessfulTVImports returns recent TV organize successes that
+// JellyWatch can use as repair candidates. Rows must have both a source
+// filename and target path so callers can reparse the original release name
+// and compare it against the current library location.
+func (m *MediaDB) QueryRecentSuccessfulTVImports(lookback time.Duration, limit int) ([]*ParseDecision, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 500
+	}
+	cutoff := time.Now().UTC().Add(-lookback)
+	rows, err := m.db.Query(`
+		SELECT `+decisionColumns+`
+		FROM parse_decisions
+		WHERE organize_outcome = 'success'
+		  AND media_type_guessed = 'tv'
+		  AND source_filename IS NOT NULL
+		  AND source_filename != ''
+		  AND target_path IS NOT NULL
+		  AND target_path != ''
+		  AND event_at >= ?
+		ORDER BY event_at DESC, id DESC
+		LIMIT ?`, cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("QueryRecentSuccessfulTVImports: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*ParseDecision
+	for rows.Next() {
+		d, err := scanDecision(rows)
+		if err != nil {
+			return nil, fmt.Errorf("QueryRecentSuccessfulTVImports scan: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // scanner abstracts *sql.Row and *sql.Rows for scanDecision.
 type scanner interface {
 	Scan(dest ...any) error
@@ -512,7 +562,9 @@ const decisionColumns = `id, source_path, source_filename, event_at,
 	existing_match_method, organize_outcome, organize_error,
 	jellyfin_item_id, jellyfin_imdb_id, jellyfin_tmdb_id, jellyfin_tvdb_id,
 	jellyfin_resolved_at, jellyfin_identified, jellyfin_first_seen_at,
-	auto_label, auto_label_at, human_label_override`
+	auto_label, auto_label_at, human_label_override,
+	metadata_state, metadata_error, metadata_check_count, metadata_repair_count,
+	last_metadata_check_at, next_metadata_check_at, last_metadata_repair_at`
 
 func scanDecision(s scanner) (*ParseDecision, error) {
 	var d ParseDecision
@@ -539,6 +591,13 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		autoLabel            sql.NullString
 		autoLabelAt          sql.NullTime
 		humanLabelOverride   sql.NullString
+		metadataState        sql.NullString
+		metadataError        sql.NullString
+		metadataCheckCount   sql.NullInt64
+		metadataRepairCount  sql.NullInt64
+		lastMetadataCheckAt  sql.NullTime
+		nextMetadataCheckAt  sql.NullTime
+		lastMetadataRepairAt sql.NullTime
 	)
 
 	err := s.Scan(
@@ -550,6 +609,8 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		&jellyfinItemID, &jellyfinImdbID, &jellyfinTmdbID, &jellyfinTvdbID,
 		&jellyfinResolvedAt, &jellyfinIdentified, &jellyfinFirstSeenAt,
 		&autoLabel, &autoLabelAt, &humanLabelOverride,
+		&metadataState, &metadataError, &metadataCheckCount, &metadataRepairCount,
+		&lastMetadataCheckAt, &nextMetadataCheckAt, &lastMetadataRepairAt,
 	)
 	if err != nil {
 		return nil, err
@@ -601,8 +662,117 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		d.AutoLabelAt = &t
 	}
 	d.HumanLabelOverride = humanLabelOverride.String
+	d.MetadataState = metadataState.String
+	d.MetadataError = metadataError.String
+	if metadataCheckCount.Valid {
+		d.MetadataCheckCount = int(metadataCheckCount.Int64)
+	}
+	if metadataRepairCount.Valid {
+		d.MetadataRepairCount = int(metadataRepairCount.Int64)
+	}
+	if lastMetadataCheckAt.Valid {
+		t := lastMetadataCheckAt.Time
+		d.LastMetadataCheckAt = &t
+	}
+	if nextMetadataCheckAt.Valid {
+		t := nextMetadataCheckAt.Time
+		d.NextMetadataCheckAt = &t
+	}
+	if lastMetadataRepairAt.Valid {
+		t := lastMetadataRepairAt.Time
+		d.LastMetadataRepairAt = &t
+	}
 
 	return &d, nil
+}
+
+// ListDueMetadataChecks returns resolved-but-unidentified rows due for a
+// passive metadata reconciliation or active repair check.
+func (m *MediaDB) ListDueMetadataChecks(now time.Time, limit int) ([]*ParseDecision, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if limit <= 0 || limit > 1000 {
+		limit = 25
+	}
+
+	rows, err := m.db.Query(`
+		SELECT `+decisionColumns+`
+		FROM parse_decisions
+		WHERE organize_outcome = 'success'
+		  AND target_path IS NOT NULL AND target_path != ''
+		  AND jellyfin_resolved_at IS NOT NULL
+		  AND jellyfin_identified = 0
+		  AND jellyfin_item_id IS NOT NULL AND jellyfin_item_id != ''
+		  AND (metadata_state IS NULL OR metadata_state != 'needs_review')
+		  AND (next_metadata_check_at IS NULL OR next_metadata_check_at <= ?)
+		ORDER BY COALESCE(next_metadata_check_at, target_at, event_at) ASC
+		LIMIT ?`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("ListDueMetadataChecks: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*ParseDecision
+	for rows.Next() {
+		d, err := scanDecision(rows)
+		if err != nil {
+			return nil, fmt.Errorf("ListDueMetadataChecks scan: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// UpdateMetadataCheckState records a passive metadata check result and
+// schedules the next check time.
+func (m *MediaDB) UpdateMetadataCheckState(id int64, state, errMsg string, nextCheck *time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now().UTC()
+	_, err := m.db.Exec(`
+		UPDATE parse_decisions SET
+			metadata_state = ?,
+			metadata_error = ?,
+			metadata_check_count = metadata_check_count + 1,
+			last_metadata_check_at = ?,
+			next_metadata_check_at = ?
+		WHERE id = ?`,
+		nullStr(state), nullStr(errMsg), now, nullTimePtr(nextCheck), id)
+	if err != nil {
+		return fmt.Errorf("UpdateMetadataCheckState: %w", err)
+	}
+	return nil
+}
+
+// UpdateMetadataRepairState records an active repair result. metadata_repair_count
+// increments only when repairedAt is non-nil, allowing failed preflight checks
+// to update state without consuming a repair attempt.
+func (m *MediaDB) UpdateMetadataRepairState(id int64, state, errMsg string, nextCheck *time.Time, repairedAt *time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now().UTC()
+	repairIncrement := 0
+	if repairedAt != nil {
+		repairIncrement = 1
+	}
+	_, err := m.db.Exec(`
+		UPDATE parse_decisions SET
+			metadata_state = ?,
+			metadata_error = ?,
+			metadata_repair_count = metadata_repair_count + ?,
+			last_metadata_check_at = ?,
+			next_metadata_check_at = ?,
+			last_metadata_repair_at = COALESCE(?, last_metadata_repair_at)
+		WHERE id = ?`,
+		nullStr(state), nullStr(errMsg), repairIncrement, now, nullTimePtr(nextCheck),
+		nullTimePtr(repairedAt), id)
+	if err != nil {
+		return fmt.Errorf("UpdateMetadataRepairState: %w", err)
+	}
+	return nil
 }
 
 // QueryStaleLabeledDecisions returns rows that already have an auto_label but

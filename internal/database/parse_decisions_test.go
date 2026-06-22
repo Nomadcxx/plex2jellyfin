@@ -36,6 +36,45 @@ func TestParseDecisionInsertGet(t *testing.T) {
 	assert.Nil(t, got.ParsedYear)
 	assert.Nil(t, got.ParsedSeason)
 	assert.Nil(t, got.ParsedEpisode)
+	assert.Equal(t, "", got.MetadataState)
+	assert.Equal(t, 0, got.MetadataCheckCount)
+	assert.Equal(t, 0, got.MetadataRepairCount)
+}
+
+func TestParseDecisionsMetadataRecoveryColumns(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	rows, err := db.SQL().Query(`PRAGMA table_info(parse_decisions)`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	columns := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal any
+			pk         int
+		)
+		require.NoError(t, rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk))
+		columns[name] = true
+	}
+	require.NoError(t, rows.Err())
+
+	for _, name := range []string{
+		"metadata_state",
+		"metadata_error",
+		"metadata_check_count",
+		"metadata_repair_count",
+		"last_metadata_check_at",
+		"next_metadata_check_at",
+		"last_metadata_repair_at",
+	} {
+		assert.True(t, columns[name], "missing column %s", name)
+	}
 }
 
 func TestParseDecisionGetNotFound(t *testing.T) {
@@ -206,6 +245,110 @@ func TestParseDecisionUpdateHumanOverride(t *testing.T) {
 	assert.Equal(t, "correct", got.HumanLabelOverride)
 }
 
+func TestListDueMetadataChecks(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	dueID, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(dueID, OrganizeUpdate{
+		TargetPath:      "/library/show/Season 01/show S01E02.mkv",
+		TargetAt:        &now,
+		OrganizeOutcome: "success",
+	}))
+	identified := false
+	require.NoError(t, db.UpdateOutcome(dueID, OutcomeUpdate{
+		JellyfinItemID:      "item-due",
+		JellyfinResolvedAt:  &now,
+		JellyfinIdentified:  &identified,
+		JellyfinFirstSeenAt: &now,
+	}))
+
+	futureID, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(futureID, OrganizeUpdate{
+		TargetPath:      "/library/show/Season 01/show S01E03.mkv",
+		TargetAt:        &now,
+		OrganizeOutcome: "success",
+	}))
+	require.NoError(t, db.UpdateOutcome(futureID, OutcomeUpdate{
+		JellyfinItemID:      "item-future",
+		JellyfinResolvedAt:  &now,
+		JellyfinIdentified:  &identified,
+		JellyfinFirstSeenAt: &now,
+	}))
+	future := now.Add(time.Hour)
+	require.NoError(t, db.UpdateMetadataCheckState(futureID, "recent_import_waiting", "", &future))
+
+	identifiedID, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(identifiedID, OrganizeUpdate{
+		TargetPath:      "/library/show/Season 01/show S01E01.mkv",
+		TargetAt:        &now,
+		OrganizeOutcome: "success",
+	}))
+	isIdentified := true
+	require.NoError(t, db.UpdateOutcome(identifiedID, OutcomeUpdate{
+		JellyfinItemID:      "item-identified",
+		JellyfinResolvedAt:  &now,
+		JellyfinIdentified:  &isIdentified,
+		JellyfinFirstSeenAt: &now,
+	}))
+
+	rows, err := db.ListDueMetadataChecks(now, 25)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, dueID, rows[0].ID)
+}
+
+func TestUpdateMetadataCheckState(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	id, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+
+	next := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	require.NoError(t, db.UpdateMetadataCheckState(id, "missing_episode_numbers", "waiting", &next))
+
+	got, err := db.GetDecision(id)
+	require.NoError(t, err)
+	assert.Equal(t, "missing_episode_numbers", got.MetadataState)
+	assert.Equal(t, "waiting", got.MetadataError)
+	assert.Equal(t, 1, got.MetadataCheckCount)
+	require.NotNil(t, got.LastMetadataCheckAt)
+	require.NotNil(t, got.NextMetadataCheckAt)
+	assert.True(t, next.Equal(*got.NextMetadataCheckAt))
+}
+
+func TestUpdateMetadataRepairState(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	id, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+
+	next := time.Now().UTC().Add(6 * time.Hour).Truncate(time.Second)
+	repairedAt := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, db.UpdateMetadataRepairState(id, "identified", "", &next, &repairedAt))
+
+	got, err := db.GetDecision(id)
+	require.NoError(t, err)
+	assert.Equal(t, "identified", got.MetadataState)
+	assert.Equal(t, 1, got.MetadataRepairCount)
+	require.NotNil(t, got.LastMetadataRepairAt)
+	assert.True(t, repairedAt.Equal(*got.LastMetadataRepairAt))
+
+	require.NoError(t, db.UpdateMetadataRepairState(id, "needs_review", "still stale", &next, nil))
+	got, err = db.GetDecision(id)
+	require.NoError(t, err)
+	assert.Equal(t, "needs_review", got.MetadataState)
+	assert.Equal(t, "still stale", got.MetadataError)
+	assert.Equal(t, 1, got.MetadataRepairCount)
+}
+
 func TestQueryDecisions_OrganizeOutcome(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -290,6 +433,70 @@ func TestQueryRecentSuccessfulMovieImports(t *testing.T) {
 	assert.Equal(t, id, rows[0].ID)
 	assert.Equal(t, recentMovie.SourceFilename, rows[0].SourceFilename)
 	assert.Equal(t, "/library/MOVIES/Mortal Kombat (2026)/Mortal Kombat (2026).mp4", rows[0].TargetPath)
+}
+
+func TestQueryRecentSuccessfulTVImports(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	targetAt := now
+
+	recentTV := makeDecision()
+	recentTV.SourcePath = "/watch/tv/Upload.S04E03.2025.1080p.WEB-DL.mkv"
+	recentTV.SourceFilename = "Upload.S04E03.2025.1080p.WEB-DL.mkv"
+	recentTV.EventAt = now
+	recentTV.MediaTypeGuessed = "tv"
+	id, err := db.InsertDecision(recentTV)
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(id, OrganizeUpdate{
+		TargetPath:      "/library/TV/Upload (2025)/Season 04/Upload (2025) S04E03.mkv",
+		TargetAt:        &targetAt,
+		OrganizeOutcome: "success",
+	}))
+
+	oldTV := makeDecision()
+	oldTV.SourcePath = "/watch/tv/Old.Show.S01E01.mkv"
+	oldTV.SourceFilename = "Old.Show.S01E01.mkv"
+	oldTV.EventAt = now.Add(-10 * 24 * time.Hour)
+	oldTV.MediaTypeGuessed = "tv"
+	oldID, err := db.InsertDecision(oldTV)
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(oldID, OrganizeUpdate{
+		TargetPath:      "/library/TV/Old Show/Season 01/Old Show S01E01.mkv",
+		TargetAt:        &targetAt,
+		OrganizeOutcome: "success",
+	}))
+
+	movie := makeDecision()
+	movie.SourceFilename = "Movie.2026.mkv"
+	movie.EventAt = now
+	movie.MediaTypeGuessed = "movie"
+	movieID, err := db.InsertDecision(movie)
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(movieID, OrganizeUpdate{
+		TargetPath:      "/library/MOVIES/Movie (2026)/Movie (2026).mkv",
+		TargetAt:        &targetAt,
+		OrganizeOutcome: "success",
+	}))
+
+	failedTV := makeDecision()
+	failedTV.SourceFilename = "Failed.Show.S01E01.mkv"
+	failedTV.EventAt = now
+	failedTV.MediaTypeGuessed = "tv"
+	failedID, err := db.InsertDecision(failedTV)
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(failedID, OrganizeUpdate{
+		OrganizeOutcome: "failed",
+		OrganizeError:   "boom",
+	}))
+
+	rows, err := db.QueryRecentSuccessfulTVImports(7*24*time.Hour, 50)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, id, rows[0].ID)
+	assert.Equal(t, recentTV.SourceFilename, rows[0].SourceFilename)
+	assert.Equal(t, "/library/TV/Upload (2025)/Season 04/Upload (2025) S04E03.mkv", rows[0].TargetPath)
 }
 
 func TestQueryDecisions_AutoLabel(t *testing.T) {

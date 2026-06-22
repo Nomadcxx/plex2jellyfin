@@ -44,6 +44,9 @@ type Item struct {
 	SeasonName        string            `json:"SeasonName,omitempty"`
 	IndexNumber       *int              `json:"IndexNumber,omitempty"`
 	ParentIndexNumber *int              `json:"ParentIndexNumber,omitempty"`
+	Overview          string            `json:"Overview,omitempty"`
+	ImageTags         map[string]string `json:"ImageTags,omitempty"`
+	PremiereDate      string            `json:"PremiereDate,omitempty"`
 }
 
 // ItemsResponse from GET /Items.

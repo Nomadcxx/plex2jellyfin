@@ -41,6 +41,49 @@ func (s *CleanupService) DeleteFileByID(fileID int64) error {
 	return nil
 }
 
+// DeleteDuplicateFile deletes one file from a live duplicate group. It is
+// idempotent for stale UI/API retries where the file has already been removed.
+func (s *CleanupService) DeleteDuplicateFile(groupID string, fileID int64) error {
+	analysis, err := s.AnalyzeDuplicates()
+	if err != nil {
+		return fmt.Errorf("failed to analyze duplicates: %w", err)
+	}
+
+	var targetGroup *DuplicateGroup
+	for i := range analysis.Groups {
+		if analysis.Groups[i].ID == groupID {
+			targetGroup = &analysis.Groups[i]
+			break
+		}
+	}
+
+	if targetGroup == nil {
+		file, err := s.db.GetMediaFileByID(fileID)
+		if err != nil {
+			return fmt.Errorf("failed to get file: %w", err)
+		}
+		if file == nil {
+			return nil
+		}
+		return fmt.Errorf("duplicate group not found: %s", groupID)
+	}
+
+	for _, file := range targetGroup.Files {
+		if file.ID == fileID {
+			return s.DeleteFileByID(fileID)
+		}
+	}
+
+	file, err := s.db.GetMediaFileByID(fileID)
+	if err != nil {
+		return fmt.Errorf("failed to get file: %w", err)
+	}
+	if file == nil {
+		return nil
+	}
+	return fmt.Errorf("file %d is not part of duplicate group %s", fileID, groupID)
+}
+
 // DeleteDuplicateFiles deletes all files in a duplicate group except the one to keep
 func (s *CleanupService) DeleteDuplicateFiles(groupID string, keepFileID int64) (int, int64, error) {
 	// Find the duplicate group by ID

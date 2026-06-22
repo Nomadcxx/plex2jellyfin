@@ -97,14 +97,16 @@ func (m *MediaDB) GetRecentSyncLogs(limit int) ([]*SyncLog, error) {
 	var logs []*SyncLog
 	for rows.Next() {
 		var log SyncLog
+		var errorMessage sql.NullString
 		err := rows.Scan(
 			&log.ID, &log.Source, &log.StartedAt, &log.CompletedAt,
 			&log.Status, &log.ItemsProcessed, &log.ItemsAdded,
-			&log.ItemsUpdated, &log.ErrorMessage,
+			&log.ItemsUpdated, &errorMessage,
 		)
 		if err != nil {
 			return nil, err
 		}
+		log.ErrorMessage = errorMessage.String
 		logs = append(logs, &log)
 	}
 
@@ -117,6 +119,7 @@ func (m *MediaDB) GetLastSyncForSource(source string) (*SyncLog, error) {
 	defer m.mu.RUnlock()
 
 	var log SyncLog
+	var errorMessage sql.NullString
 	err := m.db.QueryRow(`
 		SELECT id, source, started_at, completed_at, status,
 		       items_processed, items_added, items_updated, error_message
@@ -128,7 +131,7 @@ func (m *MediaDB) GetLastSyncForSource(source string) (*SyncLog, error) {
 	).Scan(
 		&log.ID, &log.Source, &log.StartedAt, &log.CompletedAt,
 		&log.Status, &log.ItemsProcessed, &log.ItemsAdded,
-		&log.ItemsUpdated, &log.ErrorMessage,
+		&log.ItemsUpdated, &errorMessage,
 	)
 
 	if err == sql.ErrNoRows {
@@ -137,6 +140,7 @@ func (m *MediaDB) GetLastSyncForSource(source string) (*SyncLog, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.ErrorMessage = errorMessage.String
 
 	return &log, nil
 }

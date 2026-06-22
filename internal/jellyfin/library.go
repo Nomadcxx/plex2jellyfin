@@ -23,6 +23,28 @@ func (c *Client) RefreshItem(itemID string) error {
 	return nil
 }
 
+// RefreshItemFullMetadata triggers a full metadata and image refresh for a
+// specific item.
+func (c *Client) RefreshItemFullMetadata(itemID string) error {
+	query := "?Recursive=false&MetadataRefreshMode=FullRefresh&ImageRefreshMode=FullRefresh&ReplaceAllMetadata=true&ReplaceAllImages=true"
+	if err := c.post("/Items/"+itemID+"/Refresh"+query, nil, nil); err != nil {
+		return fmt.Errorf("refreshing item full metadata %s: %w", itemID, err)
+	}
+	return nil
+}
+
+// RefreshItemFullMetadataRecursive triggers a full metadata and image refresh
+// for an item and its children. This is used for series-level repair because
+// refreshing only a stale episode cannot identify an unidentified parent
+// series.
+func (c *Client) RefreshItemFullMetadataRecursive(itemID string) error {
+	query := "?Recursive=true&MetadataRefreshMode=FullRefresh&ImageRefreshMode=FullRefresh&ReplaceAllMetadata=true&ReplaceAllImages=true"
+	if err := c.post("/Items/"+itemID+"/Refresh"+query, nil, nil); err != nil {
+		return fmt.Errorf("refreshing item recursive full metadata %s: %w", itemID, err)
+	}
+	return nil
+}
+
 // GetVirtualFolders returns all configured libraries with their disk paths.
 func (c *Client) GetVirtualFolders() ([]VirtualFolder, error) {
 	var folders []VirtualFolder

@@ -19,11 +19,15 @@ package housekeeping
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
@@ -93,6 +97,83 @@ func (e *Engine) SetVerifier(v *tmdb.Verifier) { e.verifier = v }
 // SetOpRegistry wires the daemon's IPC OpRegistry into the engine so
 // tasks can publish live progress frames consumable via SSE.
 func (e *Engine) SetOpRegistry(r *ipc.OpRegistry) { e.registry = r }
+func (e *Engine) renameWithFallback(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("stat source for cross-device move %s: %w", src, err)
+	}
+	if srcInfo.IsDir() {
+		return e.moveDirWithFallback(src, dst)
+	}
+	// Cross-device: fall back to transfer.Move
+	if e.transferer == nil {
+		return fmt.Errorf("EXDEV and no transferer available for %s -> %s", src, dst)
+	}
+	result, err := e.transferer.Move(src, dst, transfer.TransferOptions{})
+	if err != nil {
+		return fmt.Errorf("cross-device move %s -> %s: %w", src, dst, err)
+	}
+	if !result.Success {
+		return fmt.Errorf("cross-device move failed: %v", result.Error)
+	}
+	if !result.SourceRemoved {
+		return fmt.Errorf("cross-device move did not remove source: %s", src)
+	}
+	return nil
+}
+
+func (e *Engine) moveDirWithFallback(srcDir, dstDir string) error {
+	if e.transferer == nil {
+		return fmt.Errorf("EXDEV and no transferer available for %s -> %s", srcDir, dstDir)
+	}
+	if _, err := os.Stat(dstDir); err == nil && !isEmptyDir(dstDir) {
+		return fmt.Errorf("destination directory already exists: %s", dstDir)
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("stat destination directory %s: %w", dstDir, err)
+	}
+
+	if err := filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dstDir, rel)
+		if rel == "." {
+			return os.MkdirAll(dstDir, info.Mode().Perm())
+		}
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		result, err := e.transferer.Move(path, target, transfer.TransferOptions{})
+		if err != nil {
+			return fmt.Errorf("cross-device move %s -> %s: %w", path, target, err)
+		}
+		if !result.Success {
+			return fmt.Errorf("cross-device move failed %s -> %s: %v", path, target, result.Error)
+		}
+		if !result.SourceRemoved {
+			return fmt.Errorf("cross-device move did not remove source: %s", path)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := removeIfEmptyTree(srcDir); err != nil {
+		return fmt.Errorf("remove source dir %s: %w", srcDir, err)
+	}
+	return nil
+}
 
 // NewEngine constructs an Engine.
 func NewEngine(cfg Config, db *database.MediaDB, logger *logging.Logger) *Engine {
@@ -594,21 +675,44 @@ func (e *Engine) detectParserDriftRepairs(ctx context.Context, res *DetectResult
 	if e.db == nil {
 		return
 	}
-	rows, err := e.db.QueryRecentSuccessfulMovieImports(14*24*time.Hour, 500)
+	const parserDriftLookback = 60 * 24 * time.Hour
+	rows, err := e.db.QueryRecentSuccessfulMovieImports(parserDriftLookback, 500)
 	if err != nil {
 		e.logf("warn", "parser drift query failed err=%v", err)
+	} else {
+		for _, d := range rows {
+			if ctx.Err() != nil {
+				return
+			}
+			srcPath, dstPath, ok := e.parserDriftMovieRename(d)
+			if !ok {
+				continue
+			}
+			res.ParserDriftRenames++
+			enqueue(database.TaskKindParserDriftRename, map[string]any{
+				"parse_decision_id": d.ID,
+				"src_path":          srcPath,
+				"dst_path":          dstPath,
+				"source_filename":   d.SourceFilename,
+			}, 70)
+		}
+	}
+
+	tvRows, err := e.db.QueryRecentSuccessfulTVImports(parserDriftLookback, 500)
+	if err != nil {
+		e.logf("warn", "parser drift tv query failed err=%v", err)
 		return
 	}
-	for _, d := range rows {
+	for _, d := range tvRows {
 		if ctx.Err() != nil {
 			return
 		}
-		srcPath, dstPath, ok := e.parserDriftMovieRename(d)
+		srcPath, dstPath, ok := e.parserDriftTVRename(d)
 		if !ok {
 			continue
 		}
 		res.ParserDriftRenames++
-		enqueue(database.TaskKindParserDriftRename, map[string]any{
+		enqueue(database.TaskKindParserDriftTVRename, map[string]any{
 			"parse_decision_id": d.ID,
 			"src_path":          srcPath,
 			"dst_path":          dstPath,
@@ -662,7 +766,9 @@ func (e *Engine) parserDriftMovieRename(d *database.ParseDecision) (srcPath, dst
 			return "", "", false
 		}
 		if _, err := os.Stat(filepath.Dir(dstPath)); err == nil {
-			return "", "", false
+			if !isEmptyDir(filepath.Dir(dstPath)) {
+				return "", "", false
+			}
 		} else if !os.IsNotExist(err) {
 			return "", "", false
 		}
@@ -671,6 +777,112 @@ func (e *Engine) parserDriftMovieRename(d *database.ParseDecision) (srcPath, dst
 		return "", "", false
 	}
 	return srcPath, dstPath, true
+}
+
+func (e *Engine) parserDriftTVRename(d *database.ParseDecision) (srcPath, dstPath string, ok bool) {
+	if d == nil || d.SourceFilename == "" || d.TargetPath == "" {
+		return "", "", false
+	}
+	libRoot := containingLibrary(d.TargetPath, e.cfg.TVLibraries)
+	if libRoot == "" {
+		return "", "", false
+	}
+	info, err := naming.ParseTVShowName(d.SourceFilename)
+	if err != nil || info == nil || info.Title == "" || info.Season <= 0 || info.Episode <= 0 {
+		return "", "", false
+	}
+	if !tvParserDriftWasReleaseYearAfterEpisode(d, libRoot) {
+		return "", "", false
+	}
+	showName := naming.NormalizeTVShowName(info.Title, info.Year)
+	ext := filepath.Ext(d.TargetPath)
+	if ext == "" {
+		ext = filepath.Ext(d.SourceFilename)
+	}
+	if showName == "" || ext == "" {
+		return "", "", false
+	}
+	episodeName := naming.FormatTVEpisodeFilenameFromInfo(info, strings.TrimPrefix(ext, "."))
+	if episodeName == "" {
+		return "", "", false
+	}
+	srcPath = filepath.Clean(d.TargetPath)
+	dstPath = filepath.Join(libRoot, showName, naming.FormatSeasonFolder(info.Season), episodeName)
+	if srcPath == filepath.Clean(dstPath) {
+		return "", "", false
+	}
+	srcExists := false
+	if _, err := os.Stat(srcPath); err == nil {
+		srcExists = true
+	} else if !os.IsNotExist(err) {
+		return "", "", false
+	}
+	dstExists := false
+	if _, err := os.Stat(dstPath); err == nil {
+		dstExists = true
+	} else if !os.IsNotExist(err) {
+		return "", "", false
+	}
+	if srcExists && dstExists {
+		return "", "", false
+	}
+	if !srcExists && !dstExists {
+		return "", "", false
+	}
+	return srcPath, dstPath, true
+}
+
+var tvEpisodeMarkerReleaseYearRegex = regexp.MustCompile(`(?i)(?:[Ss]\d{1,2}[Ee]\d{1,2}|\d{1,2}x\d{1,2}|EP[.\-_ ]?\d{2,5}).*\b((?:19|20)\d{2})\b`)
+
+func tvParserDriftWasReleaseYearAfterEpisode(d *database.ParseDecision, libRoot string) bool {
+	if d == nil || d.ParsedYear == nil {
+		return false
+	}
+	if d.MetadataState != "series_unidentified" {
+		return false
+	}
+	if d.JellyfinIdentified != nil && *d.JellyfinIdentified {
+		return false
+	}
+	releaseYear, ok := releaseYearAfterEpisodeMarker(d.SourceFilename)
+	if !ok || releaseYear != *d.ParsedYear {
+		return false
+	}
+	targetYear := tvShowFolderYear(d.TargetPath, libRoot)
+	return targetYear == "" || targetYear == strconv.Itoa(*d.ParsedYear)
+}
+
+func releaseYearAfterEpisodeMarker(filename string) (int, bool) {
+	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	matches := tvEpisodeMarkerReleaseYearRegex.FindAllStringSubmatch(baseName, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if len(matches[i]) < 2 {
+			continue
+		}
+		year, err := strconv.Atoi(matches[i][1])
+		if err != nil {
+			continue
+		}
+		switch year {
+		case 1280, 1440, 1920, 2160:
+			continue
+		default:
+			return year, true
+		}
+	}
+	return 0, false
+}
+
+func tvShowFolderYear(targetPath, libRoot string) string {
+	rel, err := filepath.Rel(filepath.Clean(libRoot), filepath.Clean(targetPath))
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return ""
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) == 0 {
+		return ""
+	}
+	return folderYearFromPath(parts[0])
 }
 
 func containingLibrary(path string, libs []string) string {
@@ -892,6 +1104,12 @@ func (e *Engine) executeTask(ctx context.Context, t *database.HousekeepingTask) 
 		// path derived from an older parser. The current parser now derives
 		// a better same-library path, so rename the folder/file in place.
 		return e.execParserDriftRename(t)
+	case database.TaskKindParserDriftTVRename:
+		// Naming workflow: JellyWatch previously organized a TV episode to
+		// a path derived from an older parser. The current parser now
+		// derives a better same-library episode path, so move that file in
+		// place and reconcile the DB row.
+		return e.execParserDriftTVRename(t)
 	case database.TaskKindConsolidateDuplicate:
 		// Duplicate workflow: delete the inferior copies of a known
 		// high-confidence duplicate group via the same logic the CLI
@@ -910,9 +1128,38 @@ func (e *Engine) executeTask(ctx context.Context, t *database.HousekeepingTask) 
 	}
 }
 
-func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) error {
+func (e *Engine) recordRepairEvent(action, safetyClass string, confidence float64, src, dst, outcome, errMsg string, evidence map[string]any) {
+	if e == nil || e.db == nil {
+		return
+	}
+	evidenceJSON := ""
+	if len(evidence) > 0 {
+		if b, err := json.Marshal(evidence); err == nil {
+			evidenceJSON = string(b)
+		}
+	}
+	_, _ = e.db.InsertRepairEvent(database.RepairEvent{
+		EventAt:      time.Now().UTC(),
+		Action:       action,
+		SafetyClass:  safetyClass,
+		Confidence:   confidence,
+		SourcePath:   src,
+		TargetPath:   dst,
+		Outcome:      outcome,
+		Error:        errMsg,
+		LLMConsulted: false,
+		EvidenceJSON: evidenceJSON,
+	})
+}
+
+func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error) {
 	src, _ := t.Payload["src_path"].(string)
 	dst, _ := t.Payload["dst_path"].(string)
+	defer func() {
+		if err != nil {
+			e.recordRepairEvent(database.TaskKindParserDriftRename, "auto_safe", 0.95, src, dst, "failed", err.Error(), t.Payload)
+		}
+	}()
 	if src == "" || dst == "" {
 		return fmt.Errorf("payload missing src_path/dst_path")
 	}
@@ -945,18 +1192,31 @@ func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) error {
 		return fmt.Errorf("source and destination both missing: %s -> %s", src, dst)
 	}
 	if srcExists {
+		dstDirExists := false
 		if _, err := os.Stat(dstDir); err == nil {
-			return fmt.Errorf("destination directory already exists: %s", dstDir)
+			dstDirExists = true
+			if !isEmptyDir(dstDir) {
+				return fmt.Errorf("destination directory already exists: %s", dstDir)
+			}
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat dst dir: %w", err)
 		}
-		if err := os.Rename(srcDir, dstDir); err != nil {
-			return fmt.Errorf("rename folder %s -> %s: %w", srcDir, dstDir, err)
-		}
-		movedPath := filepath.Join(dstDir, filepath.Base(src))
-		if filepath.Base(src) != filepath.Base(dst) {
-			if err := os.Rename(movedPath, dst); err != nil {
-				return fmt.Errorf("rename file %s -> %s: %w", movedPath, dst, err)
+		if dstDirExists {
+			if err := e.renameWithFallback(src, dst); err != nil {
+				return fmt.Errorf("rename file %s -> %s: %w", src, dst, err)
+			}
+			if err := os.Remove(srcDir); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove source dir %s: %w", srcDir, err)
+			}
+		} else {
+			if err := e.renameWithFallback(srcDir, dstDir); err != nil {
+				return fmt.Errorf("rename folder %s -> %s: %w", srcDir, dstDir, err)
+			}
+			movedPath := filepath.Join(dstDir, filepath.Base(src))
+			if filepath.Base(src) != filepath.Base(dst) {
+				if err := e.renameWithFallback(movedPath, dst); err != nil {
+					return fmt.Errorf("rename file %s -> %s: %w", movedPath, dst, err)
+				}
 			}
 		}
 	}
@@ -1000,7 +1260,124 @@ func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) error {
 	}
 
 	e.logf("info", "parser-drift renamed src=%s dst=%s", src, dst)
+	e.recordRepairEvent(database.TaskKindParserDriftRename, "auto_safe", 0.95, src, dst, "success", "", t.Payload)
 	return nil
+}
+
+func (e *Engine) execParserDriftTVRename(t *database.HousekeepingTask) (err error) {
+	src, _ := t.Payload["src_path"].(string)
+	dst, _ := t.Payload["dst_path"].(string)
+	defer func() {
+		if err != nil {
+			e.recordRepairEvent(database.TaskKindParserDriftTVRename, "auto_safe", 0.95, src, dst, "failed", err.Error(), t.Payload)
+		}
+	}()
+	if src == "" || dst == "" {
+		return fmt.Errorf("payload missing src_path/dst_path")
+	}
+	src = filepath.Clean(src)
+	dst = filepath.Clean(dst)
+	if src == dst {
+		return fmt.Errorf("src == dst (%s)", src)
+	}
+	if id, ok := payloadInt64(t.Payload, "parse_decision_id"); ok && id > 0 {
+		d, err := e.db.GetDecision(id)
+		if err != nil {
+			return fmt.Errorf("get parse decision %d: %w", id, err)
+		}
+		expectedSrc, expectedDst, eligible := e.parserDriftTVRename(d)
+		if !eligible {
+			return fmt.Errorf("tv parser drift task no longer eligible for decision %d", id)
+		}
+		if filepath.Clean(expectedSrc) != src || filepath.Clean(expectedDst) != dst {
+			return fmt.Errorf("tv parser drift payload mismatch for decision %d", id)
+		}
+	}
+
+	srcExists := false
+	if _, err := os.Stat(src); err == nil {
+		srcExists = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat src: %w", err)
+	}
+	dstExists := false
+	if _, err := os.Stat(dst); err == nil {
+		dstExists = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat dst: %w", err)
+	}
+	if srcExists && dstExists {
+		return fmt.Errorf("source and destination both exist: %s -> %s", src, dst)
+	}
+	if !srcExists && !dstExists {
+		return fmt.Errorf("source and destination both missing: %s -> %s", src, dst)
+	}
+
+	if srcExists {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
+		}
+		if err := e.renameWithFallback(src, dst); err != nil {
+			return fmt.Errorf("rename file %s -> %s: %w", src, dst, err)
+		}
+		removeDirIfEmpty(filepath.Dir(src))
+		removeDirIfEmpty(filepath.Dir(filepath.Dir(src)))
+	}
+
+	if file, err := e.db.GetMediaFile(src); err == nil && file != nil {
+		_ = e.db.DeleteMediaFile(src)
+		file.Path = dst
+		file.LibraryRoot = containingLibrary(dst, e.cfg.TVLibraries)
+		_ = e.db.UpsertMediaFile(file)
+	}
+
+	if id, ok := payloadInt64(t.Payload, "parse_decision_id"); ok && id > 0 {
+		now := time.Now().UTC()
+		_ = e.db.UpdateOrganize(id, database.OrganizeUpdate{
+			TargetPath:      dst,
+			TargetAt:        &now,
+			OrganizeOutcome: "success",
+		})
+		if sourceFilename, _ := t.Payload["source_filename"].(string); sourceFilename != "" {
+			if info, tokens, err := naming.ParseTVShowNameVerbose(sourceFilename); err == nil && info != nil {
+				var parsedYear *int
+				if info.Year != "" {
+					year := 0
+					if _, err := fmt.Sscanf(info.Year, "%d", &year); err == nil {
+						parsedYear = &year
+					}
+				}
+				season := info.Season
+				episode := info.Episode
+				tokenJSON := ""
+				if b, err := json.Marshal(tokens); err == nil {
+					tokenJSON = string(b)
+				}
+				_ = e.db.UpdateParse(id, database.ParseUpdate{
+					ParseMethod:          "regex",
+					ParsedTitle:          info.Title,
+					ParsedYear:           parsedYear,
+					ParsedSeason:         &season,
+					ParsedEpisode:        &episode,
+					ParserStrippedTokens: tokenJSON,
+					MediaTypeGuessed:     "tv",
+				})
+			}
+		}
+	}
+
+	e.logf("info", "parser-drift-tv renamed src=%s dst=%s", src, dst)
+	e.recordRepairEvent(database.TaskKindParserDriftTVRename, "auto_safe", 0.95, src, dst, "success", "", t.Payload)
+	return nil
+}
+
+func removeDirIfEmpty(path string) {
+	if path == "" || path == "." || path == string(filepath.Separator) {
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return
+	}
 }
 
 func payloadInt64(payload map[string]any, key string) (int64, bool) {
@@ -1196,6 +1573,7 @@ func (e *Engine) execMergeMove(ctx context.Context, t *database.HousekeepingTask
 	if e.transferer == nil {
 		return fmt.Errorf("no transferer configured")
 	}
+	dstLib, _ := t.Payload["dst_lib"].(string)
 
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -1248,6 +1626,7 @@ func (e *Engine) execMergeMove(ctx context.Context, t *database.HousekeepingTask
 				if err := os.Remove(path); err != nil {
 					return fmt.Errorf("remove dup src %s: %w", path, err)
 				}
+				e.updateParseDecisionTargetPath(path, target)
 				skipped++
 				doneBytes += info.Size()
 				prog.fileSkipped(rel, info.Size(), doneBytes, totalBytes)
@@ -1283,8 +1662,12 @@ func (e *Engine) execMergeMove(ctx context.Context, t *database.HousekeepingTask
 		if file, gerr := e.db.GetMediaFile(path); gerr == nil && file != nil {
 			_ = e.db.DeleteMediaFile(path)
 			file.Path = target
+			if dstLib != "" {
+				file.LibraryRoot = dstLib
+			}
 			_ = e.db.UpsertMediaFile(file)
 		}
+		e.updateParseDecisionTargetPath(path, target)
 
 		moved++
 		doneBytes += fileSize
@@ -1305,6 +1688,20 @@ func (e *Engine) execMergeMove(ctx context.Context, t *database.HousekeepingTask
 		moved, skipped, src, dst)
 	prog.summary(moved, skipped, doneBytes, totalBytes)
 	return nil
+}
+
+func (e *Engine) updateParseDecisionTargetPath(oldPath, newPath string) {
+	if e == nil || e.db == nil || oldPath == "" || newPath == "" || oldPath == newPath {
+		return
+	}
+	now := time.Now().UTC()
+	if _, err := e.db.DB().Exec(`
+		UPDATE parse_decisions
+		   SET target_path = ?, target_at = ?
+		 WHERE target_path = ?
+		   AND organize_outcome = 'success'`, newPath, now, oldPath); err != nil {
+		e.logf("warn", "update parse decision target failed old=%s new=%s err=%v", oldPath, newPath, err)
+	}
 }
 
 // removeIfEmptyTree removes a directory tree only if it contains no files.

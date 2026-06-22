@@ -77,9 +77,9 @@ func (s *Sweeper) RunOnce(ctx context.Context, lookback, ttl time.Duration) erro
 		return fmt.Errorf("sweep query: %w", err)
 	}
 
-	pathMap := make(map[string]*database.ParseDecision, len(rows))
+	pathMap := make(map[string][]*database.ParseDecision, len(rows))
 	for _, row := range rows {
-		pathMap[row.TargetPath] = row
+		pathMap[row.TargetPath] = append(pathMap[row.TargetPath], row)
 	}
 
 	if len(pathMap) > 0 {
@@ -167,7 +167,7 @@ func (s *Sweeper) sweepUnidentified(ctx context.Context) error {
 	return nil
 }
 
-func (s *Sweeper) sweepByPath(ctx context.Context, pathMap map[string]*database.ParseDecision) error {
+func (s *Sweeper) sweepByPath(ctx context.Context, pathMap map[string][]*database.ParseDecision) error {
 	startIndex := 0
 	pageSize := sweepPageSize
 
@@ -186,7 +186,7 @@ func (s *Sweeper) sweepByPath(ctx context.Context, pathMap map[string]*database.
 				continue
 			}
 			lookup := s.translator.JellyfinToDaemon(item.Path)
-			row, ok := pathMap[lookup]
+			rows, ok := pathMap[lookup]
 			if !ok {
 				continue
 			}
@@ -195,16 +195,18 @@ func (s *Sweeper) sweepByPath(ctx context.Context, pathMap map[string]*database.
 			tmdb := item.ProviderIDs["Tmdb"]
 			tvdb := item.ProviderIDs["Tvdb"]
 			identified := imdb != "" || tmdb != "" || tvdb != ""
-			if err := s.db.UpdateOutcome(row.ID, database.OutcomeUpdate{
-				JellyfinItemID:      item.ID,
-				JellyfinImdbID:      imdb,
-				JellyfinTmdbID:      tmdb,
-				JellyfinTvdbID:      tvdb,
-				JellyfinResolvedAt:  &now,
-				JellyfinIdentified:  &identified,
-				JellyfinFirstSeenAt: &now,
-			}); err != nil {
-				return fmt.Errorf("UpdateOutcome id=%d: %w", row.ID, err)
+			for _, row := range rows {
+				if err := s.db.UpdateOutcome(row.ID, database.OutcomeUpdate{
+					JellyfinItemID:      item.ID,
+					JellyfinImdbID:      imdb,
+					JellyfinTmdbID:      tmdb,
+					JellyfinTvdbID:      tvdb,
+					JellyfinResolvedAt:  &now,
+					JellyfinIdentified:  &identified,
+					JellyfinFirstSeenAt: &now,
+				}); err != nil {
+					return fmt.Errorf("UpdateOutcome id=%d: %w", row.ID, err)
+				}
 			}
 			delete(pathMap, lookup)
 		}

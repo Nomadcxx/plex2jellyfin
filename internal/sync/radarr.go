@@ -34,7 +34,7 @@ func (s *SyncService) SyncFromRadarr(ctx context.Context) (retErr error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	movies, err := s.radarr.GetMovies()
+	movies, err := s.radarr.GetMoviesContext(ctx)
 	if err != nil {
 		if logErr := s.db.CompleteSyncLog(logID, "failed", 0, 0, 0, err.Error()); logErr != nil {
 			s.logger.Error("sync", "Failed to complete sync log", logErr)

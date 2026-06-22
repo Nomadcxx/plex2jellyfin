@@ -10,16 +10,18 @@ var (
 	codecSuffixRegex = regexp.MustCompile(`(?i)\b(x264|x265|h264|h265|hevc|avc|av1|xvid|divx)$`)
 	// Matches resolution patterns at end of title
 	resolutionSuffixRegex = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k|uhd)$`)
+	ordinalTokenRegex     = regexp.MustCompile(`(?i)^\d+(st|nd|rd|th)$`)
 )
 
 // CalculateTitleConfidence calculates a confidence score (0.0-1.0) for a parsed title.
 // Higher scores indicate cleaner, more reliable parses.
-// Uses the existing blacklist.go for release group detection.
+// Uses the existing blacklist.go for release group detection, but only in
+// contexts where the parsed title itself is likely to be a release artifact.
 func CalculateTitleConfidence(title, originalFilename string) float64 {
 	confidence := 1.0
 
 	// Major penalties
-	if IsGarbageTitle(title) {
+	if shouldApplyGarbageTitlePenalty(title, originalFilename) && IsGarbageTitle(title) {
 		confidence -= 0.8
 	}
 	if IsObfuscatedFilename(originalFilename) {
@@ -58,6 +60,71 @@ func CalculateTitleConfidence(title, originalFilename string) float64 {
 	}
 
 	return clamp(confidence, 0.0, 1.0)
+}
+
+func shouldApplyGarbageTitlePenalty(title, originalFilename string) bool {
+	// The srrDB release-group list contains many normal title words. Applying
+	// IsGarbageTitle to complete titles causes false low-confidence parses for
+	// clean names like "Green Book", "Look Away", and "The 2nd". Keep the
+	// broad release-group penalty for standalone artifacts, and for multi-word
+	// titles only when a clearly technical token remains in the parsed title.
+	if isTVPattern(originalFilename) {
+		return isStandaloneReleaseArtifact(title)
+	}
+	words := strings.Fields(title)
+	if len(words) <= 1 {
+		return true
+	}
+	for _, word := range words {
+		if isTechnicalTitleToken(word) {
+			return true
+		}
+	}
+	return false
+}
+
+func isStandaloneReleaseArtifact(title string) bool {
+	words := strings.Fields(title)
+	if len(words) != 1 {
+		return false
+	}
+	word := strings.ToLower(strings.Trim(words[0], " ._-[]()"))
+	if word == "" {
+		return true
+	}
+	if IsKnownMediaTitle(word) || IsPreservedAcronym(word) {
+		return false
+	}
+	return IsCodecMarker(word) || IsKnownReleaseGroup(word)
+}
+
+func isTechnicalTitleToken(word string) bool {
+	token := strings.ToLower(strings.Trim(word, " ._-[]()"))
+	if token == "" {
+		return true
+	}
+	if ordinalTokenRegex.MatchString(token) {
+		return false
+	}
+	if IsCodecMarker(token) || codecSuffixRegex.MatchString(token) || resolutionSuffixRegex.MatchString(token) {
+		return true
+	}
+	switch token {
+	case "bdrip", "bluray", "br-rip", "brrip", "cam", "dvdrip", "hdtv", "remux", "web", "web-dl", "webdl", "webrip":
+		return true
+	}
+
+	hasDigit := false
+	hasLetter := false
+	for _, ch := range token {
+		if ch >= '0' && ch <= '9' {
+			hasDigit = true
+		}
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
+			hasLetter = true
+		}
+	}
+	return hasDigit && hasLetter
 }
 
 // isTVPattern checks if filename has a valid SxxExx pattern

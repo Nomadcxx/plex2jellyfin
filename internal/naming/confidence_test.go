@@ -60,6 +60,27 @@ func TestCalculateTitleConfidence(t *testing.T) {
 			wantMin:  0.0,
 			wantMax:  0.5,
 		},
+		{
+			name:     "clean two word title with release-group word collision",
+			title:    "Green Book",
+			original: "Green Book (2018).mkv",
+			wantMin:  0.8,
+			wantMax:  1.0,
+		},
+		{
+			name:     "clean two word title with short release-group word collision",
+			title:    "Look Away",
+			original: "Look Away (2018).mkv",
+			wantMin:  0.8,
+			wantMax:  1.0,
+		},
+		{
+			name:     "title with ordinal digit is not garbage",
+			title:    "The 2nd",
+			original: "The 2nd (2020).mkv",
+			wantMin:  0.8,
+			wantMax:  1.0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -115,6 +136,35 @@ func TestCalculateTitleConfidence_RawTitles(t *testing.T) {
 					tt.title, tt.original, got, tt.wantMin)
 			}
 		})
+	}
+}
+
+func TestCalculateTitleConfidence_TVTitleWordsDoNotUseReleaseGroupBlacklist(t *testing.T) {
+	tests := []struct {
+		title    string
+		original string
+	}{
+		{title: "Universal Basic Guys", original: "Universal Basic Guys S01E01.mkv"},
+		{title: "Moon Knight", original: "Moon Knight S01E01.mkv"},
+		{title: "Bizarre Foods", original: "Bizarre Foods S01E01.avi"},
+		{title: "Australian Ninja Warrior", original: "Australian Ninja Warrior S06E02.mkv"},
+		{title: "Utopia (AU)", original: "Utopia (AU) S02E03.mkv"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.original, func(t *testing.T) {
+			got := CalculateTitleConfidence(tt.title, tt.original)
+			if got < 0.8 {
+				t.Fatalf("CalculateTitleConfidence(%q, %q) = %.2f, want >= 0.80", tt.title, tt.original, got)
+			}
+		})
+	}
+}
+
+func TestCalculateTitleConfidence_TVStandaloneReleaseArtifactStillPenalized(t *testing.T) {
+	got := CalculateTitleConfidence("RARBG", "RARBG S01E01.mkv")
+	if got >= 0.6 {
+		t.Fatalf("CalculateTitleConfidence for standalone release artifact = %.2f, want below AI trigger threshold", got)
 	}
 }
 

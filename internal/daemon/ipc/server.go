@@ -29,6 +29,9 @@ type Server struct {
 	path            string
 	handlers        map[Command]Handler
 	allowedPeerUIDs map[int]struct{}
+	socketOwnerUID  int
+	socketOwnerGID  int
+	socketOwnerSet  bool
 	listener        *net.UnixListener
 	wg              sync.WaitGroup
 	mu              sync.Mutex
@@ -105,6 +108,14 @@ func (s *Server) AddAllowedPeerUID(uid int) {
 	s.allowedPeerUIDs[uid] = struct{}{}
 }
 
+func (s *Server) SetSocketOwner(uid, gid int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.socketOwnerUID = uid
+	s.socketOwnerGID = gid
+	s.socketOwnerSet = true
+}
+
 func (s *Server) Start(ctx context.Context) error {
 	if _, err := os.Stat(s.path); err == nil {
 		if c, err := net.DialTimeout("unix", s.path, 200*time.Millisecond); err == nil {
@@ -121,6 +132,12 @@ func (s *Server) Start(ctx context.Context) error {
 	l, err := net.ListenUnix("unix", addr)
 	if err != nil {
 		return err
+	}
+	if s.socketOwnerSet {
+		if err := os.Chown(s.path, s.socketOwnerUID, s.socketOwnerGID); err != nil {
+			_ = l.Close()
+			return err
+		}
 	}
 	if err := os.Chmod(s.path, 0600); err != nil {
 		_ = l.Close()

@@ -1409,6 +1409,8 @@ func buildReleaseGroupMap() map[string]bool {
 		"retail", "subbed", "dubbed", "multi", "unrated",
 		"extended", "theatrical", "directors", "cut", "edition",
 		"remux", "hybrid", "complete", "collection",
+		"vostfr", "vost", "vf", "vo", "truefrench", "french",
+		"dcprip", "hdlight", "hmax", "remastered", "rodubbed",
 	}
 
 	// === QUALITY/SOURCE MARKERS ===

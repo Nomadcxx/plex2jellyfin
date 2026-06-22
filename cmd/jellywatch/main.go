@@ -40,18 +40,25 @@ var (
 )
 
 func main() {
-	rootCmd := &cobra.Command{
-		Use:   "jellywatch",
-		Short: "Media file organizer for Jellyfin libraries",
-		Long: `JellyWatch monitors download directories and automatically organizes
-media files according to Jellyfin naming conventions.
-
-Features:
-  - Robust file transfers with timeout handling (won't hang on failing disks)
-  - Automatic TV show and movie detection
-  - Jellyfin-compliant naming: "Show Name (Year) S01E01.ext"
-  - Sonarr integration for queue management`,
+	rootCmd := newRootCmd()
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
 	}
+}
+
+func newRootCmd() *cobra.Command {
+	rootCmd := &cobra.Command{
+		Use:          "jellywatch",
+		Short:        "Manual duplicate cleanup and library consolidation",
+		SilenceUsage: true,
+		Long: `JellyWatch helps review and clean up Jellyfin libraries.
+
+The primary CLI workflows are:
+  - Find duplicate media and generate a reviewable deletion plan
+  - Consolidate scattered TV series across storage drives
+  - Scan or inspect the JellyWatch media database`,
+	}
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
 
 	// Add custom help function to show ASCII header
 	originalHelpFunc := rootCmd.HelpFunc()
@@ -86,14 +93,47 @@ Features:
 	rootCmd.AddCommand(newAuditCmd())
 	rootCmd.AddCommand(newMigrateCmd())
 	rootCmd.AddCommand(newCleanupCmd())
-	rootCmd.AddCommand(newOrphansCmd())
 	rootCmd.AddCommand(newHealthCmd())
 	rootCmd.AddCommand(newReviewCmd())
 	rootCmd.AddCommand(newParsesCmd())
 	rootCmd.AddCommand(newDaemonCmd())
+	rootCmd.AddCommand(newRepairCmd())
+	rootCmd.AddCommand(newPostmortemCmd())
+	hideRootCommands(rootCmd,
+		"audit",
+		"cleanup",
+		"daemon",
+		"database",
+		"fix",
+		"health",
+		"migrate",
+		"monitor",
+		"organize",
+		"organize-folder",
+		"orphans",
+		"parses",
+		"postmortem",
+		"radarr",
+		"repair",
+		"review",
+		"serve",
+		"sonarr",
+		"validate",
+		"watch",
+	)
 
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+	return rootCmd
+}
+
+func hideRootCommands(rootCmd *cobra.Command, names ...string) {
+	hidden := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		hidden[name] = struct{}{}
+	}
+	for _, cmd := range rootCmd.Commands() {
+		if _, ok := hidden[cmd.Name()]; ok {
+			cmd.Hidden = true
+		}
 	}
 }
 
@@ -126,11 +166,6 @@ Examples:
 }
 
 func runOrganize(cmd *cobra.Command, args []string) error {
-	// Escalate to root if needed for file operations
-	if privilege.NeedsRoot() {
-		return privilege.Escalate("move files and set ownership")
-	}
-
 	source := args[0]
 
 	target := libraryPath
@@ -140,11 +175,18 @@ func runOrganize(cmd *cobra.Command, args []string) error {
 
 	if target == "" {
 		cfg, err := config.Load()
-		if err == nil && len(cfg.Libraries.TV) > 0 {
-			target = cfg.Libraries.TV[0]
-		} else {
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if len(cfg.Libraries.TV) == 0 {
 			return fmt.Errorf("no target library specified (use --library or config file)")
 		}
+		target = cfg.Libraries.TV[0]
+	}
+
+	// Escalate to root if needed for file operations
+	if privilege.NeedsRoot() {
+		return privilege.Escalate("move files and set ownership")
 	}
 
 	info, err := os.Stat(source)
@@ -255,11 +297,6 @@ Examples:
   jellywatch organize-folder /downloads/folder/ --dry-run`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Escalate to root if needed for file operations
-			if privilege.NeedsRoot() {
-				return privilege.Escalate("move files and set ownership")
-			}
-
 			source := args[0]
 
 			target := libraryPath
@@ -269,11 +306,18 @@ Examples:
 
 			if target == "" {
 				cfg, err := config.Load()
-				if err == nil && len(cfg.Libraries.Movies) > 0 {
-					target = cfg.Libraries.Movies[0]
-				} else {
+				if err != nil {
+					return fmt.Errorf("failed to load config: %w", err)
+				}
+				if len(cfg.Libraries.Movies) == 0 {
 					return fmt.Errorf("no target library specified (use --library or config file)")
 				}
+				target = cfg.Libraries.Movies[0]
+			}
+
+			// Escalate to root if needed for file operations
+			if privilege.NeedsRoot() {
+				return privilege.Escalate("move files and set ownership")
 			}
 
 			org, err := organizer.NewOrganizer(
@@ -932,14 +976,17 @@ Examples:
   jellywatch watch /downloads -n  # dry-run mode`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
 			// Escalate to root if needed for file ownership
 			if privilege.NeedsRoot() {
 				return privilege.Escalate("set file ownership to match media server")
 			}
 
 			watchDir := args[0]
-
-			cfg, _ := config.Load()
 
 			tvLibs := []string{}
 			if tvLibrary != "" {
@@ -1053,12 +1100,16 @@ NOTE: Only applies to TV series. Movies are single files and don't need consolid
 		Use:   "execute",
 		Short: "Execute consolidation plans",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
 			db, err := database.Open()
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			return runConsolidateExecute(db)
+			return runConsolidateExecute(db, cfg)
 		},
 	})
 
@@ -1096,12 +1147,15 @@ can help you clean up wasted space.`,
 		Use:   "execute",
 		Short: "Execute duplicate plans",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
 			db, err := database.Open()
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			cfg, _ := config.Load()
 			return runDuplicatesExecute(db, cfg)
 		},
 	})

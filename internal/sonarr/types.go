@@ -154,13 +154,14 @@ type MediaInfo struct {
 
 // Command represents a Sonarr command request
 type Command struct {
-	Name       string `json:"name"`
-	SeriesID   int    `json:"seriesId,omitempty"`
-	SeriesIDs  []int  `json:"seriesIds,omitempty"`
-	EpisodeIDs []int  `json:"episodeIds,omitempty"`
-	Files      []int  `json:"files,omitempty"`
-	Path       string `json:"path,omitempty"`
-	ImportMode string `json:"importMode,omitempty"`
+	Name         string `json:"name"`
+	SeriesID     int    `json:"seriesId,omitempty"`
+	SeasonNumber int    `json:"seasonNumber,omitempty"`
+	SeriesIDs    []int  `json:"seriesIds,omitempty"`
+	EpisodeIDs   []int  `json:"episodeIds,omitempty"`
+	Files        []int  `json:"files,omitempty"`
+	Path         string `json:"path,omitempty"`
+	ImportMode   string `json:"importMode,omitempty"`
 }
 
 // CommandResponse is returned after executing a command

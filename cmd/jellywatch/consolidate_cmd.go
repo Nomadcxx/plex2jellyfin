@@ -14,12 +14,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
 
-func runConsolidateExecute(db *database.MediaDB) error {
-	// Escalate to root if needed for file operations
-	if privilege.NeedsRoot() {
-		return privilege.Escalate("move files across filesystems and set ownership")
-	}
-
+func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 	plan, err := plans.LoadConsolidatePlans()
 	if err != nil {
 		return fmt.Errorf("failed to load plans: %w", err)
@@ -29,6 +24,18 @@ func runConsolidateExecute(db *database.MediaDB) error {
 		fmt.Println("No pending plans found.")
 		fmt.Println("Run 'jellywatch consolidate generate' first to create plans.")
 		return nil
+	}
+
+	if issues := consolidatePlanSafetyIssues(plan); len(issues) > 0 {
+		fmt.Println("❌ Consolidation plan failed safety validation; refusing to execute.")
+		printConsolidateSafetyIssues(issues)
+		fmt.Println("\nRegenerate after planner fixes, or inspect with 'jellywatch consolidate dry-run'.")
+		return nil
+	}
+
+	// Escalate only after validating the plan. Unsafe plans should not require sudo.
+	if privilege.NeedsRoot() {
+		return privilege.Escalate("move files across filesystems and set ownership")
 	}
 
 	fmt.Printf("⚠️  This will move %d files (%s).\n", plan.Summary.TotalMoves, formatBytes(plan.Summary.TotalBytes))
@@ -47,11 +54,6 @@ func runConsolidateExecute(db *database.MediaDB) error {
 	}
 
 	fmt.Println("\n📦 Executing consolidation plans...")
-
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
 
 	allLibraryRoots := append(cfg.Libraries.TV, cfg.Libraries.Movies...)
 
@@ -143,6 +145,74 @@ func runConsolidateExecute(db *database.MediaDB) error {
 	fmt.Printf("📦 Data relocated:     %s\n", formatBytes(movedBytes))
 
 	return nil
+}
+
+func consolidatePlanSafetyIssues(plan *plans.ConsolidatePlan) []string {
+	if plan == nil {
+		return nil
+	}
+
+	var issues []string
+	sourceCounts := make(map[string]int)
+	for _, group := range plan.Plans {
+		if hasSeasonComponent(group.TargetLocation) {
+			issues = append(issues, fmt.Sprintf("target location includes season/release structure: %s", group.TargetLocation))
+		}
+		for _, op := range group.Operations {
+			if op.Action != "move" {
+				continue
+			}
+			sourceCounts[filepath.Clean(op.SourcePath)]++
+			if pathIsWithin(group.TargetLocation, op.SourcePath) {
+				issues = append(issues, fmt.Sprintf("source already under target location; not a consolidation move: %s", op.SourcePath))
+			}
+			if hasSeasonComponent(op.SourcePath) && !hasSeasonComponent(op.TargetPath) {
+				issues = append(issues, fmt.Sprintf("target would drop season structure: %s -> %s", op.SourcePath, op.TargetPath))
+			}
+			if _, err := os.Stat(op.TargetPath); err == nil {
+				issues = append(issues, fmt.Sprintf("target already exists: %s", op.TargetPath))
+			}
+		}
+	}
+
+	for source, count := range sourceCounts {
+		if count > 1 {
+			issues = append(issues, fmt.Sprintf("duplicate source appears in %d planned moves: %s", count, source))
+		}
+	}
+
+	return issues
+}
+
+func printConsolidateSafetyIssues(issues []string) {
+	const maxIssues = 20
+	for i, issue := range issues {
+		if i >= maxIssues {
+			fmt.Printf("  ... and %d more issue(s)\n", len(issues)-maxIssues)
+			return
+		}
+		fmt.Printf("  - %s\n", issue)
+	}
+}
+
+func pathIsWithin(parent, child string) bool {
+	parent = filepath.Clean(parent)
+	child = filepath.Clean(child)
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func hasSeasonComponent(path string) bool {
+	for _, part := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
+		lower := strings.ToLower(strings.TrimSpace(part))
+		if strings.HasPrefix(lower, "season ") || strings.HasPrefix(lower, "season_") || strings.HasPrefix(lower, "season-") {
+			return true
+		}
+	}
+	return false
 }
 
 // updateDatabaseAfterMove updates or creates a database entry after a file move

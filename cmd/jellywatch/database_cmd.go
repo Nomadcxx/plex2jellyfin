@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
@@ -14,12 +15,13 @@ func newDatabaseCmd() *cobra.Command {
 		Use:     "database",
 		Aliases: []string{"db"},
 		Short:   "Database management commands",
-		Long:    `Commands for managing the HOLDEN database (media.db)`,
+		Long:    `Commands for managing the JellyWatch database (media.db)`,
 	}
 
 	cmd.AddCommand(newDatabaseInitCmd())
 	cmd.AddCommand(newDatabaseResetCmd())
 	cmd.AddCommand(newDatabasePathCmd())
+	cmd.AddCommand(newDatabaseCleanupHousekeepingCmd())
 
 	return cmd
 }
@@ -30,7 +32,7 @@ func newDatabaseInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize a fresh database",
-		Long: `Initialize a fresh HOLDEN database.
+		Long: `Initialize a fresh JellyWatch database.
 
 If a database already exists, this command will fail unless used with 'database reset'.
 Use --scan to immediately populate the database after initialization.
@@ -84,7 +86,7 @@ func newDatabasePathCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "path",
 		Short: "Show database file path",
-		Long:  `Display the path to the HOLDEN database file.`,
+		Long:  `Display the path to the JellyWatch database file.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dbPath := config.GetDatabasePath()
 			fmt.Println(dbPath)
@@ -111,6 +113,26 @@ func newDatabasePathCmd() *cobra.Command {
 	return cmd
 }
 
+func newDatabaseCleanupHousekeepingCmd() *cobra.Command {
+	var execute bool
+
+	cmd := &cobra.Command{
+		Use:   "cleanup-housekeeping",
+		Short: "Collapse duplicate housekeeping manual-review failures",
+		Long: `Collapse older duplicate housekeeping failures that already require manual review.
+
+Dry-run is the default. Use --execute to cancel older duplicate failed rows while
+keeping the newest row visible for manual review.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDatabaseCleanupHousekeeping(execute, cmd.OutOrStdout())
+		},
+	}
+
+	cmd.Flags().BoolVar(&execute, "execute", false, "Apply cleanup instead of reporting a dry-run count")
+
+	return cmd
+}
+
 func runDatabaseInit(scan bool, allowOverwrite bool) error {
 	dbPath := config.GetDatabasePath()
 
@@ -133,7 +155,7 @@ func runDatabaseInit(scan bool, allowOverwrite bool) error {
 	// Run scan if requested
 	if scan {
 		fmt.Println()
-		return runScan(false, false, true, true)
+		return runScan(false, false, true, true, "", false, false)
 	}
 
 	fmt.Println("\nRun 'jellywatch scan' to populate the database")
@@ -180,4 +202,36 @@ func runDatabaseReset(scan bool, force bool) error {
 
 	// Initialize fresh database
 	return runDatabaseInit(scan, true)
+}
+
+func runDatabaseCleanupHousekeeping(execute bool, out io.Writer) error {
+	dbPath := config.GetDatabasePath()
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	return runDatabaseCleanupHousekeepingWithDB(db, execute, out)
+}
+
+func runDatabaseCleanupHousekeepingWithDB(db *database.MediaDB, execute bool, out io.Writer) error {
+	if execute {
+		changed, err := db.CollapseDuplicateManualReviewFailures()
+		if err != nil {
+			return fmt.Errorf("cleanup housekeeping: %w", err)
+		}
+		fmt.Fprintf(out, "Canceled duplicate manual-review housekeeping failures: %d\n", changed)
+		return nil
+	}
+
+	count, err := db.CountDuplicateManualReviewFailures()
+	if err != nil {
+		return fmt.Errorf("count duplicate manual-review housekeeping failures: %w", err)
+	}
+	fmt.Fprintf(out, "Duplicate manual-review housekeeping failures: %d\n", count)
+	if count > 0 {
+		fmt.Fprintln(out, "Dry run only. Run 'jellywatch database cleanup-housekeeping --execute' to cancel older duplicate rows.")
+	}
+	return nil
 }

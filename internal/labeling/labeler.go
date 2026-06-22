@@ -9,8 +9,7 @@ import (
 // hasProviderID returns true when at least one external ID has been resolved
 // for the decision.
 func hasProviderID(dec database.ParseDecision) bool {
-	return dec.JellyfinItemID != "" ||
-		dec.JellyfinImdbID != "" ||
+	return dec.JellyfinImdbID != "" ||
 		dec.JellyfinTmdbID != "" ||
 		dec.JellyfinTvdbID != ""
 }

@@ -41,6 +41,16 @@ func TestIsObfuscatedFilename(t *testing.T) {
 			want:     true,
 		},
 		{
+			name:     "random alpha-only mixed case",
+			filename: "JfkkCQvrfJvtrrhYQrv.mkv",
+			want:     true,
+		},
+		{
+			name:     "short random mixed alphanumeric",
+			filename: "qb7R.mkv",
+			want:     true,
+		},
+		{
 			name:     "legitimate TV episode",
 			filename: "The.White.Lotus.S02E07.mkv",
 			want:     false,
@@ -58,6 +68,11 @@ func TestIsObfuscatedFilename(t *testing.T) {
 		{
 			name:     "short name not obfuscated",
 			filename: "movie.mkv",
+			want:     false,
+		},
+		{
+			name:     "short real title with number",
+			filename: "Deadpool 2.mkv",
 			want:     false,
 		},
 		{
@@ -173,11 +188,12 @@ func TestParseTVShowFromPath(t *testing.T) {
 
 func TestParseMovieFromPath(t *testing.T) {
 	tests := []struct {
-		name      string
-		path      string
-		wantTitle string
-		wantYear  string
-		wantErr   bool
+		name       string
+		path       string
+		wantTitle  string
+		wantYear   string
+		wantErr    bool
+		checkTitle bool
 	}{
 		{
 			name:      "obfuscated file with valid folder",
@@ -185,6 +201,14 @@ func TestParseMovieFromPath(t *testing.T) {
 			wantTitle: "Inception",
 			wantYear:  "2010",
 			wantErr:   false,
+		},
+		{
+			name:       "short obfuscated file in movie title folder",
+			path:       "/movies/Kingsman The Secret Service (2014)/qb7R.mkv",
+			wantTitle:  "Kingsman The Secret Service",
+			wantYear:   "2014",
+			wantErr:    false,
+			checkTitle: true,
 		},
 		{
 			name:      "non-obfuscated file",
@@ -214,6 +238,9 @@ func TestParseMovieFromPath(t *testing.T) {
 			if err != nil {
 				t.Errorf("ParseMovieFromPath(%q) unexpected error: %v", tt.path, err)
 				return
+			}
+			if tt.checkTitle && info.Title != tt.wantTitle {
+				t.Errorf("ParseMovieFromPath(%q) Title = %q, want %q", tt.path, info.Title, tt.wantTitle)
 			}
 			if info.Year != tt.wantYear {
 				t.Errorf("ParseMovieFromPath(%q) Year = %q, want %q", tt.path, info.Year, tt.wantYear)

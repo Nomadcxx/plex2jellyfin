@@ -215,6 +215,55 @@ func (m *MediaDB) CountMoviesInLibrary(libraryRoot string) (int, error) {
 	return count, err
 }
 
+// PruneFilesystemMoviesWithoutMediaFiles removes stale movie rows created by
+// filesystem scans when no tracked media file still belongs to the row.
+func (m *MediaDB) PruneFilesystemMoviesWithoutMediaFiles() (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result, err := m.db.Exec(`
+		DELETE FROM movies
+		WHERE source = 'filesystem'
+		  AND radarr_id IS NULL
+		  AND tmdb_id IS NULL
+		  AND imdb_id IS NULL
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_files
+			WHERE media_files.parent_movie_id = movies.id
+		  )
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// PruneFilesystemMoviesWithoutMediaFilesUnder removes stale filesystem movie
+// rows only below a specific canonical path.
+func (m *MediaDB) PruneFilesystemMoviesWithoutMediaFilesUnder(path string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result, err := m.db.Exec(`
+		DELETE FROM movies
+		WHERE source = 'filesystem'
+		  AND radarr_id IS NULL
+		  AND tmdb_id IS NULL
+		  AND imdb_id IS NULL
+		  AND (canonical_path = ? OR canonical_path LIKE ?)
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_files
+			WHERE media_files.parent_movie_id = movies.id
+		  )
+	`, path, path+"/%")
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (m *MediaDB) GetAllMovies() ([]*Movie, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

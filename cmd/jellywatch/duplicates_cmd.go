@@ -88,6 +88,7 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 	fmt.Println("\n🗑️ Deleting duplicate files...")
 
 	deletedCount := 0
+	failedCount := 0
 	reclaimedBytes := int64(0)
 
 	for i, p := range plan.Plans {
@@ -114,6 +115,7 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 
 		if err := deleteDuplicateFile(db, filePath, uid, gid); err != nil {
 			fmt.Printf("  ❌ Failed to delete %s: %v\n", filePath, err)
+			failedCount++
 			continue
 		}
 
@@ -122,20 +124,24 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 	}
 
 	// Handle plan file on results
-	if deletedCount == 0 {
+	if failedCount == 0 && deletedCount == len(plan.Plans) {
 		if err := plans.DeleteDuplicatePlans(); err != nil {
 			fmt.Printf("⚠️  Failed to clean up plans file: %v\n", err)
+		} else {
+			fmt.Printf("\n✅ Plan completed — %d files deleted\n", deletedCount)
 		}
-		fmt.Println("\n✅ Plan completed and removed")
 	} else {
 		if err := plans.ArchiveDuplicatePlans(); err != nil {
 			fmt.Printf("⚠️  Failed to archive plans file: %v\n", err)
 		}
-		fmt.Println("\n⚠️  Plan archived to duplicates.json.old due to failures")
+		fmt.Printf("\n⚠️  Plan archived to duplicates.json.old — %d files failed to delete\n", failedCount)
 	}
 
 	fmt.Println("\n=== Execution Complete ===")
 	fmt.Printf("✅ Successfully deleted: %d files\n", deletedCount)
+	if failedCount > 0 {
+		fmt.Printf("❌ Failed to delete:     %d files\n", failedCount)
+	}
 	fmt.Printf("📦 Space reclaimed:      %s\n", formatBytes(reclaimedBytes))
 
 	return nil

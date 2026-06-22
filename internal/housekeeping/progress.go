@@ -15,13 +15,14 @@ import (
 // All methods are nil-safe: when no registry is wired (e.g., in unit
 // tests), every call is a no-op.
 type taskProgress struct {
-	op      *ipc.Op
-	id      string
-	totalB  int64
-	totalN  int
-	src     string
-	dst     string
-	final   bool
+	op     *ipc.Op
+	reg    *ipc.OpRegistry
+	id     string
+	totalB int64
+	totalN int
+	src    string
+	dst    string
+	final  bool
 }
 
 const taskOpCmd ipc.Command = "HK_TASK"
@@ -44,6 +45,7 @@ func (e *Engine) startTaskOp(taskID int64, src, dst string, totalFiles int, tota
 		return tp
 	}
 	tp.op = op
+	tp.reg = e.registry
 	op.Frames.Append(ipc.Frame{
 		ID:      tp.id,
 		Type:    ipc.FrameProgress,
@@ -110,6 +112,9 @@ func (p *taskProgress) finish(err error) {
 			Type: ipc.FrameError,
 			Msg:  err.Error(),
 		})
+		if p.reg != nil {
+			p.reg.Finish(p.id, "error", err)
+		}
 	} else {
 		data, _ := json.Marshal(map[string]any{
 			"task_id":     p.id,
@@ -121,5 +126,8 @@ func (p *taskProgress) finish(err error) {
 			Type: ipc.FrameDone,
 			Data: data,
 		})
+		if p.reg != nil {
+			p.reg.Finish(p.id, "done", nil)
+		}
 	}
 }

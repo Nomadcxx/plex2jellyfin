@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -92,6 +93,82 @@ func TestRefreshItem_MakesPostRequestWithJSONBody(t *testing.T) {
 	}
 	if !strings.Contains(gotBody.String(), `"Recursive":true`) {
 		t.Fatalf("expected request body to include refresh payload, got %q", gotBody.String())
+	}
+}
+
+func TestRefreshItemFullMetadataUsesFullRefreshQuery(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotQuery url.Values
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	client := NewClient(Config{URL: ts.URL, APIKey: "secret-key"})
+	if err := client.RefreshItemFullMetadata("item-123"); err != nil {
+		t.Fatalf("RefreshItemFullMetadata() error = %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/Items/item-123/Refresh" {
+		t.Fatalf("path = %s, want /Items/item-123/Refresh", gotPath)
+	}
+
+	expected := map[string]string{
+		"Recursive":           "false",
+		"MetadataRefreshMode": "FullRefresh",
+		"ImageRefreshMode":    "FullRefresh",
+		"ReplaceAllMetadata":  "true",
+		"ReplaceAllImages":    "true",
+	}
+	for key, want := range expected {
+		if got := gotQuery.Get(key); got != want {
+			t.Fatalf("query %s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestRefreshItemFullMetadataRecursiveUsesRecursiveFullRefreshQuery(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotQuery url.Values
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	client := NewClient(Config{URL: ts.URL, APIKey: "secret-key"})
+	if err := client.RefreshItemFullMetadataRecursive("series-123"); err != nil {
+		t.Fatalf("RefreshItemFullMetadataRecursive() error = %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/Items/series-123/Refresh" {
+		t.Fatalf("path = %s, want /Items/series-123/Refresh", gotPath)
+	}
+
+	expected := map[string]string{
+		"Recursive":           "true",
+		"MetadataRefreshMode": "FullRefresh",
+		"ImageRefreshMode":    "FullRefresh",
+		"ReplaceAllMetadata":  "true",
+		"ReplaceAllImages":    "true",
+	}
+	for key, want := range expected {
+		if got := gotQuery.Get(key); got != want {
+			t.Fatalf("query %s = %q, want %q", key, got, want)
+		}
 	}
 }
 

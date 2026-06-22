@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -34,8 +35,9 @@ func OpenPath(path string) (*MediaDB, error) {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	// Open with WAL mode for better concurrent access
-	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
+	// Open with WAL mode and a real modernc.org/sqlite busy timeout so a
+	// manual CLI scan can coexist with daemon housekeeping/scheduler writes.
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -58,6 +60,13 @@ func OpenPath(path string) (*MediaDB, error) {
 	}
 
 	return mdb, nil
+}
+
+func sqliteDSN(path string) string {
+	values := url.Values{}
+	values.Add("_pragma", "busy_timeout(30000)")
+	values.Add("_pragma", "journal_mode(WAL)")
+	return path + "?" + values.Encode()
 }
 
 // Close closes the database connection

@@ -1,9 +1,11 @@
 package organizer
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // allowedExtensions lists extensions that PurgeNonAllowed will not remove.
@@ -27,10 +29,12 @@ func PurgeNonAllowed(dir string) error {
 		isDir bool
 	}
 	var all []entry
+	var errs []error
 
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip unreadable entries, don't abort
+			errs = append(errs, err)
+			return nil
 		}
 		if path == dir {
 			return nil
@@ -38,18 +42,29 @@ func PurgeNonAllowed(dir string) error {
 		all = append(all, entry{path: path, isDir: d.IsDir()})
 		return nil
 	})
+	if walkErr != nil {
+		errs = append(errs, walkErr)
+	}
 
 	// Process deepest paths first so directories are empty when we attempt Remove.
 	for i := len(all) - 1; i >= 0; i-- {
 		e := all[i]
 		if e.isDir {
-			os.Remove(e.path) // only succeeds for empty directories
+			if err := os.Remove(e.path); err != nil && !ignoreCleanupRemoveError(err) {
+				errs = append(errs, err)
+			}
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(e.path))
 		if !allowedExtensions[ext] {
-			os.Remove(e.path) //nolint:errcheck
+			if err := os.Remove(e.path); err != nil && !ignoreCleanupRemoveError(err) {
+				errs = append(errs, err)
+			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+func ignoreCleanupRemoveError(err error) bool {
+	return os.IsNotExist(err) || errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST)
 }

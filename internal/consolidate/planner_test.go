@@ -39,7 +39,7 @@ func TestGeneratePlans_Duplicates(t *testing.T) {
 			Resolution:          "unknown",
 			SourceType:          "unknown",
 			QualityScore:        105, // Lower score
-			IsJellyfinCompliant: false,
+			IsJellyfinCompliant: true,
 		},
 		{
 			Path:                "/media/STORAGE8/Movies/Her (2013)/Her (2013).mkv",
@@ -119,7 +119,7 @@ func TestGeneratePlans_Episodes(t *testing.T) {
 			Resolution:          "720p",
 			SourceType:          "WEBRip",
 			QualityScore:        250, // Lower score
-			IsJellyfinCompliant: false,
+			IsJellyfinCompliant: true,
 		},
 		{
 			Path:                "/media/STORAGE2/TV/Silo (2023)/Season 01/Silo (2023) S01E01.mkv",
@@ -185,6 +185,7 @@ func TestGetPlanSummary(t *testing.T) {
 			NormalizedTitle: "her",
 			Year:            &year2013,
 			QualityScore:    105,
+			IsJellyfinCompliant: true,
 		},
 		{
 			Path:            "/media/STORAGE8/Movies/Her (2013)/Her (2013).mkv",
@@ -193,6 +194,7 @@ func TestGetPlanSummary(t *testing.T) {
 			NormalizedTitle: "her",
 			Year:            &year2013,
 			QualityScore:    389,
+			IsJellyfinCompliant: true,
 		},
 	}
 
@@ -244,6 +246,7 @@ func TestClearPendingPlans(t *testing.T) {
 			NormalizedTitle: "her",
 			Year:            &year2013,
 			QualityScore:    105,
+			IsJellyfinCompliant: true,
 		},
 		{
 			Path:            "/media/STORAGE8/Movies/Her (2013)/Her (2013).mkv",
@@ -252,6 +255,7 @@ func TestClearPendingPlans(t *testing.T) {
 			NormalizedTitle: "her",
 			Year:            &year2013,
 			QualityScore:    389,
+			IsJellyfinCompliant: true,
 		},
 	}
 
@@ -277,8 +281,16 @@ func TestClearPendingPlans(t *testing.T) {
 	}
 
 	// Clear plans
-	if err := planner.clearPendingPlans(); err != nil {
-		t.Fatalf("clearPendingPlans failed: %v", err)
+	tx, err := db.DB().Begin()
+	if err != nil {
+		t.Fatalf("begin tx failed: %v", err)
+	}
+	defer tx.Rollback()
+	if err := planner.clearPendingPlansTx(tx); err != nil {
+		t.Fatalf("clearPendingPlansTx failed: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit failed: %v", err)
 	}
 
 	// Verify plans are gone
@@ -307,6 +319,7 @@ func TestGeneratePlans_NoDuplicates(t *testing.T) {
 			NormalizedTitle: "her",
 			Year:            &year2013,
 			QualityScore:    389,
+			IsJellyfinCompliant: true,
 		},
 		{
 			Path:            "/media/Movies/Interstellar (2014)/Interstellar (2014).mkv",
@@ -315,6 +328,7 @@ func TestGeneratePlans_NoDuplicates(t *testing.T) {
 			NormalizedTitle: "interstellar",
 			Year:            &year2014,
 			QualityScore:    405,
+			IsJellyfinCompliant: true,
 		},
 	}
 

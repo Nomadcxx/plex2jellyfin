@@ -92,6 +92,137 @@ func TestUpsertSeries_ScansNewColumns(t *testing.T) {
 	}
 }
 
+func TestUpsertSeries_ReusesExistingCanonicalPathForFragmentTitle(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	canonical := "/media/TV/Project Runway (2004)"
+	_, err := db.UpsertSeries(&Series{
+		Title:          "Project Runway",
+		Year:           2004,
+		CanonicalPath:  canonical,
+		LibraryRoot:    "/media/TV",
+		Source:         "filesystem",
+		SourcePriority: 50,
+		EpisodeCount:   1,
+	})
+	if err != nil {
+		t.Fatalf("canonical UpsertSeries: %v", err)
+	}
+
+	_, err = db.UpsertSeries(&Series{
+		Title:          "Welcome to the Urban Jungle",
+		Year:           2023,
+		CanonicalPath:  canonical,
+		LibraryRoot:    "/media/TV",
+		Source:         "filesystem",
+		SourcePriority: 50,
+		EpisodeCount:   1,
+	})
+	if err != nil {
+		t.Fatalf("fragment UpsertSeries: %v", err)
+	}
+
+	rows, err := db.db.Query(`SELECT title, year, canonical_path FROM series WHERE canonical_path = ?`, canonical)
+	if err != nil {
+		t.Fatalf("query series: %v", err)
+	}
+	defer rows.Close()
+
+	var count int
+	var title string
+	var year int
+	for rows.Next() {
+		count++
+		if err := rows.Scan(&title, &year, new(string)); err != nil {
+			t.Fatalf("scan series: %v", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("series rows for canonical path = %d, want 1", count)
+	}
+	if title != "Project Runway" || year != 2004 {
+		t.Fatalf("series row = %q (%d), want canonical Project Runway (2004)", title, year)
+	}
+}
+
+func TestUpsertSeries_MergesCanonicalPathRowWhenIdentityCorrectionCollides(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	keeper := &Series{
+		Title:          "Last Week Tonight with John Oliver",
+		Year:           2014,
+		CanonicalPath:  "/mnt/STORAGE5/TVSHOWS/Last Week Tonight with John Oliver (2014)",
+		LibraryRoot:    "/mnt/STORAGE5/TVSHOWS",
+		Source:         "filesystem",
+		SourcePriority: 50,
+		EpisodeCount:   52,
+	}
+	if _, err := db.UpsertSeries(keeper); err != nil {
+		t.Fatalf("keeper UpsertSeries: %v", err)
+	}
+
+	legacy := &Series{
+		Title:          "Last Week Tonight",
+		Year:           0,
+		CanonicalPath:  "/mnt/STORAGE2/TVSHOWS/Last Week Tonight with John Oliver (2014)",
+		LibraryRoot:    "/mnt/STORAGE2/TVSHOWS",
+		Source:         "filesystem",
+		SourcePriority: 50,
+		EpisodeCount:   1,
+	}
+	if _, err := db.UpsertSeries(legacy); err != nil {
+		t.Fatalf("legacy UpsertSeries: %v", err)
+	}
+
+	corrected := &Series{
+		Title:          "Last Week Tonight with John Oliver",
+		Year:           2014,
+		CanonicalPath:  legacy.CanonicalPath,
+		LibraryRoot:    legacy.LibraryRoot,
+		Source:         "filesystem",
+		SourcePriority: 50,
+		EpisodeCount:   1,
+	}
+	if _, err := db.UpsertSeries(corrected); err != nil {
+		t.Fatalf("corrected UpsertSeries should merge legacy row instead of violating unique identity: %v", err)
+	}
+
+	var rows int
+	if err := db.db.QueryRow(
+		`SELECT COUNT(*) FROM series WHERE title_normalized = ? AND year = ?`,
+		"lastweektonightwithjohnoliver", 2014,
+	).Scan(&rows); err != nil {
+		t.Fatalf("count corrected identity: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("corrected identity rows = %d, want 1", rows)
+	}
+
+	var legacyRows int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM series WHERE id = ?`, legacy.ID).Scan(&legacyRows); err != nil {
+		t.Fatalf("count legacy row: %v", err)
+	}
+	if legacyRows != 0 {
+		t.Fatalf("legacy row still exists after collision merge")
+	}
+
+	conflicts, err := db.GetUnresolvedConflicts()
+	if err != nil {
+		t.Fatalf("GetUnresolvedConflicts: %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("conflicts = %d, want 1", len(conflicts))
+	}
+	if len(conflicts[0].Locations) != 2 {
+		t.Fatalf("conflict locations = %v, want both paths", conflicts[0].Locations)
+	}
+}
+
 func TestGetAllSeries_IncludesDirtyFlags(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

@@ -119,6 +119,12 @@ func renderAuditPlanDetails(plan *plans.AuditPlan, showAllFiles bool) string {
 	}
 
 	b.WriteString(fmt.Sprintf("\nSummary: %d changes to apply\n", changesShown))
+	b.WriteString(fmt.Sprintf("AI candidates: %d | AI calls: %d | AI errors: %d\n",
+		plan.Summary.AICandidateCount, plan.Summary.AITotalCalls, plan.Summary.AIErrorCount))
+	if plan.Summary.DeterministicSkipped > 0 || plan.Summary.ManualReviewSkipped > 0 {
+		b.WriteString(fmt.Sprintf("Pre-AI skipped: %d deterministic | %d manual-review\n",
+			plan.Summary.DeterministicSkipped, plan.Summary.ManualReviewSkipped))
+	}
 	if !showAllFiles && plan.Summary.FilesToSkip > 0 {
 		unchanged := plan.Summary.TotalFiles - plan.Summary.FilesToRename - plan.Summary.FilesToSkip
 		b.WriteString(fmt.Sprintf("Unchanged: %d | Skipped: %d (use --show-all to include all files)\n", unchanged, plan.Summary.FilesToSkip))

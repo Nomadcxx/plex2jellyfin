@@ -13,6 +13,11 @@ import (
 )
 
 func runConsolidateGenerate() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
 	if err := checkDatabasePopulated(); err != nil {
 		return err
 	}
@@ -22,11 +27,6 @@ func runConsolidateGenerate() error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
-
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
 
 	fmt.Println("🔍 Analyzing library for scattered content...")
 
@@ -67,11 +67,13 @@ func runConsolidateGenerate() error {
 
 	for _, cp := range consolidatePlans {
 		if !cp.CanProceed {
-			skippedItems = append(skippedItems, skippedItem{
-				title:   cp.Title,
-				year:    cp.Year,
-				reasons: cp.Reasons,
-			})
+			if shouldReportSkippedConsolidationPlan(cp) {
+				skippedItems = append(skippedItems, skippedItem{
+					title:   cp.Title,
+					year:    cp.Year,
+					reasons: cp.Reasons,
+				})
+			}
 			continue
 		}
 
@@ -157,6 +159,10 @@ func runConsolidateGenerate() error {
 	return nil
 }
 
+func shouldReportSkippedConsolidationPlan(plan *consolidate.Plan) bool {
+	return plan != nil && len(plan.SourcePaths) > 0
+}
+
 func runConsolidateDryRun() error {
 	plan, err := plans.LoadConsolidatePlans()
 	if err != nil {
@@ -174,6 +180,13 @@ func runConsolidateDryRun() error {
 	fmt.Printf("Conflicts to consolidate: %d\n", len(plan.Plans))
 	fmt.Printf("Files to move: %d\n", plan.Summary.TotalMoves)
 	fmt.Printf("Data to relocate: %s\n\n", formatBytes(plan.Summary.TotalBytes))
+	hasSafetyIssues := false
+	if issues := consolidatePlanSafetyIssues(plan); len(issues) > 0 {
+		hasSafetyIssues = true
+		fmt.Println("⚠️  Safety issues detected; this plan will not execute until fixed:")
+		printConsolidateSafetyIssues(issues)
+		fmt.Println()
+	}
 
 	for i, group := range plan.Plans {
 		yearStr := ""
@@ -208,6 +221,10 @@ func runConsolidateDryRun() error {
 		fmt.Println()
 	}
 
-	fmt.Println("To execute: jellywatch consolidate execute")
+	if hasSafetyIssues {
+		fmt.Println("This plan is blocked from execution until the planner is fixed.")
+	} else {
+		fmt.Println("To execute: jellywatch consolidate execute")
+	}
 	return nil
 }

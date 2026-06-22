@@ -2,8 +2,11 @@ package config
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -40,6 +43,46 @@ func TestAtomicWriteWithLockSerializesParallelWriters(t *testing.T) {
 	}
 	if !looksLikeOneWriter(string(got)) {
 		t.Errorf("got partial/garbled content %q", string(got))
+	}
+}
+
+func TestAtomicWriteWithLockPreservesExistingOwnership(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires root to verify ownership preservation")
+	}
+
+	u, err := user.Lookup("nomadx")
+	if err != nil {
+		t.Skip("nomadx user not available")
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(path, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AtomicWriteWithLock(path, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := info.Sys().(*syscall.Stat_t)
+	if int(st.Uid) != uid || int(st.Gid) != gid {
+		t.Fatalf("ownership changed to %d:%d, want %d:%d", st.Uid, st.Gid, uid, gid)
 	}
 }
 

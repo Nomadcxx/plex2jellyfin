@@ -1180,6 +1180,9 @@ func TestHandleJellyfinWebhookEvent_ItemAddedUpdatesParseDecision(t *testing.T) 
 	assert.Equal(t, "tt0133093", dec.JellyfinImdbID)
 	assert.Equal(t, "603", dec.JellyfinTmdbID)
 	assert.NotNil(t, dec.JellyfinResolvedAt)
+	assert.NotNil(t, dec.JellyfinFirstSeenAt)
+	require.NotNil(t, dec.JellyfinIdentified)
+	assert.True(t, *dec.JellyfinIdentified)
 }
 
 func TestHandleJellyfinWebhookEvent_ItemAddedSkipsResolved(t *testing.T) {
@@ -1233,4 +1236,54 @@ func TestHandleJellyfinWebhookEvent_ItemAddedSkipsResolved(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "new-jf-id", updated.JellyfinItemID)
 	assert.NotNil(t, updated.JellyfinResolvedAt)
+}
+
+func TestHandleJellyfinWebhookEvent_ItemUpdatedUpgradesIdentification(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	targetPath := "/mnt/STORAGE1/MOVIES/F Valentines Day (2026)/F Valentines Day (2026).mkv"
+	now := time.Now().UTC()
+	identified := false
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:         "/downloads/f.valentines.day.2026.mkv",
+		SourceFilename:     "f.valentines.day.2026.mkv",
+		EventAt:            now,
+		TargetPath:         targetPath,
+		OrganizeOutcome:    "success",
+		JellyfinItemID:     "jf-bare",
+		JellyfinResolvedAt: &now,
+		JellyfinIdentified: &identified,
+	})
+	require.NoError(t, err)
+
+	handler := &MediaHandler{
+		db: db,
+		pathTranslator: jellyfin.NewPathTranslator([]jellyfin.PathMapping{
+			{Jellyfin: "/movies1", Daemon: "/mnt/STORAGE1/MOVIES"},
+		}),
+	}
+
+	handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventItemUpdated,
+		ItemID:           "jf-identified",
+		ItemPath:         "/movies1/F Valentines Day (2026)/F Valentines Day (2026).mkv",
+		ItemName:         "F Valentine's Day",
+		ItemType:         "Movie",
+		ProviderImdb:     "tt34622232",
+		ProviderTmdb:     "1429605",
+	})
+
+	dec, err := db.GetDecision(id)
+	require.NoError(t, err)
+	require.NotNil(t, dec)
+	assert.Equal(t, "jf-identified", dec.JellyfinItemID)
+	assert.Equal(t, "tt34622232", dec.JellyfinImdbID)
+	assert.Equal(t, "1429605", dec.JellyfinTmdbID)
+	require.NotNil(t, dec.JellyfinIdentified)
+	assert.True(t, *dec.JellyfinIdentified)
+	assert.NotNil(t, dec.JellyfinResolvedAt)
+	assert.NotNil(t, dec.JellyfinFirstSeenAt)
 }

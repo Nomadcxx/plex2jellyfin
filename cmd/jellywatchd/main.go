@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -361,6 +364,28 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var serviceWG sync.WaitGroup
+	errChan := make(chan error, 8)
+	startBackground := func(name string, run func()) {
+		serviceWG.Add(1)
+		go func() {
+			defer serviceWG.Done()
+			run()
+		}()
+	}
+	startService := func(name string, run func() error) {
+		serviceWG.Add(1)
+		go func() {
+			defer serviceWG.Done()
+			if err := run(); err != nil {
+				select {
+				case errChan <- fmt.Errorf("%s: %w", name, err):
+				case <-ctx.Done():
+				}
+			}
+		}()
+	}
+
 	reloadSupervisor := daemonreload.NewSupervisor()
 	reloadSupervisor.Register(daemonreload.NewLoggingReloadable(logger))
 	reloadSupervisor.Register(daemonreload.NewScannerReloadable(w))
@@ -369,6 +394,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	controlServer := daemonipc.NewServer(filepath.Join(configDir, "control.sock"))
+	if err := configureControlSocketAccess(controlServer); err != nil {
+		return fmt.Errorf("configure control socket access: %w", err)
+	}
 
 	// Op-registry + op-log are required by streaming commands. The server
 	// already allocates an OpRegistry; we open the on-disk op log and read
@@ -412,9 +440,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// Construct Jellyfin sweeper up front so the IPC streaming handler can
 	// trigger it manually; the periodic ticker reuses the same instance.
 	var jfSweeper *jellyfin.Sweeper
+	var metadataReconciler *jellyfin.MetadataReconciler
 	if jellyfinClient != nil && db != nil {
 		jfSweeper = jellyfin.NewSweeper(jellyfinClient, db)
 		jfSweeper.SetPathTranslator(pathTranslator)
+		metadataReconciler = jellyfin.NewMetadataReconciler(jellyfinClient, db, jellyfin.MetadataRecoveryConfig{
+			RepairCooldown:   time.Duration(cfg.MetadataRecovery.RepairCooldownHours) * time.Hour,
+			NeedsReviewAfter: cfg.MetadataRecovery.NeedsReviewAfter,
+		})
+		metadataReconciler.SetPathTranslator(pathTranslator)
 	}
 
 	controlServer.RegisterStreaming(daemonipc.CmdRescan, guardMutator(getPending, rescanHandler(fileScanner, rescanDefaults, opLog)))
@@ -423,6 +457,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	controlServer.RegisterStreaming(daemonipc.CmdDupScan, dupScanHandler(service.NewCleanupService(db), opLog))
 	controlServer.RegisterStreaming(daemonipc.CmdAIBatch, guardMutator(getPending, aiBatchHandler(handler, aiMatcher, opLog)))
 	controlServer.RegisterStreaming(daemonipc.CmdMetadataRefresh, guardMutator(getPending, metadataRefreshHandler(jellyfinClient, opLog)))
+	controlServer.RegisterStreaming(daemonipc.CmdMetadataReconcile, guardMutator(getPending, metadataReconcileHandler(metadataReconciler, opLog)))
+	controlServer.RegisterStreaming(daemonipc.CmdMetadataRepair, guardMutator(getPending, metadataRepairHandler(metadataReconciler, opLog)))
 	controlServer.RegisterStreaming(daemonipc.CmdSweep, guardMutator(getPending, sweepHandler(jfSweeper, opLog)))
 	controlServer.RegisterStreaming(daemonipc.CmdParsesAudit, guardMutator(getPending, parsesAuditHandler(db, opLog)))
 	controlServer.Register(daemonipc.CmdAttach, daemonipc.AttachHandler(controlServer))
@@ -439,7 +475,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		if interval == 0 {
 			interval = 30 * time.Second
 		}
-		go func() {
+		startBackground("AI enhancement ticker", func() {
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {
@@ -450,7 +486,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 					return
 				}
 			}
-		}()
+		})
 		logger.Info("daemon", "AI enhancement ticker started",
 			logging.F("interval", interval.String()))
 	}
@@ -460,12 +496,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		fetcher := labeling.JellyfinNameFetcher(func(itemID string) (string, error) {
 			item, err := jellyfinClient.GetItem(itemID)
 			if err != nil {
+				if errors.Is(err, jellyfin.ErrItemNotFound) {
+					return "", nil
+				}
 				return "", err
 			}
 			return item.Name, nil
 		})
 		labeler := labeling.NewRunner(db, fetcher)
-		go func() {
+		startBackground("parse-decision labeler", func() {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Error("daemon", "Parse-decision labeler panic recovered",
@@ -493,7 +532,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 					return
 				}
 			}
-		}()
+		})
 		logger.Info("daemon", "Parse-decision labeler ticker started",
 			logging.F("interval", "15m"))
 	}
@@ -501,7 +540,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// Start Jellyfin parse-decision sweeper (requires both Jellyfin and DB).
 	if jfSweeper != nil {
 		sweeper := jfSweeper
-		go func() {
+		startBackground("Jellyfin sweeper", func() {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Error("daemon", "Jellyfin sweeper panic recovered",
@@ -528,13 +567,55 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 					return
 				}
 			}
-		}()
+		})
 		logger.Info("daemon", "Jellyfin parse-decision sweeper started")
+	}
+
+	// Start passive metadata reconciliation. This is deliberately separate
+	// from repair: passive checks only read Jellyfin and update JellyWatch's
+	// DB when Jellyfin later attaches provider IDs after an import.
+	if metadataReconciler != nil && cfg.MetadataRecovery.PassiveEnabled {
+		interval := time.Duration(cfg.MetadataRecovery.PassiveIntervalMinutes) * time.Minute
+		if interval <= 0 {
+			interval = time.Hour
+		}
+		batchSize := cfg.MetadataRecovery.PassiveBatchSize
+		if batchSize <= 0 {
+			batchSize = 25
+		}
+		startBackground("Jellyfin metadata reconciler", func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("daemon", "Jellyfin metadata reconciler panic recovered",
+						fmt.Errorf("%v", r))
+				}
+			}()
+			select {
+			case <-time.After(45 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+			runMetadataReconcileOnce(ctx, logger, metadataReconciler, batchSize)
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					runMetadataReconcileOnce(ctx, logger, metadataReconciler, batchSize)
+				case <-ctx.Done():
+					return
+				}
+			}
+		})
+		logger.Info("daemon", "Jellyfin metadata reconciler started",
+			logging.F("interval", interval.String()),
+			logging.F("batch_size", batchSize))
 	}
 
 	// Housekeeping engine + scheduler: detect cross-volume duplicates,
 	// orphan source dirs, stuck syncs, etc., and drain the queued fix
 	// tasks under bounded concurrency. See internal/housekeeping.
+	var sched *scheduler.Scheduler
 	if db != nil {
 		hkCfg := housekeeping.DefaultConfig()
 		hkCfg.TVLibraries = cfg.Libraries.TV
@@ -548,7 +629,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		hkVerifier := tmdb.NewVerifier(db, jellyfinClient, cfg.TMDB.APIKey)
 		hkEngine.SetVerifier(hkVerifier)
 
-		sched := scheduler.New(db, logger)
+		sched = scheduler.New(db, logger)
 		if err := sched.Register(scheduler.Job{
 			Name:     "housekeeping.detect",
 			Schedule: "@hourly",
@@ -570,7 +651,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				if err := hkEngine.Drain(ctx); err != nil && err != context.Canceled {
 					return "", err
 				}
-				return "drain idle", nil
+				return "", nil
 			},
 		}); err != nil {
 			logger.Warn("daemon", "register housekeeping.drain failed", logging.F("error", err.Error()))
@@ -589,7 +670,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			logger.Info("daemon", "cleared stale scheduled job running flags", logging.F("count", n))
 		}
 
-		go sched.Run(ctx)
+		startBackground("scheduler", func() {
+			sched.Run(ctx)
+		})
 
 		controlServer.Register(daemonipc.CmdJobsList, jobsListHandler(db))
 		controlServer.Register(daemonipc.CmdJobRun, jobRunHandler(sched, ctx))
@@ -611,42 +694,81 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	errChan := make(chan error, 3)
+	startService("watcher", w.Start)
+	startService("health server", healthServer.Start)
+	startService("periodic scanner", func() error {
+		return periodicScanner.Start(ctx)
+	})
 
-	go func() {
-		errChan <- w.Start()
-	}()
-
-	go func() {
-		errChan <- healthServer.Start()
-	}()
-
-	go func() {
-		errChan <- periodicScanner.Start(ctx)
-	}()
-
-	select {
-	case sig := <-sigChan:
-		logger.Info("daemon", "Received shutdown signal", logging.F("signal", sig.String()))
+	shutdownServices := func() {
 		healthServer.SetHealthy(false)
 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
 
-		healthServer.Shutdown(shutdownCtx)
-		handler.Shutdown()
 		cancel()
+		if err := healthServer.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("daemon", "health server shutdown failed", logging.F("error", err.Error()))
+		}
+		if err := w.Close(); err != nil {
+			logger.Warn("daemon", "watcher close failed", logging.F("error", err.Error()))
+		}
+		handler.Shutdown()
+
+		done := make(chan struct{})
+		go func() {
+			if sched != nil {
+				sched.Shutdown()
+			}
+			serviceWG.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-shutdownCtx.Done():
+			logger.Warn("daemon", "shutdown timed out before all services stopped")
+		}
+	}
+
+	select {
+	case sig := <-sigChan:
+		logger.Info("daemon", "Received shutdown signal", logging.F("signal", sig.String()))
+		shutdownServices()
 		return nil
 
 	case err := <-errChan:
+		shutdownServices()
 		if err != nil {
 			return fmt.Errorf("service error: %w", err)
 		}
 		return nil
 
 	case <-ctx.Done():
+		shutdownServices()
 		return nil
 	}
+}
+
+func configureControlSocketAccess(s *daemonipc.Server) error {
+	u, err := user.Lookup(paths.ActualUser())
+	if err != nil {
+		return err
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return err
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return err
+	}
+
+	s.AddAllowedPeerUID(uid)
+	if os.Geteuid() == 0 {
+		s.SetSocketOwner(uid, gid)
+	}
+	return nil
 }
 
 func newInstallCmd() *cobra.Command {
@@ -673,6 +795,20 @@ func newInstallCmd() *cobra.Command {
 			fmt.Println("   sudo systemctl status jellywatchd")
 			fmt.Println("   journalctl -u jellywatchd -f")
 		},
+	}
+}
+
+func runMetadataReconcileOnce(ctx context.Context, logger *logging.Logger, reconciler *jellyfin.MetadataReconciler, batchSize int) {
+	summary, err := reconciler.RunPassive(ctx, batchSize, nil)
+	if err != nil {
+		logger.Warn("daemon", "Jellyfin metadata reconciler error", logging.F("error", err.Error()))
+		return
+	}
+	if summary.Checked > 0 || summary.Errors > 0 {
+		logger.Info("daemon", "Jellyfin metadata reconciliation completed",
+			logging.F("checked", summary.Checked),
+			logging.F("identified", summary.Identified),
+			logging.F("errors", summary.Errors))
 	}
 }
 

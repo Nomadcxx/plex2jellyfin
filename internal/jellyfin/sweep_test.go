@@ -93,6 +93,59 @@ func TestSweep_RecentRowIsSweepedWithinLookback(t *testing.T) {
 	}
 }
 
+func TestSweep_ResolvesAllRowsForSameTargetPath(t *testing.T) {
+	db := newSweepDB(t)
+	targetPath := "/library/Movies/F Valentines Day (2026)/F Valentines Day (2026).mkv"
+	oldID, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/dl/old.mkv",
+		SourceFilename:  "old.mkv",
+		EventAt:         time.Now().UTC().Add(-2 * time.Hour),
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+		AutoLabel:       "FAIL",
+	})
+	if err != nil {
+		t.Fatalf("InsertDecision old: %v", err)
+	}
+	newID, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/dl/new.mkv",
+		SourceFilename:  "new.mkv",
+		EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+	})
+	if err != nil {
+		t.Fatalf("InsertDecision new: %v", err)
+	}
+
+	srv, _ := newFakeJellyfinServer(t, []Item{
+		{ID: "jf-fvd", Path: targetPath, ProviderIDs: map[string]string{"Imdb": "tt34622232", "Tmdb": "1429605"}},
+	})
+	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
+
+	sweeper := NewSweeper(client, db)
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	for _, id := range []int64{oldID, newID} {
+		dec, err := db.GetDecision(id)
+		if err != nil {
+			t.Fatalf("GetDecision %d: %v", id, err)
+		}
+		if dec.JellyfinItemID != "jf-fvd" {
+			t.Errorf("id=%d expected JellyfinItemID=jf-fvd, got %q", id, dec.JellyfinItemID)
+		}
+		if dec.JellyfinImdbID != "tt34622232" {
+			t.Errorf("id=%d expected JellyfinImdbID=tt34622232, got %q", id, dec.JellyfinImdbID)
+		}
+		if dec.AutoLabel != "" {
+			t.Errorf("id=%d expected auto_label cleared after resolution, got %q", id, dec.AutoLabel)
+		}
+	}
+}
+
 func TestSweep_OldRowSkippedByNormalSweep(t *testing.T) {
 	db := newSweepDB(t)
 	targetPath := "/library/Movies/Old.mkv"
@@ -266,173 +319,173 @@ func TestSweep_APIErrorDoesNotMarkRows(t *testing.T) {
 }
 
 func TestSweep_ContextCancellationAbortsPagination(t *testing.T) {
-db := newSweepDB(t)
-// Seed enough rows that the sweep would otherwise paginate.
-for i := 0; i < 5; i++ {
-_, err := db.InsertDecision(database.ParseDecision{
-SourcePath:      "/dl/x.mkv",
-SourceFilename:  "x.mkv",
-EventAt:         time.Now().UTC().Add(-1 * time.Hour),
-TargetPath:      "/library/x" + strconv.Itoa(i) + ".mkv",
-OrganizeOutcome: "success",
-})
-if err != nil {
-t.Fatalf("InsertDecision: %v", err)
-}
-}
+	db := newSweepDB(t)
+	// Seed enough rows that the sweep would otherwise paginate.
+	for i := 0; i < 5; i++ {
+		_, err := db.InsertDecision(database.ParseDecision{
+			SourcePath:      "/dl/x.mkv",
+			SourceFilename:  "x.mkv",
+			EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+			TargetPath:      "/library/x" + strconv.Itoa(i) + ".mkv",
+			OrganizeOutcome: "success",
+		})
+		if err != nil {
+			t.Fatalf("InsertDecision: %v", err)
+		}
+	}
 
-srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-// Slow server: hold long enough that the per-request 30s timeout
-// would normally allow it, but cancellation should abort sooner.
-select {
-case <-r.Context().Done():
-return
-case <-time.After(2 * time.Second):
-}
-w.Header().Set("Content-Type", "application/json")
-_ = json.NewEncoder(w).Encode(ItemsResponse{Items: nil, TotalRecordCount: 0})
-}))
-defer srv.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Slow server: hold long enough that the per-request 30s timeout
+		// would normally allow it, but cancellation should abort sooner.
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ItemsResponse{Items: nil, TotalRecordCount: 0})
+	}))
+	defer srv.Close()
 
-client := NewClient(Config{URL: srv.URL, APIKey: "k"})
-sweeper := NewSweeper(client, db)
-sweeper.SetPageDelay(0)
+	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
+	sweeper := NewSweeper(client, db)
+	sweeper.SetPageDelay(0)
 
-ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
 
-start := time.Now()
-err := sweeper.RunOnce(ctx, 24*time.Hour, 7*24*time.Hour)
-elapsed := time.Since(start)
-if err == nil {
-t.Fatalf("expected error on ctx cancellation, got nil")
-}
-if elapsed > 1500*time.Millisecond {
-t.Errorf("expected sweep to abort promptly, took %v", elapsed)
-}
+	start := time.Now()
+	err := sweeper.RunOnce(ctx, 24*time.Hour, 7*24*time.Hour)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatalf("expected error on ctx cancellation, got nil")
+	}
+	if elapsed > 1500*time.Millisecond {
+		t.Errorf("expected sweep to abort promptly, took %v", elapsed)
+	}
 }
 
 func TestSweep_PageDelayIsRespectedAndCancellable(t *testing.T) {
-db := newSweepDB(t)
-for i := 0; i < 3; i++ {
-_, err := db.InsertDecision(database.ParseDecision{
-SourcePath:      "/dl/x.mkv",
-SourceFilename:  "x.mkv",
-EventAt:         time.Now().UTC().Add(-1 * time.Hour),
-TargetPath:      "/library/d" + strconv.Itoa(i) + ".mkv",
-OrganizeOutcome: "success",
-})
-if err != nil {
-t.Fatalf("InsertDecision: %v", err)
-}
-}
+	db := newSweepDB(t)
+	for i := 0; i < 3; i++ {
+		_, err := db.InsertDecision(database.ParseDecision{
+			SourcePath:      "/dl/x.mkv",
+			SourceFilename:  "x.mkv",
+			EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+			TargetPath:      "/library/d" + strconv.Itoa(i) + ".mkv",
+			OrganizeOutcome: "success",
+		})
+		if err != nil {
+			t.Fatalf("InsertDecision: %v", err)
+		}
+	}
 
-items := []Item{{ID: "a", Path: "/library/d0.mkv"}, {ID: "b", Path: "/library/d1.mkv"}, {ID: "c", Path: "/library/d2.mkv"}}
-srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-startIndex, _ := strconv.Atoi(r.URL.Query().Get("StartIndex"))
-const limit = 1
-end := startIndex + limit
-if end > len(items) {
-end = len(items)
-}
-var page []Item
-if startIndex < len(items) {
-page = items[startIndex:end]
-}
-w.Header().Set("Content-Type", "application/json")
-_ = json.NewEncoder(w).Encode(ItemsResponse{Items: page, TotalRecordCount: len(items)})
-}))
-defer srv.Close()
+	items := []Item{{ID: "a", Path: "/library/d0.mkv"}, {ID: "b", Path: "/library/d1.mkv"}, {ID: "c", Path: "/library/d2.mkv"}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startIndex, _ := strconv.Atoi(r.URL.Query().Get("StartIndex"))
+		const limit = 1
+		end := startIndex + limit
+		if end > len(items) {
+			end = len(items)
+		}
+		var page []Item
+		if startIndex < len(items) {
+			page = items[startIndex:end]
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ItemsResponse{Items: page, TotalRecordCount: len(items)})
+	}))
+	defer srv.Close()
 
-client := NewClient(Config{URL: srv.URL, APIKey: "k"})
-sweeper := NewSweeper(client, db)
-// Tight delay; verifies pageDelay is honored without slowing the test much.
-sweeper.SetPageDelay(20 * time.Millisecond)
+	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
+	sweeper := NewSweeper(client, db)
+	// Tight delay; verifies pageDelay is honored without slowing the test much.
+	sweeper.SetPageDelay(20 * time.Millisecond)
 
-start := time.Now()
-if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
-t.Fatalf("RunOnce: %v", err)
-}
-elapsed := time.Since(start)
-// 3 items, page size 1 from server -> 3 fetches, 2 sleeps of 20ms = >=40ms.
-if elapsed < 30*time.Millisecond {
-t.Errorf("expected pageDelay to slow pagination, took %v", elapsed)
-}
+	start := time.Now()
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	elapsed := time.Since(start)
+	// 3 items, page size 1 from server -> 3 fetches, 2 sleeps of 20ms = >=40ms.
+	if elapsed < 30*time.Millisecond {
+		t.Errorf("expected pageDelay to slow pagination, took %v", elapsed)
+	}
 }
 
 func TestSweep_PathTranslationResolvesContainerPaths(t *testing.T) {
-db := newSweepDB(t)
-// Daemon writes to /mnt/STORAGE5/TVSHOWS/...
-daemonPath := "/mnt/STORAGE5/TVSHOWS/Tracker (2024)/Season 03/Tracker (2024) S03E18.mkv"
-id, err := db.InsertDecision(database.ParseDecision{
-SourcePath:      "/dl/tracker.mkv",
-SourceFilename:  "tracker.mkv",
-EventAt:         time.Now().UTC().Add(-1 * time.Hour),
-TargetPath:      daemonPath,
-OrganizeOutcome: "success",
-})
-if err != nil {
-t.Fatalf("InsertDecision: %v", err)
-}
+	db := newSweepDB(t)
+	// Daemon writes to /mnt/STORAGE5/TVSHOWS/...
+	daemonPath := "/mnt/STORAGE5/TVSHOWS/Tracker (2024)/Season 03/Tracker (2024) S03E18.mkv"
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/dl/tracker.mkv",
+		SourceFilename:  "tracker.mkv",
+		EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+		TargetPath:      daemonPath,
+		OrganizeOutcome: "success",
+	})
+	if err != nil {
+		t.Fatalf("InsertDecision: %v", err)
+	}
 
-// Jellyfin reports a container-internal path.
-jellyfinPath := "/tv5/Tracker (2024)/Season 03/Tracker (2024) S03E18.mkv"
-srv, _ := newFakeJellyfinServer(t, []Item{
-{ID: "jf-99", Path: jellyfinPath, ProviderIDs: map[string]string{"Imdb": "tt39402011"}},
-})
-client := NewClient(Config{URL: srv.URL, APIKey: "k"})
+	// Jellyfin reports a container-internal path.
+	jellyfinPath := "/tv5/Tracker (2024)/Season 03/Tracker (2024) S03E18.mkv"
+	srv, _ := newFakeJellyfinServer(t, []Item{
+		{ID: "jf-99", Path: jellyfinPath, ProviderIDs: map[string]string{"Imdb": "tt39402011"}},
+	})
+	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
 
-sweeper := NewSweeper(client, db)
-sweeper.SetPageDelay(0)
-sweeper.SetPathTranslator(NewPathTranslator([]PathMapping{
-{Jellyfin: "/tv5", Daemon: "/mnt/STORAGE5/TVSHOWS"},
-}))
+	sweeper := NewSweeper(client, db)
+	sweeper.SetPageDelay(0)
+	sweeper.SetPathTranslator(NewPathTranslator([]PathMapping{
+		{Jellyfin: "/tv5", Daemon: "/mnt/STORAGE5/TVSHOWS"},
+	}))
 
-if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
-t.Fatalf("RunOnce: %v", err)
-}
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
 
-dec, err := db.GetDecision(id)
-if err != nil {
-t.Fatalf("GetDecision: %v", err)
-}
-if dec.JellyfinItemID != "jf-99" {
-t.Errorf("expected JellyfinItemID=jf-99 (translation should match), got %q", dec.JellyfinItemID)
-}
-if dec.JellyfinImdbID != "tt39402011" {
-t.Errorf("expected JellyfinImdbID=tt39402011, got %q", dec.JellyfinImdbID)
-}
-if dec.JellyfinResolvedAt == nil {
-t.Error("expected JellyfinResolvedAt to be set")
-}
+	dec, err := db.GetDecision(id)
+	if err != nil {
+		t.Fatalf("GetDecision: %v", err)
+	}
+	if dec.JellyfinItemID != "jf-99" {
+		t.Errorf("expected JellyfinItemID=jf-99 (translation should match), got %q", dec.JellyfinItemID)
+	}
+	if dec.JellyfinImdbID != "tt39402011" {
+		t.Errorf("expected JellyfinImdbID=tt39402011, got %q", dec.JellyfinImdbID)
+	}
+	if dec.JellyfinResolvedAt == nil {
+		t.Error("expected JellyfinResolvedAt to be set")
+	}
 }
 
 func TestSweep_NoTranslatorMissesContainerPath(t *testing.T) {
-// Regression guard: without a translator, a container-internal path must
-// NOT match a daemon-side target_path. This is the bug the translator fixes.
-db := newSweepDB(t)
-daemonPath := "/mnt/STORAGE5/TVSHOWS/Foo/Foo S01E01.mkv"
-id, err := db.InsertDecision(database.ParseDecision{
-SourcePath:      "/dl/foo.mkv",
-SourceFilename:  "foo.mkv",
-EventAt:         time.Now().UTC().Add(-1 * time.Hour),
-TargetPath:      daemonPath,
-OrganizeOutcome: "success",
-})
-if err != nil {
-t.Fatalf("InsertDecision: %v", err)
-}
-srv, _ := newFakeJellyfinServer(t, []Item{
-{ID: "jf-1", Path: "/tv5/Foo/Foo S01E01.mkv"},
-})
-client := NewClient(Config{URL: srv.URL, APIKey: "k"})
-sweeper := NewSweeper(client, db)
-sweeper.SetPageDelay(0)
-if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
-t.Fatalf("RunOnce: %v", err)
-}
-dec, _ := db.GetDecision(id)
-if dec.JellyfinItemID != "" {
-t.Errorf("without translator, expected no match; got %q", dec.JellyfinItemID)
-}
+	// Regression guard: without a translator, a container-internal path must
+	// NOT match a daemon-side target_path. This is the bug the translator fixes.
+	db := newSweepDB(t)
+	daemonPath := "/mnt/STORAGE5/TVSHOWS/Foo/Foo S01E01.mkv"
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/dl/foo.mkv",
+		SourceFilename:  "foo.mkv",
+		EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+		TargetPath:      daemonPath,
+		OrganizeOutcome: "success",
+	})
+	if err != nil {
+		t.Fatalf("InsertDecision: %v", err)
+	}
+	srv, _ := newFakeJellyfinServer(t, []Item{
+		{ID: "jf-1", Path: "/tv5/Foo/Foo S01E01.mkv"},
+	})
+	client := NewClient(Config{URL: srv.URL, APIKey: "k"})
+	sweeper := NewSweeper(client, db)
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	dec, _ := db.GetDecision(id)
+	if dec.JellyfinItemID != "" {
+		t.Errorf("without translator, expected no match; got %q", dec.JellyfinItemID)
+	}
 }

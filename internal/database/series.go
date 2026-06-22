@@ -94,6 +94,74 @@ func (m *MediaDB) UpsertSeries(s *Series) (shouldUpdateExternal bool, err error)
 	s.TitleNormalized = NormalizeTitle(s.Title)
 	s.UpdatedAt = time.Now()
 
+	if s.CanonicalPath != "" {
+		var existingID int64
+		var existingTitle string
+		var existingYear int
+		var existingPriority int
+		var existingSonarrID sql.NullInt64
+
+		err = m.db.QueryRow(
+			`SELECT id, title, year, source_priority, sonarr_id
+			   FROM series
+			  WHERE canonical_path = ?
+			  ORDER BY CASE WHEN year > 0 THEN 0 ELSE 1 END, source_priority DESC, id ASC
+			  LIMIT 1`,
+			s.CanonicalPath,
+		).Scan(&existingID, &existingTitle, &existingYear, &existingPriority, &existingSonarrID)
+		if err != nil && err != sql.ErrNoRows {
+			return false, err
+		}
+		if err == nil {
+			title := existingTitle
+			year := existingYear
+			if shouldReplaceSeriesIdentity(existingTitle, existingYear, s.Title, s.Year) {
+				title = s.Title
+				year = s.Year
+			}
+			normalized := NormalizeTitle(title)
+			if normalized != NormalizeTitle(existingTitle) || year != existingYear {
+				merged, shouldUpdate, err := m.mergeSeriesIdentityCollisionLocked(existingID, title, normalized, year, s)
+				if err != nil {
+					return false, err
+				}
+				if merged {
+					return shouldUpdate, nil
+				}
+			}
+
+			if s.SourcePriority >= existingPriority {
+				_, err = m.db.Exec(`
+					UPDATE series SET
+						title = ?, title_normalized = ?, year = ?,
+						library_root = ?, source = ?, source_priority = ?,
+						episode_count = MAX(episode_count, ?),
+						last_episode_added = COALESCE(?, last_episode_added),
+						updated_at = ?,
+						tvdb_id = COALESCE(?, tvdb_id),
+						imdb_id = COALESCE(?, imdb_id),
+						sonarr_id = COALESCE(?, sonarr_id)
+					WHERE id = ?`,
+					title, normalized, year,
+					s.LibraryRoot, s.Source, s.SourcePriority,
+					s.EpisodeCount,
+					s.LastEpisodeAdded, s.UpdatedAt,
+					s.TvdbID, s.ImdbID, s.SonarrID,
+					existingID,
+				)
+				if err != nil {
+					return false, err
+				}
+			}
+
+			s.ID = existingID
+			s.Title = title
+			s.TitleNormalized = normalized
+			s.Year = year
+			return false, nil
+		}
+	}
+
 	// Check existing record
 	var existingID int64
 	var existingPath string
@@ -178,6 +246,94 @@ func (m *MediaDB) UpsertSeries(s *Series) (shouldUpdateExternal bool, err error)
 	return false, nil
 }
 
+func (m *MediaDB) mergeSeriesIdentityCollisionLocked(duplicateID int64, title, normalized string, year int, incoming *Series) (merged bool, shouldUpdateExternal bool, err error) {
+	var keeperID int64
+	var keeperPath string
+	var keeperPriority int
+	var keeperSonarrID sql.NullInt64
+
+	err = m.db.QueryRow(
+		`SELECT id, canonical_path, source_priority, sonarr_id
+		   FROM series
+		  WHERE title_normalized = ? AND year = ? AND id != ?
+		  ORDER BY source_priority DESC, episode_count DESC, id ASC
+		  LIMIT 1`,
+		normalized, year, duplicateID,
+	).Scan(&keeperID, &keeperPath, &keeperPriority, &keeperSonarrID)
+	if err == sql.ErrNoRows {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+
+	tx, err := m.db.Begin()
+	if err != nil {
+		return false, false, err
+	}
+	defer tx.Rollback()
+
+	if _, _, _, err := mergeDuplicateSeriesIntoKeeper(tx, keeperID, duplicateID); err != nil {
+		return false, false, err
+	}
+
+	if incoming.SourcePriority >= keeperPriority {
+		_, err = tx.Exec(`
+			UPDATE series SET
+				title = ?,
+				title_normalized = ?,
+				year = ?,
+				source = ?,
+				source_priority = MAX(source_priority, ?),
+				episode_count = MAX(COALESCE(episode_count, 0), ?),
+				last_episode_added = COALESCE(?, last_episode_added),
+				updated_at = ?,
+				tvdb_id = COALESCE(?, tvdb_id),
+				imdb_id = COALESCE(?, imdb_id),
+				sonarr_id = COALESCE(?, sonarr_id)
+			WHERE id = ?`,
+			title, normalized, year,
+			incoming.Source,
+			incoming.SourcePriority,
+			incoming.EpisodeCount,
+			incoming.LastEpisodeAdded,
+			incoming.UpdatedAt,
+			incoming.TvdbID, incoming.ImdbID, incoming.SonarrID,
+			keeperID,
+		)
+		if err != nil {
+			return false, false, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, false, err
+	}
+
+	if incoming.CanonicalPath != "" && incoming.CanonicalPath != keeperPath {
+		if err := m.recordConflictLocked("series", title, year, keeperPath, incoming.CanonicalPath); err != nil {
+			// Conflict recording is informational; the upsert should still succeed.
+		}
+	}
+
+	incoming.ID = keeperID
+	incoming.Title = title
+	incoming.TitleNormalized = normalized
+	incoming.Year = year
+
+	if incoming.Source == "jellywatch" && incoming.CanonicalPath != keeperPath && keeperSonarrID.Valid {
+		return true, true, nil
+	}
+	return true, false, nil
+}
+
+func shouldReplaceSeriesIdentity(existingTitle string, existingYear int, incomingTitle string, incomingYear int) bool {
+	if NormalizeTitle(existingTitle) == "" {
+		return NormalizeTitle(incomingTitle) != ""
+	}
+	return existingYear == 0 && incomingYear > 0 && NormalizeTitle(incomingTitle) != ""
+}
+
 // GetAllSeriesInLibrary returns all series in a specific library root
 func (m *MediaDB) GetAllSeriesInLibrary(libraryRoot string) ([]*Series, error) {
 	m.mu.RLock()
@@ -234,6 +390,25 @@ func (m *MediaDB) IncrementEpisodeCount(seriesID int64) error {
 			updated_at = ?
 		WHERE id = ?`,
 		now, now, seriesID,
+	)
+	return err
+}
+
+// UpdateSeriesCanonicalPath records a filesystem move for a series and marks
+// the row dirty so external managers can be reconciled.
+func (m *MediaDB) UpdateSeriesCanonicalPath(id int64, canonicalPath, libraryRoot string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	_, err := m.db.Exec(`
+		UPDATE series SET
+			canonical_path = ?,
+			library_root = ?,
+			updated_at = ?,
+			sonarr_path_dirty = 1
+		WHERE id = ?`,
+		canonicalPath, libraryRoot, now, id,
 	)
 	return err
 }

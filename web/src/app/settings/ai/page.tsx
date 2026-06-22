@@ -15,6 +15,11 @@ import {
   useAIModels,
 } from '@/hooks/useSettings';
 import { ModelSelect } from '@/components/settings/ModelSelect';
+import { buildAISettingsPayload } from './settingsPayload';
+
+function numberInputValue(value: unknown): string | number {
+  return typeof value === 'number' || typeof value === 'string' ? value : '';
+}
 
 export default function AISettingsPage() {
   const { data, isLoading } = useSettingsSection('ai');
@@ -34,7 +39,7 @@ export default function AISettingsPage() {
     setDraft((prev) => ({ ...prev, [key]: value }));
 
   const submit = () => {
-    update.mutate(draft, {
+    update.mutate(buildAISettingsPayload(draft), {
       onSuccess: (result) => {
         if (result.reload.ok) toast.success('AI settings saved');
         else toast.error('Daemon reload failed; previous config restored');
@@ -141,8 +146,11 @@ export default function AISettingsPage() {
                 <span className="font-medium text-zinc-300">Confidence threshold</span>
                 <Input
                   type="number"
-                  value={typeof draft.confidence_threshold === 'number' ? draft.confidence_threshold : ''}
-                  onChange={(e) => set('confidence_threshold', Number(e.target.value))}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={numberInputValue(draft.confidence_threshold)}
+                  onChange={(e) => set('confidence_threshold', e.target.value)}
                   placeholder="0.85"
                 />
               </label>
@@ -151,8 +159,11 @@ export default function AISettingsPage() {
                 <span className="font-medium text-zinc-300">Auto-trigger threshold</span>
                 <Input
                   type="number"
-                  value={typeof draft.auto_trigger_threshold === 'number' ? draft.auto_trigger_threshold : ''}
-                  onChange={(e) => set('auto_trigger_threshold', Number(e.target.value))}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={numberInputValue(draft.auto_trigger_threshold)}
+                  onChange={(e) => set('auto_trigger_threshold', e.target.value)}
                   placeholder="0.65"
                 />
               </label>
@@ -161,8 +172,10 @@ export default function AISettingsPage() {
                 <span className="font-medium text-zinc-300">Timeout (seconds)</span>
                 <Input
                   type="number"
-                  value={typeof draft.timeout_seconds === 'number' ? draft.timeout_seconds : ''}
-                  onChange={(e) => set('timeout_seconds', Number(e.target.value))}
+                  min={1}
+                  max={600}
+                  value={numberInputValue(draft.timeout_seconds)}
+                  onChange={(e) => set('timeout_seconds', e.target.value)}
                 />
               </label>
 
@@ -170,8 +183,10 @@ export default function AISettingsPage() {
                 <span className="font-medium text-zinc-300">Max retries</span>
                 <Input
                   type="number"
-                  value={typeof draft.max_retries === 'number' ? draft.max_retries : ''}
-                  onChange={(e) => set('max_retries', Number(e.target.value))}
+                  min={0}
+                  max={20}
+                  value={numberInputValue(draft.max_retries)}
+                  onChange={(e) => set('max_retries', e.target.value)}
                 />
               </label>
 
@@ -179,8 +194,9 @@ export default function AISettingsPage() {
                 <span className="font-medium text-zinc-300">Hourly limit</span>
                 <Input
                   type="number"
-                  value={typeof draft.hourly_limit === 'number' ? draft.hourly_limit : ''}
-                  onChange={(e) => set('hourly_limit', Number(e.target.value))}
+                  min={0}
+                  value={numberInputValue(draft.hourly_limit)}
+                  onChange={(e) => set('hourly_limit', e.target.value)}
                 />
               </label>
 
@@ -188,8 +204,9 @@ export default function AISettingsPage() {
                 <span className="font-medium text-zinc-300">Daily limit</span>
                 <Input
                   type="number"
-                  value={typeof draft.daily_limit === 'number' ? draft.daily_limit : ''}
-                  onChange={(e) => set('daily_limit', Number(e.target.value))}
+                  min={0}
+                  value={numberInputValue(draft.daily_limit)}
+                  onChange={(e) => set('daily_limit', e.target.value)}
                 />
               </label>
 
@@ -197,8 +214,9 @@ export default function AISettingsPage() {
                 <span className="font-medium text-zinc-300">Enhancement interval (seconds)</span>
                 <Input
                   type="number"
-                  value={typeof draft.enhancement_interval_seconds === 'number' ? draft.enhancement_interval_seconds : ''}
-                  onChange={(e) => set('enhancement_interval_seconds', Number(e.target.value))}
+                  min={1}
+                  value={numberInputValue(draft.enhancement_interval_seconds)}
+                  onChange={(e) => set('enhancement_interval_seconds', e.target.value)}
                 />
               </label>
 
@@ -271,4 +289,3 @@ export default function AISettingsPage() {
     </div>
   );
 }
-

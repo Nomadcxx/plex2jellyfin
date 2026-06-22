@@ -22,7 +22,7 @@ export function Sidebar() {
     href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/');
 
   return (
-    <aside className="w-64 bg-zinc-900 border-r border-zinc-800 h-screen p-4">
+    <aside className="hidden w-64 bg-zinc-900 border-r border-zinc-800 h-screen p-4 md:block">
       <div className="mb-8 flex items-center gap-3">
         <Image
           src="/jellywooch.png"
@@ -51,5 +51,37 @@ export function Sidebar() {
         ))}
       </nav>
     </aside>
+  );
+}
+
+export function MobileNav() {
+  const pathname = usePathname();
+
+  const isActive = (href: string) =>
+    href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/');
+
+  return (
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-800 bg-zinc-950/95 px-2 py-2 backdrop-blur md:hidden"
+      aria-label="Primary"
+    >
+      <div className="flex items-center gap-1 overflow-x-auto">
+        {navigation.map((item) => (
+          <Link
+            key={item.name}
+            href={item.href}
+            className={
+              isActive(item.href)
+                ? 'flex min-w-16 flex-col items-center gap-1 rounded-md bg-fuchsia-500/15 px-2 py-1.5 text-xs font-medium text-fuchsia-300'
+                : 'flex min-w-16 flex-col items-center gap-1 rounded-md px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'
+            }
+            aria-current={isActive(item.href) ? 'page' : undefined}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            <span>{item.name}</span>
+          </Link>
+        ))}
+      </div>
+    </nav>
   );
 }

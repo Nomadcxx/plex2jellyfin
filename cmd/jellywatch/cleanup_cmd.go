@@ -71,14 +71,14 @@ var cruftExtensions = map[string]bool{
 const maxSampleSize = 50 * 1024 * 1024
 
 func runCleanupCruft(dryRun bool) error {
-	// Escalate to root if needed for file deletion (skip for dry-run)
-	if !dryRun && privilege.NeedsRoot() {
-		return privilege.Escalate("delete cruft files")
-	}
-
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Escalate to root if needed for file deletion (skip for dry-run)
+	if !dryRun && privilege.NeedsRoot() {
+		return privilege.Escalate("delete cruft files")
 	}
 
 	allRoots := append(cfg.Libraries.TV, cfg.Libraries.Movies...)
@@ -133,14 +133,14 @@ func runCleanupCruft(dryRun bool) error {
 }
 
 func runCleanupEmpty(dryRun bool) error {
-	// Escalate to root if needed for directory deletion (skip for dry-run)
-	if !dryRun && privilege.NeedsRoot() {
-		return privilege.Escalate("delete empty directories")
-	}
-
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Escalate to root if needed for directory deletion (skip for dry-run)
+	if !dryRun && privilege.NeedsRoot() {
+		return privilege.Escalate("delete empty directories")
 	}
 
 	allRoots := append(cfg.Libraries.TV, cfg.Libraries.Movies...)

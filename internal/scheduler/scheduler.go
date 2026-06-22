@@ -37,6 +37,7 @@ type Scheduler struct {
 	db      *database.MediaDB
 	logger  *logging.Logger
 	mu      sync.Mutex
+	wg      sync.WaitGroup
 	jobs    map[string]*registeredJob
 	cancels map[string]context.CancelFunc
 }
@@ -105,32 +106,47 @@ func (s *Scheduler) tick(ctx context.Context) {
 		if !shouldRun(row, now) {
 			continue
 		}
-		go s.fire(ctx, row.Name)
+		if err := s.start(ctx, row.Name); err != nil && s.logger != nil && !strings.Contains(err.Error(), "already running") {
+			s.logger.Warn("scheduler", fmt.Sprintf("start job failed name=%s err=%v", row.Name, err))
+		}
 	}
 }
 
-func (s *Scheduler) fire(ctx context.Context, name string) {
+func (s *Scheduler) start(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	rj, ok := s.jobs[name]
 	if !ok || rj.running {
 		s.mu.Unlock()
-		return
+		if !ok {
+			return fmt.Errorf("unknown job %q", name)
+		}
+		return fmt.Errorf("job %q is already running", name)
 	}
 	rj.running = true
 	jobCtx, cancel := context.WithCancel(ctx)
 	s.cancels[name] = cancel
+	s.wg.Add(1)
 	s.mu.Unlock()
 
+	go s.fire(jobCtx, name, rj)
+	return nil
+}
+
+func (s *Scheduler) fire(ctx context.Context, name string, rj *registeredJob) {
 	defer func() {
 		s.mu.Lock()
 		rj.running = false
 		delete(s.cancels, name)
 		s.mu.Unlock()
+		s.wg.Done()
 	}()
 
 	_ = s.db.MarkScheduledJobRunning(name, true)
 	start := time.Now()
-	result, err := rj.def.Run(jobCtx)
+	result, err := rj.def.Run(ctx)
 	dur := time.Since(start)
 
 	row, _ := s.db.GetScheduledJob(name)
@@ -148,7 +164,7 @@ func (s *Scheduler) fire(ctx context.Context, name string) {
 	if s.logger != nil {
 		if err != nil {
 			s.logger.Error("scheduler", fmt.Sprintf("job %s failed in %s: %v", name, dur, err), nil)
-		} else {
+		} else if strings.TrimSpace(result) != "" {
 			s.logger.Info("scheduler", fmt.Sprintf("job %s done in %s: %s", name, dur, result))
 		}
 	}
@@ -156,29 +172,39 @@ func (s *Scheduler) fire(ctx context.Context, name string) {
 
 // RunNow triggers a job out-of-band (used by IPC/API).
 func (s *Scheduler) RunNow(ctx context.Context, name string) error {
-	s.mu.Lock()
-	rj, ok := s.jobs[name]
-	s.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("unknown job %q", name)
-	}
-	if rj.running {
-		return fmt.Errorf("job %q is already running", name)
-	}
-	go s.fire(ctx, name)
-	return nil
+	return s.start(ctx, name)
 }
 
 // Stop cancels a running job.
 func (s *Scheduler) Stop(name string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	cancel, ok := s.cancels[name]
+	s.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("job %q is not running", name)
 	}
 	cancel()
 	return nil
+}
+
+// Shutdown cancels all running jobs and waits for them to finish.
+func (s *Scheduler) Shutdown() {
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.cancels))
+	for _, cancel := range s.cancels {
+		cancels = append(cancels, cancel)
+	}
+	s.mu.Unlock()
+
+	for _, cancel := range cancels {
+		cancel()
+	}
+	s.Wait()
+}
+
+// Wait blocks until all currently running jobs have finished.
+func (s *Scheduler) Wait() {
+	s.wg.Wait()
 }
 
 // shouldRun decides if `row` should fire now.

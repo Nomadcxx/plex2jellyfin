@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Nomadcxx/jellywatch/internal/paths"
 )
 
 // Level represents a logging level
@@ -116,13 +118,12 @@ func New(cfg Config) (*Logger, error) {
 		l.maxBackups = 5
 	}
 
-	// Set default log file path if not specified
 	if cfg.File == "" {
-		configDir, err := os.UserConfigDir()
+		jwDir, err := paths.JellyWatchDir()
 		if err != nil {
-			return nil, fmt.Errorf("unable to get config dir: %w", err)
+			return nil, fmt.Errorf("unable to get jellywatch dir: %w", err)
 		}
-		cfg.File = filepath.Join(configDir, "jellywatch", "logs", "jellywatch.log")
+		cfg.File = filepath.Join(jwDir, "logs", "jellywatch.log")
 	}
 
 	// Expand ~ in file path

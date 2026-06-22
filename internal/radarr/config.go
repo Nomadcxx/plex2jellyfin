@@ -1,6 +1,9 @@
 package radarr
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // DownloadClientConfig represents Radarr's download client configuration.
 type DownloadClientConfig struct {
@@ -105,8 +108,12 @@ func (c *Client) UpdateNamingConfig(cfg *NamingConfig) error {
 
 // GetRootFolders retrieves all root folders from Radarr
 func (c *Client) GetRootFolders() ([]RootFolder, error) {
+	return c.GetRootFoldersContext(context.Background())
+}
+
+func (c *Client) GetRootFoldersContext(ctx context.Context) ([]RootFolder, error) {
 	var folders []RootFolder
-	if err := c.get("/api/v3/rootfolder", &folders); err != nil {
+	if err := c.getContext(ctx, "/api/v3/rootfolder", &folders); err != nil {
 		return nil, err
 	}
 	return folders, nil

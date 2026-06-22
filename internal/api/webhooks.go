@@ -56,7 +56,7 @@ func (s *Server) validateWebhookSecret(r *http.Request) bool {
 	}
 	expected := strings.TrimSpace(s.cfg.Jellyfin.WebhookSecret)
 	if expected == "" {
-		return isLoopbackRequest(r)
+		return false
 	}
 
 	provided := strings.TrimSpace(r.Header.Get("X-Jellywatch-Webhook-Secret"))

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +17,11 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	tea "github.com/charmbracelet/bubbletea"
+)
+
+const (
+	daemonServicePath = "/etc/systemd/system/jellywatchd.service"
+	webServicePath    = "/etc/systemd/system/jellyweb.service"
 )
 
 func (m model) startInstallation() (tea.Model, tea.Cmd) {
@@ -54,6 +60,7 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 			{name: "Stop services", description: "Stopping running services", execute: stopRunningServices, status: statusPending},
 			{name: "Build binaries", description: "Building jellywatch and jellywatchd", execute: buildBinaries, status: statusPending},
 			{name: "Install binaries", description: "Installing to /usr/local/bin", execute: installBinaries, status: statusPending},
+			{name: "Refresh systemd", description: "Updating installed systemd units", execute: refreshSystemdUnits, status: statusPending},
 			{name: "Start services", description: "Restarting services", execute: restartServices, status: statusPending},
 		}
 	} else {
@@ -224,6 +231,17 @@ user = "%s"
 group = "%s"
 file_mode = "%s"
 dir_mode = "%s"
+
+[metadata_recovery]
+# Passive recovery checks Jellyfin for metadata that arrives after import.
+passive_enabled = true
+# Active repair is disabled by default because it asks Jellyfin to refresh items.
+repair_enabled = false
+passive_interval_minutes = 60
+passive_batch_size = 25
+repair_batch_size = 5
+repair_cooldown_hours = 6
+needs_review_after = 4
 `,
 		formatPathList(watchMovies),
 		formatPathList(watchTV),
@@ -261,11 +279,26 @@ api_key = "%s"
 enabled = true
 url = "%s"
 api_key = "%s"
+# Jellyfin webhook requests must send this same value in the
+# X-Jellywatch-Webhook-Secret header.
 webhook_secret = "%s"
+# Companion plugin shared secret; keep this the same value used for X-Jellywatch-Webhook-Secret.
+plugin_shared_secret = "%s"
 notify_on_import = true
 playback_safety = true
 verify_after_refresh = false
-`, m.jellyfinURL, m.jellyfinAPIKey, webhookSecret)
+
+# If Jellyfin reports paths from a different mount namespace than JellyWatch,
+# add one mapping per mounted library root.
+#
+# [[jellyfin.path_mappings]]
+# jellyfin = "/path/as/jellyfin/sees/it"
+# daemon = "/path/as/jellywatch/sees/it"
+#
+# [[jellyfin.path_mappings]]
+# jellyfin = "/another/jellyfin/root"
+# daemon = "/another/jellywatch/root"
+`, m.jellyfinURL, m.jellyfinAPIKey, webhookSecret, webhookSecret)
 	}
 
 	if m.aiEnabled && m.aiModel != "" {
@@ -296,7 +329,23 @@ func setupSystemd(m *model) error {
 		actualUser = "root" // fallback, though this shouldn't happen in normal install
 	}
 
-	serviceContent := fmt.Sprintf(`[Unit]
+	serviceContent := buildDaemonServiceUnit(actualUser)
+
+	if err := os.WriteFile(daemonServicePath, []byte(serviceContent), 0600); err != nil {
+		return err
+	}
+
+	exec.Command("systemctl", "daemon-reload").Run()
+
+	if err := exec.Command("systemctl", "enable", "jellywatchd.service").Run(); err != nil {
+		return fmt.Errorf("failed to enable service")
+	}
+
+	return nil
+}
+
+func buildDaemonServiceUnit(actualUser string) string {
+	return fmt.Sprintf(`[Unit]
 Description=JellyWatch Media Organizer Daemon
 After=network.target
 
@@ -319,19 +368,6 @@ AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
 [Install]
 WantedBy=multi-user.target
 `, actualUser)
-
-	servicePath := "/etc/systemd/system/jellywatchd.service"
-	if err := os.WriteFile(servicePath, []byte(serviceContent), 0600); err != nil {
-		return err
-	}
-
-	exec.Command("systemctl", "daemon-reload").Run()
-
-	if err := exec.Command("systemctl", "enable", "jellywatchd.service").Run(); err != nil {
-		return fmt.Errorf("failed to enable service")
-	}
-
-	return nil
 }
 
 func startService(m *model) error {
@@ -360,8 +396,7 @@ func setupWebSystemd(m *model) error {
 
 	serviceContent := buildWebServiceUnit(actualUser, normalizedWebPort(m.webPort))
 
-	servicePath := "/etc/systemd/system/jellyweb.service"
-	if err := os.WriteFile(servicePath, []byte(serviceContent), 0600); err != nil {
+	if err := os.WriteFile(webServicePath, []byte(serviceContent), 0600); err != nil {
 		return err
 	}
 
@@ -424,14 +459,63 @@ SyslogIdentifier=jellyweb
 
 # Security hardening
 NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/home
+ProtectSystem=full
+# ProtectHome left unset: jellyweb needs RW on the user's config dir
+# (config.toml + lock files + media.db live under ~/.config/jellywatch).
+# Jellyweb also executes user-triggered library maintenance actions such as
+# consolidation, so non-system media mounts must remain writable according to
+# their normal filesystem permissions rather than a hardcoded allow-list.
 PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
 `, actualUser, port)
+}
+
+func refreshSystemdUnits(m *model) error {
+	daemonExists := pathExists(daemonServicePath)
+	webExists := pathExists(webServicePath)
+	if !daemonExists && !webExists {
+		return nil
+	}
+
+	actualUser := getActualUser()
+	if actualUser == "" || actualUser == "root" {
+		actualUser = "root"
+	}
+
+	if daemonExists {
+		if err := os.WriteFile(daemonServicePath, []byte(buildDaemonServiceUnit(actualUser)), 0600); err != nil {
+			return fmt.Errorf("failed to refresh daemon service unit: %w", err)
+		}
+	}
+
+	if webExists {
+		port := existingWebServicePort(webServicePath, normalizedWebPort(m.webPort))
+		if err := os.WriteFile(webServicePath, []byte(buildWebServiceUnit(actualUser, port)), 0600); err != nil {
+			return fmt.Errorf("failed to refresh web service unit: %w", err)
+		}
+	}
+
+	exec.Command("systemctl", "daemon-reload").Run()
+	return nil
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func existingWebServicePort(path, fallback string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fallback
+	}
+	match := regexp.MustCompile(`--port\s+([0-9]+)`).FindSubmatch(data)
+	if len(match) != 2 {
+		return fallback
+	}
+	return string(match[1])
 }
 
 // stopRunningServices stops jellywatchd and jellyweb before an update

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/paths"
 	"github.com/spf13/viper"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type PermissionsConfig struct {
@@ -25,20 +26,22 @@ type PermissionsConfig struct {
 }
 
 type Config struct {
-	Watch         WatchConfig       `mapstructure:"watch"`
-	Libraries     LibrariesConfig   `mapstructure:"libraries"`
-	Daemon        DaemonConfig      `mapstructure:"daemon"`
-	Options       OptionsConfig     `mapstructure:"options"`
-	Sonarr        SonarrConfig      `mapstructure:"sonarr"`
-	Radarr        RadarrConfig      `mapstructure:"radarr"`
-	Jellyfin      JellyfinConfig    `mapstructure:"jellyfin"`
-	TMDB          TMDBConfig        `mapstructure:"tmdb"`
-	Logging       LoggingConfig     `mapstructure:"logging"`
-	Permissions   PermissionsConfig `mapstructure:"permissions"`
-	AI            AIConfig          `mapstructure:"ai"`
-	API           APIConfig         `mapstructure:"api"`
-	Password      string            `mapstructure:"password" secret:"true"`
-	SecureCookies bool              `mapstructure:"secure_cookies"`
+	Watch            WatchConfig            `mapstructure:"watch"`
+	Libraries        LibrariesConfig        `mapstructure:"libraries"`
+	Daemon           DaemonConfig           `mapstructure:"daemon"`
+	Options          OptionsConfig          `mapstructure:"options"`
+	Sonarr           SonarrConfig           `mapstructure:"sonarr"`
+	Radarr           RadarrConfig           `mapstructure:"radarr"`
+	Jellyfin         JellyfinConfig         `mapstructure:"jellyfin"`
+	TMDB             TMDBConfig             `mapstructure:"tmdb"`
+	Logging          LoggingConfig          `mapstructure:"logging"`
+	Permissions      PermissionsConfig      `mapstructure:"permissions"`
+	AI               AIConfig               `mapstructure:"ai"`
+	API              APIConfig              `mapstructure:"api"`
+	MetadataRecovery MetadataRecoveryConfig `mapstructure:"metadata_recovery" toml:"metadata_recovery"`
+	Password         string                 `mapstructure:"password" secret:"true"`
+	PasswordHash     string                 `mapstructure:"password_hash" secret:"true"`
+	SecureCookies    bool                   `mapstructure:"secure_cookies"`
 }
 
 // APIConfig holds HTTP-server-only concerns (CORS, etc.). CORS origins
@@ -149,6 +152,16 @@ type KeepaliveConfig struct {
 	Enabled            bool `mapstructure:"enabled"`
 	IntervalSeconds    int  `mapstructure:"interval_seconds"`
 	IdleTimeoutSeconds int  `mapstructure:"idle_timeout_seconds"`
+}
+
+type MetadataRecoveryConfig struct {
+	PassiveEnabled         bool `mapstructure:"passive_enabled" toml:"passive_enabled"`
+	RepairEnabled          bool `mapstructure:"repair_enabled" toml:"repair_enabled"`
+	PassiveIntervalMinutes int  `mapstructure:"passive_interval_minutes" toml:"passive_interval_minutes"`
+	PassiveBatchSize       int  `mapstructure:"passive_batch_size" toml:"passive_batch_size"`
+	RepairBatchSize        int  `mapstructure:"repair_batch_size" toml:"repair_batch_size"`
+	RepairCooldownHours    int  `mapstructure:"repair_cooldown_hours" toml:"repair_cooldown_hours"`
+	NeedsReviewAfter       int  `mapstructure:"needs_review_after" toml:"needs_review_after"`
 }
 
 // AIConfig contains AI title matching configuration
@@ -339,6 +352,15 @@ func DefaultConfig() *Config {
 		API: APIConfig{
 			AllowedOrigins: []string{"http://localhost:3000"},
 		},
+		MetadataRecovery: MetadataRecoveryConfig{
+			PassiveEnabled:         true,
+			RepairEnabled:          false,
+			PassiveIntervalMinutes: 60,
+			PassiveBatchSize:       25,
+			RepairBatchSize:        5,
+			RepairCooldownHours:    6,
+			NeedsReviewAfter:       4,
+		},
 	}
 }
 
@@ -356,8 +378,10 @@ func Load() (*Config, error) {
 	// Read config file if it exists
 	if _, err := os.Stat(configPath); err == nil {
 		if err := v.ReadInConfig(); err != nil {
-			return nil, fmt.Errorf("unable to read config file: %w", err)
+			return nil, fmt.Errorf("cannot read config file %s: %w", configPath, err)
 		}
+	} else if os.IsPermission(err) {
+		return nil, fmt.Errorf("cannot stat config file %s: %w", configPath, err)
 	}
 
 	// Unmarshal config
@@ -371,6 +395,19 @@ func Load() (*Config, error) {
 	// ignore, leaving users wondering why a setting has no effect.
 	if unknown := findUnknownKeys(v, cfg); len(unknown) > 0 {
 		fmt.Fprintf(os.Stderr, "config warning: %d unknown key(s) in %s: %v\n", len(unknown), configPath, unknown)
+	}
+
+	if cfg.Password != "" && cfg.PasswordHash == "" {
+		hash, hashErr := HashPassword(cfg.Password)
+		if hashErr == nil {
+			cfg.PasswordHash = hash
+			cfg.Password = ""
+			if saveErr := cfg.Save(); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "config warning: failed to migrate plaintext password to password_hash: %v\n", saveErr)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "config warning: failed to hash plaintext password: %v\n", hashErr)
+		}
 	}
 
 	return cfg, nil
@@ -434,8 +471,23 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
+	if err := c.NormalizeSecrets(); err != nil {
+		return err
+	}
 
 	return AtomicWriteWithLock(configFile, []byte(c.ToTOML()), 0600)
+}
+
+func (c *Config) NormalizeSecrets() error {
+	if c.Password != "" && c.PasswordHash == "" {
+		hash, err := HashPassword(c.Password)
+		if err != nil {
+			return err
+		}
+		c.PasswordHash = hash
+		c.Password = ""
+	}
+	return nil
 }
 
 func ConfigPath() (string, error) {
@@ -517,13 +569,15 @@ notify_on_import = %v
 playback_safety = %v
 # Query Jellyfin after refresh to verify correct identification (Phase 2)
 verify_after_refresh = %v
-# Shared secret for validating incoming webhooks (required when Jellyfin webhooks are enabled)
+# Shared secret for validating incoming webhooks. Jellyfin webhook requests must
+# send this value in the X-Jellywatch-Webhook-Secret header.
 webhook_secret = "%s"
 
 # JellyWatch Companion Plugin Settings (Phase 3)
 # Enable companion plugin for webhooks and verification
 plugin_enabled = %v
-# Shared secret for webhook authentication
+# Companion plugin shared secret. Use the same value as webhook_secret unless
+# the plugin is configured for a separate endpoint that does not call JellyWatch webhooks.
 plugin_shared_secret = "%s"
 # Automatically trigger Jellyfin library scans after organizing
 plugin_auto_scan = %v
@@ -531,6 +585,20 @@ plugin_auto_scan = %v
 plugin_verify_on_startup = %v
 # Hours between automatic verifications (0 = disabled)
 plugin_verify_interval = %d
+
+# ============================================================================
+# METADATA RECOVERY
+# Passive recovery checks Jellyfin for metadata that arrived after import.
+# Active repair is disabled by default because it asks Jellyfin to refresh items.
+# ============================================================================
+[metadata_recovery]
+passive_enabled = %v
+repair_enabled = %v
+passive_interval_minutes = %d
+passive_batch_size = %d
+repair_batch_size = %d
+repair_cooldown_hours = %d
+needs_review_after = %d
 
 # ============================================================================
 # DAEMON SETTINGS
@@ -562,11 +630,14 @@ delete_source = %v
 enabled = %v
 ollama_endpoint = "%s"
 model = "%s"
+fallback_model = "%s"
 confidence_threshold = %.2f
 auto_trigger_threshold = %.2f
 timeout_seconds = %d
 cache_enabled = %v
 cloud_model = "%s"
+auto_resolve_risky = %v
+max_retries = %d
 hourly_limit = %d
 daily_limit = %d
 enhancement_interval_seconds = %d
@@ -614,6 +685,13 @@ allowed_origins = %s
 		c.Jellyfin.PluginAutoScan,
 		c.Jellyfin.PluginVerifyOnStartup,
 		c.Jellyfin.PluginVerifyInterval,
+		c.MetadataRecovery.PassiveEnabled,
+		c.MetadataRecovery.RepairEnabled,
+		c.MetadataRecovery.PassiveIntervalMinutes,
+		c.MetadataRecovery.PassiveBatchSize,
+		c.MetadataRecovery.RepairBatchSize,
+		c.MetadataRecovery.RepairCooldownHours,
+		c.MetadataRecovery.NeedsReviewAfter,
 		c.Daemon.Enabled,
 		c.Daemon.ScanFrequency,
 		c.Daemon.HealthAddr,
@@ -623,11 +701,14 @@ allowed_origins = %s
 		c.AI.Enabled,
 		c.AI.OllamaEndpoint,
 		c.AI.Model,
+		c.AI.FallbackModel,
 		c.AI.ConfidenceThreshold,
 		c.AI.AutoTriggerThreshold,
 		c.AI.TimeoutSeconds,
 		c.AI.CacheEnabled,
 		c.AI.CloudModel,
+		c.AI.AutoResolveRisky,
+		c.AI.MaxRetries,
 		c.AI.HourlyLimit,
 		c.AI.DailyLimit,
 		c.AI.EnhancementIntervalSeconds,
@@ -658,12 +739,29 @@ allowed_origins = %s
 		base += perm
 	}
 
-	// Append password if configured
-	if c.Password != "" {
-		base += fmt.Sprintf("\n# ============================================================================\n# AUTHENTICATION\n# Optional password to protect the web UI\n# Leave empty to disable authentication\n# ============================================================================\npassword = \"%s\"\n", c.Password)
+	// Append password hash if configured. The legacy plaintext password field
+	// is still read for compatibility and migrated by Load, but new writes
+	// should not persist plaintext credentials.
+	if c.PasswordHash != "" {
+		base += fmt.Sprintf("\n# ============================================================================\n# AUTHENTICATION\n# Optional bcrypt password hash to protect the web UI\n# Leave empty to disable authentication\n# ============================================================================\npassword_hash = \"%s\"\n", c.PasswordHash)
 	}
 
 	return base
+}
+
+func HashPassword(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func VerifyPassword(password, hash string) bool {
+	if strings.TrimSpace(hash) == "" {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
 func formatStringSlice(s []string) string {
@@ -685,6 +783,16 @@ func GetDatabasePath() string {
 		return "./media.db"
 	}
 	return dbPath
+}
+
+// GetReportsPath returns the directory for JellyWatch postmortem reports.
+func GetReportsPath() string {
+	reportsPath, err := paths.ReportsDir()
+	if err != nil {
+		log.Printf("[config] warning: could not determine reports path, falling back to ./reports: %v", err)
+		return "./reports"
+	}
+	return reportsPath
 }
 
 // DefaultAIConfig returns default AI configuration

@@ -275,10 +275,25 @@ func (s *PeriodicScanner) cleanActivityFile(path string, cleanupWindow time.Time
 	}
 
 	for _, entry := range keepEntries {
-		line, _ := json.Marshal(entry)
-		tmpFile.Write(append(line, '\n'))
+		line, err := json.Marshal(entry)
+		if err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("marshal activity entry: %w", err)
+		}
+		if _, err := tmpFile.Write(append(line, '\n')); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("write activity entry: %w", err)
+		}
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp activity file: %w", err)
+	}
 
-	return os.Rename(tmpPath, path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp activity file: %w", err)
+	}
+	return nil
 }

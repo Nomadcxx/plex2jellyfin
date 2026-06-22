@@ -2,10 +2,14 @@ package scanner
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/Nomadcxx/jellywatch/internal/ai"
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 )
 
@@ -276,6 +280,193 @@ func TestProcessFile_Episode(t *testing.T) {
 	}
 }
 
+func TestProcessFile_ObfuscatedEpisodeWithoutEpisodeMarkerIndexesForReview(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	scanner := NewFileScanner(db)
+
+	tempDir := t.TempDir()
+	tvRoot := filepath.Join(tempDir, "TVSHOWS")
+	showDir := filepath.Join(tvRoot, "The Daily Show (1996)", "Season 2020")
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	episodePath := filepath.Join(showDir, "248fc0bc4f6f454b89a8158018a398a6.mkv")
+	if err := os.WriteFile(episodePath, []byte("fake video content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(episodePath, 100*1024*1024); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(episodePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := &ScanResult{}
+	if err := scanner.processFile(episodePath, info, tvRoot, "episode", result); err != nil {
+		t.Fatalf("processFile failed: %v", err)
+	}
+
+	file, err := db.GetMediaFile(episodePath)
+	if err != nil {
+		t.Fatalf("Failed to get media file: %v", err)
+	}
+	if file == nil {
+		t.Fatal("Expected file to be in database")
+	}
+	if file.MediaType != "episode" {
+		t.Fatalf("Expected media_type = episode, got %q", file.MediaType)
+	}
+	if file.NormalizedTitle != "thedailyshow" {
+		t.Fatalf("Expected normalized_title = thedailyshow, got %q", file.NormalizedTitle)
+	}
+	if file.Year == nil || *file.Year != 1996 {
+		t.Fatalf("Expected year = 1996, got %v", file.Year)
+	}
+	if file.Season == nil || *file.Season != 2020 {
+		t.Fatalf("Expected season = 2020, got %v", file.Season)
+	}
+	if file.Episode != nil {
+		t.Fatalf("Expected unknown episode to stay nil, got %v", *file.Episode)
+	}
+	if !file.NeedsReview {
+		t.Fatal("Expected file with unknown episode to need review")
+	}
+	if file.ParseMethod != "folder" {
+		t.Fatalf("Expected parse_method = folder, got %q", file.ParseMethod)
+	}
+}
+
+func TestProcessFile_ObfuscatedWithoutEpisodeContextDoesNotTriggerAI(t *testing.T) {
+	calls := 0
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "AI should not be called for obfuscated files with no episode context", http.StatusInternalServerError)
+	}))
+	defer mockServer.Close()
+
+	db := setupTestDB(t)
+	defer db.Close()
+
+	aiCfg := config.AIConfig{
+		Enabled:              true,
+		OllamaEndpoint:       mockServer.URL,
+		Model:                "minimax-m2.5:cloud",
+		ConfidenceThreshold:  0.8,
+		AutoTriggerThreshold: 0.6,
+		TimeoutSeconds:       5,
+		CacheEnabled:         false,
+	}
+	matcher, err := ai.NewMatcher(aiCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanner := NewFileScannerWithAI(db, NewAIHelper(aiCfg, db.DB(), matcher))
+
+	tempDir := t.TempDir()
+	tvRoot := filepath.Join(tempDir, "TVSHOWS")
+	showDir := filepath.Join(tvRoot, "The Daily Show (1996)", "Season 2020")
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	episodePath := filepath.Join(showDir, "248fc0bc4f6f454b89a8158018a398a6.mkv")
+	if err := os.WriteFile(episodePath, []byte("fake video content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(episodePath, 100*1024*1024); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.ScanPath(context.Background(), episodePath, tvRoot, "episode")
+	if err != nil {
+		t.Fatalf("ScanPath failed: %v", err)
+	}
+	if result.AITriggered != 0 || result.AIFailed != 0 || calls != 0 {
+		t.Fatalf("AI should not be used for obfuscated file without episode context, triggered=%d failed=%d calls=%d", result.AITriggered, result.AIFailed, calls)
+	}
+
+	file, err := db.GetMediaFile(episodePath)
+	if err != nil {
+		t.Fatalf("Failed to get media file: %v", err)
+	}
+	if file.Year == nil || *file.Year != 1996 {
+		t.Fatalf("expected folder-derived year 1996 to be preserved, got %v", file.Year)
+	}
+	if file.ParseMethod != "folder" {
+		t.Fatalf("expected parse_method folder, got %q", file.ParseMethod)
+	}
+	if !file.NeedsReview {
+		t.Fatal("obfuscated file without episode context should still need review")
+	}
+}
+
+func TestProcessFile_DeterministicTVParseDoesNotTriggerAI(t *testing.T) {
+	calls := 0
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "AI should not be called for deterministic TV parses", http.StatusInternalServerError)
+	}))
+	defer mockServer.Close()
+
+	db := setupTestDB(t)
+	defer db.Close()
+
+	aiCfg := config.AIConfig{
+		Enabled:              true,
+		OllamaEndpoint:       mockServer.URL,
+		Model:                "minimax-m2.5:cloud",
+		ConfidenceThreshold:  0.8,
+		AutoTriggerThreshold: 0.6,
+		TimeoutSeconds:       5,
+		CacheEnabled:         false,
+	}
+	matcher, err := ai.NewMatcher(aiCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanner := NewFileScannerWithAI(db, NewAIHelper(aiCfg, db.DB(), matcher))
+
+	tempDir := t.TempDir()
+	tvRoot := filepath.Join(tempDir, "TVSHOWS")
+	showDir := filepath.Join(tvRoot, "Universal Basic Guys (2024)", "Season 01")
+	if err := os.MkdirAll(showDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	episodePath := filepath.Join(showDir, "Universal Basic Guys S01E01.mkv")
+	if err := os.WriteFile(episodePath, []byte("fake video content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(episodePath, 100*1024*1024); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.ScanPath(context.Background(), episodePath, tvRoot, "episode")
+	if err != nil {
+		t.Fatalf("ScanPath failed: %v", err)
+	}
+	if result.AITriggered != 0 || result.AIFailed != 0 || calls != 0 {
+		t.Fatalf("AI should not be used for deterministic parse, triggered=%d failed=%d calls=%d", result.AITriggered, result.AIFailed, calls)
+	}
+
+	file, err := db.GetMediaFile(episodePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.ParseMethod != "regex" {
+		t.Fatalf("parse_method = %q, want regex", file.ParseMethod)
+	}
+	if file.Confidence < 0.8 {
+		t.Fatalf("confidence = %.2f, want >= 0.80", file.Confidence)
+	}
+	if file.NeedsReview {
+		t.Fatal("deterministic parse should not need review")
+	}
+}
+
 func TestProcessFile_NonCompliant(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -394,6 +585,51 @@ func TestScanPath_Integration(t *testing.T) {
 	}
 	if len(files) != 1 {
 		t.Errorf("Expected 1 Her file, got %d", len(files))
+	}
+}
+
+func TestScanPath_MovieUpdatesParentAndBestFile(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	scanner := NewFileScanner(db)
+
+	root := t.TempDir()
+	movieDir := filepath.Join(root, "Movies", "F Valentines Day (2026)")
+	if err := os.MkdirAll(movieDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	moviePath := filepath.Join(movieDir, "F Valentines Day (2026).mkv")
+	content := make([]byte, 600*1024*1024)
+	if err := os.WriteFile(moviePath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.ScanPath(context.Background(), movieDir, filepath.Join(root, "Movies"), "movie")
+	if err != nil {
+		t.Fatalf("ScanPath failed: %v", err)
+	}
+	if result.FilesAdded != 1 {
+		t.Fatalf("FilesAdded = %d, want 1", result.FilesAdded)
+	}
+
+	file, err := db.GetMediaFile(moviePath)
+	if err != nil {
+		t.Fatalf("GetMediaFile failed: %v", err)
+	}
+	if file == nil {
+		t.Fatalf("media file was not indexed")
+	}
+	if file.ParentMovieID == nil {
+		t.Fatalf("ParentMovieID should be set")
+	}
+
+	var bestFileID int64
+	err = db.DB().QueryRow(`SELECT best_file_id FROM movies WHERE id = ?`, *file.ParentMovieID).Scan(&bestFileID)
+	if err != nil {
+		t.Fatalf("query best_file_id failed: %v", err)
+	}
+	if bestFileID != file.ID {
+		t.Fatalf("best_file_id = %d, want media file id %d", bestFileID, file.ID)
 	}
 }
 

@@ -1,11 +1,16 @@
 package radarr
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
 
 func (c *Client) GetQueue(page, pageSize int) (*QueueResponse, error) {
+	return c.GetQueueContext(context.Background(), page, pageSize)
+}
+
+func (c *Client) GetQueueContext(ctx context.Context, page, pageSize int) (*QueueResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -15,19 +20,23 @@ func (c *Client) GetQueue(page, pageSize int) (*QueueResponse, error) {
 
 	endpoint := fmt.Sprintf("/api/v3/queue?page=%d&pageSize=%d&includeMovie=true", page, pageSize)
 	var response QueueResponse
-	if err := c.get(endpoint, &response); err != nil {
+	if err := c.getContext(ctx, endpoint, &response); err != nil {
 		return nil, fmt.Errorf("getting queue: %w", err)
 	}
 	return &response, nil
 }
 
 func (c *Client) GetAllQueueItems() ([]QueueItem, error) {
+	return c.GetAllQueueItemsContext(context.Background())
+}
+
+func (c *Client) GetAllQueueItemsContext(ctx context.Context) ([]QueueItem, error) {
 	var allItems []QueueItem
 	page := 1
 	pageSize := 100
 
 	for {
-		response, err := c.GetQueue(page, pageSize)
+		response, err := c.GetQueueContext(ctx, page, pageSize)
 		if err != nil {
 			return nil, err
 		}
@@ -44,18 +53,26 @@ func (c *Client) GetAllQueueItems() ([]QueueItem, error) {
 }
 
 func (c *Client) GetQueueItem(id int) (*QueueItem, error) {
+	return c.GetQueueItemContext(context.Background(), id)
+}
+
+func (c *Client) GetQueueItemContext(ctx context.Context, id int) (*QueueItem, error) {
 	endpoint := fmt.Sprintf("/api/v3/queue/%d", id)
 	var item QueueItem
-	if err := c.get(endpoint, &item); err != nil {
+	if err := c.getContext(ctx, endpoint, &item); err != nil {
 		return nil, fmt.Errorf("getting queue item %d: %w", id, err)
 	}
 	return &item, nil
 }
 
 func (c *Client) RemoveFromQueue(id int, blocklist, removeFromClient bool) error {
+	return c.RemoveFromQueueContext(context.Background(), id, blocklist, removeFromClient)
+}
+
+func (c *Client) RemoveFromQueueContext(ctx context.Context, id int, blocklist, removeFromClient bool) error {
 	endpoint := fmt.Sprintf("/api/v3/queue/%d?removeFromClient=%t&blocklist=%t",
 		id, removeFromClient, blocklist)
-	if err := c.delete(endpoint); err != nil {
+	if err := c.deleteContext(ctx, endpoint); err != nil {
 		return fmt.Errorf("removing queue item %d: %w", id, err)
 	}
 	return nil
@@ -86,7 +103,11 @@ func (c *Client) GrabQueueItem(id int) error {
 }
 
 func (c *Client) GetStuckItems() ([]QueueItem, error) {
-	allItems, err := c.GetAllQueueItems()
+	return c.GetStuckItemsContext(context.Background())
+}
+
+func (c *Client) GetStuckItemsContext(ctx context.Context) ([]QueueItem, error) {
+	allItems, err := c.GetAllQueueItemsContext(ctx)
 	if err != nil {
 		return nil, err
 	}

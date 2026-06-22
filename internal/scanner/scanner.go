@@ -112,7 +112,7 @@ func (s *FileScanner) ScanPath(ctx context.Context, path string, libraryRoot str
 	start := time.Now()
 	result := &ScanResult{}
 
-	if err := s.scanPath(ctx, libraryRoot, mediaType, result); err != nil {
+	if err := s.scanPathWithLibraryRoot(ctx, path, libraryRoot, mediaType, result); err != nil {
 		return nil, err
 	}
 
@@ -189,6 +189,10 @@ func (s *FileScanner) ScanWithOptions(ctx context.Context, opts ScanOptions) (*S
 
 // scanPath is the internal recursive scanner
 func (s *FileScanner) scanPath(ctx context.Context, path string, mediaType string, result *ScanResult) error {
+	return s.scanPathWithLibraryRoot(ctx, path, path, mediaType, result)
+}
+
+func (s *FileScanner) scanPathWithLibraryRoot(ctx context.Context, path string, libraryRoot string, mediaType string, result *ScanResult) error {
 	return filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		// Check context cancellation
 		select {
@@ -221,7 +225,7 @@ func (s *FileScanner) scanPath(ctx context.Context, path string, mediaType strin
 		}
 
 		// Process the file
-		if err := s.processFile(filePath, info, path, mediaType, result); err != nil {
+		if err := s.processFile(filePath, info, libraryRoot, mediaType, result); err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("process file %s: %w", filePath, err))
 			return nil // Continue walking
 		}
@@ -306,13 +310,21 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 	parseMethod := "regex"
 
 	if isEpisode {
+		episodeKnown := false
 		tv, err := naming.ParseTVShowName(filename)
 		if err != nil {
 			tv, err = parseTVShowFromParentFolders(filePath)
 			if err != nil {
-				return fmt.Errorf("parse TV show: %w", err)
+				tv, err = parseTVShowFromLibraryFolders(filePath, libraryRoot)
+				if err != nil {
+					return fmt.Errorf("parse TV show: %w", err)
+				}
+			} else {
+				episodeKnown = true
 			}
 			parseMethod = "folder"
+		} else {
+			episodeKnown = true
 		}
 		rawTitle = tv.Title
 		normalizedTitle = database.NormalizeTitle(tv.Title)
@@ -321,8 +333,12 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 				year = &yearInt
 			}
 		}
-		season = &tv.Season
-		episode = &tv.Episode
+		if tv.Season > 0 {
+			season = &tv.Season
+		}
+		if episodeKnown && tv.Episode > 0 {
+			episode = &tv.Episode
+		}
 	} else {
 		movie, err := naming.ParseMovieName(filename)
 		if err != nil {
@@ -380,9 +396,9 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 
 	// === STEP 3: AI TRIGGER (if low confidence + AI enabled) ===
 	if s.aiHelper != nil && s.aiHelper.IsEnabled() {
-		if bestConfidence < s.aiHelper.GetAutoTriggerThreshold() {
+		if shouldAttemptAIScan(filePath, filename, isEpisode, rawTitle, bestConfidence, s.aiHelper.GetAutoTriggerThreshold(), season, episode, year) {
 			ctx := context.Background()
-			aiResult, fromCache, err := s.aiHelper.TryParse(ctx, filename, mediaType)
+			aiResult, fromCache, err := s.aiHelper.TryParseWithContext(ctx, filename, mediaType, filepath.Dir(filePath), rawTitle, bestConfidence)
 
 			if fromCache {
 				result.AICacheHits++
@@ -396,8 +412,11 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 				// Check if AI result is better
 				if aiResult.Confidence >= s.aiHelper.GetConfidenceThreshold() {
 					// AI is confident - use it
+					rawTitle = aiResult.Title
 					normalizedTitle = database.NormalizeTitle(aiResult.Title)
-					year = aiResult.Year.Int()
+					if aiYear := aiResult.Year.Int(); aiYear != nil {
+						year = aiYear
+					}
 					if isEpisode && aiResult.Season != nil {
 						season = aiResult.Season.Int()
 						if len(aiResult.Episodes) > 0 {
@@ -410,8 +429,11 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 					result.AISucceeded++
 				} else if aiResult.Confidence > bestConfidence {
 					// AI not confident but still better than regex
+					rawTitle = aiResult.Title
 					normalizedTitle = database.NormalizeTitle(aiResult.Title)
-					year = aiResult.Year.Int()
+					if aiYear := aiResult.Year.Int(); aiYear != nil {
+						year = aiYear
+					}
 					if isEpisode && aiResult.Season != nil {
 						season = aiResult.Season.Int()
 						if len(aiResult.Episodes) > 0 {
@@ -437,15 +459,14 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 
 	var parentSeriesID *int64
 	var parentEpisodeID *int64
-	if isEpisode && season != nil && episode != nil {
-		yearValue := 0
-		if year != nil {
-			yearValue = *year
-		}
+	var parentMovieID *int64
+	if isEpisode && normalizedTitle != "" {
+		seriesPath := deriveSeriesPath(filePath, libraryRoot)
+		seriesTitle, yearValue := seriesIdentityFromPath(seriesPath, rawTitle, year)
 		series := &database.Series{
-			Title:          rawTitle,
+			Title:          seriesTitle,
 			Year:           yearValue,
-			CanonicalPath:  deriveSeriesPath(filePath, libraryRoot),
+			CanonicalPath:  seriesPath,
 			LibraryRoot:    libraryRoot,
 			Source:         "filesystem",
 			SourcePriority: 50,
@@ -460,15 +481,35 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 		}
 		parentSeriesID = &series.ID
 
-		ep := &database.Episode{
-			SeriesID: series.ID,
-			Season:   *season,
-			Episode:  *episode,
+		if season != nil && episode != nil {
+			ep := &database.Episode{
+				SeriesID: series.ID,
+				Season:   *season,
+				Episode:  *episode,
+			}
+			if err := s.db.UpsertEpisode(ep); err != nil {
+				return fmt.Errorf("upsert episode: %w", err)
+			}
+			parentEpisodeID = &ep.ID
 		}
-		if err := s.db.UpsertEpisode(ep); err != nil {
-			return fmt.Errorf("upsert episode: %w", err)
+	}
+	if !isEpisode {
+		yearValue := 0
+		if year != nil {
+			yearValue = *year
 		}
-		parentEpisodeID = &ep.ID
+		movie := &database.Movie{
+			Title:          rawTitle,
+			Year:           yearValue,
+			CanonicalPath:  filepath.Dir(filePath),
+			LibraryRoot:    libraryRoot,
+			Source:         "filesystem",
+			SourcePriority: 50,
+		}
+		if _, err := s.db.UpsertMovie(movie); err != nil {
+			return fmt.Errorf("upsert movie: %w", err)
+		}
+		parentMovieID = &movie.ID
 	}
 
 	// Create MediaFile record
@@ -477,6 +518,7 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 		Size:                info.Size(),
 		ModifiedAt:          info.ModTime(),
 		MediaType:           mediaType,
+		ParentMovieID:       parentMovieID,
 		ParentSeriesID:      parentSeriesID,
 		ParentEpisodeID:     parentEpisodeID,
 		NormalizedTitle:     normalizedTitle,
@@ -508,8 +550,41 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 			return fmt.Errorf("update episode best file: %w", err)
 		}
 	}
+	if parentMovieID != nil {
+		if err := s.db.UpdateMovieBestFile(*parentMovieID, &file.ID); err != nil {
+			return fmt.Errorf("update movie best file: %w", err)
+		}
+	}
 
 	return nil
+}
+
+func shouldAttemptAIScan(filePath, filename string, isEpisode bool, rawTitle string, confidence, threshold float64, season, episode, year *int) bool {
+	if confidence >= threshold {
+		return false
+	}
+	if hasDeterministicScannedIdentity(filePath, filename, isEpisode, rawTitle, season, episode, year) {
+		return false
+	}
+	// Obfuscated basenames carry no semantic title. The scanner may still use
+	// folder context deterministically, but it should not ask an LLM to infer
+	// missing identity from a random hash.
+	if naming.IsObfuscatedFilename(filename) {
+		return false
+	}
+	return true
+}
+
+func hasDeterministicScannedIdentity(filePath, filename string, isEpisode bool, rawTitle string, season, episode, year *int) bool {
+	if strings.TrimSpace(rawTitle) == "" {
+		return false
+	}
+	if isEpisode {
+		return season != nil && *season > 0 &&
+			episode != nil && *episode > 0 &&
+			naming.IsTVEpisodeFromPath(filePath, naming.SourceUnknown)
+	}
+	return year != nil && *year > 0 && !naming.IsObfuscatedFilename(filename)
 }
 
 func parseTVShowFromParentFolders(path string) (*naming.TVShowInfo, error) {
@@ -534,12 +609,87 @@ func parseTVShowFromParentFolders(path string) (*naming.TVShowInfo, error) {
 	return naming.ParseTVShowName(filepath.Base(path))
 }
 
+func parseTVShowFromLibraryFolders(path, libraryRoot string) (*naming.TVShowInfo, error) {
+	dir := filepath.Dir(path)
+	rel, err := filepath.Rel(libraryRoot, dir)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		rel = dir
+	}
+
+	parts := strings.Split(rel, string(filepath.Separator))
+	season := 0
+	showFolder := ""
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parsedSeason, ok := parseSeasonFolder(parts[i]); ok {
+			season = parsedSeason
+			if i > 0 {
+				showFolder = parts[i-1]
+			}
+			break
+		}
+	}
+	if showFolder == "" && len(parts) > 0 {
+		showFolder = parts[0]
+	}
+	if showFolder == "" || showFolder == "." {
+		return nil, fmt.Errorf("could not infer TV show folder from %s", path)
+	}
+
+	title := strings.TrimSpace(database.StripYear(showFolder))
+	if title == "" {
+		title = strings.TrimSpace(showFolder)
+	}
+	year := ""
+	if yearInt := database.ExtractYearFlexible(showFolder); yearInt > 0 {
+		year = fmt.Sprintf("%d", yearInt)
+	}
+	if title == "" {
+		return nil, fmt.Errorf("could not infer TV show title from %s", path)
+	}
+
+	return &naming.TVShowInfo{
+		Title:   title,
+		Year:    year,
+		Season:  season,
+		Episode: 0,
+	}, nil
+}
+
+func parseSeasonFolder(name string) (int, bool) {
+	lower := strings.TrimSpace(strings.ToLower(name))
+	if !strings.HasPrefix(lower, "season") {
+		return 0, false
+	}
+	value := strings.TrimSpace(strings.TrimPrefix(lower, "season"))
+	value = strings.TrimLeft(value, " ._-")
+	season, err := parseInt(value)
+	if err != nil || season <= 0 {
+		return 0, false
+	}
+	return season, true
+}
+
 func deriveSeriesPath(filePath, libraryRoot string) string {
 	seasonDir := filepath.Dir(filePath)
 	if strings.HasPrefix(strings.ToLower(filepath.Base(seasonDir)), "season ") {
 		return filepath.Dir(seasonDir)
 	}
 	return filepath.Dir(filePath)
+}
+
+func seriesIdentityFromPath(seriesPath, fallbackTitle string, fallbackYear *int) (string, int) {
+	title := strings.TrimSpace(filepath.Base(seriesPath))
+	year := database.ExtractYear(title)
+	if year != 0 {
+		title = strings.TrimSpace(strings.TrimSuffix(title, fmt.Sprintf("(%d)", year)))
+	}
+	if title == "" {
+		title = fallbackTitle
+	}
+	if year == 0 && fallbackYear != nil {
+		year = *fallbackYear
+	}
+	return title, year
 }
 
 // shouldIncludeFile determines if a file should be indexed

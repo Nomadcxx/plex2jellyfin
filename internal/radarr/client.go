@@ -2,6 +2,7 @@ package radarr
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,13 +37,16 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
-func (c *Client) request(method, endpoint string, body io.Reader) (*http.Response, error) {
+func (c *Client) request(ctx context.Context, method, endpoint string, body io.Reader) (*http.Response, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	fullURL, err := joinURL(c.baseURL, endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
-	req, err := http.NewRequest(method, fullURL, body)
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -67,7 +71,11 @@ func (c *Client) request(method, endpoint string, body io.Reader) (*http.Respons
 }
 
 func (c *Client) get(endpoint string, result interface{}) error {
-	resp, err := c.request(http.MethodGet, endpoint, nil)
+	return c.getContext(context.Background(), endpoint, result)
+}
+
+func (c *Client) getContext(ctx context.Context, endpoint string, result interface{}) error {
+	resp, err := c.request(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -83,6 +91,10 @@ func (c *Client) get(endpoint string, result interface{}) error {
 }
 
 func (c *Client) post(endpoint string, payload, result interface{}) error {
+	return c.postContext(context.Background(), endpoint, payload, result)
+}
+
+func (c *Client) postContext(ctx context.Context, endpoint string, payload, result interface{}) error {
 	var body io.Reader
 	if payload != nil {
 		jsonBytes, err := json.Marshal(payload)
@@ -92,7 +104,7 @@ func (c *Client) post(endpoint string, payload, result interface{}) error {
 		body = bytes.NewReader(jsonBytes)
 	}
 
-	resp, err := c.request(http.MethodPost, endpoint, body)
+	resp, err := c.request(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return err
 	}
@@ -108,6 +120,10 @@ func (c *Client) post(endpoint string, payload, result interface{}) error {
 }
 
 func (c *Client) put(endpoint string, payload, result interface{}) error {
+	return c.putContext(context.Background(), endpoint, payload, result)
+}
+
+func (c *Client) putContext(ctx context.Context, endpoint string, payload, result interface{}) error {
 	var body io.Reader
 	if payload != nil {
 		jsonBytes, err := json.Marshal(payload)
@@ -117,7 +133,7 @@ func (c *Client) put(endpoint string, payload, result interface{}) error {
 		body = bytes.NewReader(jsonBytes)
 	}
 
-	resp, err := c.request(http.MethodPut, endpoint, body)
+	resp, err := c.request(ctx, http.MethodPut, endpoint, body)
 	if err != nil {
 		return err
 	}
@@ -133,7 +149,11 @@ func (c *Client) put(endpoint string, payload, result interface{}) error {
 }
 
 func (c *Client) delete(endpoint string) error {
-	resp, err := c.request(http.MethodDelete, endpoint, nil)
+	return c.deleteContext(context.Background(), endpoint)
+}
+
+func (c *Client) deleteContext(ctx context.Context, endpoint string) error {
+	resp, err := c.request(ctx, http.MethodDelete, endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -142,16 +162,24 @@ func (c *Client) delete(endpoint string) error {
 }
 
 func (c *Client) Ping() error {
+	return c.PingContext(context.Background())
+}
+
+func (c *Client) PingContext(ctx context.Context) error {
 	var status SystemStatus
-	if err := c.get("/api/v3/system/status", &status); err != nil {
+	if err := c.getContext(ctx, "/api/v3/system/status", &status); err != nil {
 		return fmt.Errorf("ping failed: %w", err)
 	}
 	return nil
 }
 
 func (c *Client) GetSystemStatus() (*SystemStatus, error) {
+	return c.GetSystemStatusContext(context.Background())
+}
+
+func (c *Client) GetSystemStatusContext(ctx context.Context) (*SystemStatus, error) {
 	var status SystemStatus
-	if err := c.get("/api/v3/system/status", &status); err != nil {
+	if err := c.getContext(ctx, "/api/v3/system/status", &status); err != nil {
 		return nil, err
 	}
 	return &status, nil

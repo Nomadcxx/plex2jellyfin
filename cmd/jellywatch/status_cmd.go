@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/service"
 	"github.com/spf13/cobra"
 )
 
@@ -13,7 +16,7 @@ func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show database status and statistics",
-		Long: `Display HOLDEN database status, statistics, and health information.
+		Long: `Display JellyWatch database status, statistics, and health information.
 
 Shows:
   - Database file location and size
@@ -29,6 +32,11 @@ Shows:
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
 	// Open database
 	dbPath := config.GetDatabasePath()
 	db, err := database.OpenPath(dbPath)
@@ -72,8 +80,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Display
-	fmt.Println("HOLDEN Database Status")
-	fmt.Println("======================")
+	fmt.Println("JellyWatch Database Status")
+	fmt.Println("==========================")
 	fmt.Printf("Database: %s\n", dbPath)
 	fmt.Printf("Size:    %s\n", formatBytes(info.Size()))
 	fmt.Printf("Modified: %s\n\n", info.ModTime().Format("2006-01-02 15:04:05"))
@@ -86,18 +94,42 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Non-Compliant Files:  %d\n", stats.NonCompliantFiles)
 	fmt.Println()
 
-	// Get duplicate breakdowns
-	movieDups, _ := db.FindDuplicateMovies()
-	episodeDups, _ := db.FindDuplicateEpisodes()
+	printHousekeepingSummary(os.Stdout, db)
+	printDeploymentDrift(os.Stdout)
+
+	duplicateAnalysis, err := service.NewCleanupService(db).AnalyzeDuplicates()
+	if err != nil {
+		return fmt.Errorf("failed to analyze duplicates: %w", err)
+	}
+	safeMovieDups := 0
+	safeEpisodeDups := 0
+	skippedUnsafeMovieDups := 0
+	spaceReclaimable := int64(0)
+	for _, group := range duplicateAnalysis.Groups {
+		if duplicateGroupLooksUnsafeTVMovie(group, cfg) {
+			skippedUnsafeMovieDups++
+			continue
+		}
+		switch group.MediaType {
+		case "movie":
+			safeMovieDups++
+		default:
+			safeEpisodeDups++
+		}
+		spaceReclaimable += group.ReclaimableBytes
+	}
 
 	fmt.Println("Duplicates (same content exists multiple times)")
 	fmt.Println("------------------------------------------------")
-	fmt.Printf("Movie duplicates:     %d groups\n", len(movieDups))
-	fmt.Printf("Episode duplicates:   %d groups\n", len(episodeDups))
-	if stats.SpaceReclaimable > 0 {
-		fmt.Printf("Space reclaimable:    %s\n", formatBytes(stats.SpaceReclaimable))
+	fmt.Printf("Movie duplicates:     %d groups\n", safeMovieDups)
+	fmt.Printf("Episode duplicates:   %d groups\n", safeEpisodeDups)
+	if skippedUnsafeMovieDups > 0 {
+		fmt.Printf("Unsafe groups skipped: %d movie groups under TV library roots\n", skippedUnsafeMovieDups)
 	}
-	if len(movieDups)+len(episodeDups) > 0 {
+	if spaceReclaimable > 0 {
+		fmt.Printf("Space reclaimable:    %s\n", formatBytes(spaceReclaimable))
+	}
+	if safeMovieDups+safeEpisodeDups > 0 {
 		fmt.Println("→ Run 'jellywatch duplicates generate' to review")
 	}
 	fmt.Println()
@@ -113,20 +145,25 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("Scattered (same title across storage drives)")
-	fmt.Println("--------------------------------------------")
+	fmt.Println("Scattered TV Series (same show across storage drives)")
+	fmt.Println("-----------------------------------------------------")
 	fmt.Printf("Series in multiple locations:  %d\n", seriesConflicts)
-	fmt.Printf("Movies in multiple locations:  %d\n", movieConflicts)
+	if movieConflicts > 0 {
+		fmt.Printf("Movies in multiple locations:   %d (tracked, not handled by consolidate)\n", movieConflicts)
+	}
 	if seriesConflicts > 0 {
 		fmt.Println("→ Run 'jellywatch consolidate generate' to review")
 	}
 
-	if len(conflicts) > 0 {
+	if seriesConflicts > 0 {
 		fmt.Println("\nDetails:")
 		shown := 0
 		for _, c := range conflicts {
+			if c.MediaType != "series" {
+				continue
+			}
 			if shown >= 5 {
-				fmt.Printf("  ... and %d more\n", len(conflicts)-5)
+				fmt.Printf("  ... and %d more\n", seriesConflicts-5)
 				break
 			}
 			yearStr := ""
@@ -162,4 +199,115 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func printHousekeepingSummary(w io.Writer, db *database.MediaDB) {
+	counts, err := db.CountHousekeepingTasks()
+	if err != nil || len(counts) == 0 {
+		return
+	}
+	duplicateManualReview, _ := db.CountDuplicateManualReviewFailures()
+
+	fmt.Fprintln(w, "Housekeeping")
+	fmt.Fprintln(w, "------------")
+	fmt.Fprintf(w, "Pending:              %d\n", counts[database.TaskStatusPending])
+	fmt.Fprintf(w, "Running:              %d\n", counts[database.TaskStatusRunning])
+	fmt.Fprintf(w, "Flagged/manual review: %d\n", counts[database.TaskStatusFlagged])
+	fmt.Fprintf(w, "Failed:               %d\n", counts[database.TaskStatusFailed])
+	if duplicateManualReview > 0 {
+		fmt.Fprintf(w, "Duplicate failures:   %d manual-review rows can be collapsed\n", duplicateManualReview)
+		fmt.Fprintln(w, "→ Run 'jellywatch database cleanup-housekeeping --execute'")
+	}
+	fmt.Fprintln(w)
+}
+
+type deploymentBinary struct {
+	Name      string
+	BuildPath string
+	LivePath  string
+}
+
+func defaultDeploymentBinaries() []deploymentBinary {
+	return []deploymentBinary{
+		{Name: "jellywatch", BuildPath: "/tmp/jellywatch", LivePath: "/usr/local/bin/jellywatch"},
+		{Name: "jellywatchd", BuildPath: "/tmp/jellywatchd", LivePath: "/usr/local/bin/jellywatchd"},
+		{Name: "jellyweb", BuildPath: "/tmp/jellyweb", LivePath: "/usr/local/bin/jellyweb"},
+	}
+}
+
+func deploymentDriftWarnings(binaries []deploymentBinary) []string {
+	var warnings []string
+	for _, bin := range binaries {
+		if bin.BuildPath == "" || bin.LivePath == "" {
+			continue
+		}
+		buildInfo, buildErr := os.Stat(bin.BuildPath)
+		liveInfo, liveErr := os.Stat(bin.LivePath)
+		if os.IsNotExist(buildErr) {
+			continue
+		}
+		if buildErr != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: cannot read build artifact %s: %v", bin.Name, bin.BuildPath, buildErr))
+			continue
+		}
+		if liveErr != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: cannot read deployed binary %s: %v", bin.Name, bin.LivePath, liveErr))
+			continue
+		}
+		same, err := sameFileContent(bin.BuildPath, bin.LivePath, buildInfo, liveInfo)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: cannot compare %s to %s: %v", bin.Name, bin.BuildPath, bin.LivePath, err))
+			continue
+		}
+		if !same {
+			warnings = append(warnings, fmt.Sprintf("%s: %s differs from deployed %s", bin.Name, bin.BuildPath, bin.LivePath))
+		}
+	}
+	return warnings
+}
+
+func printDeploymentDrift(w io.Writer) {
+	warnings := deploymentDriftWarnings(defaultDeploymentBinaries())
+	if len(warnings) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Deployment")
+	fmt.Fprintln(w, "----------")
+	fmt.Fprintln(w, "WARNING: rebuilt binaries are not deployed:")
+	for _, warning := range warnings {
+		fmt.Fprintf(w, "  - %s\n", warning)
+	}
+	fmt.Fprintln(w, "→ Run: sudo systemctl stop jellywatchd jellyweb && sudo cp /tmp/jellywatch /tmp/jellywatchd /tmp/jellyweb /usr/local/bin/ && sudo systemctl start jellywatchd jellyweb")
+	fmt.Fprintln(w)
+}
+
+func sameFileContent(a, b string, aInfo, bInfo os.FileInfo) (bool, error) {
+	if aInfo.Size() != bInfo.Size() {
+		return false, nil
+	}
+	aHash, err := fileSHA256(a)
+	if err != nil {
+		return false, err
+	}
+	bHash, err := fileSHA256(b)
+	if err != nil {
+		return false, err
+	}
+	return aHash == bHash, nil
+}
+
+func fileSHA256(path string) ([sha256.Size]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	var out [sha256.Size]byte
+	copy(out[:], h.Sum(nil))
+	return out, nil
 }

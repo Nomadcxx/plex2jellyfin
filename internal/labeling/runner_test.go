@@ -44,13 +44,17 @@ func errName() labeling.JellyfinNameFetcher {
 }
 
 func baseDecision(itemID string, parsedTitle string, age time.Duration) database.ParseDecision {
-	return database.ParseDecision{
+	d := database.ParseDecision{
 		SourcePath:     "/downloads/show.mkv",
 		SourceFilename: "show.mkv",
 		EventAt:        time.Now().Add(-age),
 		ParsedTitle:    parsedTitle,
 		JellyfinItemID: itemID,
 	}
+	if itemID != "" {
+		d.JellyfinTvdbID = "tvdb-" + itemID
+	}
+	return d
 }
 
 func TestRunner_QueriesOnlyAutoLabelIsNullRows(t *testing.T) {
@@ -181,6 +185,7 @@ func TestRunner_StaleLabelIsReDerivedAfterRename(t *testing.T) {
 		EventAt:            now.Add(-30 * 24 * time.Hour),
 		ParsedTitle:        "Tracker",
 		JellyfinItemID:     "item1",
+		JellyfinTvdbID:     "tvdb-item1",
 		JellyfinResolvedAt: &resolved,
 	}
 	id := insertDecision(t, db, dec)

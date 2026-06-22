@@ -108,6 +108,41 @@ func TestLoadDuplicatePlans_NoFile(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadAuditPlansPreservesActionItemIndex(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOME", tempDir)
+
+	plan := &AuditPlan{
+		CreatedAt: time.Now(),
+		Command:   "audit",
+		Summary: AuditSummary{
+			TotalFiles:    3,
+			FilesToRename: 1,
+			FilesToSkip:   2,
+		},
+		Items: []AuditItem{
+			{ID: 1, Path: "/library/skipped-a.mkv", SkipReason: "confidence"},
+			{ID: 2, Path: "/library/rename-me.mkv"},
+			{ID: 3, Path: "/library/skipped-b.mkv", SkipReason: "unchanged"},
+		},
+		Actions: []AuditAction{
+			{Action: "rename", ItemIndex: 1, NewPath: "/library/Rename Me.mkv", Confidence: 0.95},
+		},
+	}
+
+	if err := SaveAuditPlans(plan); err != nil {
+		t.Fatalf("SaveAuditPlans failed: %v", err)
+	}
+
+	loaded, err := LoadAuditPlans()
+	if err != nil {
+		t.Fatalf("LoadAuditPlans failed: %v", err)
+	}
+	if got := loaded.Actions[0].ItemIndex; got != 1 {
+		t.Fatalf("expected loaded action item index 1, got %d", got)
+	}
+}
+
 func TestSaveAndLoadConsolidatePlans(t *testing.T) {
 	tempDir := t.TempDir()
 	os.Setenv("HOME", tempDir)
@@ -161,6 +196,20 @@ func TestSaveAndLoadConsolidatePlans(t *testing.T) {
 	}
 }
 
+func TestLoadConsolidatePlansMissingFileReturnsNil(t *testing.T) {
+	tempDir := t.TempDir()
+	os.Setenv("HOME", tempDir)
+	defer os.Unsetenv("HOME")
+
+	plan, err := LoadConsolidatePlans()
+	if err != nil {
+		t.Fatalf("LoadConsolidatePlans returned error for missing file: %v", err)
+	}
+	if plan != nil {
+		t.Fatalf("LoadConsolidatePlans returned %#v, want nil", plan)
+	}
+}
+
 func TestGetPlansDir(t *testing.T) {
 	tempDir := t.TempDir()
 	os.Setenv("HOME", tempDir)
@@ -208,6 +257,9 @@ func TestExecuteAuditAction_Rename(t *testing.T) {
 		Resolution:      "1080p",
 		QualityScore:    100,
 		LibraryRoot:     tempDir,
+		Confidence:      0.1,
+		ParseMethod:     "regex",
+		NeedsReview:     true,
 	}
 	if err := db.UpsertMediaFile(file); err != nil {
 		t.Fatalf("Failed to insert media file: %v", err)
@@ -220,10 +272,11 @@ func TestExecuteAuditAction_Rename(t *testing.T) {
 	}
 	targetPath := filepath.Join(tempDir, "Correct Title.mkv")
 	action := AuditAction{
-		Action:   "rename",
-		NewTitle: "Correct Title",
-		NewPath:  targetPath,
-		NewYear:  func() *int { y := 2020; return &y }(),
+		Action:     "rename",
+		NewTitle:   "Correct Title",
+		NewPath:    targetPath,
+		NewYear:    func() *int { y := 2020; return &y }(),
+		Confidence: 0.95,
 	}
 
 	err = ExecuteAuditAction(db, item, action, false, nil)
@@ -252,6 +305,15 @@ func TestExecuteAuditAction_Rename(t *testing.T) {
 	}
 	if updated.Year == nil || *updated.Year != 2020 {
 		t.Errorf("Expected year 2020, got %v", updated.Year)
+	}
+	if updated.NeedsReview {
+		t.Error("Expected successful audit rename to clear needs_review")
+	}
+	if updated.ParseMethod != "audit" {
+		t.Errorf("Expected parse_method audit, got %q", updated.ParseMethod)
+	}
+	if updated.Confidence != 0.95 {
+		t.Errorf("Expected confidence 0.95, got %v", updated.Confidence)
 	}
 }
 

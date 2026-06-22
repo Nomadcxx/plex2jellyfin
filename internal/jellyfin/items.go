@@ -2,12 +2,15 @@ package jellyfin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+var ErrItemNotFound = errors.New("jellyfin item not found")
 
 // SearchItems searches Jellyfin's library by name.
 func (c *Client) SearchItems(searchTerm string, itemTypes ...string) (*ItemsResponse, error) {
@@ -29,11 +32,14 @@ func (c *Client) SearchItems(searchTerm string, itemTypes ...string) (*ItemsResp
 
 // GetItem returns full metadata for a specific item.
 func (c *Client) GetItem(itemID string) (*Item, error) {
-	var item Item
-	if err := c.get("/Items/"+itemID, &item); err != nil {
+	resp, err := c.GetItemsByIDs(context.Background(), []string{itemID})
+	if err != nil {
 		return nil, fmt.Errorf("getting item %s: %w", itemID, err)
 	}
-	return &item, nil
+	if resp == nil || len(resp.Items) == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrItemNotFound, itemID)
+	}
+	return &resp.Items[0], nil
 }
 
 // GetItemByPath finds an item matching a specific filesystem path.
@@ -62,6 +68,23 @@ func (c *Client) GetItemsByParent(parentID string) (*ItemsResponse, error) {
 	var resp ItemsResponse
 	if err := c.get("/Items?"+query.Encode(), &resp); err != nil {
 		return nil, fmt.Errorf("getting items by parent: %w", err)
+	}
+	return &resp, nil
+}
+
+// GetItemsByIDs returns metadata for the requested Jellyfin item IDs using a
+// single batched request.
+func (c *Client) GetItemsByIDs(ctx context.Context, ids []string) (*ItemsResponse, error) {
+	if len(ids) == 0 {
+		return &ItemsResponse{}, nil
+	}
+	query := url.Values{}
+	query.Set("Ids", strings.Join(ids, ","))
+	query.Set("Fields", "Path,ProviderIds,SeriesId,ParentId,IndexNumber,ParentIndexNumber,Overview,ImageTags,PremiereDate")
+
+	var resp ItemsResponse
+	if err := c.getCtx(ctx, "/Items?"+query.Encode(), &resp); err != nil {
+		return nil, fmt.Errorf("getting items by ids: %w", err)
 	}
 	return &resp, nil
 }
@@ -100,7 +123,7 @@ func (c *Client) ListItemsPageCtx(ctx context.Context, startIndex, limit int) (*
 	query := url.Values{}
 	query.Set("Recursive", "true")
 	query.Set("IncludeItemTypes", "Episode,Movie")
-	query.Set("Fields", "Path,ProviderIds")
+	query.Set("Fields", "Path,ProviderIds,SeriesId,ParentId,IndexNumber,ParentIndexNumber,Overview,ImageTags,PremiereDate")
 	query.Set("StartIndex", strconv.Itoa(startIndex))
 	query.Set("Limit", strconv.Itoa(limit))
 

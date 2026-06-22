@@ -47,3 +47,30 @@ func TestFullRescanEmitsProgressAndHonorsCancel(t *testing.T) {
 		t.Error("no indexing events emitted")
 	}
 }
+
+func TestFullRescanReportsIndexErrors(t *testing.T) {
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "broken.mkv")
+	if err := os.Symlink(filepath.Join(dir, "missing-source.mkv"), broken); err != nil {
+		t.Fatal(err)
+	}
+
+	mdb, err := database.OpenPath(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mdb.Close()
+	s := NewFileScanner(mdb)
+
+	progress := make(chan database.ProgressEvent, 64)
+	done := make(chan error, 1)
+	go func() { done <- s.FullRescan(context.Background(), []string{dir}, false, progress) }()
+	for ev := range progress {
+		if ev.Phase == "complete" {
+			break
+		}
+	}
+	if err := <-done; err == nil {
+		t.Fatal("expected full rescan to report indexing error")
+	}
+}

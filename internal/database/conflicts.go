@@ -187,24 +187,36 @@ func (m *MediaDB) upsertConflict(c Conflict) error {
 		return fmt.Errorf("failed to marshal locations: %w", err)
 	}
 
-	query := `
-		INSERT OR REPLACE INTO conflicts (
-			media_type, title, title_normalized, year, locations, created_at
-		) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(media_type, title_normalized, year)
-		DO UPDATE SET 
-			locations = excluded.locations,
-			resolved = FALSE,
-			resolved_at = NULL,
-			resolved_path = NULL
-		WHERE NOT resolved
-	`
+	var existingID int64
+	err = m.db.QueryRow(`
+		SELECT id FROM conflicts
+		WHERE media_type = ? AND title_normalized = ? AND year IS ? AND resolved = FALSE`,
+		c.MediaType, c.TitleNormalized, c.Year,
+	).Scan(&existingID)
+	if err == nil {
+		_, err = m.db.Exec(`
+			UPDATE conflicts
+			   SET title = ?,
+			       locations = ?,
+			       resolved = FALSE,
+			       resolved_at = NULL,
+			       resolved_path = NULL
+			 WHERE id = ?`,
+			c.Title, string(locationsJSON), existingID,
+		)
+		return err
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
 
-	_, err = m.db.Exec(query,
+	_, err = m.db.Exec(`
+		INSERT INTO conflicts (
+			media_type, title, title_normalized, year, locations, created_at
+		) VALUES (?, ?, ?, ?, ?, ?)`,
 		c.MediaType, c.Title, c.TitleNormalized, c.Year,
 		string(locationsJSON), time.Now(),
 	)
-
 	return err
 }
 
@@ -292,7 +304,8 @@ func (m *MediaDB) GetConflict(conflictID int64) (*Conflict, error) {
 
 	var c Conflict
 	var locationsJSON string
-	var resolvedAt, resolvedPath sql.NullString
+	var resolvedAt sql.NullTime
+	var resolvedPath sql.NullString
 
 	query := `
 		SELECT id, media_type, title, title_normalized, year,
@@ -320,10 +333,7 @@ func (m *MediaDB) GetConflict(conflictID int64) (*Conflict, error) {
 
 	// Set nullable fields
 	if resolvedAt.Valid {
-		t, err := time.Parse(time.RFC3339, resolvedAt.String)
-		if err == nil {
-			c.ResolvedAt = &t
-		}
+		c.ResolvedAt = &resolvedAt.Time
 	}
 	if resolvedPath.Valid {
 		c.ResolvedPath = &resolvedPath.String

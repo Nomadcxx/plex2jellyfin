@@ -142,16 +142,25 @@ type ProgressBar struct {
 	actionsCreated int
 	errorsCount    int
 	updateInterval int
+	unit           string
 }
 
 // NewProgressBar creates a new progress bar for audit generation
 func NewProgressBar(total int) *ProgressBar {
+	return NewProgressBarWithUnit(total, "files")
+}
+
+func NewProgressBarWithUnit(total int, unit string) *ProgressBar {
+	if unit == "" {
+		unit = "files"
+	}
 	return &ProgressBar{
 		total:          total,
 		current:        0,
 		actionsCreated: 0,
 		errorsCount:    0,
 		updateInterval: 10,
+		unit:           unit,
 	}
 }
 
@@ -178,8 +187,8 @@ func (p *ProgressBar) render() {
 
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 
-	fmt.Printf("\r%s %3.0f%% (%d/%d files) | %d actions | %d errors",
-		bar, percentage, p.current, p.total, p.actionsCreated, p.errorsCount)
+	fmt.Printf("\r%s %3.0f%% (%d/%d %s) | %d actions | %d errors",
+		bar, percentage, p.current, p.total, p.unit, p.actionsCreated, p.errorsCount)
 }
 
 // Finish completes the progress bar and moves to next line

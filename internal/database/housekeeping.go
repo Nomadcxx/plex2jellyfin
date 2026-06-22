@@ -38,8 +38,9 @@ const (
 	// Consolidation workflow (TV scatter only):
 	TaskKindSeriesConsolidate = "series_consolidate" // auto, move one TV series' scattered episodes onto a single volume
 	// Naming workflow:
-	TaskKindFolderRename      = "folder_rename"       // auto, rename folder in-place to canonical case (no cross-volume work)
-	TaskKindParserDriftRename = "parser_drift_rename" // auto, repair JellyWatch-created path after parser fixes
+	TaskKindFolderRename        = "folder_rename"          // auto, rename folder in-place to canonical case (no cross-volume work)
+	TaskKindParserDriftRename   = "parser_drift_rename"    // auto, repair JellyWatch-created movie path after parser fixes
+	TaskKindParserDriftTVRename = "parser_drift_tv_rename" // auto, repair JellyWatch-created TV episode path after parser fixes
 )
 
 // HousekeepingTask is a queued (or completed) housekeeping action.
@@ -82,6 +83,77 @@ func (m *MediaDB) RequeueStaleRunningTasks() (int64, error) {
 	return res.RowsAffected()
 }
 
+// CountDuplicateManualReviewFailures returns how many older failed rows would
+// be canceled by CollapseDuplicateManualReviewFailures.
+func (m *MediaDB) CountDuplicateManualReviewFailures() (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var count int64
+	err := m.db.QueryRow(`
+		SELECT COUNT(*)
+		  FROM housekeeping_tasks
+		 WHERE status = 'failed'
+		   AND (last_error LIKE '%manual review required%'
+		        OR last_error LIKE '%manual-review required%')
+		   AND dedup_key IN (
+		       SELECT dedup_key
+		         FROM housekeeping_tasks
+		        WHERE status = 'failed'
+		          AND (last_error LIKE '%manual review required%'
+		               OR last_error LIKE '%manual-review required%')
+		        GROUP BY dedup_key
+		       HAVING COUNT(*) > 1
+		   )
+		   AND id NOT IN (
+		       SELECT MAX(id)
+		         FROM housekeeping_tasks
+		        WHERE status = 'failed'
+		          AND (last_error LIKE '%manual review required%'
+		               OR last_error LIKE '%manual-review required%')
+		        GROUP BY dedup_key
+		   )`).Scan(&count)
+	return count, err
+}
+
+// CollapseDuplicateManualReviewFailures cancels older failed rows for the same
+// dedup key when the failure already says manual review is required. This keeps
+// one visible review item while removing historical retry noise from the queue.
+func (m *MediaDB) CollapseDuplicateManualReviewFailures() (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	res, err := m.db.Exec(`
+		UPDATE housekeeping_tasks
+		   SET status = 'canceled',
+		       finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP),
+		       last_error = COALESCE(last_error, 'superseded duplicate manual-review failure')
+		 WHERE status = 'failed'
+		   AND (last_error LIKE '%manual review required%'
+		        OR last_error LIKE '%manual-review required%')
+		   AND dedup_key IN (
+		       SELECT dedup_key
+		         FROM housekeeping_tasks
+		        WHERE status = 'failed'
+		          AND (last_error LIKE '%manual review required%'
+		               OR last_error LIKE '%manual-review required%')
+		        GROUP BY dedup_key
+		       HAVING COUNT(*) > 1
+		   )
+		   AND id NOT IN (
+		       SELECT MAX(id)
+		         FROM housekeeping_tasks
+		        WHERE status = 'failed'
+		          AND (last_error LIKE '%manual review required%'
+		               OR last_error LIKE '%manual-review required%')
+		        GROUP BY dedup_key
+		   )`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // EnqueueHousekeepingTask inserts a task. If a pending/running row with the
 // same dedup_key exists, the call is a no-op (returns 0, nil).
 func (m *MediaDB) EnqueueHousekeepingTask(jobName, kind string, payload map[string]any, priority int) (int64, error) {
@@ -96,6 +168,9 @@ func (m *MediaDB) EnqueueHousekeepingTask(jobName, kind string, payload map[stri
 		return 0, fmt.Errorf("marshal payload: %w", err)
 	}
 	dedup := housekeepingDedupKey(jobName, kind, body)
+	if m.housekeepingManualReviewFailedLocked(dedup) {
+		return 0, nil
+	}
 
 	// Decide initial status: flag-only kinds skip execution and stay
 	// in 'flagged' for human review via the WebUI.
@@ -124,6 +199,23 @@ func (m *MediaDB) EnqueueHousekeepingTask(jobName, kind string, payload map[stri
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+func (m *MediaDB) housekeepingManualReviewFailedLocked(dedup string) bool {
+	var status string
+	var lastError sql.NullString
+	err := m.db.QueryRow(`
+		SELECT status, last_error
+		  FROM housekeeping_tasks
+		 WHERE dedup_key = ?
+		 ORDER BY id DESC
+		 LIMIT 1`, dedup).Scan(&status, &lastError)
+	if err != nil {
+		return false
+	}
+	return status == TaskStatusFailed &&
+		lastError.Valid &&
+		containsAny(lastError.String, "manual review required", "manual-review required")
 }
 
 func housekeepingDedupKey(jobName, kind string, payload []byte) string {

@@ -1,22 +1,31 @@
 package radarr
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 )
 
 func (c *Client) GetMovies() ([]Movie, error) {
+	return c.GetMoviesContext(context.Background())
+}
+
+func (c *Client) GetMoviesContext(ctx context.Context) ([]Movie, error) {
 	var movies []Movie
-	if err := c.get("/api/v3/movie", &movies); err != nil {
+	if err := c.getContext(ctx, "/api/v3/movie", &movies); err != nil {
 		return nil, fmt.Errorf("getting movies: %w", err)
 	}
 	return movies, nil
 }
 
 func (c *Client) GetMovie(id int) (*Movie, error) {
+	return c.GetMovieContext(context.Background(), id)
+}
+
+func (c *Client) GetMovieContext(ctx context.Context, id int) (*Movie, error) {
 	endpoint := fmt.Sprintf("/api/v3/movie/%d", id)
 	var movie Movie
-	if err := c.get(endpoint, &movie); err != nil {
+	if err := c.getContext(ctx, endpoint, &movie); err != nil {
 		return nil, fmt.Errorf("getting movie %d: %w", id, err)
 	}
 	return &movie, nil
@@ -50,7 +59,11 @@ func (c *Client) LookupMovieByImdbID(imdbID string) (*Movie, error) {
 }
 
 func (c *Client) GetMovieByTmdbID(tmdbID int) (*Movie, error) {
-	movies, err := c.GetMovies()
+	return c.GetMovieByTmdbIDContext(context.Background(), tmdbID)
+}
+
+func (c *Client) GetMovieByTmdbIDContext(ctx context.Context, tmdbID int) (*Movie, error) {
+	movies, err := c.GetMoviesContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +78,11 @@ func (c *Client) GetMovieByTmdbID(tmdbID int) (*Movie, error) {
 }
 
 func (c *Client) GetMovieByImdbID(imdbID string) (*Movie, error) {
-	movies, err := c.GetMovies()
+	return c.GetMovieByImdbIDContext(context.Background(), imdbID)
+}
+
+func (c *Client) GetMovieByImdbIDContext(ctx context.Context, imdbID string) (*Movie, error) {
+	movies, err := c.GetMoviesContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +125,12 @@ func (c *Client) DeleteMovieFile(id int) error {
 // UpdateMoviePath updates the path for a movie in Radarr
 // This is used when JellyWatch moves a movie to a new location
 func (c *Client) UpdateMoviePath(movieID int, newPath string) error {
+	return c.UpdateMoviePathContext(context.Background(), movieID, newPath)
+}
+
+func (c *Client) UpdateMoviePathContext(ctx context.Context, movieID int, newPath string) error {
 	// First get the existing movie
-	movie, err := c.GetMovie(movieID)
+	movie, err := c.GetMovieContext(ctx, movieID)
 	if err != nil {
 		return fmt.Errorf("getting movie for update: %w", err)
 	}
@@ -120,7 +141,7 @@ func (c *Client) UpdateMoviePath(movieID int, newPath string) error {
 	// PUT the updated movie back
 	endpoint := fmt.Sprintf("/api/v3/movie/%d", movieID)
 	var updated Movie
-	if err := c.put(endpoint, movie, &updated); err != nil {
+	if err := c.putContext(ctx, endpoint, movie, &updated); err != nil {
 		return fmt.Errorf("updating movie path: %w", err)
 	}
 

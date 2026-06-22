@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -44,6 +46,40 @@ func (h *StreamingOpHandlers) MetadataRefresh(w http.ResponseWriter, r *http.Req
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	h.startStream(w, r, ipc.CmdMetadataRefresh, body)
+}
+
+func (h *StreamingOpHandlers) MetadataReconcile(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Limit int `json:"limit"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	h.startStream(w, r, ipc.CmdMetadataReconcile, body)
+}
+
+func (h *StreamingOpHandlers) MetadataRepair(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Limit       int     `json:"limit"`
+		DecisionIDs []int64 `json:"decision_ids"`
+		DryRun      bool    `json:"dry_run"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	h.startStream(w, r, ipc.CmdMetadataRepair, body)
+}
+
+func (h *StreamingOpHandlers) MetadataRepairItem(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_id", "id must be a positive integer")
+		return
+	}
+	body := struct {
+		DecisionID int64 `json:"decision_id"`
+		Limit      int   `json:"limit"`
+	}{
+		DecisionID: id,
+		Limit:      1,
+	}
+	h.startStream(w, r, ipc.CmdMetadataRepair, body)
 }
 
 func (h *StreamingOpHandlers) Sweep(w http.ResponseWriter, r *http.Request) {

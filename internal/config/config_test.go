@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -42,6 +44,109 @@ func TestAIConfig_CircuitBreakerDefaults(t *testing.T) {
 	}
 	if cfg.CircuitBreaker.CooldownSeconds != 30 {
 		t.Errorf("expected cooldown 30s, got %d", cfg.CircuitBreaker.CooldownSeconds)
+	}
+}
+
+func TestConfigToTOMLIncludesAllAISettings(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Model = "minimax-m2.5:cloud"
+	cfg.AI.FallbackModel = "qwen3:8b"
+	cfg.AI.CloudModel = "nemotron-3-nano:30b-cloud"
+	cfg.AI.AutoResolveRisky = true
+	cfg.AI.MaxRetries = 7
+	cfg.AI.HourlyLimit = 11
+	cfg.AI.DailyLimit = 22
+
+	toml := cfg.ToTOML()
+	for _, want := range []string{
+		`model = "minimax-m2.5:cloud"`,
+		`fallback_model = "qwen3:8b"`,
+		`cloud_model = "nemotron-3-nano:30b-cloud"`,
+		`auto_resolve_risky = true`,
+		`max_retries = 7`,
+		`hourly_limit = 11`,
+		`daily_limit = 22`,
+	} {
+		if !strings.Contains(toml, want) {
+			t.Fatalf("expected TOML to include %s:\n%s", want, toml)
+		}
+	}
+}
+
+func TestConfigToTOMLWritesPasswordHashNotPlainPassword(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Password = "secret"
+	cfg.PasswordHash = "$2a$10$example"
+
+	toml := cfg.ToTOML()
+	if strings.Contains(toml, `password = "secret"`) {
+		t.Fatalf("TOML should not write plaintext password:\n%s", toml)
+	}
+	if !strings.Contains(toml, `password_hash = "$2a$10$example"`) {
+		t.Fatalf("TOML should write password_hash:\n%s", toml)
+	}
+}
+
+func TestConfigSaveHashesPlaintextPassword(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SUDO_USER", "")
+	cfg := DefaultConfig()
+	cfg.Password = "secret"
+
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".config", "jellywatch", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	toml := string(data)
+	if strings.Contains(toml, `password = "secret"`) {
+		t.Fatalf("saved config contains plaintext password:\n%s", toml)
+	}
+	if !strings.Contains(toml, `password_hash = "$2`) {
+		t.Fatalf("saved config does not contain bcrypt password_hash:\n%s", toml)
+	}
+	if cfg.Password != "" || cfg.PasswordHash == "" {
+		t.Fatalf("Save should migrate in-memory password to hash, got password=%q hash=%q", cfg.Password, cfg.PasswordHash)
+	}
+}
+
+func TestGetReportsPathUsesConfigDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SUDO_USER", "")
+
+	got := GetReportsPath()
+	if !strings.HasSuffix(got, filepath.Join(".config", "jellywatch", "reports")) {
+		t.Fatalf("GetReportsPath = %q", got)
+	}
+}
+
+func TestLoadReturnsErrorForUnreadableExistingConfig(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read files regardless of owner mode")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SUDO_USER", "")
+
+	configDir := filepath.Join(home, ".config", "jellywatch")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte("[libraries]\ntv = [\"/tv\"]\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(configPath, 0o600) })
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected unreadable config to return an error")
+	}
+	if !strings.Contains(err.Error(), "cannot read config file") {
+		t.Fatalf("expected actionable config read error, got %v", err)
 	}
 }
 

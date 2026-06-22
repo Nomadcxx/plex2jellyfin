@@ -148,6 +148,151 @@ func TestMediaFileCRUD(t *testing.T) {
 	}
 }
 
+func TestGetLowConfidenceFilesUnderPathScopesToDirectoryAndExactFile(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	db, err := OpenPath(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	files := []*MediaFile{
+		{
+			Path:            "/library/A/low-a.mkv",
+			Size:            1,
+			ModifiedAt:      time.Now(),
+			MediaType:       "movie",
+			NormalizedTitle: "low a",
+			Confidence:      0.2,
+			Source:          "filesystem",
+			SourcePriority:  50,
+			LibraryRoot:     "/library",
+		},
+		{
+			Path:            "/library/B/low-b.mkv",
+			Size:            1,
+			ModifiedAt:      time.Now(),
+			MediaType:       "movie",
+			NormalizedTitle: "low b",
+			Confidence:      0.3,
+			Source:          "filesystem",
+			SourcePriority:  50,
+			LibraryRoot:     "/library",
+		},
+		{
+			Path:            "/library/A/high-a.mkv",
+			Size:            1,
+			ModifiedAt:      time.Now(),
+			MediaType:       "movie",
+			NormalizedTitle: "high a",
+			Confidence:      0.99,
+			Source:          "filesystem",
+			SourcePriority:  50,
+			LibraryRoot:     "/library",
+		},
+	}
+	for _, file := range files {
+		if err := db.UpsertMediaFile(file); err != nil {
+			t.Fatalf("UpsertMediaFile(%s): %v", file.Path, err)
+		}
+	}
+
+	dirScoped, err := db.GetLowConfidenceFilesUnderPath(0.8, 0, "/library/A")
+	if err != nil {
+		t.Fatalf("GetLowConfidenceFilesUnderPath dir: %v", err)
+	}
+	if len(dirScoped) != 1 || dirScoped[0].Path != "/library/A/low-a.mkv" {
+		t.Fatalf("dir scoped files = %#v, want only /library/A/low-a.mkv", dirScoped)
+	}
+
+	fileScoped, err := db.GetLowConfidenceFilesUnderPath(0.8, 0, "/library/B/low-b.mkv")
+	if err != nil {
+		t.Fatalf("GetLowConfidenceFilesUnderPath file: %v", err)
+	}
+	if len(fileScoped) != 1 || fileScoped[0].Path != "/library/B/low-b.mkv" {
+		t.Fatalf("file scoped files = %#v, want only /library/B/low-b.mkv", fileScoped)
+	}
+}
+
+func TestGetLowConfidenceFilesIncludesParseMethod(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	file := &MediaFile{
+		Path:            "/library/show/hash.mkv",
+		Size:            1,
+		ModifiedAt:      time.Now(),
+		MediaType:       "episode",
+		NormalizedTitle: "show",
+		Confidence:      0.1,
+		ParseMethod:     "folder",
+		NeedsReview:     true,
+		Source:          "filesystem",
+		SourcePriority:  50,
+		LibraryRoot:     "/library",
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("UpsertMediaFile: %v", err)
+	}
+
+	files, err := db.GetLowConfidenceFiles(0.8, 0)
+	if err != nil {
+		t.Fatalf("GetLowConfidenceFiles: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("len(files) = %d, want 1", len(files))
+	}
+	if files[0].ParseMethod != "folder" {
+		t.Fatalf("ParseMethod = %q, want folder", files[0].ParseMethod)
+	}
+	if !files[0].NeedsReview {
+		t.Fatal("NeedsReview = false, want true")
+	}
+}
+
+func TestUpsertMediaFileSetsExistingIDOnUpdate(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	path := "/movies/Example (2026)/Example (2026).mkv"
+	year := 2026
+	first := &MediaFile{
+		Path:            path,
+		Size:            100,
+		ModifiedAt:      time.Now(),
+		MediaType:       "movie",
+		NormalizedTitle: "example",
+		Year:            &year,
+	}
+	if err := db.UpsertMediaFile(first); err != nil {
+		t.Fatalf("first upsert failed: %v", err)
+	}
+	if first.ID == 0 {
+		t.Fatalf("first upsert did not set ID")
+	}
+
+	second := &MediaFile{
+		Path:            path,
+		Size:            200,
+		ModifiedAt:      time.Now(),
+		MediaType:       "movie",
+		NormalizedTitle: "example",
+		Year:            &year,
+	}
+	if err := db.UpsertMediaFile(second); err != nil {
+		t.Fatalf("second upsert failed: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("updated row ID = %d, want existing ID %d", second.ID, first.ID)
+	}
+}
+
 func TestDuplicateDetection(t *testing.T) {
 	// Create temporary database
 	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")

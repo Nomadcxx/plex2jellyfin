@@ -1,0 +1,8 @@
+[Unit]
+Description=JellyWatch scheduled postmortem collector
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/nomadx/Documents/jellywatch
+ExecStart=/usr/local/bin/jellywatch postmortem collect --since 96h
+ExecStartPost=/home/nomadx/Documents/jellywatch/scripts/jellywatch-postmortem-terminal.sh

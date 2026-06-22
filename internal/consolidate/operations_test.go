@@ -2,8 +2,11 @@ package consolidate
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
@@ -245,4 +248,150 @@ func TestExecutorPrintfWithNilWriter(t *testing.T) {
 	}()
 
 	executor.Printf("Test message\n")
+}
+
+func TestExecutePlanFailsEarlyWhenTargetNotWritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write through directory mode restrictions")
+	}
+
+	tempDir := t.TempDir()
+	target := filepath.Join(tempDir, "target")
+	source := filepath.Join(tempDir, "source.mkv")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("video"), 0644); err != nil {
+		t.Fatalf("failed to create source: %v", err)
+	}
+	if err := os.Chmod(target, 0555); err != nil {
+		t.Fatalf("failed to make target read-only: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(target, 0755)
+	})
+
+	plan := &Plan{
+		CanProceed: true,
+		TargetPath: target,
+		Operations: []*Operation{
+			{
+				SourcePath:      source,
+				DestinationPath: filepath.Join(target, "Season 01", "source.mkv"),
+				Size:            5,
+			},
+		},
+	}
+	consolidator := &Consolidator{cfg: &config.Config{}}
+
+	err := consolidator.ExecutePlan(plan, false)
+	if err == nil {
+		t.Fatal("ExecutePlan returned nil, want target write error")
+	}
+	if !strings.Contains(err.Error(), "target path is not writable") {
+		t.Fatalf("ExecutePlan error = %q, want target write error", err)
+	}
+	if strings.Contains(err.Error(), "operations failed") {
+		t.Fatalf("ExecutePlan error = %q, should fail before per-operation execution", err)
+	}
+}
+
+func TestExecutePlanUpdatesDatabaseAfterMove(t *testing.T) {
+	tempDir := t.TempDir()
+	sourceRoot := filepath.Join(tempDir, "storage2", "TV")
+	targetRoot := filepath.Join(tempDir, "storage1", "TV")
+	sourceDir := filepath.Join(sourceRoot, "Silo (2023)", "Season 01")
+	targetSeries := filepath.Join(targetRoot, "Silo (2023)")
+	sourcePath := filepath.Join(sourceDir, "Silo S01E01.mkv")
+	targetPath := filepath.Join(targetSeries, "Season 01", "Silo S01E01.mkv")
+
+	if err := os.MkdirAll(sourceDir, 0755); err != nil {
+		t.Fatalf("failed to create source dir: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("video"), 0644); err != nil {
+		t.Fatalf("failed to create source file: %v", err)
+	}
+
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	year := 2023
+	series := &database.Series{
+		Title:          "Silo",
+		Year:           year,
+		CanonicalPath:  filepath.Join(sourceRoot, "Silo (2023)"),
+		LibraryRoot:    sourceRoot,
+		Source:         "jellywatch",
+		SourcePriority: 100,
+	}
+	if _, err := db.UpsertSeries(series); err != nil {
+		t.Fatalf("failed to insert series: %v", err)
+	}
+
+	file := &database.MediaFile{
+		Path:            sourcePath,
+		Size:            5,
+		ModifiedAt:      time.Now(),
+		MediaType:       "episode",
+		ParentSeriesID:  &series.ID,
+		NormalizedTitle: "silo",
+		Year:            &year,
+		Season:          intPtr(1),
+		Episode:         intPtr(1),
+		Source:          "jellywatch",
+		SourcePriority:  100,
+		LibraryRoot:     sourceRoot,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("failed to insert media file: %v", err)
+	}
+
+	consolidator := NewConsolidator(db, &config.Config{
+		Libraries: config.LibrariesConfig{TV: []string{targetRoot}},
+		Options: config.OptionsConfig{
+			VerifyChecksums: false,
+		},
+	})
+	err = consolidator.ExecutePlan(&Plan{
+		CanProceed: true,
+		TargetPath: targetSeries,
+		Operations: []*Operation{{
+			SourcePath:      sourcePath,
+			DestinationPath: targetPath,
+			Size:            5,
+			Type:            "series",
+		}},
+	}, false)
+	if err != nil {
+		t.Fatalf("ExecutePlan failed: %v", err)
+	}
+
+	if got, err := db.GetMediaFile(sourcePath); err != nil {
+		t.Fatalf("GetMediaFile(source) failed: %v", err)
+	} else if got != nil {
+		t.Fatalf("source DB row still exists after move")
+	}
+	got, err := db.GetMediaFile(targetPath)
+	if err != nil {
+		t.Fatalf("GetMediaFile(target) failed: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("target DB row was not inserted after move")
+	}
+	if got.LibraryRoot != targetRoot {
+		t.Fatalf("LibraryRoot = %q, want %q", got.LibraryRoot, targetRoot)
+	}
+	updatedSeries, err := db.GetSeriesByID(series.ID)
+	if err != nil {
+		t.Fatalf("GetSeriesByID failed: %v", err)
+	}
+	if updatedSeries.CanonicalPath != targetSeries {
+		t.Fatalf("CanonicalPath = %q, want %q", updatedSeries.CanonicalPath, targetSeries)
+	}
+	if !updatedSeries.SonarrPathDirty {
+		t.Fatalf("series should be marked dirty after consolidation path change")
+	}
 }
