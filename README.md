@@ -14,7 +14,7 @@ Because Sonarr and Radarr can't be trusted with naming conventions.
 
 ## What It Does
 
-JellyWatch is a Linux background service that watches download directories, parses media filenames, and renames/moves files into a Jellyfin-compatible layout. A second service (`jellyweb`) ships a web dashboard at port `5522` for monitoring, queue management, duplicate review, and configuration. Optional Ollama integration provides AI-assisted parsing for ambiguous filenames.
+JellyWatch watches download directories, parses media filenames, and renames files into a Jellyfin-compatible layout. `jellyweb` serves a web dashboard at port `5522` for monitoring, queue management, duplicate review, and configuration. An optional Ollama integration handles ambiguous filenames with AI-assisted parsing.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh | sudo bash
@@ -22,7 +22,7 @@ curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh 
 
 ## The Problem
 
-Your *arr stack downloads `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv`. Jellyfin wants `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv`. JellyWatch fixes that automatically, with AI fallback when filenames are ambiguous, and a self-healing convergence loop for files that slip through.
+Your *arr stack downloads `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv`. Jellyfin wants `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv`. JellyWatch fixes that automatically, with AI fallback for ambiguous filenames and a convergence loop that catches files the parser missed.
 
 ## Architecture
 
@@ -80,11 +80,11 @@ jellywatch audit --generate --dry-run   # Preview AI rename suggestions
 jellywatch audit --execute              # Apply approved fixes
 ```
 
-The model is given the library kind (Movies vs TV), folder path, and current parse as context. See [`docs/ai-context.md`](docs/ai-context.md).
+The audit sends the library kind (Movies vs TV), folder path, and current parse as context to the LLM. See [`docs/ai-context.md`](docs/ai-context.md).
 
 ### Duplicates & Consolidation
 
-The daemon runs an automated convergence loop that pushes duplicate detection and consolidation jobs into the housekeeping queue continuously — visible in the web UI at `/scheduler`. The CLI commands above are for one-off manual maintenance.
+The daemon runs a convergence loop that detects duplicates and scattered series, feeding them into the housekeeping queue. You can see the queue in the web UI at `/scheduler`. The CLI commands above handle one-off manual maintenance.
 
 ### Advanced Commands (hidden from root help)
 
@@ -129,11 +129,11 @@ Every settings page maps to a section of `~/.config/jellywatch/config.toml`.
 
 **TV Shows:** `TV Shows/Show Name (Year)/Season 01/Show Name (Year) S01E01.ext`
 
-Release-group noise (`1080p`, `x264`, `WEB-DL`, `RARBG`, `-YTS`, etc.) is stripped during parse. Resolution / source / HDR are also extracted from the parent directory when missing from the filename, so quality grouping works on legacy libraries.
+The parser strips release-group noise (`1080p`, `x264`, `WEB-DL`, `RARBG`, `-YTS`, etc.). It also extracts resolution, source, and HDR from the parent directory when the filename lacks them, so quality grouping works on legacy libraries.
 
 ## Configuration
 
-Lives at `~/.config/jellywatch/config.toml`. A full annotated template is in [`config.toml.example`](config.toml.example).
+Config file: `~/.config/jellywatch/config.toml`. A full annotated template is in [`config.toml.example`](config.toml.example).
 
 ```toml
 [watch]
@@ -200,7 +200,7 @@ jellyfin = "/tv5"
 daemon   = "/mnt/STORAGE5/TVSHOWS"
 ```
 
-Without these, parse-decision rows for organized files are eventually labeled FAIL by the sweeper.
+Without these, the sweeper labels parse-decision rows for organized files as FAIL.
 
 ### File Permissions
 
@@ -227,7 +227,7 @@ systemctl --user status jellywatch-postmortem.timer  # scheduled evidence collec
 journalctl -u jellywatchd -f
 ```
 
-`jellyweb` depends on `jellywatchd` and reaches it via the Unix-domain control socket — no TCP between them.
+`jellyweb` depends on `jellywatchd` and reaches it via the Unix-domain control socket. No TCP between them.
 
 The postmortem timer runs every 4 days, collecting parse decisions, repair events, housekeeping state, and suspicious items into an evidence bundle at `~/.config/jellywatch/reports/latest/`. It opens a terminal with an `agent-prompt.md` for periodic human or LLM review.
 
@@ -248,7 +248,7 @@ go build -o installer ./cmd/installer
 sudo ./installer
 ```
 
-The installer is interactive and configures watch paths, library paths, *arr keys, AI, permissions, and systemd units. A non-destructive update mode preserves an existing `config.toml`.
+The installer walks you through watch paths, library paths, *arr keys, AI, permissions, and systemd units. You can re-run it to update without losing your existing `config.toml`.
 
 Requires **Go 1.24+** (see `go.mod`).
 
