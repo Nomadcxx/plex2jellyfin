@@ -53,56 +53,59 @@ See [`docs/architecture.md`](docs/architecture.md) for details.
 
 ## CLI Commands
 
-`jellywatch --help` lists the full set. Most-used:
+`jellywatch --help` shows the primary workflows. Advanced and maintenance commands are available but hidden from the root help to keep it focused.
+
+### Primary Commands
 
 ```bash
 jellywatch scan                          # Index libraries into media.db
-jellywatch organize /downloads/file.mkv  # Organize a single file
-jellywatch organize-folder /downloads/X  # Organize a directory tree
-jellywatch watch /downloads              # Foreground watcher (one-off; daemon does this in service mode)
-jellywatch validate                      # Check existing library against Jellyfin naming rules
-jellywatch fix                           # Interactive cleanup wizard
-jellywatch cleanup                       # Remove cruft files / empty dirs
-jellywatch status                        # DB statistics
-jellywatch monitor                       # Tail jellywatchd activity log
-jellywatch daemon {start|stop|restart}   # Control the systemd service
-jellywatch serve                         # Run the API server in foreground
+jellywatch status                        # DB statistics and deployment health
+jellywatch duplicates generate           # Find duplicate media
+jellywatch duplicates dry-run            # Preview deletion plan
+jellywatch duplicates execute            # Keep the best copy, remove the rest
+jellywatch consolidate generate          # Find TV series scattered across drives
+jellywatch consolidate dry-run           # Preview consolidation moves
+jellywatch consolidate execute           # Merge into a single library path
+jellywatch config                        # Manage configuration
+jellywatch version                       # Print version information
 ```
 
 ### AI Audit
 
-Reviews files with low parse confidence and proposes renames via Ollama:
+Reviews files with low parse confidence and proposes renames via the configured LLM:
 
 ```bash
-jellywatch audit generate     # Identify low-confidence files
-jellywatch audit dry-run      # Preview AI rename suggestions
-jellywatch audit execute      # Apply approved fixes
-jellywatch review             # Interactive approval of AI suggestions
+jellywatch audit --generate             # Identify low-confidence files
+jellywatch audit --generate --dry-run   # Preview AI rename suggestions
+jellywatch audit --execute              # Apply approved fixes
 ```
 
 The model is given the library kind (Movies vs TV), folder path, and current parse as context. See [`docs/ai-context.md`](docs/ai-context.md).
 
 ### Duplicates & Consolidation
 
-```bash
-jellywatch duplicates generate   # Find duplicate media
-jellywatch duplicates execute    # Keep the best copy, remove the rest
+The daemon runs an automated convergence loop that pushes duplicate detection and consolidation jobs into the housekeeping queue continuously — visible in the web UI at `/scheduler`. The CLI commands above are for one-off manual maintenance.
 
-jellywatch consolidate generate  # Find TV series scattered across drives
-jellywatch consolidate execute   # Merge into a single library path
-```
-
-These commands are for one-off maintenance. The daemon runs an automated convergence loop that pushes the same kinds of jobs into the housekeeping queue continuously — visible in the web UI at `/scheduler`.
-
-### Sonarr / Radarr / Jellyfin helpers
+### Advanced Commands (hidden from root help)
 
 ```bash
-jellywatch sonarr ...    # Sonarr integration commands
-jellywatch radarr ...    # Radarr integration commands
-jellywatch health        # Verify *arr setup is compatible
-jellywatch migrate       # Reconcile DB paths against *arr current state
-jellywatch orphans       # Detect / remediate orphaned Jellyfin episodes
-jellywatch parses        # Query parse_decisions table
+jellywatch organize /downloads/file.mkv  # Organize a single file
+jellywatch organize-folder /downloads/X  # Organize a directory tree
+jellywatch watch /downloads              # Foreground watcher
+jellywatch validate <path>              # Check library against Jellyfin naming rules
+jellywatch cleanup                      # Remove cruft files / empty dirs
+jellywatch monitor                      # Tail jellywatchd activity log
+jellywatch daemon {start|stop|restart}  # Control the systemd service
+jellywatch serve                        # Run the API server in foreground
+jellywatch repair series-dedupe         # Repair duplicate series rows
+jellywatch database cleanup-housekeeping # Collapse duplicate housekeeping rows
+jellywatch postmortem collect --since 96h # Generate evidence bundle for review
+jellywatch sonarr ...                   # Sonarr integration commands
+jellywatch radarr ...                   # Radarr integration commands
+jellywatch health                       # Verify *arr setup is compatible
+jellywatch migrate                      # Reconcile DB paths against *arr current state
+jellywatch orphans                      # Detect / remediate orphaned Jellyfin episodes
+jellywatch parses                       # Query parse_decisions table
 ```
 
 ## Web Dashboard
@@ -149,12 +152,19 @@ health_addr    = ":8686"
 [ai]
 enabled              = true
 ollama_endpoint      = "http://localhost:11434"
-model                = "llama3.1"
+model                = "minimax-m2.5:cloud"
+fallback_model       = "kimi-k2.6:cloud"
 confidence_threshold = 0.8
+auto_trigger_threshold = 0.6
+timeout_seconds      = 30
+cache_enabled        = true
+auto_resolve_risky   = false
+max_retries          = 3
+hourly_limit         = 10
+daily_limit          = 50
 
 [options]
 dry_run          = false
-verify_checksums = false
 delete_source    = true
 ```
 
@@ -208,15 +218,18 @@ dir_mode  = "0755"
 
 ## Services
 
-The installer registers two systemd units:
+The installer registers three systemd units:
 
 ```bash
-systemctl status jellywatchd    # daemon
-systemctl status jellyweb       # web UI on :5522
+systemctl status jellywatchd              # daemon
+systemctl status jellyweb                # web UI on :5522
+systemctl --user status jellywatch-postmortem.timer  # scheduled evidence collection
 journalctl -u jellywatchd -f
 ```
 
 `jellyweb` depends on `jellywatchd` and reaches it via the Unix-domain control socket — no TCP between them.
+
+The postmortem timer runs every 4 days, collecting parse decisions, repair events, housekeeping state, and suspicious items into an evidence bundle at `~/.config/jellywatch/reports/latest/`. It opens a terminal with an `agent-prompt.md` for periodic human or LLM review.
 
 ## Install
 
