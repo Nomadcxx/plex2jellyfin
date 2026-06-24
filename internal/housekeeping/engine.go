@@ -594,20 +594,11 @@ func folderYearFromPath(v any) string {
 	j := strings.LastIndex(base, ")")
 	if i >= 0 && j > i+4 {
 		inner := base[i+1 : j]
-		if len(inner) == 4 && allDigits(inner) {
+		if len(inner) == 4 && isAllDigits(inner) {
 			return inner
 		}
 	}
 	return ""
-}
-
-func allDigits(s string) bool {
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func (e *Engine) detectOrphanSources(ctx context.Context, res *DetectResult, enqueue func(string, map[string]any, int)) {

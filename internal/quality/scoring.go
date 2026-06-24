@@ -1,5 +1,7 @@
 package quality
 
+import "strings"
+
 // CONDOR Quality Scoring System
 // Based on jellysink's proven algorithm: Resolution > Source > Size
 //
@@ -211,58 +213,24 @@ func AudioToString(a AudioCodec) string {
 }
 
 // CodecToString extracts codec information from filename
-// This is a simple extractor - more sophisticated parsing can be added
 func CodecToString(filename string) string {
-	upper := filename
+	upper := strings.ToUpper(filename)
 
-	// Check for common codecs in order of preference
-	if contains(upper, "AV1") {
+	if strings.Contains(upper, "AV1") {
 		return "AV1"
 	}
-	if contains(upper, "HEVC") || contains(upper, "H.265") || contains(upper, "H265") || contains(upper, "X265") {
+	if strings.Contains(upper, "HEVC") || strings.Contains(upper, "H.265") || strings.Contains(upper, "H265") || strings.Contains(upper, "X265") {
 		return "x265"
 	}
-	if contains(upper, "H.264") || contains(upper, "H264") || contains(upper, "X264") || contains(upper, "AVC") {
+	if strings.Contains(upper, "H.264") || strings.Contains(upper, "H264") || strings.Contains(upper, "X264") || strings.Contains(upper, "AVC") {
 		return "x264"
 	}
-	if contains(upper, "VP9") {
+	if strings.Contains(upper, "VP9") {
 		return "VP9"
 	}
-	if contains(upper, "XVID") {
+	if strings.Contains(upper, "XVID") {
 		return "XviD"
 	}
 
 	return "unknown"
-}
-
-// contains is a case-insensitive substring check
-func contains(s, substr string) bool {
-	// Already assume both are in consistent case from caller
-	return stringContains(s, substr) || stringContains(toLower(s), toLower(substr))
-}
-
-func stringContains(s, substr string) bool {
-	return len(s) >= len(substr) && indexOfSubstring(s, substr) >= 0
-}
-
-func indexOfSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
-func toLower(s string) string {
-	result := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			result[i] = c + ('a' - 'A')
-		} else {
-			result[i] = c
-		}
-	}
-	return string(result)
 }

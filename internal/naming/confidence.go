@@ -1,6 +1,7 @@
 package naming
 
 import (
+	"math"
 	"regexp"
 	"strings"
 )
@@ -59,7 +60,7 @@ func CalculateTitleConfidence(title, originalFilename string) float64 {
 		confidence = 0.5
 	}
 
-	return clamp(confidence, 0.0, 1.0)
+	return math.Max(math.Min(confidence, 1.0), 0.0)
 }
 
 func shouldApplyGarbageTitlePenalty(title, originalFilename string) bool {
@@ -213,13 +214,4 @@ func hasReleaseMarkers(filename string) bool {
 	return false
 }
 
-// clamp restricts value to [min, max] range
-func clamp(value, min, max float64) float64 {
-	if value < min {
-		return min
-	}
-	if value > max {
-		return max
-	}
-	return value
-}
+

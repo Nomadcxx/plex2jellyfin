@@ -441,12 +441,7 @@ func getAvailableSpace(path string) (int64, error) {
 	return int64(stat.Bavail) * int64(stat.Bsize), nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+
 
 // findExistingShowDir searches for an existing show directory in the library
 // Returns the full path to the show directory if found, empty string otherwise

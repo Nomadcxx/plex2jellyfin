@@ -240,27 +240,8 @@ func (q *QualityInfo) String() string {
 	}
 
 	// Source
-	switch q.Source {
-	case SourceCAM:
-		parts = append(parts, "CAM")
-	case SourceTS:
-		parts = append(parts, "TS")
-	case SourceTC:
-		parts = append(parts, "TC")
-	case SourceDVDScr:
-		parts = append(parts, "DVDScr")
-	case SourceDVDRip:
-		parts = append(parts, "DVDRip")
-	case SourceHDTV:
-		parts = append(parts, "HDTV")
-	case SourceWEBRip:
-		parts = append(parts, "WEBRip")
-	case SourceWEBDL:
-		parts = append(parts, "WEB-DL")
-	case SourceBluRay:
-		parts = append(parts, "BluRay")
-	case SourceREMUX:
-		parts = append(parts, "REMUX")
+	if source := q.Source.String(); source != "Unknown" {
+		parts = append(parts, source)
 	}
 
 	// HDR

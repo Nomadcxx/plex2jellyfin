@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -744,7 +745,5 @@ func isVideoFile(path string) bool {
 
 // parseInt safely converts string to int
 func parseInt(s string) (int, error) {
-	var i int
-	_, err := fmt.Sscanf(s, "%d", &i)
-	return i, err
+	return strconv.Atoi(s)
 }

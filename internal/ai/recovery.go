@@ -48,12 +48,7 @@ func ExtractPartialResult(response string) (*Result, bool) {
 	return &result, true
 }
 
-func min(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
+
 
 // GetNudgePrompt returns a corrective prompt to help the AI fix malformed JSON responses.
 // This is a necessary public API function for the recovery mechanism.

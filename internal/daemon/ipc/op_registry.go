@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"errors"
+	"sort"
 	"sync"
 	"time"
 )
@@ -130,13 +131,9 @@ func (r *OpRegistry) List() []OpSummary {
 		out = append(out, s)
 	}
 	// newest first
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j].StartedAt > out[i].StartedAt {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].StartedAt > out[j].StartedAt
+	})
 	return out
 }
 

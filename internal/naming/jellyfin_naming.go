@@ -1,6 +1,7 @@
 package naming
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -52,12 +53,7 @@ func IsJellyfinCompliantFilename(filename, mediaType string) bool {
 
 // getExtension returns the file extension without the dot
 func getExtension(filename string) string {
-	for i := len(filename) - 1; i >= 0; i-- {
-		if filename[i] == '.' {
-			return filename[i+1:]
-		}
-	}
-	return ""
+	return strings.TrimPrefix(filepath.Ext(filename), ".")
 }
 
 // hasReleaseGroupSuffix checks for release group pattern like "-RARBG"
