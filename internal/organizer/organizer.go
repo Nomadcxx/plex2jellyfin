@@ -375,7 +375,7 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
 
-	cleanName := naming.NormalizeMovieName(movie.Title, movie.Year)
+	cleanName := naming.NormalizeMediaName(movie.Title, movie.Year)
 	movieDir := filepath.Join(libraryPath, cleanName)
 	ext := filepath.Ext(sourcePath)
 	targetPath := filepath.Join(movieDir, cleanName+ext)
@@ -550,7 +550,7 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 
 	showDir := findExistingShowDir(libraryPath, tv.Title)
 	if showDir == "" {
-		showName := naming.NormalizeTVShowName(tv.Title, tv.Year)
+		showName := naming.NormalizeMediaName(tv.Title, tv.Year)
 		showDir = filepath.Join(libraryPath, showName)
 	}
 

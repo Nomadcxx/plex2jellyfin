@@ -265,15 +265,7 @@ func parseTVShowFromBaseName(baseName, filename string) (*TVShowInfo, error) {
 	}, nil
 }
 
-func NormalizeMovieName(title, year string) string {
-	title = titleCaseWithOrdinals(title)
-	if year != "" {
-		return fmt.Sprintf("%s (%s)", title, year)
-	}
-	return title
-}
-
-func NormalizeTVShowName(title, year string) string {
+func NormalizeMediaName(title, year string) string {
 	title = titleCaseWithOrdinals(title)
 	if year != "" {
 		return fmt.Sprintf("%s (%s)", title, year)
@@ -304,7 +296,7 @@ func FormatTVEpisodeFilenameFromInfo(info *TVShowInfo, ext string) string {
 		return ""
 	}
 	if info.EpisodeDate != "" {
-		title := NormalizeTVShowName(info.Title, info.Year)
+		title := NormalizeMediaName(info.Title, info.Year)
 		return fmt.Sprintf("%s %s.%s", title, info.EpisodeDate, ext)
 	}
 	return FormatTVEpisodeFilename(info.Title, info.Year, info.Season, info.Episode, ext)

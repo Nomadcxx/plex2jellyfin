@@ -724,7 +724,7 @@ func (e *Engine) parserDriftMovieRename(d *database.ParseDecision) (srcPath, dst
 	if err != nil || info == nil || info.Title == "" {
 		return "", "", false
 	}
-	cleanName := naming.NormalizeMovieName(info.Title, info.Year)
+	cleanName := naming.NormalizeMediaName(info.Title, info.Year)
 	ext := filepath.Ext(d.TargetPath)
 	if ext == "" {
 		ext = filepath.Ext(d.SourceFilename)
@@ -785,7 +785,7 @@ func (e *Engine) parserDriftTVRename(d *database.ParseDecision) (srcPath, dstPat
 	if !tvParserDriftWasReleaseYearAfterEpisode(d, libRoot) {
 		return "", "", false
 	}
-	showName := naming.NormalizeTVShowName(info.Title, info.Year)
+	showName := naming.NormalizeMediaName(info.Title, info.Year)
 	ext := filepath.Ext(d.TargetPath)
 	if ext == "" {
 		ext = filepath.Ext(d.SourceFilename)

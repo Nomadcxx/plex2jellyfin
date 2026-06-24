@@ -91,7 +91,7 @@ func (c *Checker) CheckMovie(fullPath string) ComplianceResult {
 	}
 
 	// Validate expected folder name
-	expectedFolder := naming.NormalizeMovieName(movie.Title, movie.Year)
+	expectedFolder := naming.NormalizeMediaName(movie.Title, movie.Year)
 	if parentDir != expectedFolder {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: folder should be '%s'", IssueInvalidFolderStructure, expectedFolder))
 	}
@@ -172,7 +172,7 @@ func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 	}
 
 	// Validate expected show folder name
-	expectedShowFolder := naming.NormalizeTVShowName(tv.Title, tv.Year)
+	expectedShowFolder := naming.NormalizeMediaName(tv.Title, tv.Year)
 	if showFolder != expectedShowFolder {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: show folder should be '%s'", IssueInvalidFolderStructure, expectedShowFolder))
 	}

@@ -45,9 +45,9 @@ func TestParseMovieNameChainedReleaseGroups(t *testing.T) {
             t.Errorf("ParseMovieName(%q) error: %v", tc.filename, err)
             continue
         }
-        title := NormalizeMovieName(info.Title, info.Year)
+        title := NormalizeMediaName(info.Title, info.Year)
         if title != tc.expectedTitle+" ("+tc.expectedYear+")" {
-            t.Errorf("NormalizeMovieName(%q, %q) = %q, want %q", info.Title, info.Year, title, tc.expectedTitle+" ("+tc.expectedYear+")")
+            t.Errorf("NormalizeMediaName(%q, %q) = %q, want %q", info.Title, info.Year, title, tc.expectedTitle+" ("+tc.expectedYear+")")
         }
     }
 }
