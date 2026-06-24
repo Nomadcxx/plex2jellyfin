@@ -54,7 +54,8 @@ func TestSaveAndLoadDuplicatePlans(t *testing.T) {
 	}
 
 	// Verify file exists
-	path, _ := getDuplicatePlansPath()
+	dir, _ := GetPlansDir()
+	path := filepath.Join(dir, "duplicates.json")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatal("Plan file was not created")
 	}

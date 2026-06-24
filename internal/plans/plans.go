@@ -91,33 +91,6 @@ func GetPlansDir() (string, error) {
 	return paths.PlansDir()
 }
 
-// getConsolidatePlansPath returns the path to consolidate.json
-func getConsolidatePlansPath() (string, error) {
-	dir, err := GetPlansDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "consolidate.json"), nil
-}
-
-// getDuplicatePlansPath returns the path to duplicates.json
-func getDuplicatePlansPath() (string, error) {
-	dir, err := GetPlansDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "duplicates.json"), nil
-}
-
-// getAuditPlansPath returns path to audit.json
-func getAuditPlansPath() (string, error) {
-	dir, err := GetPlansDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "audit.json"), nil
-}
-
 // --- generic plan file operations ---
 
 func savePlan[T any](plan *T, filename string) error {
