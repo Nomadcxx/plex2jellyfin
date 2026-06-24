@@ -233,3 +233,32 @@ func TestFindAllShowLocations_NoMatches(t *testing.T) {
 		t.Errorf("findAllShowLocations(nonexistent) found %d locations, want 0", len(locations))
 	}
 }
+
+func TestFindShowDirInLibrary_YearAware(t *testing.T) {
+	tmpDir := t.TempDir()
+	libDir := filepath.Join(tmpDir, "library")
+	seasonDir := filepath.Join(libDir, "Dracula (2020)")
+	seasonDir2025 := filepath.Join(libDir, "Dracula (2025)")
+
+	os.MkdirAll(seasonDir, 0755)
+	os.MkdirAll(seasonDir2025, 0755)
+
+	selector := &Selector{
+		libraries: []string{libDir},
+	}
+
+	result := selector.findShowDirInLibrary(libDir, "dracula", "2020")
+	if result != seasonDir {
+		t.Errorf("year 2020: got %q, want %q", result, seasonDir)
+	}
+
+	result = selector.findShowDirInLibrary(libDir, "dracula", "2025")
+	if result != seasonDir2025 {
+		t.Errorf("year 2025: got %q, want %q", result, seasonDir2025)
+	}
+
+	result = selector.findShowDirInLibrary(libDir, "dracula", "")
+	if result == "" {
+		t.Errorf("no year: should match any, got empty")
+	}
+}

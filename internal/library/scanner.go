@@ -56,7 +56,10 @@ func (s *Selector) findShowDirInLibrary(library, normalizedTitle, year string) s
 		normalizedDir := normalizeTitle(dirName)
 
 		// Extract year from directory if present
-		dirYear := extractYearFromDir(dirName)
+		dirYear := ""
+		if matches := regexp.MustCompile(`\((\d{4})\)`).FindStringSubmatch(dirName); len(matches) >= 2 {
+			dirYear = matches[1]
+		}
 
 		// If both have years, they MUST match
 		if year != "" && dirYear != "" && year != dirYear {
