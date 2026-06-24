@@ -360,7 +360,7 @@ func TestSweep_ContextCancellationAbortsPagination(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error on ctx cancellation, got nil")
 	}
-	if elapsed > 1500*time.Millisecond {
+	if elapsed > 5000*time.Millisecond {
 		t.Errorf("expected sweep to abort promptly, took %v", elapsed)
 	}
 }

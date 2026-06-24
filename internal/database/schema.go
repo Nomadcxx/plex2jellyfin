@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 22
+const currentSchemaVersion = 23
 
 // SQL migration scripts
 var migrations = []migration{
@@ -667,9 +667,6 @@ var migrations = []migration{
 	},
 	{
 		version: 22,
-		// Durable audit trail for automatic repair decisions. Postmortem
-		// reports consume this table so every daemon-side repair can be
-		// reviewed with the evidence that justified it.
 		up: []string{
 			`CREATE TABLE IF NOT EXISTS repair_events (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -688,6 +685,23 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_repair_events_event_at ON repair_events(event_at)`,
 			`CREATE INDEX IF NOT EXISTS idx_repair_events_action ON repair_events(action, outcome)`,
 			`INSERT INTO schema_version (version) VALUES (22)`,
+		},
+	},
+	{
+		version: 23,
+		up: []string{
+			`CREATE TABLE IF NOT EXISTS deferred_ops (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				path TEXT NOT NULL,
+				type TEXT NOT NULL,
+				source_path TEXT NOT NULL,
+				target_path TEXT,
+				reason TEXT,
+				deferred_at DATETIME NOT NULL,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_deferred_ops_path ON deferred_ops(path)`,
+			`INSERT INTO schema_version (version) VALUES (23)`,
 		},
 	},
 }

@@ -275,7 +275,25 @@ func (m *MediaDB) DeleteMediaFile(path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	_, err := m.db.Exec("DELETE FROM media_files WHERE path = ?", path)
+	var id int64
+	err := m.db.QueryRow("SELECT id FROM media_files WHERE path = ?", path).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("failed to find media file: %w", err)
+	}
+
+	_, err = m.db.Exec("UPDATE movies SET best_file_id = NULL WHERE best_file_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to clear movie best_file references: %w", err)
+	}
+	_, err = m.db.Exec("UPDATE episodes SET best_file_id = NULL WHERE best_file_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to clear episode best_file references: %w", err)
+	}
+
+	_, err = m.db.Exec("DELETE FROM media_files WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete media file: %w", err)
 	}
@@ -288,7 +306,16 @@ func (m *MediaDB) DeleteMediaFileByID(id int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	_, err := m.db.Exec("DELETE FROM media_files WHERE id = ?", id)
+	_, err := m.db.Exec("UPDATE movies SET best_file_id = NULL WHERE best_file_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to clear movie best_file references: %w", err)
+	}
+	_, err = m.db.Exec("UPDATE episodes SET best_file_id = NULL WHERE best_file_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to clear episode best_file references: %w", err)
+	}
+
+	_, err = m.db.Exec("DELETE FROM media_files WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete media file: %w", err)
 	}

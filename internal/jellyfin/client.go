@@ -82,30 +82,46 @@ func (c *Client) requestCtx(ctx context.Context, method, endpoint string, body i
 	}
 
 	fullURL := base.ResolveReference(rel)
-	req, err := http.NewRequestWithContext(ctx, method, fullURL.String(), body)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, fullURL.String(), body)
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+
+		if withAuth && c.apiKey != "" {
+			req.Header.Set("Authorization", c.authHeader())
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("executing request (attempt %d/3): %w", attempt+1, err)
+			if attempt < 2 {
+				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			defer resp.Body.Close()
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			lastErr = fmt.Errorf("API error (status %d, attempt %d/3): %s", resp.StatusCode, attempt+1, string(bodyBytes))
+			if resp.StatusCode >= 500 && attempt < 2 {
+				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		return resp, nil
 	}
 
-	if withAuth && c.apiKey != "" {
-		req.Header.Set("Authorization", c.authHeader())
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	return resp, nil
+	return nil, lastErr
 }
 
 func (c *Client) getCtx(ctx context.Context, endpoint string, result interface{}) error {

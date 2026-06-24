@@ -184,7 +184,7 @@ func TestGetSystemInfo_InvalidURLAndHTTPError(t *testing.T) {
 	defer errorServer.Close()
 
 	client := NewClient(Config{URL: errorServer.URL, APIKey: "secret-key"})
-	if _, err := client.GetSystemInfo(); err == nil || !strings.Contains(err.Error(), "API error (status 502)") {
+	if _, err := client.GetSystemInfo(); err == nil || !strings.Contains(err.Error(), "API error (status 502") {
 		t.Fatalf("expected API status error, got %v", err)
 	}
 }

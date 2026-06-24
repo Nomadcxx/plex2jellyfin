@@ -210,8 +210,10 @@ func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
 			return
 		}
 
-		if err := s.db.MarkSeriesSynced(req.ID); err != nil {
-			s.logger.Error("failed to mark series synced", "id", req.ID, "error", err)
+		if err := retryWithBackoff(ctx, 3, func() error {
+			return s.db.MarkSeriesSynced(req.ID)
+		}); err != nil {
+			s.logger.Error("failed to mark series synced after Sonarr update succeeded", "id", req.ID, "error", err)
 		}
 
 	case "movie":
@@ -241,8 +243,10 @@ func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
 			return
 		}
 
-		if err := s.db.MarkMovieSynced(req.ID); err != nil {
-			s.logger.Error("failed to mark movie synced", "id", req.ID, "error", err)
+		if err := retryWithBackoff(ctx, 3, func() error {
+			return s.db.MarkMovieSynced(req.ID)
+		}); err != nil {
+			s.logger.Error("failed to mark movie synced after Radarr update succeeded", "id", req.ID, "error", err)
 		}
 	}
 }

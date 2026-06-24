@@ -62,8 +62,7 @@ func (c *Cache) Get(inputNormalized, inputType, model string) (*Result, error) {
 		}
 	}
 
-	// Update usage stats asynchronously
-	go c.updateUsage(id)
+	c.updateUsage(id)
 
 	return &Result{
 		Title:           title,

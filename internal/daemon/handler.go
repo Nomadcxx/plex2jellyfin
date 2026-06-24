@@ -41,6 +41,7 @@ type MediaHandler struct {
 	seasonPackActive map[string]struct{}
 	seasonPackDone   map[string]time.Time
 	mu               sync.Mutex
+	parseDecisionMu  sync.Mutex // serializes webhook + processFile writes to parse_decisions
 	dryRun           bool
 	stats            *Stats
 	logger           *logging.Logger
@@ -768,6 +769,7 @@ func (h *MediaHandler) processFile(path string) {
 	// surface how the same file was previously parsed (ExistingMatchMethod).
 	var decisionID int64
 	if h.db != nil {
+		h.parseDecisionMu.Lock()
 		mediaTypeGuessed := "movie"
 		if isTVEpisode {
 			mediaTypeGuessed = "tv"
@@ -784,6 +786,7 @@ func (h *MediaHandler) processFile(path string) {
 			MediaTypeGuessed:    mediaTypeGuessed,
 			ExistingMatchMethod: existingMethod,
 		})
+		h.parseDecisionMu.Unlock()
 		if insertErr != nil {
 			h.logger.Warn("handler", "failed to insert parse decision",
 				logging.F("filename", filename),
@@ -1497,6 +1500,8 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 	case jellyfin.EventItemAdded:
 		itemID := strings.TrimSpace(event.ItemID)
 		if h.db != nil && path != "" && itemID != "" {
+			h.parseDecisionMu.Lock()
+			defer h.parseDecisionMu.Unlock()
 			if err := h.db.UpsertJellyfinItem(path, itemID, event.ItemName, event.ItemType); err != nil {
 				if h.logger != nil {
 					h.logger.Warn("handler", "Failed to upsert Jellyfin item", logging.F("path", path), logging.F("item_id", itemID), logging.F("error", err.Error()))
@@ -1531,6 +1536,8 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 	case jellyfin.EventItemUpdated:
 		itemID := strings.TrimSpace(event.ItemID)
 		if h.db != nil && path != "" && itemID != "" {
+			h.parseDecisionMu.Lock()
+			defer h.parseDecisionMu.Unlock()
 			if err := h.db.UpsertJellyfinItem(path, itemID, event.ItemName, event.ItemType); err != nil {
 				if h.logger != nil {
 					h.logger.Warn("handler", "Failed to upsert Jellyfin item", logging.F("path", path), logging.F("item_id", itemID), logging.F("error", err.Error()))
@@ -1988,6 +1995,7 @@ func (h *MediaHandler) processPendingAI(ctx context.Context, progress chan<- dat
 		h.mu.Lock()
 		delete(h.pendingAI, item.Path)
 		h.mu.Unlock()
+		h.organizeWithRegexFallback(item)
 	}
 	if progress != nil {
 		progress <- database.ProgressEvent{

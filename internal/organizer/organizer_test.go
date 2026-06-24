@@ -154,7 +154,7 @@ func TestOrganizeMovie_DuplicateExists(t *testing.T) {
 	err := os.MkdirAll(movieDir, 0755)
 	require.NoError(t, err)
 
-	existingFile := filepath.Join(movieDir, "The Matrix (1999).mkv")
+	existingFile := filepath.Join(movieDir, "The.Matrix.1999.1080p.BluRay.mkv")
 	createTestFile(t, existingFile, 1*1024*1024*1024) // 1GB (lower quality)
 
 	// Create new higher quality file
@@ -186,6 +186,45 @@ func TestOrganizeMovie_DuplicateExists(t *testing.T) {
 	info, err := os.Stat(expectedPath)
 	require.NoError(t, err)
 	assert.Greater(t, info.Size(), int64(2*1024*1024*1024), "File should be the larger one")
+}
+
+// TestOrganizeMovie_ExistingFilePreservedOnTransferFailure verifies that
+// when a transfer fails, the existing file in the target directory is NOT
+// removed. The old code removed the existing file BEFORE the transfer,
+// which meant a transfer failure left no file at all.
+func TestOrganizeMovie_ExistingFilePreservedOnTransferFailure(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	db, dbCleanup := setupTestDB(t)
+	defer dbCleanup()
+
+	movieDir := filepath.Join(libraryDir, "The Matrix (1999)")
+	err := os.MkdirAll(movieDir, 0755)
+	require.NoError(t, err)
+
+	existingFile := filepath.Join(movieDir, "The.Matrix.1999.1080p.BluRay.mkv")
+	createTestFile(t, existingFile, 1*1024*1024*1024)
+
+	transferer, err := transfer.New(transfer.BackendRsync)
+	require.NoError(t, err)
+
+	org, err := NewOrganizer([]string{libraryDir},
+		WithDatabase(db),
+		WithBackend(transfer.BackendRsync),
+	)
+	require.NoError(t, err)
+	org.transferer = transferer
+
+	nonExistentSource := filepath.Join(sourceDir, "The.Matrix.1999.2160p.REMUX.mkv")
+
+	movie := naming.MovieInfo{Title: "The Matrix", Year: "1999"}
+	result, err := org.OrganizeMovieWithParsed(nonExistentSource, libraryDir, movie)
+	require.NoError(t, err)
+	require.False(t, result.Success, "should fail because source doesn't exist")
+
+	assert.FileExists(t, existingFile,
+		"existing file must be preserved when transfer fails")
 }
 
 // TestOrganizeMovie_DatabaseUpdate tests database is updated after organization

@@ -436,12 +436,6 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 		}, nil
 	}
 
-	if existingFile != "" && existingFile != targetPath {
-		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
-			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
-		}
-	}
-
 	opts := o.buildTransferOptions()
 
 	var err error
@@ -465,6 +459,21 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 		}, nil
 	}
 
+	if existingFile != "" && existingFile != targetPath {
+		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
+		}
+	}
+
+	if o.db != nil {
+		if mediaFile, err := o.db.GetMediaFile(sourcePath); err == nil && mediaFile != nil {
+			mediaFile.Path = targetPath
+			if err := o.db.UpdateMediaFile(mediaFile); err != nil {
+				log.Printf("[organizer] warning: failed to update media file path after move: %v", err)
+			}
+		}
+	}
+
 	// HOLDEN Phase 3: Self-learning - update database with organized movie
 	if o.db != nil {
 		yearInt := 0
@@ -479,9 +488,10 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 			Source:         "jellywatch",
 			SourcePriority: 100,
 		}
-		_, _ = o.db.UpsertMovie(movieRecord)
-
-		if o.syncService != nil {
+		_, err := o.db.UpsertMovie(movieRecord)
+		if err != nil {
+			log.Printf("[organizer] CRITICAL: DB upsert failed after file move — filesystem and database are inconsistent: %v", err)
+		} else if o.syncService != nil {
 			o.db.SetMovieDirty(movieRecord.ID)
 			o.syncService.QueueSync("movie", movieRecord.ID)
 		}
@@ -636,12 +646,6 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		}, nil
 	}
 
-	if existingFile != "" && existingFile != targetPath {
-		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
-			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
-		}
-	}
-
 	opts := o.buildTransferOptions()
 
 	var err error
@@ -665,6 +669,21 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		}, nil
 	}
 
+	if existingFile != "" && existingFile != targetPath {
+		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
+		}
+	}
+
+	if o.db != nil {
+		if mediaFile, err := o.db.GetMediaFile(sourcePath); err == nil && mediaFile != nil {
+			mediaFile.Path = targetPath
+			if err := o.db.UpdateMediaFile(mediaFile); err != nil {
+				log.Printf("[organizer] warning: failed to update media file path after move: %v", err)
+			}
+		}
+	}
+
 	// HOLDEN Phase 3: Self-learning - update database with organized TV show
 	if o.db != nil {
 		yearInt := 0
@@ -680,9 +699,10 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 			SourcePriority: 100,
 			EpisodeCount:   0,
 		}
-		_, _ = o.db.UpsertSeries(seriesRecord)
-
-		if o.syncService != nil {
+		_, err := o.db.UpsertSeries(seriesRecord)
+		if err != nil {
+			log.Printf("[organizer] CRITICAL: DB upsert failed after file move — filesystem and database are inconsistent: %v", err)
+		} else if o.syncService != nil {
 			o.db.SetSeriesDirty(seriesRecord.ID)
 			o.syncService.QueueSync("series", seriesRecord.ID)
 		}

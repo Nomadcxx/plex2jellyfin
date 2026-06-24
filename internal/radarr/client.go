@@ -46,28 +46,43 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body io.R
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+
+		req.Header.Set("X-Api-Key", c.apiKey)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("executing request (attempt %d/3): %w", attempt+1, err)
+			if attempt < 2 {
+				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			defer resp.Body.Close()
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			lastErr = fmt.Errorf("API error (status %d, attempt %d/3): %s", resp.StatusCode, attempt+1, string(bodyBytes))
+			if resp.StatusCode >= 500 && attempt < 2 {
+				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		return resp, nil
 	}
 
-	req.Header.Set("X-Api-Key", c.apiKey)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	return resp, nil
+	return nil, lastErr
 }
 
 func (c *Client) get(endpoint string, result interface{}) error {

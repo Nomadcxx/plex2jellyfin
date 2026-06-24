@@ -223,7 +223,6 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	var deferredQueue *jellyfin.DeferredQueue
 	if cfg.Jellyfin.PlaybackSafety {
 		playbackLocks = jellyfin.NewPlaybackLockManager()
-		deferredQueue = jellyfin.NewDeferredQueue()
 		logger.Info("daemon", "Jellyfin playback safety enabled")
 	}
 
@@ -232,6 +231,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
+
+	if cfg.Jellyfin.PlaybackSafety {
+		deferredQueue = jellyfin.NewDeferredQueueWithDB(db)
+		deferredQueue.LoadFromDB()
+	}
 
 	// Recover any sync_log entries stuck in "running" from previous crashes
 	if recovered, err := db.RecoverStuckSyncLogs(1 * time.Hour); err != nil {

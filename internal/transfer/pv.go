@@ -126,17 +126,25 @@ func (p *PVTransferer) runPV(src, dst string, totalSize int64, opts TransferOpti
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	dstDir := filepath.Dir(dst)
+	tmpFile, err := os.CreateTemp(dstDir, "."+filepath.Base(dst)+".tmp-*")
 	if err != nil {
-		return 0, fmt.Errorf("failed to create destination: %w", err)
+		return 0, fmt.Errorf("failed to create temporary destination: %w", err)
 	}
-	defer dstFile.Close()
+	tmpPath := tmpFile.Name()
+	committed := false
+	defer func() {
+		_ = tmpFile.Close()
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
 	args := p.buildArgs(totalSize)
 	args = append(args, src)
 
 	cmd := exec.CommandContext(ctx, p.pvPath, args...)
-	cmd.Stdout = dstFile
+	cmd.Stdout = tmpFile
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -186,9 +194,16 @@ func (p *PVTransferer) runPV(src, dst string, totalSize int64, opts TransferOpti
 		return bytesCopied.Load(), fmt.Errorf("pv failed: %w", err)
 	}
 
-	if err := dstFile.Sync(); err != nil {
+	if err := tmpFile.Sync(); err != nil {
 		return bytesCopied.Load(), fmt.Errorf("sync error: %w", err)
 	}
+	if err := tmpFile.Close(); err != nil {
+		return bytesCopied.Load(), fmt.Errorf("close error: %w", err)
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return bytesCopied.Load(), fmt.Errorf("commit temporary destination: %w", err)
+	}
+	committed = true
 
 	return totalSize, nil
 }
