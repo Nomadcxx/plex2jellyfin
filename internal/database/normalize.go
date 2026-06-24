@@ -21,7 +21,7 @@ func NormalizeTitle(title string) string {
 	// Remove common separators and punctuation
 	replacements := []string{
 		" ", "", ".", "", "-", "", "_", "",
-		"'", "", ":", "", "&", "", "*", "",
+		"'", "", "\u2019", "", ":", "", "&", "", "*", "",
 		",", "", "!", "", "?", "",
 		"(", "", ")", "",
 		"[", "", "]", "",

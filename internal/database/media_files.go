@@ -141,30 +141,25 @@ func (m *MediaDB) UpsertMediaFile(file *MediaFile) error {
 	return nil
 }
 
-// GetMediaFile retrieves a media file by path
-func (m *MediaDB) GetMediaFile(path string) (*MediaFile, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+// mediaFileColumns is the canonical SELECT column list for media_files.
+const mediaFileColumns = `
+	id, path, size, modified_at,
+	media_type, parent_movie_id, parent_series_id, parent_episode_id,
+	normalized_title, year, season, episode,
+	resolution, source_type, codec, audio_format, quality_score,
+	confidence, parse_method, needs_review,
+	is_jellyfin_compliant, compliance_issues,
+	source, source_priority, library_root,
+	created_at, updated_at
+`
 
+// scanMediaFileRow scans a single media_files row from a QueryRow result.
+func scanMediaFileRow(row *sql.Row) (*MediaFile, error) {
 	var file MediaFile
 	var complianceJSON string
-
-	query := `
-		SELECT
-			id, path, size, modified_at,
-			media_type, parent_movie_id, parent_series_id, parent_episode_id,
-			normalized_title, year, season, episode,
-			resolution, source_type, codec, audio_format, quality_score,
-			confidence, parse_method, needs_review,
-			is_jellyfin_compliant, compliance_issues,
-			source, source_priority, library_root,
-			created_at, updated_at
-		FROM media_files
-		WHERE path = ?
-	`
-
 	var needsReviewInt int
-	err := m.db.QueryRow(query, path).Scan(
+
+	err := row.Scan(
 		&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
 		&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
 		&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
@@ -183,7 +178,6 @@ func (m *MediaDB) GetMediaFile(path string) (*MediaFile, error) {
 
 	file.NeedsReview = needsReviewInt != 0
 
-	// Deserialize compliance issues
 	if complianceJSON != "" {
 		if err := json.Unmarshal([]byte(complianceJSON), &file.ComplianceIssues); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal compliance issues: %w", err)
@@ -193,56 +187,22 @@ func (m *MediaDB) GetMediaFile(path string) (*MediaFile, error) {
 	return &file, nil
 }
 
+// GetMediaFile retrieves a media file by path
+func (m *MediaDB) GetMediaFile(path string) (*MediaFile, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	query := "SELECT " + mediaFileColumns + " FROM media_files WHERE path = ?"
+	return scanMediaFileRow(m.db.QueryRow(query, path))
+}
+
 // GetMediaFileByID retrieves a media file by ID
 func (m *MediaDB) GetMediaFileByID(id int64) (*MediaFile, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var file MediaFile
-	var complianceJSON string
-
-	query := `
-		SELECT
-			id, path, size, modified_at,
-			media_type, parent_movie_id, parent_series_id, parent_episode_id,
-			normalized_title, year, season, episode,
-			resolution, source_type, codec, audio_format, quality_score,
-			confidence, parse_method, needs_review,
-			is_jellyfin_compliant, compliance_issues,
-			source, source_priority, library_root,
-			created_at, updated_at
-		FROM media_files
-		WHERE id = ?
-	`
-
-	var needsReviewInt int
-	err := m.db.QueryRow(query, id).Scan(
-		&file.ID, &file.Path, &file.Size, &file.ModifiedAt,
-		&file.MediaType, &file.ParentMovieID, &file.ParentSeriesID, &file.ParentEpisodeID,
-		&file.NormalizedTitle, &file.Year, &file.Season, &file.Episode,
-		&file.Resolution, &file.SourceType, &file.Codec, &file.AudioFormat, &file.QualityScore,
-		&file.Confidence, &file.ParseMethod, &needsReviewInt,
-		&file.IsJellyfinCompliant, &complianceJSON,
-		&file.Source, &file.SourcePriority, &file.LibraryRoot,
-		&file.CreatedAt, &file.UpdatedAt,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get media file: %w", err)
-	}
-
-	file.NeedsReview = needsReviewInt != 0
-
-	// Deserialize compliance issues
-	if complianceJSON != "" {
-		if err := json.Unmarshal([]byte(complianceJSON), &file.ComplianceIssues); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal compliance issues: %w", err)
-		}
-	}
-
-	return &file, nil
+	query := "SELECT " + mediaFileColumns + " FROM media_files WHERE id = ?"
+	return scanMediaFileRow(m.db.QueryRow(query, id))
 }
 
 // UpdateMediaFile updates a media file's metadata in the database

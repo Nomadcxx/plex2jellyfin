@@ -6,6 +6,89 @@ import (
 	"testing"
 )
 
+func TestBulkHousekeepingTasks(t *testing.T) {
+	db, err := OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+
+	// Enqueue 3 tasks with distinct payloads (dedup key is derived from payload)
+	payloads := []map[string]any{
+		{"title": "alpha", "src": "/a", "dst": "/b"},
+		{"title": "beta", "src": "/c", "dst": "/d"},
+		{"title": "gamma", "src": "/e", "dst": "/f"},
+	}
+	var ids []int64
+	for _, p := range payloads {
+		id, err := db.EnqueueHousekeepingTask("test", TaskKindNoYearMerge, p, 10)
+		if err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		ids = append(ids, id)
+	}
+
+	// Claim and fail two of them
+	task1, err := db.ClaimNextHousekeepingTask()
+	if err != nil || task1 == nil {
+		t.Fatalf("claim1: %v", err)
+	}
+	db.CompleteHousekeepingTask(task1.ID, errors.New("fail"), 1)
+	task2, err := db.ClaimNextHousekeepingTask()
+	if err != nil || task2 == nil {
+		t.Fatalf("claim2: %v", err)
+	}
+	db.CompleteHousekeepingTask(task2.ID, errors.New("fail"), 1)
+
+	// BulkRetry should reset the 2 failed tasks to pending
+	n, err := db.BulkRetryHousekeepingTasks([]int64{task1.ID, task2.ID, ids[2]})
+	if err != nil {
+		t.Fatalf("BulkRetry: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("BulkRetry affected %d, want 2", n)
+	}
+
+	// Verify both are now pending
+	for _, id := range []int64{task1.ID, task2.ID} {
+		var status string
+		db.db.QueryRow(`SELECT status FROM housekeeping_tasks WHERE id = ?`, id).Scan(&status)
+		if status != "pending" {
+			t.Fatalf("task %d status = %s, want pending", id, status)
+		}
+	}
+
+	// BulkCancel should cancel all 3 pending tasks
+	n, err = db.BulkCancelHousekeepingTasks(ids)
+	if err != nil {
+		t.Fatalf("BulkCancel: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("BulkCancel affected %d, want 3", n)
+	}
+
+	// Verify all are canceled
+	for _, id := range ids {
+		var status string
+		db.db.QueryRow(`SELECT status FROM housekeeping_tasks WHERE id = ?`, id).Scan(&status)
+		if status != "canceled" {
+			t.Fatalf("task %d status = %s, want canceled", id, status)
+		}
+	}
+
+	// Empty IDs should be a no-op
+	n, err = db.BulkRetryHousekeepingTasks(nil)
+	if err != nil || n != 0 {
+		t.Fatalf("empty BulkRetry: n=%d err=%v, want 0 nil", n, err)
+	}
+
+	// Nonexistent ID should affect 0 rows
+	n, err = db.BulkRetryHousekeepingTasks([]int64{99999})
+	if err != nil || n != 0 {
+		t.Fatalf("nonexistent BulkRetry: n=%d err=%v, want 0 nil", n, err)
+	}
+}
+
 func TestEnqueueHousekeepingTaskSuppressesFailedManualReviewDedup(t *testing.T) {
 	db, err := OpenPath(filepath.Join(t.TempDir(), "media.db"))
 	if err != nil {
