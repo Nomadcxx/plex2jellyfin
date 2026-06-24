@@ -99,25 +99,25 @@ const maxAIRetryAttempts = 10
 // aiRetryBackoff returns the backoff duration for a given attempt count.
 // Schedule: 30s, 60s, 2m, 5m, 15m, 30m, then 30m for all subsequent.
 func aiRetryBackoff(attempt int) time.Duration {
-	backoffs := []time.Duration{
-		30 * time.Second,
-		60 * time.Second,
-		2 * time.Minute,
-		5 * time.Minute,
-		15 * time.Minute,
-		30 * time.Minute,
-	}
 	if attempt <= 0 {
-		return backoffs[0]
+		return aiRetryBackoffSteps[0]
 	}
-	if attempt > len(backoffs) {
-		return backoffs[len(backoffs)-1]
+	if attempt > len(aiRetryBackoffSteps) {
+		return aiRetryBackoffSteps[len(aiRetryBackoffSteps)-1]
 	}
-	return backoffs[attempt-1]
+	return aiRetryBackoffSteps[attempt-1]
 }
 
 var transientRetryDelay = 2 * time.Second
 var seasonPackEventSuppressWindow = 30 * time.Minute
+var aiRetryBackoffSteps = []time.Duration{
+	30 * time.Second,
+	60 * time.Second,
+	2 * time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+	30 * time.Minute,
+}
 
 type Stats struct {
 	mu               sync.RWMutex
@@ -436,6 +436,9 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 					logging.F("path", normalizedPath),
 					logging.F("reason", reason))
 				h.transientWarned[normalizedPath] = true
+				if len(h.transientWarned) > 2000 {
+					h.transientWarned = make(map[string]bool)
+				}
 			} else {
 				h.logger.Debug("handler", "Skipping repeated transient path retry",
 					logging.F("path", normalizedPath),
@@ -579,6 +582,9 @@ func (h *MediaHandler) shouldLogError(path, errMsg string) bool {
 		return false
 	}
 	h.loggedErrors[key] = struct{}{}
+	if len(h.loggedErrors) > 2000 {
+		h.loggedErrors = make(map[string]struct{})
+	}
 	return true
 }
 

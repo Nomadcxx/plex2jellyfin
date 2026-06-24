@@ -330,6 +330,7 @@ var qualityMarkerDetect = regexp.MustCompile(`(?i)(x264|x265|h264|h265|hevc|avc|
 
 // releaseGroupSuffix matches release group tags at end of filename like "-SPARKS", "-postbot"
 var releaseGroupSuffix = regexp.MustCompile(`(?i)-[A-Za-z0-9]+$`)
+var spaceRegex = regexp.MustCompile(`\s+`)
 
 // collectStrippedTokens collects the release metadata tokens (quality, codec,
 // release group, etc.) that stripReleaseMarkers would remove from baseName.
@@ -546,6 +547,5 @@ func extractTitleBeforeEpisode(s string) string {
 }
 
 func normalizeSpaces(s string) string {
-	spaceRegex := regexp.MustCompile(`\s+`)
 	return spaceRegex.ReplaceAllString(s, " ")
 }
