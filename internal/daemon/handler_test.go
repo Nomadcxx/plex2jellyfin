@@ -1287,3 +1287,138 @@ func TestHandleJellyfinWebhookEvent_ItemUpdatedUpgradesIdentification(t *testing
 	assert.NotNil(t, dec.JellyfinResolvedAt)
 	assert.NotNil(t, dec.JellyfinFirstSeenAt)
 }
+
+func TestProcessFileWithGen_StaleCallbackNoOp(t *testing.T) {
+	cfg := MediaHandlerConfig{
+		TVLibraries:  []string{"/tv"},
+		MovieLibs:    []string{"/movies"},
+		DebounceTime: 10 * time.Second,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	path := "/downloads/test.mkv"
+	gen := int64(1)
+
+	handler.mu.Lock()
+	handler.pendingGen[path] = gen + 1
+	handler.mu.Unlock()
+
+	handler.processFileWithGen(path, gen)
+}
+
+func TestProcessFileWithGen_CurrentGenRuns(t *testing.T) {
+	cfg := MediaHandlerConfig{
+		TVLibraries:  []string{"/tv"},
+		MovieLibs:    []string{"/movies"},
+		DebounceTime: 10 * time.Second,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	path := "/downloads/test.mkv"
+	gen := int64(1)
+
+	handler.mu.Lock()
+	handler.pendingGen[path] = gen
+	handler.pending[path] = time.AfterFunc(time.Hour, func() {})
+	handler.transientRetries[path] = 1
+	handler.mu.Unlock()
+
+	handler.processFileWithGen(path, gen)
+
+	handler.mu.Lock()
+	_, inPending := handler.pending[path]
+	_, inGen := handler.pendingGen[path]
+	_, inRetries := handler.transientRetries[path]
+	handler.mu.Unlock()
+
+	assert.False(t, inPending, "pending entry should be cleaned up")
+	assert.False(t, inGen, "gen entry should be cleaned up")
+	assert.False(t, inRetries, "retry entry should be cleaned up")
+}
+
+func TestShutdown_InvalidatesPendingGens(t *testing.T) {
+	cfg := MediaHandlerConfig{
+		TVLibraries:  []string{"/tv"},
+		MovieLibs:    []string{"/movies"},
+		DebounceTime: 10 * time.Second,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	path := "/downloads/test.mkv"
+	handler.mu.Lock()
+	handler.pendingGen[path] = 1
+	handler.pending[path] = time.AfterFunc(time.Hour, func() {})
+	handler.mu.Unlock()
+
+	handler.Shutdown()
+
+	handler.mu.Lock()
+	_, inGen := handler.pendingGen[path]
+	handler.mu.Unlock()
+	assert.False(t, inGen, "pendingGen should be cleared on shutdown")
+}
+
+func TestReplayDeferredOperation_RespectsShutdown(t *testing.T) {
+	cfg := MediaHandlerConfig{
+		TVLibraries:  []string{"/tv"},
+		MovieLibs:    []string{"/movies"},
+		DebounceTime: 10 * time.Second,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	handler.cancel()
+
+	done := make(chan struct{})
+	go func() {
+		handler.replayDeferredOperation(jellyfin.DeferredOp{
+			Type:       "organize",
+			SourcePath: "/downloads/test.mkv",
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("replayDeferredOperation should return immediately when ctx is cancelled")
+	}
+}
+
+func TestReplayDeferredOperation_WaitsForShutdown(t *testing.T) {
+	cfg := MediaHandlerConfig{
+		TVLibraries:  []string{"/tv"},
+		MovieLibs:    []string{"/movies"},
+		DebounceTime: 10 * time.Second,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		handler.replayDeferredOperation(jellyfin.DeferredOp{
+			Type:       "organize",
+			SourcePath: "/downloads/test.mkv",
+		})
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	handler.cancel()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("replayDeferredOperation goroutine should complete after cancel")
+	}
+}

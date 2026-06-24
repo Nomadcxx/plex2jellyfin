@@ -42,6 +42,10 @@ type MediaHandler struct {
 	seasonPackDone   map[string]time.Time
 	mu               sync.Mutex
 	parseDecisionMu  sync.Mutex // serializes webhook + processFile writes to parse_decisions
+	pendingGen       map[string]int64 // generation counter to invalidate stale timer callbacks
+	shutdownWg       sync.WaitGroup
+	ctx              context.Context
+	cancel           context.CancelFunc
 	dryRun           bool
 	stats            *Stats
 	logger           *logging.Logger
@@ -328,6 +332,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		movieWatchPaths:   cfg.MovieWatchPaths,
 		debounceTime:      cfg.DebounceTime,
 		pending:           make(map[string]*time.Timer),
+		pendingGen:        make(map[string]int64),
 		transientRetries:  make(map[string]int),
 		transientWarned:   make(map[string]bool),
 		seasonPackActive:  make(map[string]struct{}),
@@ -353,6 +358,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		targetHealthState: make(map[string]bool),
 		unparseableCache:  NewNegativeCache(),
 	}
+	handler.ctx, handler.cancel = context.WithCancel(context.Background())
 	hydrateNegativeCacheFromDB(handler.unparseableCache, cfg.Database, cfg.Logger)
 	return handler, nil
 }
@@ -453,9 +459,11 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 			delete(h.pending, normalizedPath)
 		}
 
+		gen := h.pendingGen[normalizedPath] + 1
+		h.pendingGen[normalizedPath] = gen
 		h.transientRetries[normalizedPath]++
 		h.pending[normalizedPath] = time.AfterFunc(transientRetryDelay, func() {
-			h.processFile(normalizedPath)
+			h.processFileWithGen(normalizedPath, gen)
 		})
 
 		h.logger.Info("handler", "Deferred transient path",
@@ -473,8 +481,10 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 		delete(h.pending, normalizedPath)
 	}
 
+	gen := h.pendingGen[normalizedPath] + 1
+	h.pendingGen[normalizedPath] = gen
 	h.pending[normalizedPath] = time.AfterFunc(h.debounceTime, func() {
-		h.processFile(normalizedPath)
+		h.processFileWithGen(normalizedPath, gen)
 	})
 
 	return nil
@@ -660,6 +670,21 @@ func (h *MediaHandler) finishSeasonPack(releaseDir string, completed bool, now t
 	if completed {
 		h.seasonPackDone[releaseDir] = now
 	}
+}
+
+func (h *MediaHandler) processFileWithGen(path string, expectedGen int64) {
+	h.mu.Lock()
+	currentGen := h.pendingGen[path]
+	if currentGen != expectedGen {
+		h.mu.Unlock()
+		return
+	}
+	delete(h.pending, path)
+	delete(h.pendingGen, path)
+	delete(h.transientRetries, path)
+	h.mu.Unlock()
+
+	h.processFile(path)
 }
 
 func (h *MediaHandler) processFile(path string) {
@@ -1436,6 +1461,9 @@ func (h *MediaHandler) Stats() StatsSnapshot {
 }
 
 func (h *MediaHandler) Shutdown() {
+	h.cancel()
+	h.shutdownWg.Wait()
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -1443,6 +1471,7 @@ func (h *MediaHandler) Shutdown() {
 		timer.Stop()
 		delete(h.pending, path)
 	}
+	h.pendingGen = make(map[string]int64)
 
 	if h.notifyManager != nil {
 		h.notifyManager.Close()
@@ -1685,8 +1714,22 @@ func (h *MediaHandler) replayDeferredOperation(op jellyfin.DeferredOp) {
 			logging.F("source", op.SourcePath),
 			logging.F("target", op.TargetPath))
 	}
-	// Re-run through the regular process pipeline so classification and notifications stay consistent.
-	go h.processFile(op.SourcePath)
+	select {
+	case <-h.ctx.Done():
+		return
+	default:
+	}
+
+	h.shutdownWg.Add(1)
+	go func() {
+		defer h.shutdownWg.Done()
+		select {
+		case <-h.ctx.Done():
+			return
+		default:
+		}
+		h.processFile(op.SourcePath)
+	}()
 }
 
 func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"sync"
@@ -12,9 +13,12 @@ import (
 )
 
 const (
-	maxFrameBytes = 64 * 1024
-	idleTimeout   = 5 * time.Minute
+	maxFrameBytes        = 64 * 1024
+	idleTimeout          = 5 * time.Minute
+	maxConcurrentPerConn = 50
 )
+
+var requestTimeout = 30 * time.Second
 
 type Handler func(ctx context.Context, req Request, w FrameWriter)
 
@@ -91,8 +95,13 @@ func (s *Server) RegisterStreaming(cmd Command, h StreamingHandler) {
 		ringW := &ringWriter{inner: w, ring: op.Frames}
 		hbDone := make(chan struct{})
 		go heartbeatLoop(opCtx, req.ID, ringW, hbDone)
+		defer func() {
+			if r := recover(); r != nil {
+				op.Final = &FinalState{State: "error", Msg: fmt.Sprintf("handler panic: %v", r), At: time.Now()}
+			}
+			close(hbDone)
+		}()
 		h(opCtx, req.Args, ringW, op)
-		close(hbDone)
 	})
 }
 
@@ -197,6 +206,7 @@ func (s *Server) handleConn(ctx context.Context, c *net.UnixConn) {
 
 	w := newFrameWriter(c)
 	r := bufio.NewReaderSize(c, maxFrameBytes)
+	sem := make(chan struct{}, maxConcurrentPerConn)
 	for {
 		_ = c.SetReadDeadline(time.Now().Add(idleTimeout))
 		line, err := r.ReadBytes('\n')
@@ -224,7 +234,19 @@ func (s *Server) handleConn(ctx context.Context, c *net.UnixConn) {
 			w.Error(req.ID, ErrNotImplemented, string(req.Cmd))
 			continue
 		}
-		go h(ctx, req, w)
+		select {
+		case sem <- struct{}{}:
+			reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+			go func() {
+				defer func() {
+					cancel()
+					<-sem
+				}()
+				h(reqCtx, req, w)
+			}()
+		default:
+			w.Error(req.ID, ErrBusy, "too many concurrent requests on this connection")
+		}
 	}
 }
 
