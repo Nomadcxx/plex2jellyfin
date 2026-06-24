@@ -123,8 +123,7 @@ func (c *Cache) updateUsage(id int) {
 		WHERE id = ?
 	`, id)
 	if err != nil {
-		// Log but don't fail - this is best-effort tracking
-		fmt.Printf("[WARN] Failed to update cache usage: %v\n", err)
+		return
 	}
 }
 

@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"fmt"
 	"time"
 )
 
@@ -84,7 +83,6 @@ func (k *Keepalive) performKeepalive(ctx context.Context) {
 	k.status.UpdateModelAvailability(available, k.matcher.config.Model)
 
 	if !available {
-		fmt.Printf("[Keepalive] Model unavailable: %s\n", k.matcher.config.Model)
 		return
 	}
 
@@ -94,12 +92,10 @@ func (k *Keepalive) performKeepalive(ctx context.Context) {
 	_, err := k.matcher.Parse(ctx, k.config.FilenamePrompt)
 	if err != nil {
 		k.status.RecordRequest(false, latency)
-		fmt.Printf("[Keepalive] Failed to warm model: %v\n", err)
 		return
 	}
 
 	k.status.RecordRequest(true, latency)
-	fmt.Printf("[Keepalive] Model warmed: %s (latency: %v)\n", k.matcher.config.Model, latency)
 }
 
 // IsRunning returns true if keepalive is active
