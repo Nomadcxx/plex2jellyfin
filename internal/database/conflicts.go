@@ -73,21 +73,18 @@ func (m *MediaDB) DetectConflicts() ([]Conflict, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Find TV shows in multiple locations
-	tvConflicts, err := m.detectSeriesConflicts()
+	tvConflicts, err := m.detectConflicts("series", "series")
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect series conflicts: %w", err)
 	}
 
-	// Find movies in multiple locations
-	movieConflicts, err := m.detectMovieConflicts()
+	movieConflicts, err := m.detectConflicts("movies", "movie")
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect movie conflicts: %w", err)
 	}
 
 	conflicts := append(tvConflicts, movieConflicts...)
 
-	// Insert conflicts that don't already exist
 	for _, conflict := range conflicts {
 		if err := m.upsertConflict(conflict); err != nil {
 			return nil, fmt.Errorf("failed to insert conflict: %w", err)
@@ -97,18 +94,19 @@ func (m *MediaDB) DetectConflicts() ([]Conflict, error) {
 	return m.getUnresolvedConflictsLocked()
 }
 
-// detectSeriesConflicts finds series with multiple canonical_path values
-func (m *MediaDB) detectSeriesConflicts() ([]Conflict, error) {
+// detectConflicts finds items in the given table with multiple canonical_path values.
+// tableName is "series" or "movies"; mediaType is "series" or "movie" (stored on Conflict).
+func (m *MediaDB) detectConflicts(tableName, mediaType string) ([]Conflict, error) {
 	rows, err := m.db.Query(`
-		SELECT title, title_normalized, year, 
+		SELECT title, title_normalized, year,
 		       json_group_array(DISTINCT canonical_path) as locations,
 		       COUNT(DISTINCT canonical_path) as location_count
-		FROM series
+		FROM ` + tableName + `
 		GROUP BY title_normalized, year
 		HAVING location_count > 1
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query series conflicts: %w", err)
+		return nil, fmt.Errorf("failed to query %s conflicts: %w", mediaType, err)
 	}
 	defer rows.Close()
 
@@ -122,56 +120,14 @@ func (m *MediaDB) detectSeriesConflicts() ([]Conflict, error) {
 			&c.Title, &c.TitleNormalized, &c.Year, &locationsJSON, &locationCount,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan series conflict: %w", err)
+			return nil, fmt.Errorf("failed to scan %s conflict: %w", mediaType, err)
 		}
 
-		// Parse locations JSON
 		if err := json.Unmarshal([]byte(locationsJSON), &c.Locations); err != nil {
 			return nil, fmt.Errorf("failed to parse locations JSON: %w", err)
 		}
 
-		c.MediaType = "series"
-		c.CreatedAt = time.Now()
-		conflicts = append(conflicts, c)
-	}
-
-	return conflicts, rows.Err()
-}
-
-// detectMovieConflicts finds movies with multiple canonical_path values
-func (m *MediaDB) detectMovieConflicts() ([]Conflict, error) {
-	rows, err := m.db.Query(`
-		SELECT title, title_normalized, year, 
-		       json_group_array(DISTINCT canonical_path) as locations,
-		       COUNT(DISTINCT canonical_path) as location_count
-		FROM movies
-		GROUP BY title_normalized, year
-		HAVING location_count > 1
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query movie conflicts: %w", err)
-	}
-	defer rows.Close()
-
-	var conflicts []Conflict
-	for rows.Next() {
-		var c Conflict
-		var locationsJSON string
-		var locationCount int
-
-		err := rows.Scan(
-			&c.Title, &c.TitleNormalized, &c.Year, &locationsJSON, &locationCount,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan movie conflict: %w", err)
-		}
-
-		// Parse locations JSON
-		if err := json.Unmarshal([]byte(locationsJSON), &c.Locations); err != nil {
-			return nil, fmt.Errorf("failed to parse locations JSON: %w", err)
-		}
-
-		c.MediaType = "movie"
+		c.MediaType = mediaType
 		c.CreatedAt = time.Now()
 		conflicts = append(conflicts, c)
 	}
