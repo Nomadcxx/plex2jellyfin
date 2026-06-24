@@ -266,6 +266,7 @@ func parseTVShowFromBaseName(baseName, filename string) (*TVShowInfo, error) {
 }
 
 func NormalizeMovieName(title, year string) string {
+	title = titleCaseWithOrdinals(title)
 	if year != "" {
 		return fmt.Sprintf("%s (%s)", title, year)
 	}
@@ -273,6 +274,7 @@ func NormalizeMovieName(title, year string) string {
 }
 
 func NormalizeTVShowName(title, year string) string {
+	title = titleCaseWithOrdinals(title)
 	if year != "" {
 		return fmt.Sprintf("%s (%s)", title, year)
 	}

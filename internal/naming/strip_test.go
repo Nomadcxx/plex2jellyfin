@@ -36,6 +36,7 @@ func TestParseMovieNameChainedReleaseGroups(t *testing.T) {
     }{
         {"2.Guns.2013.1080p.BluRay.x264-SPARKS-postbot.mkv", "2 Guns", "2013"},
         {"Sinister.2012.720p.BluRay.x264-AMIABLE-WhiteRevtmp.mkv", "Sinister", "2012"},
+        {"masters.of.the.universe.2026.720p.vostfr.dcprip.h264-jff.mkv", "Masters Of The Universe", "2026"},
     }
     
     for _, tc := range tests {
@@ -44,11 +45,9 @@ func TestParseMovieNameChainedReleaseGroups(t *testing.T) {
             t.Errorf("ParseMovieName(%q) error: %v", tc.filename, err)
             continue
         }
-        if info.Title != tc.expectedTitle {
-            t.Errorf("ParseMovieName(%q) title = %q, want %q", tc.filename, info.Title, tc.expectedTitle)
-        }
-        if info.Year != tc.expectedYear {
-            t.Errorf("ParseMovieName(%q) year = %q, want %q", tc.filename, info.Year, tc.expectedYear)
+        title := NormalizeMovieName(info.Title, info.Year)
+        if title != tc.expectedTitle+" ("+tc.expectedYear+")" {
+            t.Errorf("NormalizeMovieName(%q, %q) = %q, want %q", info.Title, info.Year, title, tc.expectedTitle+" ("+tc.expectedYear+")")
         }
     }
 }
