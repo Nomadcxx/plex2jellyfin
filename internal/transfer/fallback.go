@@ -66,7 +66,7 @@ func (f *FallbackTransferer) tryAll(src, dst string, opts TransferOptions, isMov
 	var lastErr error
 	var errors []string
 
-	for i, backend := range f.backends {
+	for _, backend := range f.backends {
 		var result *TransferResult
 		var err error
 
@@ -84,10 +84,6 @@ func (f *FallbackTransferer) tryAll(src, dst string, opts TransferOptions, isMov
 		lastErr = err
 		errMsg := fmt.Sprintf("%s: %v", backend.Name(), err)
 		errors = append(errors, errMsg)
-
-		if i < len(f.backends)-1 {
-			fmt.Printf("  ⚠️  %s failed, trying %s...\n", backend.Name(), f.backends[i+1].Name())
-		}
 	}
 
 	if lastResult != nil {
