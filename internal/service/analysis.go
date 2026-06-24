@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
 const minConsolidationFileSize = 100 * 1024 * 1024
@@ -337,12 +338,7 @@ func countConsolidatableFiles(root string) (int, int64) {
 }
 
 func isScatteredMediaFile(ext string) bool {
-	switch strings.ToLower(ext) {
-	case ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".m2ts", ".ts":
-		return true
-	default:
-		return false
-	}
+	return video.IsVideoExt(ext)
 }
 
 // generateGroupID creates a unique ID for a duplicate group

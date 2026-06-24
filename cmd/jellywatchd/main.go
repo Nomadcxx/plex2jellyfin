@@ -33,6 +33,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/tmdb"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 	"github.com/spf13/cobra"
 )
@@ -812,15 +813,8 @@ func runMetadataReconcileOnce(ctx context.Context, logger *logging.Logger, recon
 	}
 }
 
-// isMediaFile checks if a path represents a media file that should be processed
 func isMediaFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	mediaExts := map[string]bool{
-		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
-		".wmv": true, ".flv": true, ".webm": true, ".m4v": true,
-		".mpg": true, ".mpeg": true, ".m2ts": true, ".ts": true,
-	}
-	return mediaExts[ext]
+	return video.IsVideo(path)
 }
 
 // performInitialScan walks through all watch directories and processes any existing media files

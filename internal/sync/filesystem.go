@@ -11,6 +11,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/scanner"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
 const filesystemSourcePriority = 50
@@ -287,23 +288,15 @@ func containsDirectoryReleaseMarker(title string) bool {
 // countVideoFiles counts video files recursively in a directory
 func countVideoFiles(dir string) int {
 	count := 0
-	videoExts := map[string]bool{
-		".mkv": true, ".mp4": true, ".avi": true,
-		".m4v": true, ".mov": true, ".wmv": true,
-		".ts": true, ".m2ts": true,
-	}
-
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || info.IsDir() {
 			return nil
 		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if videoExts[ext] {
+		if video.IsVideo(path) {
 			count++
 		}
 		return nil
 	})
-
 	return count
 }
 

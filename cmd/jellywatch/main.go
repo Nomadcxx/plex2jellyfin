@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
@@ -17,6 +16,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 	"github.com/Nomadcxx/jellywatch/internal/validator"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 	"github.com/spf13/cobra"
 )
@@ -1064,15 +1064,8 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
-// isMediaFileCheck checks if extension is a media file type
 func isMediaFileCheck(ext string) bool {
-	ext = strings.ToLower(ext)
-	mediaExts := map[string]bool{
-		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
-		".wmv": true, ".flv": true, ".webm": true, ".m4v": true,
-		".mpg": true, ".mpeg": true, ".m2ts": true, ".ts": true,
-	}
-	return mediaExts[ext]
+	return video.IsVideoExt(ext)
 }
 
 // newConsolidateCmd creates the consolidate command

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
 // IssueType represents the type of mismatch between filesystem and Jellyfin.
@@ -354,22 +356,6 @@ func (v *Verifier) getItemsByLibrary(libraryID string) ([]Item, error) {
 	return resp.Items, nil
 }
 
-// isMediaFile checks if a file is a media file based on extension.
 func isMediaFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	mediaExts := map[string]bool{
-		".mkv":  true,
-		".mp4":  true,
-		".avi":  true,
-		".mov":  true,
-		".wmv":  true,
-		".flv":  true,
-		".m4v":  true,
-		".webm": true,
-		".mpg":  true,
-		".mpeg": true,
-		".m2ts": true,
-		".ts":   true,
-	}
-	return mediaExts[ext]
+	return video.IsVideo(path)
 }

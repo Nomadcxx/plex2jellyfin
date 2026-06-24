@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
 // ShowLocation represents a show found in a library
@@ -78,29 +80,15 @@ func (s *Selector) findShowDirInLibrary(library, normalizedTitle, year string) s
 // countEpisodesInShow counts video files in a show directory (recursively)
 func countEpisodesInShow(showDir string) int {
 	count := 0
-	videoExts := map[string]bool{
-		".mkv":  true,
-		".mp4":  true,
-		".avi":  true,
-		".m4v":  true,
-		".mov":  true,
-		".wmv":  true,
-		".ts":   true,
-		".m2ts": true,
-	}
-
 	filepath.Walk(showDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || info.IsDir() {
 			return nil
 		}
-
-		ext := strings.ToLower(filepath.Ext(path))
-		if videoExts[ext] {
+		if video.IsVideo(path) {
 			count++
 		}
 		return nil
 	})
-
 	return count
 }
 

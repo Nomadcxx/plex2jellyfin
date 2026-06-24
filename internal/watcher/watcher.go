@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
 type EventType string
@@ -186,11 +187,5 @@ func (w *Watcher) handleEvent(event fsnotify.Event) error {
 }
 
 func (w *Watcher) isVideoFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	videoExts := map[string]bool{
-		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
-		".wmv": true, ".flv": true, ".webm": true, ".m4v": true,
-		".mpg": true, ".mpeg": true, ".m2ts": true, ".ts": true,
-	}
-	return videoExts[ext]
+	return video.IsVideo(path)
 }

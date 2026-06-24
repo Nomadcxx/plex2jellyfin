@@ -8,6 +8,8 @@ import (
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
 // Pre-compiled regexes for advanced parsing performance optimization
@@ -661,12 +663,8 @@ func IsGarbageTitle(title string) bool {
 func CleanMovieName(name string) string {
 	// Strip file extension FIRST (if present)
 	ext := strings.ToLower(filepath.Ext(name))
-	videoExts := []string{".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".flv", ".webm", ".mpg", ".mpeg"}
-	for _, ve := range videoExts {
-		if ext == ve {
-			name = strings.TrimSuffix(name, ext)
-			break
-		}
+	if video.IsVideoExt(ext) {
+		name = strings.TrimSuffix(name, ext)
 	}
 
 	// Extract year first (before any modifications)

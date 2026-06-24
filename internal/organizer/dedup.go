@@ -5,17 +5,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
-
-// videoExts is the canonical set of video file extensions recognised by
-// this package. Used by both FindEpisodeFile and findExistingMediaFile.
-var videoExts = map[string]bool{
-	".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
-	".wmv": true, ".m4v": true, ".ts": true, ".m2ts": true,
-}
 
 var (
 	reSxxExx = regexp.MustCompile(`(?i)[Ss](\d{1,2})[Ee](\d{1,2})`)
@@ -59,8 +52,7 @@ func FindEpisodeFile(seasonDir string, season, episode int) (string, bool) {
 		if entry.IsDir() {
 			continue
 		}
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		if !videoExts[ext] {
+		if !video.IsVideo(entry.Name()) {
 			continue
 		}
 		s, e, ok := ExtractEpisodeKey(entry.Name())

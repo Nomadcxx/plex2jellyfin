@@ -19,6 +19,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	syncsvc "github.com/Nomadcxx/jellywatch/internal/sync"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
 type OrganizationResult struct {
@@ -1057,10 +1058,6 @@ func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func
 }
 
 func collectVideoFiles(root string) ([]string, error) {
-	videoExtensions := map[string]bool{
-		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
-		".wmv": true, ".m4v": true, ".ts": true, ".m2ts": true, ".webm": true,
-	}
 	var files []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -1069,7 +1066,7 @@ func collectVideoFiles(root string) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if videoExtensions[strings.ToLower(filepath.Ext(path))] {
+		if video.IsVideo(path) {
 			files = append(files, path)
 		}
 		return nil
@@ -1086,11 +1083,6 @@ func (o *Organizer) findExistingMediaFile(dir string) (string, *quality.QualityI
 		return "", nil
 	}
 
-	videoExtensions := map[string]bool{
-		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
-		".wmv": true, ".m4v": true, ".ts": true, ".m2ts": true,
-	}
-
 	var bestPath string
 	var bestQuality *quality.QualityInfo
 
@@ -1099,8 +1091,7 @@ func (o *Organizer) findExistingMediaFile(dir string) (string, *quality.QualityI
 			continue
 		}
 
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		if !videoExtensions[ext] {
+		if !video.IsVideo(entry.Name()) {
 			continue
 		}
 

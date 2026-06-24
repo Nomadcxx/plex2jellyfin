@@ -12,6 +12,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
 type Selector struct {
@@ -391,8 +392,7 @@ func (s *Selector) countMediaItems(library string, isMovie bool) int {
 	if isMovie {
 		_ = filepath.Walk(library, func(path string, info fs.FileInfo, err error) error {
 			if err == nil && !info.IsDir() {
-				ext := strings.ToLower(filepath.Ext(path))
-				if ext == ".mkv" || ext == ".mp4" || ext == ".avi" {
+				if video.IsVideo(path) {
 					if strings.Contains(info.Name(), "(") && strings.Contains(info.Name(), ")") {
 						count++
 					}
@@ -403,8 +403,7 @@ func (s *Selector) countMediaItems(library string, isMovie bool) int {
 	} else {
 		_ = filepath.Walk(library, func(path string, info fs.FileInfo, err error) error {
 			if err == nil && !info.IsDir() {
-				ext := strings.ToLower(filepath.Ext(path))
-				if ext == ".mkv" || ext == ".mp4" || ext == ".avi" {
+				if video.IsVideo(path) {
 					if strings.Contains(info.Name(), "S") && strings.Contains(info.Name(), "E") {
 						count++
 					}

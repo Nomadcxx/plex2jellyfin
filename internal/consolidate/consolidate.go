@@ -9,6 +9,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
 const (
@@ -341,21 +342,6 @@ func countFilesInPath(path string, conflict *database.Conflict) (int, error) {
 	return count, err
 }
 
-// isMediaFile checks if extension is a media file
 func isMediaFile(ext string) bool {
-	mediaExts := map[string]bool{
-		".mkv":  true,
-		".mp4":  true,
-		".avi":  true,
-		".mov":  true,
-		".wmv":  true,
-		".flv":  true,
-		".webm": true,
-		".m4v":  true,
-		".mpg":  true,
-		".mpeg": true,
-		".m2ts": true,
-		".ts":   true,
-	}
-	return mediaExts[ext]
+	return video.IsVideoExt(ext)
 }
