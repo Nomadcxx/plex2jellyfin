@@ -97,7 +97,6 @@ func getConsolidatePlansPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	return filepath.Join(dir, "consolidate.json"), nil
 }
 
@@ -107,41 +106,45 @@ func getDuplicatePlansPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	return filepath.Join(dir, "duplicates.json"), nil
 }
 
-// SaveConsolidatePlans saves a consolidate plan to JSON file
-func SaveConsolidatePlans(plan *ConsolidatePlan) error {
-	path, err := getConsolidatePlansPath()
+// getAuditPlansPath returns path to audit.json
+func getAuditPlansPath() (string, error) {
+	dir, err := GetPlansDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "audit.json"), nil
+}
+
+// --- generic plan file operations ---
+
+func savePlan[T any](plan *T, filename string) error {
+	dir, err := GetPlansDir()
 	if err != nil {
 		return err
 	}
-
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	path := filepath.Join(dir, filename)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create plans directory: %w", err)
 	}
-
-	data, err := json.MarshalIndent(plan, "", " 	")
+	data, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal plan: %w", err)
 	}
-
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("failed to write plan file: %w", err)
 	}
-
 	return nil
 }
 
-// LoadConsolidatePlans loads a consolidate plan from JSON file
-func LoadConsolidatePlans() (*ConsolidatePlan, error) {
-	path, err := getConsolidatePlansPath()
+func loadPlan[T any](filename string) (*T, error) {
+	dir, err := GetPlansDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to open plans file: %w", err)
 	}
-
+	path := filepath.Join(dir, filename)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -149,139 +152,55 @@ func LoadConsolidatePlans() (*ConsolidatePlan, error) {
 		}
 		return nil, fmt.Errorf("failed to read plans file: %w", err)
 	}
-
-	var plan ConsolidatePlan
+	var plan T
 	if err := json.Unmarshal(data, &plan); err != nil {
 		return nil, fmt.Errorf("failed to parse plans file: %w", err)
 	}
-
 	return &plan, nil
 }
 
-// DeleteConsolidatePlans removes the consolidate plans file
-func DeleteConsolidatePlans() error {
-	path, err := getConsolidatePlansPath()
+func deletePlan(filename string) error {
+	dir, err := GetPlansDir()
 	if err != nil {
 		return err
 	}
-
+	path := filepath.Join(dir, filename)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete plan file: %w", err)
 	}
-
 	return nil
 }
 
-// ArchiveConsolidatePlans renames consolidate.json to consolidate.json.old
-func ArchiveConsolidatePlans() error {
-	path, err := getConsolidatePlansPath()
+func archivePlan(filename string) error {
+	dir, err := GetPlansDir()
 	if err != nil {
 		return err
 	}
-
-	// Check if file exists
+	path := filepath.Join(dir, filename)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil // Nothing to archive
+		return nil
 	}
-
 	oldPath := path + ".old"
-
-	// Remove old archive if exists
 	os.Remove(oldPath)
-
-	// Rename current to .old
 	if err := os.Rename(path, oldPath); err != nil {
 		return fmt.Errorf("failed to archive plan file: %w", err)
 	}
-
 	return nil
 }
 
-// SaveDuplicatePlans saves a duplicate plan to JSON file
-func SaveDuplicatePlans(plan *DuplicatePlan) error {
-	path, err := getDuplicatePlansPath()
-	if err != nil {
-		return err
-	}
+// --- Consolidate wrappers ---
 
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("failed to create plans directory: %w", err)
-	}
+func SaveConsolidatePlans(plan *ConsolidatePlan) error       { return savePlan(plan, "consolidate.json") }
+func LoadConsolidatePlans() (*ConsolidatePlan, error)        { return loadPlan[ConsolidatePlan]("consolidate.json") }
+func DeleteConsolidatePlans() error                          { return deletePlan("consolidate.json") }
+func ArchiveConsolidatePlans() error                         { return archivePlan("consolidate.json") }
 
-	data, err := json.MarshalIndent(plan, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal plan: %w", err)
-	}
+// --- Duplicate wrappers ---
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("failed to write plan file: %w", err)
-	}
-
-	return nil
-}
-
-// LoadDuplicatePlans loads a duplicate plan from JSON file
-func LoadDuplicatePlans() (*DuplicatePlan, error) {
-	path, err := getDuplicatePlansPath()
-	if err != nil {
-		return nil, fmt.Errorf("failed to open plans file: %w", err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read plans file: %w", err)
-	}
-
-	var plan DuplicatePlan
-	if err := json.Unmarshal(data, &plan); err != nil {
-		return nil, fmt.Errorf("failed to parse plans file: %w", err)
-	}
-
-	return &plan, nil
-}
-
-// DeleteDuplicatePlans removes the duplicate plans file
-func DeleteDuplicatePlans() error {
-	path, err := getDuplicatePlansPath()
-	if err != nil {
-		return err
-	}
-
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to delete plan file: %w", err)
-	}
-
-	return nil
-}
-
-// ArchiveDuplicatePlans renames duplicates.json to duplicates.json.old
-func ArchiveDuplicatePlans() error {
-	path, err := getDuplicatePlansPath()
-	if err != nil {
-		return err
-	}
-
-	// Check if file exists
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil // Nothing to archive
-	}
-
-	oldPath := path + ".old"
-
-	// Remove old archive if exists
-	os.Remove(oldPath)
-
-	// Rename current to .old
-	if err := os.Rename(path, oldPath); err != nil {
-		return fmt.Errorf("failed to archive plan file: %w", err)
-	}
-
-	return nil
-}
+func SaveDuplicatePlans(plan *DuplicatePlan) error           { return savePlan(plan, "duplicates.json") }
+func LoadDuplicatePlans() (*DuplicatePlan, error)            { return loadPlan[DuplicatePlan]("duplicates.json") }
+func DeleteDuplicatePlans() error                            { return deletePlan("duplicates.json") }
+func ArchiveDuplicatePlans() error                           { return archivePlan("duplicates.json") }
 
 // AuditItem represents a low-confidence file that needs review
 type AuditItem struct {
@@ -341,73 +260,12 @@ type AuditPlan struct {
 	Actions   []AuditAction `json:"actions,omitempty"`
 }
 
-// getAuditPlansPath returns path to audit.json
-func getAuditPlansPath() (string, error) {
-	dir, err := GetPlansDir()
-	if err != nil {
-		return "", err
-	}
+// --- Audit wrappers ---
 
-	return filepath.Join(dir, "audit.json"), nil
-}
-
-// SaveAuditPlans saves an audit plan to JSON file
-func SaveAuditPlans(plan *AuditPlan) error {
-	path, err := getAuditPlansPath()
-	if err != nil {
-		return err
-	}
-
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("failed to create plans directory: %w", err)
-	}
-
-	data, err := json.MarshalIndent(plan, "", "	")
-	if err != nil {
-		return fmt.Errorf("failed to marshal plan: %w", err)
-	}
-
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("failed to write plan file: %w", err)
-	}
-
-	return nil
-}
-
-// LoadAuditPlans loads an audit plan from JSON file
-func LoadAuditPlans() (*AuditPlan, error) {
-	path, err := getAuditPlansPath()
-	if err != nil {
-		return nil, fmt.Errorf("failed to open plans file: %w", err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read plans file: %w", err)
-	}
-
-	var plan AuditPlan
-	if err := json.Unmarshal(data, &plan); err != nil {
-		return nil, fmt.Errorf("failed to parse plans file: %w", err)
-	}
-
-	return &plan, nil
-}
-
-// DeleteAuditPlans removes the audit plans file
-func DeleteAuditPlans() error {
-	path, err := getAuditPlansPath()
-	if err != nil {
-		return err
-	}
-
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to delete plan file: %w", err)
-	}
-
-	return nil
-}
+func SaveAuditPlans(plan *AuditPlan) error   { return savePlan(plan, "audit.json") }
+func LoadAuditPlans() (*AuditPlan, error)    { return loadPlan[AuditPlan]("audit.json") }
+func DeleteAuditPlans() error                { return deletePlan("audit.json") }
+func ArchiveAuditPlans() error               { return archivePlan("audit.json") }
 
 // ExecuteAuditAction executes an audit action (rename or delete) on a file
 func ExecuteAuditAction(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool, cfg *config.Config) error {
@@ -562,28 +420,6 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 			fmt.Printf("Failed to rollback file move: %v\n", rollbackErr)
 		}
 		return fmt.Errorf("failed to update database: %w", err)
-	}
-
-	return nil
-}
-
-// ArchiveAuditPlans renames audit.json to audit.json.old
-func ArchiveAuditPlans() error {
-	path, err := getAuditPlansPath()
-	if err != nil {
-		return err
-	}
-
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil // Nothing to archive
-	}
-
-	oldPath := path + ".old"
-
-	os.Remove(oldPath)
-
-	if err := os.Rename(path, oldPath); err != nil {
-		return fmt.Errorf("failed to archive plan file: %w", err)
 	}
 
 	return nil
