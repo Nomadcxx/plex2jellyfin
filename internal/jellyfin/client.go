@@ -165,14 +165,6 @@ func (c *Client) post(endpoint string, payload, result interface{}) error {
 	return nil
 }
 
-func (c *Client) Ping() error {
-	_, err := c.GetSystemInfo()
-	if err != nil {
-		return fmt.Errorf("ping failed: %w", err)
-	}
-	return nil
-}
-
 func (c *Client) GetSystemInfo() (*SystemInfo, error) {
 	var info SystemInfo
 	if err := c.get("/System/Info", &info); err != nil {

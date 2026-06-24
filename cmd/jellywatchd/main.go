@@ -203,18 +203,18 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			APIKey:  cfg.Jellyfin.APIKey,
 			Timeout: 30 * time.Second,
 		})
-		if err := jellyfinClient.Ping(); err != nil {
+		info, err := jellyfinClient.GetSystemInfo()
+		if err != nil {
 			logger.Warn("daemon", "Jellyfin connection failed, disabling integration", logging.F("error", err.Error()))
 			jellyfinClient = nil
+		} else if info != nil {
+			logger.Info("daemon", "Jellyfin integration enabled",
+				logging.F("server", info.ServerName),
+				logging.F("version", info.Version))
 		} else {
-			info, err := jellyfinClient.GetSystemInfo()
-			if err == nil && info != nil {
-				logger.Info("daemon", "Jellyfin integration enabled",
-					logging.F("server", info.ServerName),
-					logging.F("version", info.Version))
-			} else {
-				logger.Info("daemon", "Jellyfin integration enabled", logging.F("url", cfg.Jellyfin.URL))
-			}
+			logger.Info("daemon", "Jellyfin integration enabled", logging.F("url", cfg.Jellyfin.URL))
+		}
+		if jellyfinClient != nil {
 			notifyMgr.Register(notify.NewJellyfinNotifier(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, cfg.Jellyfin.NotifyOnImport))
 		}
 	}

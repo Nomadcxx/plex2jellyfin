@@ -212,7 +212,7 @@ var rsyncProgressRegex = regexp.MustCompile(`^\s*(\d[\d,]*)\s+(\d+)%`)
 
 func (r *RsyncTransferer) parseProgress(stdout *bufio.Reader, progressFn func(current, total int64)) {
 	scanner := bufio.NewScanner(stdout)
-	scanner.Split(scanRsyncOutput)
+	scanner.Split(scanPVOutput)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -227,20 +227,3 @@ func (r *RsyncTransferer) parseProgress(stdout *bufio.Reader, progressFn func(cu
 	}
 }
 
-func scanRsyncOutput(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if atEOF && len(data) == 0 {
-		return 0, nil, nil
-	}
-
-	for i := 0; i < len(data); i++ {
-		if data[i] == '\n' || data[i] == '\r' {
-			return i + 1, data[0:i], nil
-		}
-	}
-
-	if atEOF {
-		return len(data), data, nil
-	}
-
-	return 0, nil, nil
-}
