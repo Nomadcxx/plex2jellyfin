@@ -256,6 +256,11 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool, scanPath st
 		} else if pruned > 0 && !jsonOutput {
 			fmt.Printf("Pruned stale filesystem movie rows: %d\n", pruned)
 		}
+		if pruned, err := pruneStaleFilesystemSeriesRows(db, ""); err != nil {
+			return fmt.Errorf("pruning stale filesystem series rows: %w", err)
+		} else if pruned > 0 && !jsonOutput {
+			fmt.Printf("Pruned stale filesystem series rows: %d\n", pruned)
+		}
 	}
 
 	duration := time.Since(startTime)
@@ -443,6 +448,11 @@ func runTargetedScan(ctx context.Context, db *database.MediaDB, cfg *config.Conf
 	} else if pruned > 0 && !jsonOutput {
 		fmt.Printf("Pruned stale filesystem movie rows: %d\n", pruned)
 	}
+	if pruned, err := pruneStaleFilesystemSeriesRows(db, path); err != nil {
+		return fmt.Errorf("pruning stale filesystem series rows: %w", err)
+	} else if pruned > 0 && !jsonOutput {
+		fmt.Printf("Pruned stale filesystem series rows: %d\n", pruned)
+	}
 
 	duration := time.Since(startTime)
 	if jsonOutput {
@@ -476,6 +486,13 @@ func pruneStaleFilesystemMovieRows(db *database.MediaDB, path string) (int64, er
 		return db.PruneFilesystemMoviesWithoutMediaFilesUnder(path)
 	}
 	return db.PruneFilesystemMoviesWithoutMediaFiles()
+}
+
+func pruneStaleFilesystemSeriesRows(db *database.MediaDB, path string) (int64, error) {
+	if strings.TrimSpace(path) != "" {
+		return db.PruneFilesystemSeriesWithoutMediaFilesUnder(path)
+	}
+	return db.PruneFilesystemSeriesWithoutMediaFiles()
 }
 
 func pruneMissingMediaRows(db *database.MediaDB) (int, error) {

@@ -141,7 +141,7 @@ func (s *Sweeper) sweepUnidentified(ctx context.Context) error {
 		}
 		mismatches, err := verifier.GetUnidentifiedItems(folder.ItemID)
 		if err != nil {
-			// Log-and-continue: a bad library shouldn't tank the sweep.
+			slog.Warn("skipping library after error", "folder", folder.ItemID, "error", err)
 			continue
 		}
 		for _, m := range mismatches {

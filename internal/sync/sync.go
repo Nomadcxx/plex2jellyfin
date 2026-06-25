@@ -203,7 +203,7 @@ func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
 
 		err = retryWithBackoff(ctx, 3, func() error {
 			return s.sonarr.UpdateSeriesPath(*series.SonarrID, series.CanonicalPath)
-		})
+		}, nil)
 
 		if err != nil {
 			s.logger.Error("failed to update Sonarr path (will retry)", "id", req.ID, "error", err)
@@ -212,7 +212,7 @@ func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
 
 		if err := retryWithBackoff(ctx, 3, func() error {
 			return s.db.MarkSeriesSynced(req.ID)
-		}); err != nil {
+		}, nil); err != nil {
 			s.logger.Error("failed to mark series synced after Sonarr update succeeded", "id", req.ID, "error", err)
 		}
 
@@ -236,7 +236,7 @@ func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
 
 		err = retryWithBackoff(ctx, 3, func() error {
 			return s.radarr.UpdateMoviePathContext(ctx, *movie.RadarrID, movie.CanonicalPath)
-		})
+		}, nil)
 
 		if err != nil {
 			s.logger.Error("failed to update Radarr path (will retry)", "id", req.ID, "error", err)
@@ -245,14 +245,14 @@ func (s *SyncService) processSyncRequest(ctx context.Context, req SyncRequest) {
 
 		if err := retryWithBackoff(ctx, 3, func() error {
 			return s.db.MarkMovieSynced(req.ID)
-		}); err != nil {
+		}, nil); err != nil {
 			s.logger.Error("failed to mark movie synced after Radarr update succeeded", "id", req.ID, "error", err)
 		}
 	}
 }
 
 // retryWithBackoff executes fn with exponential backoff up to maxRetries
-func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) error {
+func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error, shouldRetry func(error) bool) error {
 	var lastErr error
 	baseDelay := 1 * time.Second
 	maxDelay := 30 * time.Second
@@ -270,6 +270,10 @@ func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) erro
 		}
 
 		lastErr = err
+
+		if shouldRetry != nil && !shouldRetry(err) {
+			return err
+		}
 
 		delay := baseDelay * time.Duration(1<<uint(i))
 		if delay > maxDelay {
@@ -309,7 +313,7 @@ func (s *SyncService) syncDirtyRecords(ctx context.Context) error {
 
 				err := retryWithBackoff(ctx, 3, func() error {
 					return s.sonarr.UpdateSeriesPath(*series.SonarrID, series.CanonicalPath)
-				})
+				}, nil)
 
 				if err != nil {
 					s.logger.Error("failed to update Sonarr path (will retry)", "id", series.ID, "error", err)
@@ -342,7 +346,7 @@ func (s *SyncService) syncDirtyRecords(ctx context.Context) error {
 
 				err := retryWithBackoff(ctx, 3, func() error {
 					return s.radarr.UpdateMoviePathContext(ctx, *movie.RadarrID, movie.CanonicalPath)
-				})
+				}, nil)
 
 				if err != nil {
 					s.logger.Error("failed to update Radarr path (will retry)", "id", movie.ID, "error", err)

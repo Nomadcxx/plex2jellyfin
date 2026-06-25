@@ -121,8 +121,8 @@ func (pc *PluginClient) request(method, endpoint string, body io.Reader) (*http.
 			bodyBytes, _ := io.ReadAll(resp.Body)
 			lastErr = fmt.Errorf("API error (status %d, attempt %d/%d): %s", resp.StatusCode, attempt+1, maxRetries, string(bodyBytes))
 
-			// Retry on 5xx errors
-			if resp.StatusCode >= 500 && attempt < maxRetries-1 {
+			// Retry on 5xx errors and 429 rate limits
+			if (resp.StatusCode >= 500 || resp.StatusCode == 429) && attempt < maxRetries-1 {
 				backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
 				time.Sleep(backoff)
 				continue

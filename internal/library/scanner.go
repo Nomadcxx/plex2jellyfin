@@ -42,6 +42,8 @@ func (s *Selector) findAllShowLocations(showName, year string) []ShowLocation {
 	return locations
 }
 
+var yearParenRegex = regexp.MustCompile(`\((\d{4})\)`)
+
 // findShowDirInLibrary finds a show directory in a single library
 func (s *Selector) findShowDirInLibrary(library, normalizedTitle, year string) string {
 	entries, err := os.ReadDir(library)
@@ -59,7 +61,7 @@ func (s *Selector) findShowDirInLibrary(library, normalizedTitle, year string) s
 
 		// Extract year from directory if present
 		dirYear := ""
-		if matches := regexp.MustCompile(`\((\d{4})\)`).FindStringSubmatch(dirName); len(matches) >= 2 {
+		if matches := yearParenRegex.FindStringSubmatch(dirName); len(matches) >= 2 {
 			dirYear = matches[1]
 		}
 

@@ -195,6 +195,7 @@ func (s *CleanupService) pruneMissingMediaFiles(files []*database.MediaFile) ([]
 			}
 			continue
 		}
+		existing = append(existing, file)
 	}
 	return existing, nil
 }

@@ -357,7 +357,7 @@ func TestRetryWithBackoff(t *testing.T) {
 				return fmt.Errorf("permanent error")
 			}
 
-			err := retryWithBackoff(context.Background(), tt.maxRetries, fn)
+			err := retryWithBackoff(context.Background(), tt.maxRetries, fn, nil)
 
 			if tt.shouldSucceed && err != nil {
 				t.Errorf("expected success, got error: %v", err)
@@ -366,6 +366,49 @@ func TestRetryWithBackoff(t *testing.T) {
 				t.Error("expected error after all retries, got nil")
 			}
 		})
+	}
+}
+
+func TestRetryWithBackoff_ShouldRetryFilter(t *testing.T) {
+	attempts := 0
+	fn := func() error {
+		attempts++
+		return fmt.Errorf("permanent error")
+	}
+
+	shouldRetry := func(err error) bool {
+		return false
+	}
+
+	err := retryWithBackoff(context.Background(), 3, fn, shouldRetry)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if attempts != 1 {
+		t.Errorf("expected 1 attempt with shouldRetry=false, got %d", attempts)
+	}
+}
+
+func TestRetryWithBackoff_ShouldRetryAllowsRetry(t *testing.T) {
+	attempts := 0
+	fn := func() error {
+		attempts++
+		if attempts < 3 {
+			return fmt.Errorf("retry me")
+		}
+		return nil
+	}
+
+	shouldRetry := func(err error) bool {
+		return true
+	}
+
+	err := retryWithBackoff(context.Background(), 3, fn, shouldRetry)
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if attempts != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts)
 	}
 }
 

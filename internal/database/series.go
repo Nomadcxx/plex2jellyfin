@@ -461,3 +461,52 @@ func (m *MediaDB) GetAllSeries() ([]*Series, error) {
 
 	return series, rows.Err()
 }
+
+// PruneFilesystemSeriesWithoutMediaFiles removes stale series rows created by
+// filesystem scans when no tracked media file still belongs to the row.
+func (m *MediaDB) PruneFilesystemSeriesWithoutMediaFiles() (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result, err := m.db.Exec(`
+		DELETE FROM series
+		WHERE source = 'filesystem'
+		  AND sonarr_id IS NULL
+		  AND tvdb_id IS NULL
+		  AND imdb_id IS NULL
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_files
+			WHERE media_files.parent_series_id = series.id
+		  )
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// PruneFilesystemSeriesWithoutMediaFilesUnder removes stale filesystem series
+// rows only below a specific canonical path.
+func (m *MediaDB) PruneFilesystemSeriesWithoutMediaFilesUnder(path string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result, err := m.db.Exec(`
+		DELETE FROM series
+		WHERE source = 'filesystem'
+		  AND sonarr_id IS NULL
+		  AND tvdb_id IS NULL
+		  AND imdb_id IS NULL
+		  AND (canonical_path = ? OR canonical_path LIKE ?)
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_files
+			WHERE media_files.parent_series_id = series.id
+		  )
+	`, path, path+"/%")
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

@@ -38,8 +38,8 @@ type PathTranslator struct {
 func NewPathTranslator(mappings []PathMapping) *PathTranslator {
 	cleaned := make([]PathMapping, 0, len(mappings))
 	for _, m := range mappings {
-		j := strings.TrimSpace(m.Jellyfin)
-		d := strings.TrimSpace(m.Daemon)
+		j := strings.TrimRight(strings.TrimSpace(m.Jellyfin), "/")
+		d := strings.TrimRight(strings.TrimSpace(m.Daemon), "/")
 		if j == "" || d == "" {
 			continue
 		}
