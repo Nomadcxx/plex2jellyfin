@@ -34,6 +34,7 @@ Evidence bundle:
 Read these first:
 - context.md
 - summary.json
+- unknown-seasons.json
 - repair-events.json
 - suspicious-items.json
 - jellyfin-diff.json
@@ -46,6 +47,7 @@ Safety rules:
 - Do not delete or rename media without explicit user approval.
 - Treat LLM-only repair decisions as suspicious unless corroborated by deterministic parser, folder context, Jellyfin/provider metadata, or duplicate evidence.
 - Obfuscated filenames are folder-context/manual-review candidates, not AI rename candidates.
+- If unknown-seasons.json reports actionable pollution above zero, prioritize that as a regression.
 - Parser drift should identify the rule or release marker that caused the bad parse.
 
 Expected output:

@@ -1,9 +1,11 @@
 package postmortem
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,15 +13,43 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/jellywatch/internal/naming"
 )
 
 type Collector struct {
-	DB        *database.MediaDB
-	Root      string
-	Since     time.Time
-	Now       func() time.Time
-	LogDir    string
-	Workspace string
+	DB             *database.MediaDB
+	Root           string
+	Since          time.Time
+	Now            func() time.Time
+	LogDir         string
+	Workspace      string
+	UnknownSeasons func() UnknownSeasonEvidence
+}
+
+var journalctlExcerpt = func(since time.Time) (string, error) {
+	if since.IsZero() {
+		since = time.Now().Add(-96 * time.Hour)
+	}
+	out, err := exec.Command(
+		"journalctl",
+		"-u", "jellywatchd",
+		"-u", "jellyweb",
+		"--since", since.Local().Format("2006-01-02 15:04:05"),
+		"-n", "200",
+		"--no-pager",
+	).CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		if text != "" {
+			return "", fmt.Errorf("%w: %s", err, text)
+		}
+		return "", err
+	}
+	if text == "" {
+		return "", fmt.Errorf("journalctl returned no lines")
+	}
+	return text, nil
 }
 
 type housekeepingSnapshot struct {
@@ -64,16 +94,18 @@ func (c Collector) Collect() (BundlePaths, error) {
 		return BundlePaths{}, fmt.Errorf("query repair events: %w", err)
 	}
 	hk := c.housekeeping()
+	unknownSeasons := c.unknownSeasonEvidence()
 	suspicious, pathFalsePositives := suspiciousFromDecisions(decisions)
 	summary := Summary{
-		RunID:              bundle.RunID,
-		GeneratedAt:        now,
-		Since:              c.Since,
-		ProcessedDecisions: len(decisions),
-		RepairEvents:       len(repairs),
-		SuspiciousItems:    len(suspicious),
-		HousekeepingFailed: hk.Counts[database.TaskStatusFailed],
-		ManualReview:       hk.Counts[database.TaskStatusFlagged],
+		RunID:                   bundle.RunID,
+		GeneratedAt:             now,
+		Since:                   c.Since,
+		ProcessedDecisions:      len(decisions),
+		RepairEvents:            len(repairs),
+		SuspiciousItems:         len(suspicious),
+		HousekeepingFailed:      hk.Counts[database.TaskStatusFailed],
+		ManualReview:            hk.Counts[database.TaskStatusFlagged],
+		UnknownSeasonActionable: unknownSeasons.ActionablePollutionEpisodes,
 	}
 
 	if err := writeJSON(bundle.File("summary.json"), summary); err != nil {
@@ -94,6 +126,9 @@ func (c Collector) Collect() (BundlePaths, error) {
 	if err := writeJSON(bundle.File("suspicious-items.json"), suspicious); err != nil {
 		return bundle, err
 	}
+	if err := writeJSON(bundle.File("unknown-seasons.json"), unknownSeasons); err != nil {
+		return bundle, err
+	}
 	if err := writeJSON(bundle.File("media-inventory.json"), c.mediaInventory()); err != nil {
 		return bundle, err
 	}
@@ -109,13 +144,61 @@ func (c Collector) Collect() (BundlePaths, error) {
 	if err := writeText(bundle.File("agent-prompt.md"), AgentPrompt(c.Workspace, bundle.LatestLink)); err != nil {
 		return bundle, err
 	}
-	if err := writeText(bundle.File("report.md"), MarkdownReport(summary, suspicious)); err != nil {
+	if err := writeText(bundle.File("report.md"), MarkdownReport(summary, suspicious, unknownSeasons)); err != nil {
 		return bundle, err
 	}
 	if err := updateLatestLink(bundle); err != nil {
 		return bundle, err
 	}
 	return bundle, nil
+}
+
+func (c Collector) unknownSeasonEvidence() UnknownSeasonEvidence {
+	if c.UnknownSeasons != nil {
+		return c.UnknownSeasons()
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return UnknownSeasonEvidence{Error: err.Error()}
+	}
+	if strings.TrimSpace(cfg.Jellyfin.URL) == "" || strings.TrimSpace(cfg.Jellyfin.APIKey) == "" {
+		return UnknownSeasonEvidence{Error: "jellyfin url/api_key not configured"}
+	}
+	client := jellyfin.NewClient(jellyfin.Config{
+		URL:     cfg.Jellyfin.URL,
+		APIKey:  cfg.Jellyfin.APIKey,
+		Timeout: 30 * time.Second,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	report, err := client.AuditUnknownSeasons(ctx, "")
+	if err != nil {
+		return UnknownSeasonEvidence{Error: err.Error()}
+	}
+	return unknownSeasonEvidenceFromReport(report)
+}
+
+func unknownSeasonEvidenceFromReport(report *jellyfin.UnknownSeasonReport) UnknownSeasonEvidence {
+	if report == nil {
+		return UnknownSeasonEvidence{Error: "unknown season report unavailable"}
+	}
+	actionable := report.RefreshCandidateEpisodes + report.RandomishBasenameEpisodes
+	return UnknownSeasonEvidence{
+		UserID:                      report.UserID,
+		Total:                       report.Total,
+		RefreshRepairableSeasons:    report.RefreshRepairableSeasons,
+		RefreshRepairableEpisodes:   report.RefreshRepairableEpisodes,
+		RefreshCandidateSeasons:     report.RefreshCandidateSeasons,
+		RefreshCandidateEpisodes:    report.RefreshCandidateEpisodes,
+		RandomishBasenameEpisodes:   report.RandomishBasenameEpisodes,
+		ActionablePollutionEpisodes: actionable,
+		FolderContext:               report.FolderContext,
+		MixedReview:                 report.MixedReview,
+		ManualUnknown:               report.ManualUnknown,
+		Empty:                       report.Empty,
+		Indexed:                     report.Indexed,
+		Issues:                      report.Issues,
+	}
 }
 
 type parseDecisionEvidence struct {
@@ -186,17 +269,29 @@ func (c Collector) housekeeping() housekeepingSnapshot {
 }
 
 func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousItem, []SuspiciousItem) {
-	var suspicious []SuspiciousItem
-	var pathFalsePositives []SuspiciousItem
+	suspicious := make([]SuspiciousItem, 0)
+	pathFalsePositives := make([]SuspiciousItem, 0)
+	targetSources := make(map[string]map[string]string)
 	for _, d := range decisions {
 		if d == nil {
 			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(d.OrganizeOutcome), "success") && strings.TrimSpace(d.TargetPath) != "" && strings.TrimSpace(d.SourcePath) != "" {
+			sources := targetSources[d.TargetPath]
+			if sources == nil {
+				sources = make(map[string]string)
+				targetSources[d.TargetPath] = sources
+			}
+			sources[d.SourcePath] = d.SourceFilename
 		}
 		name := strings.TrimSpace(d.ParsedTitle)
 		if name == "" && d.TargetPath != "" {
 			name = strings.TrimSuffix(filepath.Base(d.TargetPath), filepath.Ext(d.TargetPath))
 		}
 		if item := ClassifySuspiciousName(name, d.TargetPath); item.Category != "" {
+			suspicious = append(suspicious, item)
+		}
+		if item := classifyParserDrift(d); item.Category != "" {
 			suspicious = append(suspicious, item)
 		}
 		target, jellyfin, ok := parsePathMismatch(d.MetadataError)
@@ -213,7 +308,108 @@ func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousI
 			}
 		}
 	}
+	for target, sources := range targetSources {
+		if len(sources) < 2 {
+			continue
+		}
+		names := make([]string, 0, len(sources))
+		for source, name := range sources {
+			if strings.TrimSpace(name) == "" {
+				name = filepath.Base(source)
+			}
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		if len(names) > 4 {
+			names = append(names[:4], fmt.Sprintf("and %d more", len(names)-4))
+		}
+		suspicious = append(suspicious, SuspiciousItem{
+			Category: "target_collision",
+			Path:     target,
+			Reason:   "multiple successful parse decisions wrote to the same target: " + strings.Join(names, "; "),
+		})
+	}
 	return suspicious, pathFalsePositives
+}
+
+func classifyParserDrift(d *database.ParseDecision) SuspiciousItem {
+	if d == nil || d.ParsedTitle == "" || d.SourcePath == "" {
+		return SuspiciousItem{}
+	}
+	switch strings.ToLower(strings.TrimSpace(d.ParseMethod)) {
+	case "ai", "manual", "season_pack":
+		return SuspiciousItem{}
+	}
+
+	switch strings.ToLower(strings.TrimSpace(d.MediaTypeGuessed)) {
+	case "movie":
+		info, err := naming.ParseMovieName(d.SourceFilename)
+		if err != nil {
+			info, err = naming.ParseMovieName(d.SourcePath)
+		}
+		if err != nil || info == nil {
+			return SuspiciousItem{}
+		}
+		if sameNormalizedTitle(d.ParsedTitle, info.Title) && sameYear(d.ParsedYear, info.Year) {
+			return SuspiciousItem{}
+		}
+		return SuspiciousItem{
+			Category: "parser_drift",
+			Name:     d.ParsedTitle,
+			Path:     d.TargetPath,
+			Reason:   fmt.Sprintf("current parser would produce movie title %q year %q", info.Title, info.Year),
+		}
+	case "tv":
+		info, err := naming.ParseTVShowFromPath(d.SourcePath)
+		if err != nil || info == nil {
+			return SuspiciousItem{}
+		}
+		if sameNormalizedTitle(d.ParsedTitle, info.Title) &&
+			sameIntPtr(d.ParsedSeason, info.Season) &&
+			sameIntPtr(d.ParsedEpisode, info.Episode) {
+			return SuspiciousItem{}
+		}
+		return SuspiciousItem{
+			Category: "parser_drift",
+			Name:     d.ParsedTitle,
+			Path:     d.TargetPath,
+			Reason:   fmt.Sprintf("current parser would produce TV identity %q S%02dE%02d", info.Title, info.Season, info.Episode),
+		}
+	default:
+		return SuspiciousItem{}
+	}
+}
+
+func sameNormalizedTitle(a, b string) bool {
+	return normalizeDriftTitle(a) == normalizeDriftTitle(b)
+}
+
+func normalizeDriftTitle(s string) string {
+	s = strings.ToLower(s)
+	s = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return ' '
+	}, s)
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func sameYear(stored *int, parsed string) bool {
+	if stored == nil {
+		return true
+	}
+	if parsed == "" {
+		return false
+	}
+	return fmt.Sprintf("%d", *stored) == parsed
+}
+
+func sameIntPtr(stored *int, parsed int) bool {
+	if stored == nil || parsed == 0 {
+		return stored == nil && parsed == 0
+	}
+	return *stored == parsed
 }
 
 func parsePathMismatch(msg string) (target, jellyfin string, ok bool) {
@@ -233,14 +429,14 @@ func parsePathMismatch(msg string) (target, jellyfin string, ok bool) {
 }
 
 type mediaInventorySnapshot struct {
-	TotalFiles int                `json:"total_files"`
-	ByType     map[string]int     `json:"by_type"`
-	DuplicateGroups int           `json:"duplicate_groups"`
-	DuplicateFiles  int           `json:"duplicate_files"`
-	SpaceReclaimable int64        `json:"space_reclaimable"`
-	NonCompliantFiles int         `json:"non_compliant_files"`
+	TotalFiles          int            `json:"total_files"`
+	ByType              map[string]int `json:"by_type"`
+	DuplicateGroups     int            `json:"duplicate_groups"`
+	DuplicateFiles      int            `json:"duplicate_files"`
+	SpaceReclaimable    int64          `json:"space_reclaimable"`
+	NonCompliantFiles   int            `json:"non_compliant_files"`
 	QualityDistribution map[string]int `json:"quality_distribution"`
-	Error      string             `json:"error,omitempty"`
+	Error               string         `json:"error,omitempty"`
 }
 
 func (c Collector) mediaInventory() mediaInventorySnapshot {
@@ -304,42 +500,58 @@ func (c Collector) configSnapshot() map[string]any {
 }
 
 func (c Collector) daemonLogExcerpt() string {
-	if c.LogDir == "" {
-		return ""
-	}
-	entries, err := os.ReadDir(c.LogDir)
-	if err != nil {
-		return ""
-	}
+	var failures []string
 	type candidate struct {
 		path string
 		mod  time.Time
 	}
 	var candidates []candidate
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		info, err := entry.Info()
+	if c.LogDir != "" {
+		entries, err := os.ReadDir(c.LogDir)
 		if err != nil {
-			continue
+			failures = append(failures, fmt.Sprintf("log dir %s: %v", c.LogDir, err))
+		} else {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				info, err := entry.Info()
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("stat %s: %v", filepath.Join(c.LogDir, entry.Name()), err))
+					continue
+				}
+				candidates = append(candidates, candidate{
+					path: filepath.Join(c.LogDir, entry.Name()),
+					mod:  info.ModTime(),
+				})
+			}
 		}
-		candidates = append(candidates, candidate{
-			path: filepath.Join(c.LogDir, entry.Name()),
-			mod:  info.ModTime(),
-		})
+	} else {
+		failures = append(failures, "no configured file log path")
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].mod.After(candidates[j].mod)
 	})
-	for _, c := range candidates {
-		data, err := os.ReadFile(c.path)
+	for _, cand := range candidates {
+		data, err := os.ReadFile(cand.path)
 		if err != nil {
+			failures = append(failures, fmt.Sprintf("read %s: %v", cand.path, err))
+			continue
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			failures = append(failures, fmt.Sprintf("read %s: empty log file", cand.path))
 			continue
 		}
 		return lastLines(string(data), 200)
 	}
-	return ""
+
+	if text, err := journalctlExcerpt(c.Since); err == nil {
+		return lastLines(text, 200)
+	} else {
+		failures = append(failures, fmt.Sprintf("journalctl jellywatchd/jellyweb: %v", err))
+	}
+
+	return "daemon log unavailable\n" + strings.Join(failures, "\n")
 }
 
 func lastLines(s string, n int) string {

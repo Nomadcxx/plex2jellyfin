@@ -1,6 +1,9 @@
 package postmortem
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 type SuspiciousItem struct {
 	Category string `json:"category"`
@@ -19,9 +22,10 @@ var pollutedMarkers = []string{
 	"x264",
 	"x265",
 	"HEVC",
-	"HDR",
-	"HDR10",
 	"HDR10+",
+	"HDR10",
+	"HDRip",
+	"HDR",
 	"Dolby Vision",
 	"DV",
 	"DDP",
@@ -55,13 +59,28 @@ var pollutedMarkers = []string{
 	"French",
 }
 
+var pollutedMarkerPatterns = compilePollutedMarkerPatterns(pollutedMarkers)
+
+type pollutedMarkerPattern struct {
+	marker string
+	re     *regexp.Regexp
+}
+
+func compilePollutedMarkerPatterns(markers []string) []pollutedMarkerPattern {
+	patterns := make([]pollutedMarkerPattern, 0, len(markers))
+	for _, marker := range markers {
+		re := regexp.MustCompile(`(?i)(^|[^a-z0-9])` + regexp.QuoteMeta(marker) + `([^a-z0-9]|$)`)
+		patterns = append(patterns, pollutedMarkerPattern{marker: marker, re: re})
+	}
+	return patterns
+}
+
 func ClassifySuspiciousName(name, path string) SuspiciousItem {
-	lowerName := strings.ToLower(name)
-	for _, marker := range pollutedMarkers {
-		if strings.Contains(lowerName, strings.ToLower(marker)) {
+	for _, marker := range pollutedMarkerPatterns {
+		if marker.re.MatchString(name) {
 			return SuspiciousItem{
 				Category: "polluted_name",
-				Marker:   marker,
+				Marker:   marker.marker,
 				Name:     name,
 				Path:     path,
 				Reason:   "visible title contains release or language marker",

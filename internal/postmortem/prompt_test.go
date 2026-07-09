@@ -11,6 +11,7 @@ func TestAgentPromptContainsSafetyRulesAndEvidenceFiles(t *testing.T) {
 	for _, want := range []string{
 		"cd /home/nomadx/Documents/jellywatch",
 		"summary.json",
+		"unknown-seasons.json",
 		"repair-events.json",
 		"suspicious-items.json",
 		"Do not delete or rename media without explicit user approval",
