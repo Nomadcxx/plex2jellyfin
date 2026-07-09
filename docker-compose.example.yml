@@ -1,0 +1,14 @@
+services:
+  plex2jellyfin:
+    image: ghcr.io/nomadcxx/plex2jellyfin:latest
+    container_name: plex2jellyfin
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./config:/config
+      - /path/to/downloads:/watch
+      - /path/to/media:/library
+    ports:
+      - "5522:5522"
+    restart: unless-stopped

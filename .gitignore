@@ -28,6 +28,7 @@ Thumbs.db
 *.yaml
 *.yml
 !config.example.toml
+!docker-compose.example.yml
 
 # Development documentation
 AGENTS.md

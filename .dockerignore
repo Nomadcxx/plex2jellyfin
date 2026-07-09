@@ -1,0 +1,8 @@
+bin/
+build/
+web/node_modules/
+web/.next/
+docs/
+*.test
+media.db
+.git/

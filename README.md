@@ -86,6 +86,49 @@ sudo ./installer
 
 The installer walks you through watch paths, library paths, *arr keys, AI, permissions, and systemd units. Re-run it to update; it preserves your existing `config.toml`. Requires **Go 1.24+** to build from source.
 
+### Docker
+
+One image, three binaries: `plex2jellyfin-daemon` and `plex2jellyfin-web` run together under the entrypoint; the `plex2jellyfin` CLI is available for one-off commands (`docker run --rm <image> plex2jellyfin version`).
+
+```bash
+docker run -d \
+  --name plex2jellyfin \
+  -e PUID=1000 -e PGID=1000 \
+  -v ./config:/config \
+  -v /path/to/downloads:/watch \
+  -v /path/to/media:/library \
+  -p 5522:5522 \
+  --restart unless-stopped \
+  ghcr.io/nomadcxx/plex2jellyfin:latest
+```
+
+Or with [`docker-compose.example.yml`](docker-compose.example.yml):
+
+```yaml
+services:
+  plex2jellyfin:
+    image: ghcr.io/nomadcxx/plex2jellyfin:latest
+    container_name: plex2jellyfin
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./config:/config
+      - /path/to/downloads:/watch
+      - /path/to/media:/library
+    ports:
+      - "5522:5522"
+    restart: unless-stopped
+```
+
+```bash
+docker compose -f docker-compose.example.yml up -d
+```
+
+`PUID`/`PGID` (linuxserver.io-style, default `1000:1000`) set the user the daemon and web UI run as inside the container; `/config` is chowned to match on start. Config lives at `/config/.config/plex2jellyfin/config.toml`, same layout as a bare-metal install rooted at `$HOME`.
+
+> **Note:** the container always runs as that non-root user, so the `[permissions]` chown feature (see [File Permissions](#file-permissions)) has nothing to elevate to and is unavailable in-container. Control file ownership with `PUID`/`PGID` instead — set them to match the UID/GID that should own files under `/library`.
+
 ## CLI Commands
 
 `plex2jellyfin --help` shows the primary workflows. Advanced and maintenance commands exist but stay hidden from the root help.
