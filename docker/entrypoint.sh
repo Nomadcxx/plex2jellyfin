@@ -22,6 +22,16 @@ fi
 
 su-exec p2j plex2jellyfin-daemon &
 DAEMON_PID=$!
+su-exec p2j plex2jellyfin-web &
+WEB_PID=$!
 
-trap 'kill $DAEMON_PID 2>/dev/null' TERM INT
-exec su-exec p2j plex2jellyfin-web
+# exec would reset the trap, orphaning the daemon on `docker stop`;
+# run both in the background and forward TERM/INT to each explicitly.
+forward() { kill -TERM "$DAEMON_PID" "$WEB_PID" 2>/dev/null; }
+trap forward TERM INT
+
+wait "$WEB_PID"
+WEB_STATUS=$?
+kill -TERM "$DAEMON_PID" 2>/dev/null
+wait "$DAEMON_PID" 2>/dev/null || true
+exit "$WEB_STATUS"
