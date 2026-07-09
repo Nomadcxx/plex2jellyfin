@@ -93,7 +93,7 @@ Adjust the owner/group and modes to whatever `[permissions]` you've configured.
 
 **Fix:**
 
-1. Confirm the file is actually under the correct library root (`[watch]`/`[libraries]` in `config.toml`) — the AI is told which library type it's working in and trusts that.
+1. Confirm the file sits under the correct library root (`[watch]`/`[libraries]` in `config.toml`) — the AI is told which library type it's working in and trusts that.
 2. Re-run `plex2jellyfin scan` after fixing the config so the database reflects the corrected library assignment.
 
 ### AI calls failing or timing out

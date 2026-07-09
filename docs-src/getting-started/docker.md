@@ -55,7 +55,7 @@ docker exec jellyfin id
 
 If PUID/PGID don't match your host's Jellyfin user, Jellyfin may lose read/write access to files the daemon moves into `/library`, even though the move itself succeeds inside the container.
 
-Note that only `/config` gets the automatic `chown -R` on start — `/watch` and `/library` are left with whatever ownership they already have on the host. If files land in `/library` owned by an unexpected user, check that PUID/PGID match the host UID/GID you expect, and that the host directories themselves are writable by that UID/GID.
+Only `/config` gets the automatic `chown -R` on start — `/watch` and `/library` keep whatever ownership they already have on the host. If files land in `/library` owned by an unexpected user, check that PUID/PGID match the host UID/GID you expect, and that the host directories themselves are writable by that UID/GID.
 
 ## The `[permissions]` chown feature is unavailable in-container
 
@@ -100,7 +100,7 @@ The image and entrypoint work under rootless Podman, with one extra consideratio
 Two common approaches:
 
 - Run with `--userns=keep-id` so the container's UID namespace matches your host user 1:1, then set `PUID`/`PGID` to your normal host UID/GID.
-- Or leave the default subordinate-UID mapping and set `PUID`/`PGID` to the *in-container* UID, then adjust host-side directory ownership to match whatever host UID that maps to (check with `podman unshare cat /proc/self/uid_map` from inside the container's namespace, or simply `podman exec <container> id`).
+- Or leave the default subordinate-UID mapping and set `PUID`/`PGID` to the *in-container* UID, then adjust host-side directory ownership to match whatever host UID that maps to (check with `podman unshare cat /proc/self/uid_map` from inside the container's namespace, or `podman exec <container> id`).
 
 Either way, verify the mapping with `podman exec plex2jellyfin id` and confirm the reported UID/GID's host-side ownership lines up with your `/library` and `/watch` mounts before trusting a migration run.
 
