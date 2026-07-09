@@ -73,6 +73,13 @@ func TestParseMovieName(t *testing.T) {
 			wantErr:   false,
 		},
 		{
+			name:      "Strips HDRip source marker",
+			input:     "Masters.of.the.Universe.2026.iNTERNAL.1080p.10bit.HDRip.2CH.x265.HEVC-PSA.mkv",
+			wantTitle: "Masters of the Universe",
+			wantYear:  "2026",
+			wantErr:   false,
+		},
+		{
 			name:      "Preserves roman numeral sequel",
 			input:     "Mortal.Kombat.II.2026.1080p.WEBRip.x264.AAC-LAMA.mp4",
 			wantTitle: "Mortal Kombat II",
@@ -98,6 +105,20 @@ func TestParseMovieName(t *testing.T) {
 			input:     "Ratatouille.2007.720p.BluRay.RoDubbed.DD.5.1.x264-SPHD.mkv",
 			wantTitle: "Ratatouille",
 			wantYear:  "2007",
+			wantErr:   false,
+		},
+		{
+			name:      "Strips dotted Dolby Vision marker",
+			input:     "Kraven.the.Hunter.2024.2160p.H.265.HDR.D.V.iTA.EnG.EAC3.Sub.iTA.EnG-MIRCrew.mkv",
+			wantTitle: "Kraven the Hunter",
+			wantYear:  "2024",
+			wantErr:   false,
+		},
+		{
+			name:      "Strips glued HDR10 language and release group markers",
+			input:     "The.Island.2005.UpScaled.2160p.H265.10.bit.DV.HDR10ita.eng.AC3.5.1.sub.ita.eng.Licdom.mkv",
+			wantTitle: "The Island",
+			wantYear:  "2005",
 			wantErr:   false,
 		},
 		{
@@ -374,6 +395,18 @@ func TestParseTVShowFromPath_AbsoluteEpisodeNotObfuscated(t *testing.T) {
 	}
 	if got.Episode != 1157 {
 		t.Errorf("ParseTVShowFromPath() episode = %d, want 1157", got.Episode)
+	}
+}
+
+func TestParseTVShowFromPath_RejectsUnsupportedMultiEpisodeRange(t *testing.T) {
+	path := "/downloads/tv/Maisy.S01E061-062-063-064.Fish-Hiccups-Ice-Puzzle.480p.WEB-DL.AAC2.0.x264/Maisy.S01E061-062-063-064.Fish-Hiccups-Ice-Puzzle.480p.WEB-DL.AAC2.0.x264.mkv"
+
+	_, err := ParseTVShowFromPath(path)
+	if err == nil {
+		t.Fatal("ParseTVShowFromPath() expected error for unsupported multi-episode range, got nil")
+	}
+	if !errors.Is(err, ErrParseFailed) {
+		t.Fatalf("ParseTVShowFromPath() error = %v, want ErrParseFailed", err)
 	}
 }
 

@@ -38,7 +38,7 @@ func init() {
 		`\b(4K|UHD)\b`, // 4K, UHD
 
 		// HDR formats (before generic HDR to catch specific variants)
-		`\bHDR10\+|\b(HDR10|HDR10Plus|Dolby\s?Vision|DoVi|DV|HDR|HLG|PQ|SDR)\b`,
+		`\bHDR10\+|\bHDR10(?:Plus)?(?:ITA|ENG)?\b|\b(HDR10|Dolby\s?Vision|DoVi|D[ .-]?V|HDR|HLG|PQ|SDR)\b`,
 
 		// Audio formats with channels (most specific first)
 		`\b(DTS-HD\s?MA|DTS-HD\s?HRA|DTS-HD|DTS-X|DTS-ES)\b`, // DTS variants
@@ -69,7 +69,7 @@ func init() {
 		// Source types
 		`\bBlu[ .-]?Ray[ .-]+MA\b`,
 		`\b(Blu[ .-]?Ray|BDRip|BRRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
-		`\b(HDTV|PDTV|SDTV|DVDRip|DVD|DVDSCR)\b`,
+		`\b(HDTV|PDTV|SDTV|HDRip|DVDRip|DVD|DVDSCR)\b`,
 		`\b(CAM|HDTS|TS|TC|SCR|R5)\b`,
 
 		// Streaming platforms
@@ -86,7 +86,7 @@ func init() {
 		`\b(XviD|DivX|MPEG2|VC-1|VP9)\b`,
 
 		// Special editions
-		`\b(IMAX\s?Enhanced|IMAX|Remastered|REMASTERED)\b`,
+		`\b(IMAX\s?Enhanced|IMAX|Remastered|REMASTERED|Up[ .-]?Scaled)\b`,
 		`\b(Directors\s?Cut|DC|Theatrical|UNCUT|Criterion)\b`,
 
 		// Multi-language and subtitles
@@ -102,13 +102,13 @@ func init() {
 		`\((?:iso|rip|cd\d|disc\d|disk\d)\)`,
 
 		// Known release groups (specific names only)
-		`\b(PSYCHD|MAG|CHAMELE0N|MIRCREW|MIRC|WILL1869|ASPiDe|CI?NEMIX|CiNEMiX|CINEMIX|MIRCREW)\b`,
+		`\b(PSYCHD|MAG|CHAMELE0N|MIRCREW|MIRC|WILL1869|ASPiDe|CI?NEMIX|CiNEMiX|CINEMIX|MIRCREW|LICDOM)\b`,
 
 		// Bracketed content (e.g., "[Org BD 2.0 Hindi + DD 5.1 English]")
 		`\[.*?\]`,
 
 		// Bit depth
-		`\b(8bits?|10bits?|12bits?)\b`,
+		`\b(8|10|12)[ .]?bits?\b`,
 	}
 
 	advReleasePatterns = make([]*regexp.Regexp, 0, len(patterns))

@@ -31,7 +31,7 @@ type TVShowInfo struct {
 var (
 	yearRegex      = regexp.MustCompile(`\b(19|20)\d{2}\b`)
 	yearParenRegex = regexp.MustCompile(`\((\d{4})\)`)
-	episodeSERegex = regexp.MustCompile(`[Ss](\d{1,2})[Ee](\d{1,2})`)
+	episodeSERegex = regexp.MustCompile(`[Ss](\d{1,2})[Ee](\d{1,4})`)
 	episodeXRegex  = regexp.MustCompile(`(\d{1,2})x(\d{1,2})`)
 	episodeEPRegex = regexp.MustCompile(`(?i)\bEP[.\-_ ]?(\d{2,5})\b`)
 	// Date-based episode pattern: YYYY.MM.DD, YYYY-MM-DD, YYYY_MM_DD
@@ -44,7 +44,7 @@ func init() {
 		`\b\d{3,4}[pi]\b`,
 		`\b(?:2160|1080|720|480)\b`,
 		`\b(4K|UHD)\b`,
-		`\bHDR10\+|\bHDR10(?:Plus)?\b|\b(HDR|DoVi|DV|SDR|HLG)\b`,
+		`\bHDR10\+|\bHDR10(?:Plus)?(?:ITA|ENG)?\b|\b(HDR|DoVi|D[ .-]?V|SDR|HLG)\b`,
 		// Codec glued to channel digits (must come BEFORE bare codec match so the
 		// trailing channel digits get stripped together). Allows 1-3 digit
 		// groups so all of these are stripped:
@@ -60,21 +60,21 @@ func init() {
 		`\b\d+CH\b`,
 		`\bBlu[ .-]?Ray[ .-]+MA\b`,
 		`\b(Blu[ .-]?Ray|BDRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
-		`\b(HDTV|DVDRip|DVD)\b`,
+		`\b(HDTV|HDRip|DVDRip|DVD)\b`,
 		`\b(AMZN|NF|ATVP|HULU|DSNP|HMAX|MAX|PMTP)\b`,
 		`\b[xh][ .]?26[45]\b`,
 		`\b(HEVC|AVC|AV1)\b`,
-		`\b(PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED|REMASTERED|REMASTER)\b`,
+		`\b(PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED|REMASTERED|REMASTER|Up[ .-]?Scaled)\b`,
 		`\b(DUAL|DL|MULTI|DUB|DUBBED|RODUBBED|SUB|SUBS|VOSTFR|DCPRIP|HDLight|TrueFrench|VOST|VF)\b`,
 		// Language/locale tags (e.g., iTA-ENG, FRE, MULTi). 3-letter codes
 		// only — 2-letter codes (EN, NO, ES) collide too often with real
 		// title words ("No Good Deed", "Es", "En").
 		`\b(ITA|ENG|FRE|FRA|GER|DEU|ESP|SPA|POR|RUS|JPN|KOR|CHI|HIN|NORDiC|LATINO)\b`,
 		`@\w+`,
-		`\b(RARBG|YTS|YIFY|FLUX|ETHEL|Kitsune|NTb|CMRG|SPARKS|FGT|BZ|TSRG)\b`,
+		`\b(RARBG|YTS|YIFY|FLUX|ETHEL|Kitsune|NTb|CMRG|SPARKS|FGT|BZ|TSRG|LICDOM)\b`,
 		`\bv\d+\b`,
 		`\[.*?\]`,
-		`\b(8bits?|10bits?|12bits?)\b`,
+		`\b(8|10|12)[ .]?bits?\b`,
 		// Note: release group suffix (-SPARKS, -postbot) handled separately in stripReleaseMarkers
 		// REMOVED: `\b[A-Z]{2,5}\d*$` - too broad, strips last word of short titles (e.g., "Pitt" from "The Pitt")
 		// Release groups are already handled by the explicit group list above and releaseGroupSuffix regex
@@ -92,6 +92,10 @@ func IsMovieFilename(filename string) bool {
 
 func IsTVEpisodeFilename(filename string) bool {
 	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+
+	if hasUnsupportedMultiEpisodeRange(baseName) {
+		return true
+	}
 
 	return findEpisodeMatch(baseName).found
 }
@@ -232,6 +236,10 @@ func ParseTVSeasonPackNameVerbose(name string) (*TVSeasonPackInfo, []string, err
 }
 
 func parseTVShowFromBaseName(baseName, filename string) (*TVShowInfo, error) {
+	if hasUnsupportedMultiEpisodeRange(baseName) {
+		return nil, fmt.Errorf("%w: unsupported multi-episode range in: %s", ErrParseFailed, filename)
+	}
+
 	episodeMatch := findEpisodeMatch(baseName)
 	if !episodeMatch.found {
 		return nil, fmt.Errorf("%w: no episode information found in: %s", ErrParseFailed, filename)
@@ -328,9 +336,25 @@ var knownReleaseGroups = map[string]bool{
 // indicating that any trailing -Word is almost certainly a release group
 var qualityMarkerDetect = regexp.MustCompile(`(?i)(x264|x265|h264|h265|hevc|avc|bluray|blu-ray|bdrip|remux|web-dl|webdl|webrip|\d{3,4}p|4k|uhd)`)
 
-// releaseGroupSuffix matches release group tags at end of filename like "-SPARKS", "-postbot"
-var releaseGroupSuffix = regexp.MustCompile(`(?i)-[A-Za-z0-9]+$`)
+// releaseGroupSuffixToken matches the trailing segment after the last hyphen,
+// e.g. "SPARKS", "postbot", or "Ben.The.Men".
+var releaseGroupSuffixToken = regexp.MustCompile(`(?i)^[A-Za-z0-9]+(?:[._ ][A-Za-z0-9]+)*$`)
 var spaceRegex = regexp.MustCompile(`\s+`)
+
+func trailingReleaseGroupSuffix(s string) (string, bool) {
+	idx := strings.LastIndex(s, "-")
+	if idx < 0 || idx == len(s)-1 {
+		return "", false
+	}
+	suffix := s[idx+1:]
+	if !releaseGroupSuffixToken.MatchString(suffix) {
+		return "", false
+	}
+	if yearRegex.MatchString(suffix) || qualityMarkerDetect.MatchString(suffix) {
+		return "", false
+	}
+	return suffix, true
+}
 
 // collectStrippedTokens collects the release metadata tokens (quality, codec,
 // release group, etc.) that stripReleaseMarkers would remove from baseName.
@@ -368,12 +392,12 @@ func collectStrippedTokens(baseName string) []string {
 	// is almost certainly a release group
 	if qualityMarkerDetect.MatchString(s) {
 		for {
-			m := releaseGroupSuffix.FindString(s)
-			if m == "" {
+			suffix, ok := trailingReleaseGroupSuffix(s)
+			if !ok {
 				break
 			}
-			add(strings.TrimPrefix(m, "-"))
-			newS := releaseGroupSuffix.ReplaceAllString(s, "")
+			add(suffix)
+			newS := strings.TrimSuffix(s, "-"+suffix)
 			if newS == s {
 				break
 			}
@@ -411,10 +435,11 @@ func stripReleaseMarkers(s string) string {
 	// This is safe because titles like "Doctor-Who" won't have codec markers after them.
 	if qualityMarkerDetect.MatchString(s) {
 		for {
-			newS := releaseGroupSuffix.ReplaceAllString(s, "")
-			if newS == s {
+			suffix, ok := trailingReleaseGroupSuffix(s)
+			if !ok {
 				break
 			}
+			newS := strings.TrimSuffix(s, "-"+suffix)
 			s = newS
 		}
 	}
@@ -473,6 +498,65 @@ type episodeMatch struct {
 	kind    string
 	date    string
 	found   bool
+}
+
+func hasUnsupportedMultiEpisodeRange(s string) bool {
+	for _, loc := range episodeSERegex.FindAllStringSubmatchIndex(s, -1) {
+		if len(loc) < 6 || loc[5] < 0 || loc[5] > len(s) {
+			continue
+		}
+		if hasEpisodeRangeSuffix(s[loc[5]:]) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasEpisodeRangeSuffix(s string) bool {
+	if s == "" {
+		return false
+	}
+	if s[0] == 'E' || s[0] == 'e' {
+		_, ok := consumeEpisodeRangeNumber(s[1:])
+		return ok
+	}
+	if s[0] != '-' {
+		return false
+	}
+	rest := s[1:]
+	if rest == "" {
+		return false
+	}
+	if rest[0] == 'E' || rest[0] == 'e' {
+		rest = rest[1:]
+	}
+	_, ok := consumeEpisodeRangeNumber(rest)
+	return ok
+}
+
+func consumeEpisodeRangeNumber(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	end := 0
+	for end < len(s) && end < 4 && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	if end < len(s) && (s[end] == 'p' || s[end] == 'P' || s[end] == 'i' || s[end] == 'I') {
+		return 0, false
+	}
+	episode, err := strconv.Atoi(s[:end])
+	if err != nil || episode <= 0 {
+		return 0, false
+	}
+	switch episode {
+	case 480, 576, 720, 1080, 2160:
+		return 0, false
+	}
+	return end, true
 }
 
 func findEpisodeMatch(s string) episodeMatch {
