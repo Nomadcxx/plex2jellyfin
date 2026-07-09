@@ -594,3 +594,13 @@ When the user delivers final ASCII/PNG art:
 - [ ] Submit to awesome-jellyfin list (PR adding plex2jellyfin under Media Organization).
 - [ ] AUR package (`plex2jellyfin-bin`) — follow-up, same pattern as sysc-greet/gslapper.
 - [ ] Announcement post drafts for r/jellyfin, r/selfhosted (angle: "I migrated my Plex library to Jellyfin and wrote the tool that fixed the naming chaos").
+
+---
+
+### Task 11: MkDocs documentation site (added 2026-07-10 per user)
+
+Model the setup on `/home/nomadx/Documents/sysc-greet-dev` (existing mkdocs project), but use a plainer/default-leaning theme. User wires up GitHub Actions manually; we create all content including the workflow file.
+
+Required pages (minimum): index (what/why), install (script, manual, packages), docker (dedicated page — volumes, PUID/PGID, why chown is unavailable in-container, SELinux/rootless notes, compose walkthrough), migration guide (Plex library → Jellyfin workflow), CLI reference, configuration reference (config.toml sections), daemon & services, troubleshooting.
+
+Gate: `mkdocs build --strict` succeeds locally; nav complete; no broken internal links.
