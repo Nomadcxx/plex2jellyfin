@@ -9,6 +9,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/identity"
 	"github.com/Nomadcxx/jellywatch/internal/video"
 )
 
@@ -95,6 +96,11 @@ func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) 
 	planningConflict := *conflict
 	planningConflict.Locations = c.normalizedConflictLocations(conflict)
 	plan.SourcePaths = planningConflict.Locations
+	if reasons := c.seriesIdentitySafetyReasons(&planningConflict); len(reasons) > 0 {
+		plan.CanProceed = false
+		plan.Reasons = append(plan.Reasons, reasons...)
+		return plan, nil
+	}
 
 	// Determine target path (choose the location with most content)
 	targetPath, err := c.chooseTargetPath(&planningConflict)
@@ -143,6 +149,34 @@ func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) 
 
 	c.stats.PlansGenerated++
 	return plan, nil
+}
+
+func (c *Consolidator) seriesIdentitySafetyReasons(conflict *database.Conflict) []string {
+	if conflict.MediaType != "series" || len(conflict.Locations) < 2 {
+		return nil
+	}
+
+	ids := make([]identity.SeriesIdentity, 0, len(conflict.Locations))
+	for _, location := range conflict.Locations {
+		ids = append(ids, identity.SeriesIdentity{Path: location})
+	}
+
+	var reasons []string
+	for i := 0; i < len(ids); i++ {
+		for j := i + 1; j < len(ids); j++ {
+			decision := identity.CompareSeries(ids[i], ids[j])
+			if decision.Verdict == identity.VerdictSame {
+				continue
+			}
+			reasons = append(reasons, fmt.Sprintf(
+				"identity safety: %s <-> %s: %s",
+				ids[i].Path,
+				ids[j].Path,
+				strings.Join(decision.Reasons, "; "),
+			))
+		}
+	}
+	return reasons
 }
 
 func (c *Consolidator) normalizedConflictLocations(conflict *database.Conflict) []string {

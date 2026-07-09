@@ -12,6 +12,21 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/database"
 )
 
+func createLargeMediaFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("failed to create media dir: %v", err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("failed to create media file: %v", err)
+	}
+	defer f.Close()
+	if err := f.Truncate(MinConsolidationFileSize + 1); err != nil {
+		t.Fatalf("failed to size media file: %v", err)
+	}
+}
+
 func TestConsolidatorGeneratePlan(t *testing.T) {
 	// Create temporary database
 	tempDir, err := ioutil.TempDir("", "jellywatch_test")
@@ -379,6 +394,112 @@ func TestGeneratePlanSkipsJellywatchQuarantineLocations(t *testing.T) {
 	}
 	if len(plan.Operations) != 0 {
 		t.Fatalf("operations = %d, want 0", len(plan.Operations))
+	}
+}
+
+func TestGeneratePlanBlocksIdentitySafetyMismatches(t *testing.T) {
+	tests := []struct {
+		name      string
+		locationA string
+		fileA     string
+		locationB string
+		fileB     string
+	}{
+		{
+			name:      "survivor australian survivor",
+			locationA: "Australian Survivor (2002)",
+			fileA:     "Australian Survivor S08E01.mkv",
+			locationB: "Survivor (2000)",
+			fileB:     "Survivor S41E01.mkv",
+		},
+		{
+			name:      "survivor au survivor",
+			locationA: "Survivor AU (2016)",
+			fileA:     "Survivor AU S14E23.mkv",
+			locationB: "Survivor (2000)",
+			fileB:     "Survivor S41E01.mkv",
+		},
+		{
+			name:      "utopia au utopia",
+			locationA: "Utopia (AU) (2014)",
+			fileA:     "Utopia (AU) S02E07.mkv",
+			locationB: "Utopia (2013)",
+			fileB:     "Utopia S01E01.mkv",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+			if err != nil {
+				t.Fatalf("Failed to open database: %v", err)
+			}
+			defer db.Close()
+
+			tvRoot1 := filepath.Join(tempDir, "storage1", "TV")
+			tvRoot2 := filepath.Join(tempDir, "storage2", "TV")
+			locationA := filepath.Join(tvRoot1, tt.locationA)
+			locationB := filepath.Join(tvRoot2, tt.locationB)
+			createLargeMediaFile(t, filepath.Join(locationA, "Season 01", tt.fileA))
+			createLargeMediaFile(t, filepath.Join(locationB, "Season 01", tt.fileB))
+
+			plan, err := NewConsolidator(db, &config.Config{
+				Libraries: config.LibrariesConfig{TV: []string{tvRoot1, tvRoot2}},
+			}).GeneratePlan(&database.Conflict{
+				ID:        42,
+				MediaType: "series",
+				Title:     "Identity Check",
+				Locations: []string{locationA, locationB},
+			})
+			if err != nil {
+				t.Fatalf("GeneratePlan failed: %v", err)
+			}
+			if plan.CanProceed {
+				t.Fatalf("plan should not proceed for identity mismatch")
+			}
+			if !strings.Contains(strings.Join(plan.Reasons, " "), "identity safety") {
+				t.Fatalf("Reasons = %v, want identity safety reason", plan.Reasons)
+			}
+		})
+	}
+}
+
+func TestGeneratePlanAllowsIdentitySafeSameSeries(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tvRoot1 := filepath.Join(tempDir, "storage1", "TV")
+	tvRoot2 := filepath.Join(tempDir, "storage2", "TV")
+	target := filepath.Join(tvRoot1, "Silo (2023)")
+	source := filepath.Join(tvRoot2, "Silo (2023)")
+	createLargeMediaFile(t, filepath.Join(target, "Season 01", "Silo S01E01.mkv"))
+	sourceFile := filepath.Join(source, "Season 01", "Silo S01E02.mkv")
+	createLargeMediaFile(t, sourceFile)
+
+	year := 2023
+	plan, err := NewConsolidator(db, &config.Config{
+		Libraries: config.LibrariesConfig{TV: []string{tvRoot1, tvRoot2}},
+	}).GeneratePlan(&database.Conflict{
+		ID:              42,
+		MediaType:       "series",
+		Title:           "Silo",
+		TitleNormalized: "silo",
+		Year:            &year,
+		Locations:       []string{target, source},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan failed: %v", err)
+	}
+	if !plan.CanProceed {
+		t.Fatalf("plan should proceed for same series: %v", plan.Reasons)
+	}
+	if len(plan.Operations) != 1 || plan.Operations[0].SourcePath != sourceFile {
+		t.Fatalf("unexpected operations: %#v", plan.Operations)
 	}
 }
 

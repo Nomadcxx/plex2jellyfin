@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -91,6 +92,10 @@ func (m *MediaDB) DetectConflicts() ([]Conflict, error) {
 		}
 	}
 
+	if err := m.resolveStaleConflictsLocked(); err != nil {
+		return nil, fmt.Errorf("failed to resolve stale conflicts: %w", err)
+	}
+
 	return m.getUnresolvedConflictsLocked()
 }
 
@@ -174,6 +179,80 @@ func (m *MediaDB) upsertConflict(c Conflict) error {
 		string(locationsJSON), time.Now(),
 	)
 	return err
+}
+
+func (m *MediaDB) resolveStaleConflictsLocked() error {
+	conflicts, err := m.getUnresolvedConflictsLocked()
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	for _, conflict := range conflicts {
+		activeLocations := 0
+		var resolvedPath string
+		for _, location := range conflict.Locations {
+			active, err := m.conflictLocationHasEvidenceLocked(conflict, location)
+			if err != nil {
+				return err
+			}
+			if active {
+				activeLocations++
+				resolvedPath = location
+			}
+		}
+		// ponytail: only auto-resolve stale rows with one surviving DB-backed
+		// location; zero-evidence rows may be synthetic/manual and stay visible.
+		if activeLocations != 1 {
+			continue
+		}
+
+		_, err := m.db.Exec(`
+			UPDATE conflicts SET
+				resolved = TRUE,
+				resolved_at = ?,
+				resolved_path = ?
+			WHERE id = ? AND resolved = FALSE
+		`, now, resolvedPath, conflict.ID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *MediaDB) conflictLocationHasEvidenceLocked(conflict Conflict, location string) (bool, error) {
+	table := "series"
+	if conflict.MediaType == "movie" {
+		table = "movies"
+	}
+
+	var count int
+	err := m.db.QueryRow(`
+		SELECT COUNT(*) FROM `+table+`
+		WHERE title_normalized = ? AND year IS ? AND canonical_path = ?
+	`, conflict.TitleNormalized, conflict.Year, location).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+
+	if _, err := os.Stat(location); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+
+	err = m.db.QueryRow(`
+		SELECT COUNT(*) FROM media_files
+		WHERE path = ? OR path LIKE ?
+	`, location, location+"/%").Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // RecordConflict records a conflict when the same media is found in multiple locations.

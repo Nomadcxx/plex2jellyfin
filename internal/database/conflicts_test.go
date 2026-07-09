@@ -145,6 +145,41 @@ func TestDetectConflicts_FindsMovieAndSeriesConflicts(t *testing.T) {
 	}
 }
 
+func TestDetectConflicts_ResolvesStaleConflicts(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	dropUniqueConstraint(t, db, "series")
+	insertConflictRow(t, db, "series", "Upload", "upload", 2020, "/storage1/Upload (2020)")
+	insertConflictRow(t, db, "series", "Upload", "upload", 2020, "/storage4/Upload (2020)")
+
+	if conflicts, err := db.DetectConflicts(); err != nil {
+		t.Fatalf("DetectConflicts failed: %v", err)
+	} else if len(conflicts) != 1 {
+		t.Fatalf("expected initial conflict, got %d", len(conflicts))
+	}
+
+	if _, err := db.db.Exec(`DELETE FROM series WHERE canonical_path = ?`, "/storage4/Upload (2020)"); err != nil {
+		t.Fatalf("delete duplicate series row failed: %v", err)
+	}
+
+	conflicts, err := db.DetectConflicts()
+	if err != nil {
+		t.Fatalf("DetectConflicts failed after cleanup: %v", err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("expected stale conflict to be resolved, got %d: %+v", len(conflicts), conflicts)
+	}
+
+	var resolved int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM conflicts WHERE title_normalized = 'upload' AND resolved = TRUE`).Scan(&resolved); err != nil {
+		t.Fatalf("count resolved conflicts failed: %v", err)
+	}
+	if resolved != 1 {
+		t.Fatalf("resolved stale conflicts = %d, want 1", resolved)
+	}
+}
+
 func TestDetectConflicts_NoConflictsReturnsEmpty(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
