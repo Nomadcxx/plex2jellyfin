@@ -45,6 +45,16 @@ func (c *Client) RefreshItemFullMetadataRecursive(itemID string) error {
 	return nil
 }
 
+// RefreshItemMetadataRecursive asks Jellyfin to re-read item metadata for a
+// series and children without forcing artwork replacement.
+func (c *Client) RefreshItemMetadataRecursive(itemID string) error {
+	query := "?Recursive=true&MetadataRefreshMode=FullRefresh&ImageRefreshMode=Default&ReplaceAllMetadata=true&ReplaceAllImages=false"
+	if err := c.post("/Items/"+itemID+"/Refresh"+query, nil, nil); err != nil {
+		return fmt.Errorf("refreshing item recursive metadata %s: %w", itemID, err)
+	}
+	return nil
+}
+
 // GetVirtualFolders returns all configured libraries with their disk paths.
 func (c *Client) GetVirtualFolders() ([]VirtualFolder, error) {
 	var folders []VirtualFolder

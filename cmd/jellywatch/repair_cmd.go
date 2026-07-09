@@ -15,6 +15,7 @@ func newRepairCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newRepairSeriesDedupeCmd())
+	cmd.AddCommand(newRepairUnknownSeasonsCmd())
 	return cmd
 }
 

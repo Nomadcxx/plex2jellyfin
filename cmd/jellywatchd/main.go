@@ -72,6 +72,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("unable to load config: %w", err)
 	}
+	if !cfg.Daemon.Enabled {
+		return errors.New("daemon is disabled in config")
+	}
 	var currentConfigMu sync.RWMutex
 	currentConfig := cfg
 	getCurrentConfig := func() *config.Config {
@@ -359,6 +362,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "Initial scan completed successfully")
 	}
 
+	if cfg.Daemon.HealthAddr != "" {
+		healthAddr = cfg.Daemon.HealthAddr
+	}
 	logger.Info("daemon", "JellyWatchd started",
 		logging.F("watch_dirs", len(watchPaths)),
 		logging.F("tv_libs", cfg.Libraries.TV),
@@ -617,6 +623,44 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			logging.F("batch_size", batchSize))
 	}
 
+	if jellyfinClient != nil && cfg.MetadataRecovery.RepairEnabled {
+		interval := time.Duration(cfg.MetadataRecovery.PassiveIntervalMinutes) * time.Minute
+		if interval <= 0 {
+			interval = time.Hour
+		}
+		batchSize := cfg.MetadataRecovery.RepairBatchSize
+		if batchSize <= 0 {
+			batchSize = 5
+		}
+		startBackground("Jellyfin unknown-season repair", func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("daemon", "Jellyfin unknown-season repair panic recovered",
+						fmt.Errorf("%v", r))
+				}
+			}()
+			select {
+			case <-time.After(2 * time.Minute):
+			case <-ctx.Done():
+				return
+			}
+			runUnknownSeasonRepairOnce(ctx, logger, jellyfinClient, batchSize)
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					runUnknownSeasonRepairOnce(ctx, logger, jellyfinClient, batchSize)
+				case <-ctx.Done():
+					return
+				}
+			}
+		})
+		logger.Info("daemon", "Jellyfin unknown-season repair started",
+			logging.F("interval", interval.String()),
+			logging.F("batch_size", batchSize))
+	}
+
 	// Housekeeping engine + scheduler: detect cross-volume duplicates,
 	// orphan source dirs, stuck syncs, etc., and drain the queued fix
 	// tasks under bounded concurrency. See internal/housekeeping.
@@ -814,6 +858,25 @@ func runMetadataReconcileOnce(ctx context.Context, logger *logging.Logger, recon
 			logging.F("checked", summary.Checked),
 			logging.F("identified", summary.Identified),
 			logging.F("errors", summary.Errors))
+	}
+}
+
+func runUnknownSeasonRepairOnce(ctx context.Context, logger *logging.Logger, client *jellyfin.Client, batchSize int) {
+	report, err := client.RepairUnknownSeasons(ctx, "", batchSize, false)
+	if err != nil {
+		logger.Warn("daemon", "Jellyfin unknown-season repair error", logging.F("error", err.Error()))
+		return
+	}
+	if report.Audit.Total > 0 || report.Errors > 0 || report.Refreshed > 0 {
+		logger.Info("daemon", "Jellyfin unknown-season repair completed",
+			logging.F("unknown_seasons", report.Audit.Total),
+			logging.F("refresh_repairable", report.Audit.RefreshRepairableSeasons),
+			logging.F("folder_context", report.Audit.FolderContext),
+			logging.F("mixed_review", report.Audit.MixedReview),
+			logging.F("manual_unknown", report.Audit.ManualUnknown),
+			logging.F("refreshed", report.Refreshed),
+			logging.F("skipped", report.Skipped),
+			logging.F("errors", report.Errors))
 	}
 }
 

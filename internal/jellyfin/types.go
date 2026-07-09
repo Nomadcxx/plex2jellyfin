@@ -42,6 +42,7 @@ type Item struct {
 	SeriesID          string            `json:"SeriesId,omitempty"`
 	SeriesName        string            `json:"SeriesName,omitempty"`
 	SeasonName        string            `json:"SeasonName,omitempty"`
+	DateCreated       string            `json:"DateCreated,omitempty"`
 	IndexNumber       *int              `json:"IndexNumber,omitempty"`
 	ParentIndexNumber *int              `json:"ParentIndexNumber,omitempty"`
 	Overview          string            `json:"Overview,omitempty"`
