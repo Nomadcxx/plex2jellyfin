@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 // TestNewSyncService verifies sync service creation

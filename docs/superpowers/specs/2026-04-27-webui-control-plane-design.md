@@ -13,9 +13,9 @@
 
 ## 1. Problem
 
-The webui today is built for analysis (duplicates, consolidation, parse decisions). Configuration and operational control are absent: the only mutable settings field is the AI section; there is no UI for daemon start/stop/restart, no way to trigger DB cleanup or rebuild from the UI, and the watch folders / library locations / Sonarr / Radarr / Jellyfin sections are read-only. Users must edit `~/.config/jellywatch/config.toml` by hand and run `systemctl` to apply changes.
+The webui today is built for analysis (duplicates, consolidation, parse decisions). Configuration and operational control are absent: the only mutable settings field is the AI section; there is no UI for daemon start/stop/restart, no way to trigger DB cleanup or rebuild from the UI, and the watch folders / library locations / Sonarr / Radarr / Jellyfin sections are read-only. Users must edit `~/.config/plex2jellyfin/config.toml` by hand and run `systemctl` to apply changes.
 
-This design closes those gaps for a **local-only deployment**. Local-only is enforced by default: `jellyweb` binds to loopback unless explicitly configured otherwise, and unsafe non-loopback binds require web authentication to be enabled. Users are still told not to expose `jellyweb` directly to untrusted networks.
+This design closes those gaps for a **local-only deployment**. Local-only is enforced by default: `plex2jellyfin-web` binds to loopback unless explicitly configured otherwise, and unsafe non-loopback binds require web authentication to be enabled. Users are still told not to expose `plex2jellyfin-web` directly to untrusted networks.
 
 ## 2. Goals & Non-Goals
 
@@ -24,7 +24,7 @@ This design closes those gaps for a **local-only deployment**. Local-only is enf
 - Webui can start, stop, restart, and reload the daemon.
 - Webui can re-scan media and reset the database with TUI-installer-grade progress UX.
 - All destructive operations have appropriate safety gates and crash-safe semantics.
-- The CLI grows a thin `jellywatch daemon …` command set so scripts and post-install hooks have parity with the UI.
+- The CLI grows a thin `plex2jellyfin daemon …` command set so scripts and post-install hooks have parity with the UI.
 - The control plane is safe-by-default on fresh installs: loopback bind by default, auth required for non-loopback HTTP binds, and UID-aware IPC permissions.
 
 ### Non-Goals
@@ -40,7 +40,7 @@ This design closes those gaps for a **local-only deployment**. Local-only is enf
 
 ```
 ┌─────────────────────┐       Unix socket        ┌─────────────────────┐
-│      jellyweb       │  ~/.config/jellywatch/   │     jellywatchd     │
+│      plex2jellyfin-web       │  ~/.config/plex2jellyfin/   │     plex2jellyfin-daemon     │
 │                     │      control.sock        │                     │
 │  • Next.js UI       │ ◄──────────────────────► │  • Scanner          │
 │  • REST API (5522)  │   {STATUS, RELOAD,       │  • AI matcher       │
@@ -49,33 +49,33 @@ This design closes those gaps for a **local-only deployment**. Local-only is enf
 │  • config.toml RW   │    CANCEL}               │  • Op registry      │
 └─────────────────────┘                          └─────────────────────┘
        │                                                    │
-       └─────────► ~/.config/jellywatch/config.toml ◄───────┘
-                       (jellyweb writes,
-                        jellywatchd reads on RELOAD)
+       └─────────► ~/.config/plex2jellyfin/config.toml ◄───────┘
+                       (plex2jellyfin-web writes,
+                        plex2jellyfin-daemon reads on RELOAD)
 ```
 
 ### 3.2 Boundaries
-- **`jellyweb` is the only runtime writer of `config.toml`.** Installer and `jellywatch config init` are install-time writers; their writes coincide with daemon (re)starts so reload semantics don't apply to them.
-- All writers (`jellyweb`, installer, `jellywatch config init`) use **atomic write** (`tmp` → `fsync` → `rename`) plus an **`flock(2)` advisory lock** on `config.toml` for the write window.
-- **`jellywatchd` exposes no HTTP control surface.** All mutation/lifecycle commands travel over the IPC socket. Daemon `health_addr` remains for chunk-3 observability.
-- **`jellyweb` owns "start"** of the daemon: it spawns the daemon process if not running, or delegates to systemd if a unit is detected. Start logic is daemon-launch-strategy aware: prefer systemd → fallback to direct exec.
-- **Long-running ops execute inside the daemon.** Their progress streams travel IPC → `jellyweb` → SSE → browser.
-- **`jellyweb` HTTP is local by default.** The default bind address changes to `127.0.0.1`; `0.0.0.0` / non-loopback binds are refused unless `password` is configured or an explicit `--allow-unauthenticated-remote` development override is passed.
+- **`plex2jellyfin-web` is the only runtime writer of `config.toml`.** Installer and `plex2jellyfin config init` are install-time writers; their writes coincide with daemon (re)starts so reload semantics don't apply to them.
+- All writers (`plex2jellyfin-web`, installer, `plex2jellyfin config init`) use **atomic write** (`tmp` → `fsync` → `rename`) plus an **`flock(2)` advisory lock** on `config.toml` for the write window.
+- **`plex2jellyfin-daemon` exposes no HTTP control surface.** All mutation/lifecycle commands travel over the IPC socket. Daemon `health_addr` remains for chunk-3 observability.
+- **`plex2jellyfin-web` owns "start"** of the daemon: it spawns the daemon process if not running, or delegates to systemd if a unit is detected. Start logic is daemon-launch-strategy aware: prefer systemd → fallback to direct exec.
+- **Long-running ops execute inside the daemon.** Their progress streams travel IPC → `plex2jellyfin-web` → SSE → browser.
+- **`plex2jellyfin-web` HTTP is local by default.** The default bind address changes to `127.0.0.1`; `0.0.0.0` / non-loopback binds are refused unless `password` is configured or an explicit `--allow-unauthenticated-remote` development override is passed.
 - **REST API paths are mounted under `/api/v1`.** Endpoint names below omit the prefix for readability; browser-visible API calls use `/api/v1/...`.
 
 ### 3.3 Bootstrap order on a fresh install
-1. `jellyweb` starts first (always available, used for setup wizard).
+1. `plex2jellyfin-web` starts first (always available, used for setup wizard).
 2. User configures paths via webui.
-3. `jellyweb` writes config and asks daemon to start.
+3. `plex2jellyfin-web` writes config and asks daemon to start.
 4. Start strategy resolution (in order):
-   - If a systemd user unit exists → `systemctl --user start jellywatchd`.
-   - Else if a system unit exists and `jellyweb` runs with `polkit`/sudo authorization → `systemctl start jellywatchd`.
-   - Else → `jellyweb` exec-spawns the daemon **detached** (`setsid`, stdout/stderr redirected to a daemon log file) so `jellyweb`'s lifecycle does not bind the daemon's. This path is intended for development and non-systemd hosts.
+   - If a systemd user unit exists → `systemctl --user start plex2jellyfin-daemon`.
+   - Else if a system unit exists and `plex2jellyfin-web` runs with `polkit`/sudo authorization → `systemctl start plex2jellyfin-daemon`.
+   - Else → `plex2jellyfin-web` exec-spawns the daemon **detached** (`setsid`, stdout/stderr redirected to a daemon log file) so `plex2jellyfin-web`'s lifecycle does not bind the daemon's. This path is intended for development and non-systemd hosts.
 5. UI surfaces "daemon installed?" so unintegrated installs can be diagnosed and offers a "Install systemd unit" button when missing.
 
 ### 3.4 Identity and permission model
 
-`jellywatchd` may run either as the same user as `jellyweb` or as root when configured file ownership changes require `chown`.
+`plex2jellyfin-daemon` may run either as the same user as `plex2jellyfin-web` or as root when configured file ownership changes require `chown`.
 
 - Same-user daemon: `control.sock` is `0600`, owned by the daemon/web UID. `SO_PEERCRED` requires peer UID equality.
 - Root/system daemon: installer writes an allowlisted web UID into the daemon unit/config context. `control.sock` is still root-owned, but the daemon accepts exactly that peer UID via `SO_PEERCRED`; no arbitrary local user may connect. The socket directory remains `0700` where possible, or `0710` with an installer-created group only if needed by the platform.
@@ -84,7 +84,7 @@ This design closes those gaps for a **local-only deployment**. Local-only is enf
 ## 4. IPC Protocol
 
 ### 4.1 Transport
-- Unix domain socket at `~/.config/jellywatch/control.sock`.
+- Unix domain socket at `~/.config/plex2jellyfin/control.sock`.
 - File permissions follow the identity model in §3.4.
 - **`SO_PEERCRED`** check on each connection: daemon refuses peers outside the same UID / explicit installer allowlist.
 - Stale-socket detection on daemon startup (try connect → if dead, unlink and recreate).
@@ -158,7 +158,7 @@ Failed reloads return:
 - 10-minute dedup window: re-issued `op_id` returns the original op's stream.
 
 ### 4.9 Crash recovery for destructive ops
-- Before mutation, the daemon appends `{op_id, cmd, args, ts, state: "in_progress"}` to `~/.config/jellywatch/op_log.jsonl` and fsyncs it.
+- Before mutation, the daemon appends `{op_id, cmd, args, ts, state: "in_progress"}` to `~/.config/plex2jellyfin/op_log.jsonl` and fsyncs it.
 - On op completion, the daemon appends a second record with `done`, `failed`, or `cancelled`; records are never edited in place.
 - On daemon **startup**, it folds `op_log.jsonl` by `op_id` and looks for latest-state `in_progress` records.
 - If found, the daemon refuses normal startup; `STATUS` returns `{state: "interrupted", interrupted_op: {...}}`. The webui shows a recovery screen requiring an explicit user decision (discard or resume) before any other operation is allowed.
@@ -176,7 +176,7 @@ CONFLICT, INTERRUPTED, CANCELLED, TIMEOUT, INTERNAL, NOT_IMPLEMENTED
 - Daemon rejects unknown versions with `VERSION_MISMATCH`.
 - New commands added in v1 are opt-in (a daemon that doesn't know `FOO` returns `NOT_IMPLEMENTED`).
 
-## 5. REST API (`jellyweb` ↔ browser)
+## 5. REST API (`plex2jellyfin-web` ↔ browser)
 
 All routes in this section are mounted under `/api/v1`; examples omit the prefix for readability.
 
@@ -258,7 +258,7 @@ Three end-states the UI distinguishes:
 - **Yellow:** validation has warnings or some non-critical signal; reload OK.
 - **Red:** reload reports failures and previous config was restored — UI shows which subsystems failed and offers retry / edit. Disk and daemon runtime remain consistent.
 
-If `jellyweb` cannot reach the daemon during save, the default behavior is to leave the previous config in place and return 502/504. Manual edits can still be applied through `/daemon/reload`.
+If `plex2jellyfin-web` cannot reach the daemon during save, the default behavior is to leave the previous config in place and return 502/504. Manual edits can still be applied through `/daemon/reload`.
 
 ### 5.5 Daemon lifecycle
 
@@ -281,13 +281,13 @@ POST /database/reset       body: {confirm: "media.db",
                                   preserve: ["audit_log"]}        → 202 + op_id
 ```
 
-Database lifecycle operations require maintenance coordination because both `jellyweb` and `jellywatchd` may hold SQLite handles:
+Database lifecycle operations require maintenance coordination because both `plex2jellyfin-web` and `plex2jellyfin-daemon` may hold SQLite handles:
 
-1. `jellyweb` enters DB maintenance mode: new DB-backed HTTP requests return 503 with `code: "MAINTENANCE"` and in-flight DB reads get a short drain window.
-2. `jellyweb` closes its `MediaDB` handle and acknowledges readiness to the daemon.
+1. `plex2jellyfin-web` enters DB maintenance mode: new DB-backed HTTP requests return 503 with `code: "MAINTENANCE"` and in-flight DB reads get a short drain window.
+2. `plex2jellyfin-web` closes its `MediaDB` handle and acknowledges readiness to the daemon.
 3. Daemon pauses scanner/watch processing, closes or checkpoints its DB handle as needed, then performs reset/rescan.
 4. Daemon reopens the DB and exits maintenance mode.
-5. `jellyweb` reopens its DB handle before returning terminal progress to the browser.
+5. `plex2jellyfin-web` reopens its DB handle before returning terminal progress to the browser.
 
 If either process cannot enter maintenance mode, the operation fails before destructive mutation begins.
 
@@ -379,7 +379,7 @@ Two cards:
 
 | Layer            | Where                  | Blocking?       | Purpose                            |
 |------------------|------------------------|------------------|------------------------------------|
-| Schema           | `jellyweb` per request  | Yes (4xx)        | Reject malformed bodies            |
+| Schema           | `plex2jellyfin-web` per request  | Yes (4xx)        | Reject malformed bodies            |
 | Filesystem       | `/paths/preflight`      | No (warning)     | Detect inaccessible paths early    |
 | Connection       | `*/test`                | No (warning)     | Surface bad credentials early      |
 | Section validate | `/settings/{s}/validate`| No (warning)     | Bundles all of the above pre-save  |
@@ -393,12 +393,12 @@ Two cards:
 ## 8. CLI parity additions
 
 ```
-jellywatch daemon status        → STATUS via IPC
-jellywatch daemon reload        → RELOAD via IPC
-jellywatch daemon stop          → STOP via IPC
+plex2jellyfin daemon status        → STATUS via IPC
+plex2jellyfin daemon reload        → RELOAD via IPC
+plex2jellyfin daemon stop          → STOP via IPC
 ```
 
-(`start` stays as `systemctl start jellywatchd` or direct invocation; no daemon to talk to.) New file `cmd/jellywatch/daemon_cmd.go`; shared IPC client in `internal/daemon/ipc/client.go`.
+(`start` stays as `systemctl start plex2jellyfin-daemon` or direct invocation; no daemon to talk to.) New file `cmd/plex2jellyfin/daemon_cmd.go`; shared IPC client in `internal/daemon/ipc/client.go`.
 
 ## 9. File-level deltas
 
@@ -406,13 +406,13 @@ jellywatch daemon stop          → STOP via IPC
 ```
 internal/daemon/ipc/protocol.go          NEW   message types, command names, error codes
 internal/daemon/ipc/server.go            NEW   listener, accept loop, dispatch, op registry
-internal/daemon/ipc/client.go            NEW   shared by jellyweb + CLI
+internal/daemon/ipc/client.go            NEW   shared by plex2jellyfin-web + CLI
 internal/daemon/ipc/op_log.go            NEW   crash-safe op log + recovery
 internal/daemon/ipc/oplog_test.go        NEW
 internal/daemon/reload/supervisor.go     NEW   two-phase Reloadable runner
 internal/daemon/reload/registry.go       NEW   register subsystems' Prepare funcs
 internal/daemon/reload/*_reloadable.go   NEW   one per subsystem (scanner, ai, ratelimit, log, ...)
-cmd/jellywatchd/main.go                  EDIT  start IPC server; call ipc.RecoverInterruptedOps
+cmd/plex2jellyfin-daemon/main.go                  EDIT  start IPC server; call ipc.RecoverInterruptedOps
 internal/scanner/scanner.go              EDIT  add Prepare(); honor ctx.Cancel between files
 internal/database/maintenance.go         NEW   ResetDatabase, Rescan with progress chan
 internal/api/settings_handlers.go        NEW   per-section read/write/validate/test handlers
@@ -422,10 +422,10 @@ internal/api/database_handlers.go        NEW   /database/* lifecycle handlers
 internal/api/db_maintenance.go           NEW   close/reopen DB handle coordination
 internal/api/sse_relay.go                NEW   IPC ATTACH → SSE relay
 internal/api/server.go                   EDIT  mount new routes
-cmd/jellyweb/main.go                     EDIT  default loopback bind + unsafe bind guard
+cmd/plex2jellyfin-web/main.go                     EDIT  default loopback bind + unsafe bind guard
 internal/config/config.go                EDIT  atomic write + flock; struct tags for secrets
 api/openapi.yaml                         EDIT  add all new routes
-cmd/jellywatch/daemon_cmd.go             NEW   CLI subcommands
+cmd/plex2jellyfin/daemon_cmd.go             NEW   CLI subcommands
 ```
 
 ### Frontend
@@ -460,7 +460,7 @@ web/src/lib/api/client.ts                                EDIT  → typed clients
 
 ## 10. Error Handling
 
-### 10.1 jellyweb → browser
+### 10.1 plex2jellyfin-web → browser
 - 4xx: schema / validation failure, returns `{error: {code, message, details}}`.
 - 503: `flock` couldn't be acquired in 2s.
 - 502/504: IPC to daemon failed or timed out — UI shows "Daemon unreachable" and offers `/daemon/start`.
@@ -483,7 +483,7 @@ web/src/lib/api/client.ts                                EDIT  → typed clients
 
 ### 11.1 Backend
 - **Unit:** every IPC command handler, the two-phase reload supervisor (mock subsystems with controllable Prepare/Commit/Rollback failure), config save (flock contention, partial-write injection, reload-failure restore), op log replay, unsafe bind guard.
-- **Integration:** start `jellywatchd` + `jellyweb` in test harness, drive via IPC client + REST. Cover happy path, reload failure with disk restore, mid-rescan cancel, DB maintenance close/reopen, root-daemon peer UID allowlist, mid-reset crash + recovery (kill daemon process, restart, verify recovery flow).
+- **Integration:** start `plex2jellyfin-daemon` + `plex2jellyfin-web` in test harness, drive via IPC client + REST. Cover happy path, reload failure with disk restore, mid-rescan cancel, DB maintenance close/reopen, root-daemon peer UID allowlist, mid-reset crash + recovery (kill daemon process, restart, verify recovery flow).
 - **Property:** atomic write + flock contention with N parallel writers (no partial files, no lost updates).
 
 ### 11.2 Frontend

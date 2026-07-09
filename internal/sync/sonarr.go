@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 const sonarrSourcePriority = 25
@@ -83,7 +83,7 @@ func (s *SyncService) SyncFromSonarr(ctx context.Context) (retErr error) {
 		existing, _ := s.db.GetSeriesByTitle(show.Title, show.Year)
 		isNew := (existing == nil)
 
-		// UpsertSeries respects source priority - won't overwrite jellywatch paths
+		// UpsertSeries respects source priority - won't overwrite plex2jellyfin paths
 		_, err := s.db.UpsertSeries(record)
 		if err != nil {
 			s.logger.Warn("failed to upsert series", "title", show.Title, "error", err)

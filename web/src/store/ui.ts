@@ -19,7 +19,7 @@ export const useUIStore = create<UIState>()(
         set({ sidebarCollapsed: collapsed }),
     }),
     {
-      name: 'jellywatch-ui',
+      name: 'plex2jellyfin-ui',
     }
   )
 );

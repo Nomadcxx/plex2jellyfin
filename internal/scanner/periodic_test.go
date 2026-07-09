@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/activity"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/logging"
-	"github.com/Nomadcxx/jellywatch/internal/watcher"
+	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/watcher"
 )
 
 type recordingHandler struct {

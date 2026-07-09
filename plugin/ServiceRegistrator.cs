@@ -1,10 +1,10 @@
-using JellyWatch.Plugin.Api;
-using JellyWatch.Plugin.EventHandlers;
+using Plex2Jellyfin.Plugin.Api;
+using Plex2Jellyfin.Plugin.EventHandlers;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace JellyWatch.Plugin;
+namespace Plex2Jellyfin.Plugin;
 
 /// <summary>
 /// Registers plugin services with the Jellyfin DI container.
@@ -23,6 +23,6 @@ public class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHttpClient();
 
         // Register custom API controller
-        serviceCollection.AddScoped<JellyWatchController>();
+        serviceCollection.AddScoped<Plex2JellyfinController>();
     }
 }

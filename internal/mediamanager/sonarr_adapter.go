@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 // SonarrAdapter wraps the Sonarr client to implement MediaManager

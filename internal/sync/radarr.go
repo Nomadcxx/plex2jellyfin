@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 const radarrSourcePriority = 25
@@ -76,7 +76,7 @@ func (s *SyncService) SyncFromRadarr(ctx context.Context) (retErr error) {
 		existing, _ := s.db.GetMovieByTitle(movie.Title, movie.Year)
 		isNew := (existing == nil)
 
-		// UpsertMovie respects source priority - won't overwrite jellywatch paths
+		// UpsertMovie respects source priority - won't overwrite plex2jellyfin paths
 		_, err := s.db.UpsertMovie(record)
 		if err != nil {
 			s.logger.Warn("failed to upsert movie", "title", movie.Title, "error", err)

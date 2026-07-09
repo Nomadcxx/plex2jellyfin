@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { OpEvent } from '@/components/settings/ProgressCard';
 
-const STORAGE_KEY = 'jellywatch.activeOp';
+const STORAGE_KEY = 'plex2jellyfin.activeOp';
 
 export function useOpStream(opID: string | null) {
   const [events, setEvents] = useState<OpEvent[]>([]);

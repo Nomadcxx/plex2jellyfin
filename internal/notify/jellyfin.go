@@ -168,7 +168,7 @@ func (n *JellyfinNotifier) doJSONRequest(method, path string, body []byte) ([]by
 }
 
 func (n *JellyfinNotifier) authHeader() string {
-	return fmt.Sprintf(`MediaBrowser Token="%s", Client="jellywatch", Device="jellywatchd", DeviceId="jellywatchd", Version="1.0.0"`, n.apiKey)
+	return fmt.Sprintf(`MediaBrowser Token="%s", Client="plex2jellyfin", Device="plex2jellyfin-daemon", DeviceId="plex2jellyfin-daemon", Version="1.0.0"`, n.apiKey)
 }
 
 func deriveSearchTermFromPath(path string) string {

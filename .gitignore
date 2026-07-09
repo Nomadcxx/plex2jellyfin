@@ -1,9 +1,9 @@
 # Binaries (in root only)
-/jellywatch
-/jellywatchd
+/plex2jellyfin
+/plex2jellyfin-daemon
 /installer
 /installer-test
-/jellyweb
+/plex2jellyfin-web
 bin/
 
 # Test binary
@@ -71,7 +71,7 @@ docs/UI_*.md
 docs/audits/
 
 # Bug reports and session transcripts
-JELLYWATCH_BUG_REPORT_*.md
+PLEX2JELLYFIN_BUG_REPORT_*.md
 2026-*.txt
 
 # Demo/experimental binaries
@@ -106,7 +106,7 @@ build/
 
 # Root-level scratch scripts and reports (debugging / one-off tooling)
 /*.py
-/jellywatch_scan*.txt
+/plex2jellyfin_scan*.txt
 /scan_results.txt
 /metadata_refresh_results.csv
 /BUGFIX-PROMPT.md

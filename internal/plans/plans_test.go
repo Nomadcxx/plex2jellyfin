@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 func TestSaveAndLoadDuplicatePlans(t *testing.T) {
@@ -221,7 +221,7 @@ func TestGetPlansDir(t *testing.T) {
 		t.Fatalf("GetPlansDir failed: %v", err)
 	}
 
-	expected := filepath.Join(tempDir, ".config", "jellywatch", "plans")
+	expected := filepath.Join(tempDir, ".config", "plex2jellyfin", "plans")
 	if dir != expected {
 		t.Errorf("Expected %s, got %s", expected, dir)
 	}

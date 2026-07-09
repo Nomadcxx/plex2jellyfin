@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 // MockSonarrClient implements basic Sonarr client methods for testing

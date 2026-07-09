@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/mediamanager"
+	"github.com/Nomadcxx/plex2jellyfin/internal/mediamanager"
 )
 
 // mockManager is a test implementation of MediaManager

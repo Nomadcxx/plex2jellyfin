@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 )
 
 // MediaType represents the type of media file

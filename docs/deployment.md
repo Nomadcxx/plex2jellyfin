@@ -1,10 +1,10 @@
-# JellyWatch Deployment Guide
+# Plex2Jellyfin Deployment Guide
 
 ## Quick Start
 
 1. Build: make build
-2. Configure: edit ~/.config/jellywatch/config.toml
-3. Run: ./jellywatch serve --addr :8765
+2. Configure: edit ~/.config/plex2jellyfin/config.toml
+3. Run: ./plex2jellyfin serve --addr :8765
 
 ## HTTPS with Nginx
 

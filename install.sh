@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-REPO_URL="https://github.com/Nomadcxx/jellywatch.git"
-INSTALL_DIR="/tmp/jellywatch-install-$$"
+REPO_URL="https://github.com/Nomadcxx/plex2jellyfin.git"
+INSTALL_DIR="/tmp/plex2jellyfin-install-$$"
 
-echo "JellyWatch Installer"
+echo "Plex2Jellyfin Installer"
 echo "===================="
 echo ""
 
@@ -49,7 +49,7 @@ echo ""
 
 EXIT_CODE=$?
 
-if [ -d "/tmp/jellywatch-install-$$" ]; then
+if [ -d "/tmp/plex2jellyfin-install-$$" ]; then
     rm -rf "$INSTALL_DIR"
 fi
 

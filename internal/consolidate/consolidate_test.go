@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 func createLargeMediaFile(t *testing.T, path string) {
@@ -29,7 +29,7 @@ func createLargeMediaFile(t *testing.T, path string) {
 
 func TestConsolidatorGeneratePlan(t *testing.T) {
 	// Create temporary database
-	tempDir, err := ioutil.TempDir("", "jellywatch_test")
+	tempDir, err := ioutil.TempDir("", "plex2jellyfin_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestConsolidatorGeneratePlan(t *testing.T) {
 }
 
 func TestGeneratePlanSkipsMissingSourceLocation(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "jellywatch_test")
+	tempDir, err := ioutil.TempDir("", "plex2jellyfin_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestGeneratePlanSkipsNestedLocationsAlreadyUnderTarget(t *testing.T) {
 	}
 }
 
-func TestGeneratePlanSkipsJellywatchQuarantineLocations(t *testing.T) {
+func TestGeneratePlanSkipsPlex2JellyfinQuarantineLocations(t *testing.T) {
 	tempDir := t.TempDir()
 
 	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
@@ -354,7 +354,7 @@ func TestGeneratePlanSkipsJellywatchQuarantineLocations(t *testing.T) {
 	tvRoot1 := filepath.Join(tempDir, "storage1", "TV")
 	tvRoot2 := filepath.Join(tempDir, "storage2", "TV")
 	target := filepath.Join(tvRoot1, "Farscape (1999)")
-	quarantine := filepath.Join(tvRoot2, "_jellywatch_quarantine_20260607", "teneighty farscape duplicate S04E21")
+	quarantine := filepath.Join(tvRoot2, "_plex2jellyfin_quarantine_20260607", "teneighty farscape duplicate S04E21")
 	if err := os.MkdirAll(target, 0755); err != nil {
 		t.Fatalf("failed to create target: %v", err)
 	}
@@ -505,7 +505,7 @@ func TestGeneratePlanAllowsIdentitySafeSameSeries(t *testing.T) {
 
 func TestConsolidatorChooseTargetPath(t *testing.T) {
 	// Create temporary database
-	tempDir, err := ioutil.TempDir("", "jellywatch_test")
+	tempDir, err := ioutil.TempDir("", "plex2jellyfin_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -653,7 +653,7 @@ func TestIsMediaFile(t *testing.T) {
 
 func TestStorePlanUntrackedFile(t *testing.T) {
 	// Create temporary database
-	tempDir, err := ioutil.TempDir("", "jellywatch_test")
+	tempDir, err := ioutil.TempDir("", "plex2jellyfin_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}

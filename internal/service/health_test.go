@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

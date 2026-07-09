@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 // JellyfinHandlers exposes Jellyfin bridge status endpoints.

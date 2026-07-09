@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
-	"github.com/Nomadcxx/jellywatch/internal/jellyweb/daemonctl"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemonctl"
 )
 
 type DaemonHandlers struct {

@@ -1,0 +1,24 @@
+[Unit]
+Description=Plex2Jellyfin Media File Watcher
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=SUDO_USER=nomadx
+ExecStart=/usr/local/bin/plex2jellyfin-daemon
+Restart=on-failure
+RestartSec=10
+
+# Security settings
+# NoNewPrivileges disabled - daemon needs to chown files
+# NoNewPrivileges=true
+PrivateTmp=true
+
+# Restrict capabilities to minimum needed
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+
+[Install]
+WantedBy=multi-user.target

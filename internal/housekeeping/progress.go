@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 )
 
 // taskProgress is a thin adapter that pushes housekeeping task lifecycle

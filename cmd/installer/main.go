@@ -11,7 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Nomadcxx/jellywatch/internal/privilege"
+	"github.com/Nomadcxx/plex2jellyfin/internal/privilege"
 )
 
 // globalProgram is used to send messages from goroutines
@@ -126,7 +126,7 @@ func main() {
 	}
 
 	// Create log file with unique name to avoid permission issues
-	logFile, err := os.CreateTemp("", "jellywatch-installer-*.log")
+	logFile, err := os.CreateTemp("", "plex2jellyfin-installer-*.log")
 	if err != nil {
 		// Silently continue without log file - don't print warning on exit
 		logFile = nil
@@ -135,7 +135,7 @@ func main() {
 		// Make diagnostics readable even when installer runs as root.
 		_ = os.Chmod(logFile.Name(), 0644)
 		defer logFile.Close()
-		logFile.WriteString(fmt.Sprintf("=== JellyWatch Installer Log ===\n"))
+		logFile.WriteString(fmt.Sprintf("=== Plex2Jellyfin Installer Log ===\n"))
 		logFile.WriteString(fmt.Sprintf("Started: %s\n", time.Now().Format("2006-01-02 15:04:05")))
 		logFile.WriteString(fmt.Sprintf("Debug Mode: %v\n\n", debugMode))
 	}

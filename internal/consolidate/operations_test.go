@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 func TestConsolidator_GenerateAllPlans_ExcludesMovies(t *testing.T) {
@@ -324,7 +324,7 @@ func TestExecutePlanUpdatesDatabaseAfterMove(t *testing.T) {
 		Year:           year,
 		CanonicalPath:  filepath.Join(sourceRoot, "Silo (2023)"),
 		LibraryRoot:    sourceRoot,
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 	}
 	if _, err := db.UpsertSeries(series); err != nil {
@@ -341,7 +341,7 @@ func TestExecutePlanUpdatesDatabaseAfterMove(t *testing.T) {
 		Year:            &year,
 		Season:          intPtr(1),
 		Episode:         intPtr(1),
-		Source:          "jellywatch",
+		Source:          "plex2jellyfin",
 		SourcePriority:  100,
 		LibraryRoot:     sourceRoot,
 	}

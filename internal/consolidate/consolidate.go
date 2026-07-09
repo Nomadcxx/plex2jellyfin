@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/identity"
-	"github.com/Nomadcxx/jellywatch/internal/video"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/identity"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
 const (
@@ -187,11 +187,11 @@ func (c *Consolidator) normalizedConflictLocations(conflict *database.Conflict) 
 	locations := make([]string, 0, len(conflict.Locations))
 	seen := make(map[string]struct{}, len(conflict.Locations))
 	for _, location := range conflict.Locations {
-		if isJellywatchQuarantinePath(location) {
+		if isPlex2JellyfinQuarantinePath(location) {
 			continue
 		}
 		root := c.seriesRootForPath(location)
-		if root == "" || isJellywatchQuarantinePath(root) {
+		if root == "" || isPlex2JellyfinQuarantinePath(root) {
 			continue
 		}
 		root = filepath.Clean(root)
@@ -246,9 +246,9 @@ func (c *Consolidator) seriesRootForPath(path string) string {
 	return clean
 }
 
-func isJellywatchQuarantinePath(path string) bool {
+func isPlex2JellyfinQuarantinePath(path string) bool {
 	for _, part := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
-		if strings.HasPrefix(part, "_jellywatch_quarantine") {
+		if strings.HasPrefix(part, "_plex2jellyfin_quarantine") {
 			return true
 		}
 	}

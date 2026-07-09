@@ -1,8 +1,8 @@
 # Jellyfin Cross-Drive Grouping: Plugin Research
 
-**Goal:** Build a Jellyfin plugin (or complementary JellyWatch feature) that groups TV shows and movies by TMDB/IMDB ID regardless of physical drive location — matching Plex behavior.
+**Goal:** Build a Jellyfin plugin (or complementary Plex2Jellyfin feature) that groups TV shows and movies by TMDB/IMDB ID regardless of physical drive location — matching Plex behavior.
 
-**Problem statement:** Jellyfin splits shows across library roots by folder name. Season 2 of The Simpsons on Drive 1 and Season 3 on Drive 2 appear as two separate shows. Even same-drive splits occur when folder name casing varies (`the simpsons` vs. `The Simpsons`). JellyWatch already fixes naming compliance; this research asks whether a Jellyfin plugin can fix the grouping problem at the server level.
+**Problem statement:** Jellyfin splits shows across library roots by folder name. Season 2 of The Simpsons on Drive 1 and Season 3 on Drive 2 appear as two separate shows. Even same-drive splits occur when folder name casing varies (`the simpsons` vs. `The Simpsons`). Plex2Jellyfin already fixes naming compliance; this research asks whether a Jellyfin plugin can fix the grouping problem at the server level.
 
 ---
 
@@ -66,7 +66,7 @@ External Python script (not a plugin) that scans the library for duplicate media
 - Quality ranking: width × height, then bitrate, then file size (via ffprobe; falls back to size)
 - Safety: files moved to trash, not deleted; full original path preserved
 
-The two-pass ID-first → fuzzy-name fallback algorithm is directly applicable to JellyWatch's duplicate detection logic.
+The two-pass ID-first → fuzzy-name fallback algorithm is directly applicable to Plex2Jellyfin's duplicate detection logic.
 
 ---
 
@@ -294,14 +294,14 @@ After each scan: find duplicate Series by TMDB ID → delete N-1 via `DeleteItem
 
 Query for Series/episodes sharing TMDB/TVDB IDs with different `SeriesPresentationUniqueKey` values → call Jellyfin's `/Items/MergeVersions` API endpoint. Works for movies and episodes as alternate versions. Does not collapse two Series entries into one at the show level.
 
-**Best quick-win:** Doesn't fix the root cause but makes the UI display correctly for most users. Can be implemented from JellyWatch's daemon in Go against the Jellyfin REST API — no C# plugin needed.
+**Best quick-win:** Doesn't fix the root cause but makes the UI display correctly for most users. Can be implemented from Plex2Jellyfin's daemon in Go against the Jellyfin REST API — no C# plugin needed.
 
-#### Approach D: JellyWatch-Side Normalization (No Plugin Required)
+#### Approach D: Plex2Jellyfin-Side Normalization (No Plugin Required)
 
-JellyWatch already knows TMDB IDs from its verifier. After consolidation, JellyWatch could emit a canonical directory layout (move/symlink files into a single unified tree per show, keyed on TMDB ID) before Jellyfin scans. Jellyfin's native resolver finds all seasons in one place and groups them natively.
+Plex2Jellyfin already knows TMDB IDs from its verifier. After consolidation, Plex2Jellyfin could emit a canonical directory layout (move/symlink files into a single unified tree per show, keyed on TMDB ID) before Jellyfin scans. Jellyfin's native resolver finds all seasons in one place and groups them natively.
 
-**Pros:** Entirely in Go; no C# required; leverages existing JellyWatch TMDB knowledge; no Jellyfin plugin API risk.  
-**Cons:** JellyWatch must manage file locations; adds complexity to the consolidation step.
+**Pros:** Entirely in Go; no C# required; leverages existing Plex2Jellyfin TMDB knowledge; no Jellyfin plugin API risk.  
+**Cons:** Plex2Jellyfin must manage file locations; adds complexity to the consolidation step.
 
 #### Approach E: Plugin-Level Identity Key Override (COMPLEX — Shokofin pattern)
 
@@ -333,11 +333,11 @@ A proper native fix would modify `SeriesResolver.cs` and `LibraryManager.cs` to 
 
 ## Part 6: Recommendations
 
-### Immediate (JellyWatch daemon, Go, no C# required)
+### Immediate (Plex2Jellyfin daemon, Go, no C# required)
 
-Add a `MergeVersions` housekeeping task to JellyWatch's daemon that:
+Add a `MergeVersions` housekeeping task to Plex2Jellyfin's daemon that:
 1. Queries the Jellyfin REST API for all Series items in the library
-2. Groups by TMDB/TVDB ID using JellyWatch's existing verifier data
+2. Groups by TMDB/TVDB ID using Plex2Jellyfin's existing verifier data
 3. Calls `/Items/MergeVersions` for duplicates
 
 This is a quick win that improves the UI without requiring a Jellyfin plugin or filesystem changes.
@@ -347,7 +347,7 @@ This is a quick win that improves the UI without requiring a Jellyfin plugin or 
 Fork or extend `jellyfin-plugin-library-unifier` as a production-quality `ILibraryPostScanTask` plugin with:
 - TMDB ID as the primary match key (not just TVDB)
 - Robust edge case handling: partial seasons, missing provider IDs, symlink staleness cleanup
-- Integration with JellyWatch's compliance database via REST
+- Integration with Plex2Jellyfin's compliance database via REST
 - Configuration UI for staging directory path and match strategy
 
 ### Long-term (if plugin approach proves insufficient)

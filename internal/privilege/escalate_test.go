@@ -17,7 +17,7 @@ func TestNeedsRoot_AsNonRoot(t *testing.T) {
 }
 
 func TestNeedsRoot_TestBypass(t *testing.T) {
-	t.Setenv("JELLYWATCH_TEST_NO_ESCALATE", "1")
+	t.Setenv("PLEX2JELLYFIN_TEST_NO_ESCALATE", "1")
 
 	if NeedsRoot() {
 		t.Error("NeedsRoot() = true, want false when test bypass is enabled")

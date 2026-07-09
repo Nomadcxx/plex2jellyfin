@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/logging"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/service"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
-	"github.com/Nomadcxx/jellywatch/internal/watcher"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/watcher"
 )
 
 // PeriodicScanner runs periodic directory scans to catch missed files
@@ -389,6 +389,6 @@ func (s *PeriodicScanner) checkArrHealth() {
 		s.mu.Lock()
 		s.healthy = false
 		s.mu.Unlock()
-		s.logger.Error("scanner", "Arr health check found critical issues — marking scanner unhealthy. Run 'jellywatch health --fix' to resolve.", nil)
+		s.logger.Error("scanner", "Arr health check found critical issues — marking scanner unhealthy. Run 'plex2jellyfin health --fix' to resolve.", nil)
 	}
 }

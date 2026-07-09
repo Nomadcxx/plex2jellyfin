@@ -1,16 +1,16 @@
 using MediaBrowser.Model.Plugins;
 
-namespace JellyWatch.Plugin.Configuration;
+namespace Plex2Jellyfin.Plugin.Configuration;
 
 /// <summary>
-/// Plugin configuration for JellyWatch.
+/// Plugin configuration for Plex2Jellyfin.
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
     /// <summary>
-    /// JellyWatch daemon URL (e.g., http://localhost:3000).
+    /// Plex2Jellyfin daemon URL (e.g., http://localhost:3000).
     /// </summary>
-    public string JellyWatchUrl { get; set; } = "http://localhost:3000";
+    public string Plex2JellyfinUrl { get; set; } = "http://localhost:3000";
 
     /// <summary>
     /// Shared secret for webhook authentication.
@@ -18,7 +18,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public string SharedSecret { get; set; } = "";
 
     /// <summary>
-    /// Enable event forwarding to JellyWatch.
+    /// Enable event forwarding to Plex2Jellyfin.
     /// </summary>
     public bool EnableEventForwarding { get; set; } = true;
 
@@ -28,7 +28,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool EnableCustomEndpoints { get; set; } = true;
 
     /// <summary>
-    /// Timeout for HTTP requests to JellyWatch (in seconds).
+    /// Timeout for HTTP requests to Plex2Jellyfin (in seconds).
     /// </summary>
     public int RequestTimeoutSeconds { get; set; } = 30;
 

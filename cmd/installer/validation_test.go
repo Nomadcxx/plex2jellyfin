@@ -9,7 +9,7 @@ import (
 
 func TestTestJellyfinCmd_UsesValidAuthorizationHeader(t *testing.T) {
 	const apiKey = "abc123"
-	wantAuth := `MediaBrowser Token="abc123", Client="jellywatch-installer", Device="installer", DeviceId="installer", Version="1.0.0"`
+	wantAuth := `MediaBrowser Token="abc123", Client="plex2jellyfin-installer", Device="installer", DeviceId="installer", Version="1.0.0"`
 
 	origTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {

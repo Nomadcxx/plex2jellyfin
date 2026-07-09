@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 )
 
 func TestCheckPlaybackSafetyDisabled(t *testing.T) {

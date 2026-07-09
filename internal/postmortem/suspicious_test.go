@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 func TestClassifySuspiciousNamePollutedReleaseMarker(t *testing.T) {

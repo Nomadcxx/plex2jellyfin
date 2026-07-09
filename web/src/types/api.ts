@@ -112,7 +112,7 @@ export interface paths {
     get: operations["getJellyfinUnidentifiableItems"];
   };
   "/jellyfin/plugin/status": {
-    /** Get JellyWatch companion plugin status */
+    /** Get Plex2Jellyfin companion plugin status */
     get: operations["getJellyfinPluginStatus"];
   };
   "/health": {
@@ -893,7 +893,7 @@ export interface operations {
       };
     };
   };
-  /** Get JellyWatch companion plugin status */
+  /** Get Plex2Jellyfin companion plugin status */
   getJellyfinPluginStatus: {
     responses: {
       /** @description Plugin status */

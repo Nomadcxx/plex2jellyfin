@@ -1,7 +1,7 @@
 package transfer
 
 import (
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 // OptionsFromConfig creates TransferOptions from configuration.

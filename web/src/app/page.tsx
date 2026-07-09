@@ -25,8 +25,8 @@ export default function DashboardPage() {
       <div className="space-y-6">
         <div className="flex items-center gap-4">
           <Image
-            src="/jellywatch_brand.png"
-            alt="JellyWatch"
+            src="/plex2jellyfin_brand.png"
+            alt="Plex2Jellyfin"
             width={100}
             height={100}
             className="rounded"

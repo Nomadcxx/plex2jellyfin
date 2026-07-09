@@ -1,11 +1,11 @@
-# JellyWatch + Jellyfin Integration: Comprehensive Handover (2026-03-01)
+# Plex2Jellyfin + Jellyfin Integration: Comprehensive Handover (2026-03-01)
 
 ## 1. Mission For Next Agent
 You are taking over a **3-track incident/regression investigation**:
 
 1. Web UI service regression (`http://localhost:5522` served placeholder/minimal page).
 2. Jellyfin plugin webhook auth/contract mismatch and installer integration gap.
-3. JellyWatch source-of-truth pipeline drift (Sonarr/Radarr import still active), plus local "The Pitt" visibility anomaly.
+3. Plex2Jellyfin source-of-truth pipeline drift (Sonarr/Radarr import still active), plus local "The Pitt" visibility anomaly.
 
 This handover contains validated evidence, architecture context, git history context, and exact reproduction commands.
 
@@ -14,13 +14,13 @@ Deliverables expected from you:
 
 1. Confirm/fix root cause for web UI serving placeholder output.
 2. Confirm/fix webhook auth behavior across daemon/API/plugin with secure defaults and installer UX.
-3. Restore/verify intended model: JellyWatch DB and move logic as source-of-truth, not Sonarr/Radarr import.
+3. Restore/verify intended model: Plex2Jellyfin DB and move logic as source-of-truth, not Sonarr/Radarr import.
 4. Produce a local-state incident report specifically for The Pitt S02E08 visibility anomaly.
 5. Add/extend tests for all behavior changes.
 6. Provide rollback plan and operational playbook.
 
 ## 3. Repository + Branch Context
-- Repo path: `/home/nomadx/Documents/jellywatch`
+- Repo path: `/home/nomadx/Documents/plex2jellyfin`
 - Current branch: `fix/jellyfin-10.10-compat`
 - Worktree is dirty with extensive ongoing changes (do not assume clean baseline).
 
@@ -41,7 +41,7 @@ Architecture references:
 
 ## 4.1 Issue 1: Web UI Placeholder Page
 Symptoms:
-- `jellyweb` service log returns `GET /` as `200 52B`.
+- `plex2jellyfin-web` service log returns `GET /` as `200 52B`.
 - Browser showed a minimal/unstyled page.
 
 Validated causes observed:
@@ -49,8 +49,8 @@ Validated causes observed:
 2. `embedded/frontend/index.html` had also been overwritten to placeholder text (`placeholder`) in local tree.
 
 Evidence:
-- `/etc/systemd/system/jellyweb.service` runs `/usr/local/bin/jellyweb --host 0.0.0.0 --port 5522`
-- `systemctl status jellyweb --no-pager -n 200` showed repeated `200 52B` responses for `/`
+- `/etc/systemd/system/plex2jellyfin-web.service` runs `/usr/local/bin/plex2jellyfin-web --host 0.0.0.0 --port 5522`
+- `systemctl status plex2jellyfin-web --no-pager -n 200` showed repeated `200 52B` responses for `/`
 - `embedded/web/index.html` content: minimal placeholder
 - `embedded/frontend/index.html` content was placeholder until restored from `web/out/index.html`
 
@@ -64,7 +64,7 @@ Validated causes:
 2. Server handlers originally required non-empty secret always; empty secret => hard reject.
 
 Evidence:
-- `~/.config/jellywatch/config.toml` had no `jellyfin.webhook_secret`.
+- `~/.config/plex2jellyfin/config.toml` had no `jellyfin.webhook_secret`.
 - Probe:
   - `POST http://localhost:8686/api/v1/webhooks/jellyfin` => `401 unauthorized`
   - `POST http://localhost:5522/api/v1/webhooks/jellyfin` => `401 unauthorized`
@@ -78,7 +78,7 @@ Files involved:
 This is the most important track.
 
 ### 4.3.1 Source-of-truth drift (critical)
-User intent is JellyWatch-first import/move/naming. Live system state contradicts that.
+User intent is Plex2Jellyfin-first import/move/naming. Live system state contradicts that.
 
 Validated via Sonarr/Radarr APIs:
 - Sonarr download client config: `enableCompletedDownloadHandling = true`
@@ -88,7 +88,7 @@ Validated via Sonarr/Radarr APIs:
 
 Implication:
 - Sonarr/Radarr are still auto-importing from SAB watch dirs into library.
-- JellyWatch scanner sees watch dirs mostly empty (hence periodic `processed=0`).
+- Plex2Jellyfin scanner sees watch dirs mostly empty (hence periodic `processed=0`).
 - Renaming disabled means raw release names can land directly in library.
 
 ### 4.3.2 The Pitt S02E08 specific anomaly
@@ -108,10 +108,10 @@ Interpretation:
 ## 5. Local Runtime Snapshot (Important)
 
 Services:
-- `jellywatchd`: active, periodic scans every 5m, usually `processed=0`
-- `jellyweb`: active, on `5522`
+- `plex2jellyfin-daemon`: active, periodic scans every 5m, usually `processed=0`
+- `plex2jellyfin-web`: active, on `5522`
 
-Current watch/library config (`~/.config/jellywatch/config.toml`):
+Current watch/library config (`~/.config/plex2jellyfin/config.toml`):
 - Watch:
   - `/mnt/NVME3/Sabnzbd/complete/movies`
   - `/mnt/NVME3/Sabnzbd/complete/tv`
@@ -176,10 +176,10 @@ Jellyfin library virtual folders:
 - Raw filename search:
   - `GET /Items?Recursive=true&SearchTerm=The.Pitt.S02E08&IncludeItemTypes=Episode,Video&Limit=50`
 
-## 7.3 JellyWatch runtime
-- `systemctl status jellywatchd --no-pager -n 200`
-- `journalctl -u jellywatchd --no-pager -n 240`
-- `systemctl status jellyweb --no-pager -n 200`
+## 7.3 Plex2Jellyfin runtime
+- `systemctl status plex2jellyfin-daemon --no-pager -n 200`
+- `journalctl -u plex2jellyfin-daemon --no-pager -n 240`
+- `systemctl status plex2jellyfin-web --no-pager -n 200`
 
 ## 8. Hypotheses To Confirm/Reject
 
@@ -192,7 +192,7 @@ Jellyfin library virtual folders:
 
 ## WS-A: Hardening source-of-truth enforcement
 - Introduce explicit installer/runtime guardrails:
-  - If JellyWatch source-of-truth mode is enabled, enforce/verify:
+  - If Plex2Jellyfin source-of-truth mode is enabled, enforce/verify:
     - Sonarr `enableCompletedDownloadHandling=false`
     - Radarr `enableCompletedDownloadHandling=false`
     - Sonarr `renameEpisodes=true` (or document required alternative)
@@ -227,7 +227,7 @@ At minimum:
 - installer config generation includes webhook secret behavior
 
 2. Integration tests:
-- Simulated Sonarr import disabled path with JellyWatch watcher processing
+- Simulated Sonarr import disabled path with Plex2Jellyfin watcher processing
 - Simulated Sonarr import enabled path showing expected skip behavior and warning
 - Jellyfin API verification for series episode linkage after rename/refresh
 
@@ -239,7 +239,7 @@ At minimum:
 
 ## 11. Open Questions
 1. Should local-loopback-without-secret be allowed long-term, or require secret always?
-2. Should JellyWatch ship a first-run "arr policy reconciler" that mutates Sonarr/Radarr settings automatically?
+2. Should Plex2Jellyfin ship a first-run "arr policy reconciler" that mutates Sonarr/Radarr settings automatically?
 3. How should raw release naming be handled when arr rename is intentionally off?
 
 ## 12. Final Note
@@ -248,9 +248,9 @@ The local evidence strongly indicates **configuration drift + naming policy mism
 ## 13. Fresh Runtime Addendum (2026-03-01 evening)
 Additional verification after initial handover draft:
 
-1. `jellywatchd` and `jellyweb` are both active for multiple days with no crash-loop.
-2. `jellywatchd` continues periodic scans every 5 minutes with `processed=0` repeatedly.
-3. `jellyweb` still serves `GET /` as `200 52B` in current runtime.
+1. `plex2jellyfin-daemon` and `plex2jellyfin-web` are both active for multiple days with no crash-loop.
+2. `plex2jellyfin-daemon` continues periodic scans every 5 minutes with `processed=0` repeatedly.
+3. `plex2jellyfin-web` still serves `GET /` as `200 52B` in current runtime.
 4. Sonarr and Radarr still have `enableCompletedDownloadHandling=true`.
 5. Sonarr and Radarr still have `renameEpisodes=false` / `renameMovies=false`.
 6. On disk, The Pitt season folder contains:

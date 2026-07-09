@@ -123,7 +123,7 @@ func (c *Client) DeleteMovieFile(id int) error {
 }
 
 // UpdateMoviePath updates the path for a movie in Radarr
-// This is used when JellyWatch moves a movie to a new location
+// This is used when Plex2Jellyfin moves a movie to a new location
 func (c *Client) UpdateMoviePath(movieID int, newPath string) error {
 	return c.UpdateMoviePathContext(context.Background(), movieID, newPath)
 }

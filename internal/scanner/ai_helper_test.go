@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 func TestAIHelper_CircuitBreaker(t *testing.T) {

@@ -4,7 +4,7 @@
 
 **Goal:** Wire Ollama Cloud AI into the daemon's file organization pipeline using a two-lane confidence-gated approach — fast lane for high-confidence regex, slow lane for AI enhancement of low-confidence parses.
 
-**Architecture:** The handler computes confidence after regex parsing. Files scoring >= 0.6 organize immediately via new `*WithParsed()` organizer methods. Files below 0.6 are held in a pending map and processed by a 30s ticker that calls `ai.Matcher.ParseWithRetry()`, classifies the change, and either auto-applies safe corrections or flags risky ones for `jellywatch review`.
+**Architecture:** The handler computes confidence after regex parsing. Files scoring >= 0.6 organize immediately via new `*WithParsed()` organizer methods. Files below 0.6 are held in a pending map and processed by a 30s ticker that calls `ai.Matcher.ParseWithRetry()`, classifies the change, and either auto-applies safe corrections or flags risky ones for `plex2jellyfin review`.
 
 **Tech Stack:** Go, existing `ai.Matcher` (Ollama Cloud), `naming.CalculateTitleConfidence`, JSONL logging, Cobra CLI.
 
@@ -27,8 +27,8 @@
 | `internal/organizer/organizer_test.go` | Tests for `*WithParsed()` methods |
 | `internal/daemon/handler.go` | Add `pendingAI` map, confidence gating, ticker, AI config fields |
 | `internal/daemon/handler_test.go` | Integration tests for two-lane routing |
-| `cmd/jellywatchd/main.go` | Wire `ai.Matcher` into handler, start ticker |
-| `cmd/jellywatch/review_cmd.go` | **New.** `jellywatch review` interactive command |
+| `cmd/plex2jellyfin-daemon/main.go` | Wire `ai.Matcher` into handler, start ticker |
+| `cmd/plex2jellyfin/review_cmd.go` | **New.** `plex2jellyfin review` interactive command |
 
 ---
 
@@ -1254,7 +1254,7 @@ AIMatcher       *ai.Matcher
 AIConfig        config.AIConfig
 ```
 
-This requires adding imports for `"github.com/Nomadcxx/jellywatch/internal/ai"` and `"github.com/Nomadcxx/jellywatch/internal/config"`.
+This requires adding imports for `"github.com/Nomadcxx/plex2jellyfin/internal/ai"` and `"github.com/Nomadcxx/plex2jellyfin/internal/config"`.
 
 - [ ] **Step 2: Add fields to MediaHandler struct**
 
@@ -1881,11 +1881,11 @@ git commit -m "daemon: add ProcessPendingAI ticker method with expiry and rate l
 ### Task 10: Wire AI into main.go
 
 **Files:**
-- Modify: `cmd/jellywatchd/main.go:185-218` (handler creation)
+- Modify: `cmd/plex2jellyfin-daemon/main.go:185-218` (handler creation)
 
 - [ ] **Step 1: Add AI matcher creation**
 
-In `cmd/jellywatchd/main.go`, before the `handler` creation block (~line 196), add:
+In `cmd/plex2jellyfin-daemon/main.go`, before the `handler` creation block (~line 196), add:
 
 ```go
 // Create AI matcher for daemon enhancement if enabled
@@ -1905,7 +1905,7 @@ if cfg.AI.Enabled {
 }
 ```
 
-This requires adding `"github.com/Nomadcxx/jellywatch/internal/ai"` to imports.
+This requires adding `"github.com/Nomadcxx/plex2jellyfin/internal/ai"` to imports.
 
 - [ ] **Step 2: Add AI fields to handler config**
 
@@ -1949,26 +1949,26 @@ if cfg.AI.Enabled && aiMatcher != nil {
 
 - [ ] **Step 4: Verify build**
 
-Run: `go build ./cmd/jellywatchd/...`
+Run: `go build ./cmd/plex2jellyfin-daemon/...`
 Expected: success
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cmd/jellywatchd/main.go
+git add cmd/plex2jellyfin-daemon/main.go
 git commit -m "daemon: wire AI matcher and enhancement ticker into main"
 ```
 
 ---
 
-### Task 11: jellywatch review Command
+### Task 11: plex2jellyfin review Command
 
 **Files:**
-- Create: `cmd/jellywatch/review_cmd.go`
+- Create: `cmd/plex2jellyfin/review_cmd.go`
 
 - [ ] **Step 1: Create review command**
 
-Create `cmd/jellywatch/review_cmd.go`:
+Create `cmd/plex2jellyfin/review_cmd.go`:
 
 ```go
 package main
@@ -1980,7 +1980,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon"
 	"github.com/spf13/cobra"
 )
 
@@ -1999,7 +1999,7 @@ func init() {
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
-	configDir := filepath.Join(os.Getenv("HOME"), ".config", "jellywatch")
+	configDir := filepath.Join(os.Getenv("HOME"), ".config", "plex2jellyfin")
 	logPath := filepath.Join(configDir, "ai-enhancements.jsonl")
 
 	flagged, err := daemon.ReadFlaggedForReview(logPath)
@@ -2065,14 +2065,14 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 - [ ] **Step 2: Verify build**
 
-Run: `go build ./cmd/jellywatch/...`
+Run: `go build ./cmd/plex2jellyfin/...`
 Expected: success (may have compilation errors from pre-existing untracked test files — ignore those)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cmd/jellywatch/review_cmd.go
-git commit -m "cli: add jellywatch review command for AI enhancement triage"
+git add cmd/plex2jellyfin/review_cmd.go
+git commit -m "cli: add plex2jellyfin review command for AI enhancement triage"
 ```
 
 ---
@@ -2096,7 +2096,7 @@ Expected: all PASS
 
 - [ ] **Step 4: Build all binaries**
 
-Run: `go build ./cmd/jellywatch/ && go build ./cmd/jellywatchd/`
+Run: `go build ./cmd/plex2jellyfin/ && go build ./cmd/plex2jellyfin-daemon/`
 Expected: success
 
 - [ ] **Step 5: Commit any remaining fixes**

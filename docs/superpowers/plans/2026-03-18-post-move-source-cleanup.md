@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** After jellywatchd successfully moves a media file to the library, automatically clean up the now-empty source download directory (and walk up parent dirs to the watch root), removing SABnzbd junk files along the way.
+**Goal:** After plex2jellyfin-daemon successfully moves a media file to the library, automatically clean up the now-empty source download directory (and walk up parent dirs to the watch root), removing SABnzbd junk files along the way.
 
 **Architecture:** Two new private methods on `MediaHandler` in `handler.go`: `containsVideoFilesRecursive()` reuses the existing `IsMediaFile()` extension set and short-circuits with `fs.SkipAll` on first hit; `cleanupSourceDir()` gates on source-file absence, walks bottom-up removing video-free directories, stops at watch roots. Called from both `processFile()` and `applyAIResult()` after confirmed success.
 
@@ -171,7 +171,7 @@ func TestContainsVideoFilesRecursive(t *testing.T) {
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch && go test ./internal/daemon/... -run "TestCleanup|TestContainsVideo" -v
+cd /home/nomadx/Documents/plex2jellyfin && go test ./internal/daemon/... -run "TestCleanup|TestContainsVideo" -v
 ```
 
 Expected: compile error — `h.cleanupSourceDir` and `h.containsVideoFilesRecursive` undefined.
@@ -259,7 +259,7 @@ func (h *MediaHandler) cleanupSourceDir(sourcePath string) {
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch && go test ./internal/daemon/... -run "TestCleanup|TestContainsVideo" -v
+cd /home/nomadx/Documents/plex2jellyfin && go test ./internal/daemon/... -run "TestCleanup|TestContainsVideo" -v
 ```
 
 Expected: all PASS.
@@ -267,7 +267,7 @@ Expected: all PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch
+cd /home/nomadx/Documents/plex2jellyfin
 git add internal/daemon/handler.go internal/daemon/handler_test.go
 git commit -m "feat: add cleanupSourceDir and containsVideoFilesRecursive to MediaHandler"
 ```
@@ -305,7 +305,7 @@ Change to:
 - [ ] **Step 2: Run the full daemon test suite**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch && go test ./internal/daemon/... -v 2>&1 | grep -E "^(--- PASS|--- FAIL|FAIL|ok)"
+cd /home/nomadx/Documents/plex2jellyfin && go test ./internal/daemon/... -v 2>&1 | grep -E "^(--- PASS|--- FAIL|FAIL|ok)"
 ```
 
 Expected: all PASS.
@@ -313,7 +313,7 @@ Expected: all PASS.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch
+cd /home/nomadx/Documents/plex2jellyfin
 git add internal/daemon/handler.go
 git commit -m "feat: wire cleanupSourceDir into processFile after successful organize"
 ```
@@ -365,7 +365,7 @@ Change to:
 - [ ] **Step 2: Run the full daemon test suite**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch && go test ./internal/daemon/... -v 2>&1 | grep -E "^(--- PASS|--- FAIL|FAIL|ok)"
+cd /home/nomadx/Documents/plex2jellyfin && go test ./internal/daemon/... -v 2>&1 | grep -E "^(--- PASS|--- FAIL|FAIL|ok)"
 ```
 
 Expected: all PASS.
@@ -373,7 +373,7 @@ Expected: all PASS.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch
+cd /home/nomadx/Documents/plex2jellyfin
 git add internal/daemon/handler.go
 git commit -m "feat: wire cleanupSourceDir into applyAIResult for AI-enhanced path"
 ```
@@ -385,7 +385,7 @@ git commit -m "feat: wire cleanupSourceDir into applyAIResult for AI-enhanced pa
 - [ ] **Step 1: Run the full build**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch && go build ./...
+cd /home/nomadx/Documents/plex2jellyfin && go build ./...
 ```
 
 Expected: clean build, no errors.
@@ -393,7 +393,7 @@ Expected: clean build, no errors.
 - [ ] **Step 2: Run all tests**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch && go test ./internal/daemon/... ./internal/organizer/... ./internal/sync/... -count=1
+cd /home/nomadx/Documents/plex2jellyfin && go test ./internal/daemon/... ./internal/organizer/... ./internal/sync/... -count=1
 ```
 
 Expected: all packages PASS.
@@ -401,19 +401,19 @@ Expected: all packages PASS.
 - [ ] **Step 3: Build binaries**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch
-go build -o /tmp/jellywatch ./cmd/jellywatch && go build -o /tmp/jellywatchd ./cmd/jellywatchd && echo "Build OK"
+cd /home/nomadx/Documents/plex2jellyfin
+go build -o /tmp/plex2jellyfin ./cmd/plex2jellyfin && go build -o /tmp/plex2jellyfin-daemon ./cmd/plex2jellyfin-daemon && echo "Build OK"
 ```
 
 - [ ] **Step 4: Install and restart service**
 
 ```bash
-echo "dnommm78" | sudo -S systemctl stop jellywatchd.service
-echo "dnommm78" | sudo -S cp /tmp/jellywatch /usr/local/bin/jellywatch
-echo "dnommm78" | sudo -S cp /tmp/jellywatchd /usr/local/bin/jellywatchd
-echo "dnommm78" | sudo -S systemctl start jellywatchd.service
+echo "dnommm78" | sudo -S systemctl stop plex2jellyfin-daemon.service
+echo "dnommm78" | sudo -S cp /tmp/plex2jellyfin /usr/local/bin/plex2jellyfin
+echo "dnommm78" | sudo -S cp /tmp/plex2jellyfin-daemon /usr/local/bin/plex2jellyfin-daemon
+echo "dnommm78" | sudo -S systemctl start plex2jellyfin-daemon.service
 sleep 2
-systemctl status jellywatchd.service --no-pager | head -20
+systemctl status plex2jellyfin-daemon.service --no-pager | head -20
 ```
 
 Expected: `Active: active (running)`.

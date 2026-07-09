@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 )
 
 func TestWebhookInvalidPayload(t *testing.T) {
@@ -24,7 +24,7 @@ func TestWebhookInvalidPayload(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString("{"))
-	req.Header.Set("X-Jellywatch-Webhook-Secret", "test-secret")
+	req.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "test-secret")
 	w := httptest.NewRecorder()
 
 	s.HandleJellyfinWebhook(w, req)
@@ -47,7 +47,7 @@ func TestWebhookPlaybackStartAndStop(t *testing.T) {
 	startPayload := []byte(`{"NotificationType":"PlaybackStart","NotificationUsername":"alice","DeviceName":"TV","ClientName":"Jellyfin","ItemPath":"` + path + `","ItemId":"123"}`)
 
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewReader(startPayload))
-	startReq.Header.Set("X-Jellywatch-Webhook-Secret", "test-secret")
+	startReq.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "test-secret")
 	startW := httptest.NewRecorder()
 	s.HandleJellyfinWebhook(startW, startReq)
 
@@ -62,7 +62,7 @@ func TestWebhookPlaybackStartAndStop(t *testing.T) {
 	s.deferredQueue.Add(path, jellyfin.DeferredOp{Type: "organize_movie", SourcePath: path})
 	stopPayload := []byte(`{"NotificationType":"PlaybackStop","ItemPath":"` + path + `"}`)
 	stopReq := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewReader(stopPayload))
-	stopReq.Header.Set("X-Jellywatch-Webhook-Secret", "test-secret")
+	stopReq.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "test-secret")
 	stopW := httptest.NewRecorder()
 	s.HandleJellyfinWebhook(stopW, stopReq)
 
@@ -87,7 +87,7 @@ func TestWebhookUnknownEvent(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"Nope"}`))
-	req.Header.Set("X-Jellywatch-Webhook-Secret", "test-secret")
+	req.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "test-secret")
 	w := httptest.NewRecorder()
 
 	s.HandleJellyfinWebhook(w, req)
@@ -117,7 +117,7 @@ func TestWebhookItemAddedPersistsToDB(t *testing.T) {
 	path := "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv"
 	payload := []byte(`{"NotificationType":"ItemAdded","ItemPath":"` + path + `","ItemId":"jf-123","Name":"The Matrix","ItemType":"Movie"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewReader(payload))
-	req.Header.Set("X-Jellywatch-Webhook-Secret", "test-secret")
+	req.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "test-secret")
 	w := httptest.NewRecorder()
 
 	s.HandleJellyfinWebhook(w, req)
@@ -156,7 +156,7 @@ func TestWebhookSecretValidation(t *testing.T) {
 	}
 
 	reqWrong := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"PlaybackStart"}`))
-	reqWrong.Header.Set("X-Jellywatch-Webhook-Secret", "wrong")
+	reqWrong.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "wrong")
 	wWrong := httptest.NewRecorder()
 	s.HandleJellyfinWebhook(wWrong, reqWrong)
 	if wWrong.Code != http.StatusUnauthorized {
@@ -164,7 +164,7 @@ func TestWebhookSecretValidation(t *testing.T) {
 	}
 
 	reqOK := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"PlaybackStart","ItemPath":"/x.mkv"}`))
-	reqOK.Header.Set("X-Jellywatch-Webhook-Secret", "expected-secret")
+	reqOK.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "expected-secret")
 	wOK := httptest.NewRecorder()
 	s.HandleJellyfinWebhook(wOK, reqOK)
 	if wOK.Code != http.StatusOK {
@@ -173,7 +173,7 @@ func TestWebhookSecretValidation(t *testing.T) {
 
 	for _, notificationType := range []string{"ItemAdded", "ItemUpdated"} {
 		reqEvent := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"`+notificationType+`","ItemPath":"/x.mkv","ItemId":"jf-1"}`))
-		reqEvent.Header.Set("X-Jellywatch-Webhook-Secret", "expected-secret")
+		reqEvent.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "expected-secret")
 		wEvent := httptest.NewRecorder()
 		s.HandleJellyfinWebhook(wEvent, reqEvent)
 		if wEvent.Code != http.StatusOK {
@@ -266,7 +266,7 @@ func TestWebhookAuth_FullFlowWithGeneratedSecret(t *testing.T) {
 	body := `{"NotificationType":"PlaybackStart","ItemPath":"/library/TV/The Pitt/The Pitt S02E08.mkv"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Jellywatch-Webhook-Secret", secret)
+	req.Header.Set("X-Plex2Jellyfin-Webhook-Secret", secret)
 	req.RemoteAddr = "10.0.0.50:54321"
 
 	w := httptest.NewRecorder()
@@ -357,7 +357,7 @@ func TestHandleItemAdded_UpdatesParseDecision(t *testing.T) {
 
 	payload := []byte(`{"NotificationType":"ItemAdded","ItemPath":"` + targetPath + `","ItemId":"jf-api-1","Name":"The Matrix","ItemType":"Movie","Provider_imdb":"tt0133093","Provider_tmdb":"603"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewReader(payload))
-	req.Header.Set("X-Jellywatch-Webhook-Secret", "test-secret")
+	req.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "test-secret")
 	w := httptest.NewRecorder()
 	s.HandleJellyfinWebhook(w, req)
 	if w.Code != http.StatusOK {

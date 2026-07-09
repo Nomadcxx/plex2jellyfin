@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 func TestOptionsFromConfig_NilConfig(t *testing.T) {

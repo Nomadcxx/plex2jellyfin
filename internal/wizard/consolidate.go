@@ -3,7 +3,7 @@ package wizard
 import (
 	"fmt"
 
-	"github.com/Nomadcxx/jellywatch/internal/service"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 )
 
 func (w *Wizard) handleScattered(analysis *service.ScatteredAnalysis) error {

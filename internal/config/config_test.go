@@ -97,7 +97,7 @@ func TestConfigSaveHashesPlaintextPassword(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".config", "jellywatch", "config.toml"))
+	data, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".config", "plex2jellyfin", "config.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestGetReportsPathUsesConfigDir(t *testing.T) {
 	t.Setenv("SUDO_USER", "")
 
 	got := GetReportsPath()
-	if !strings.HasSuffix(got, filepath.Join(".config", "jellywatch", "reports")) {
+	if !strings.HasSuffix(got, filepath.Join(".config", "plex2jellyfin", "reports")) {
 		t.Fatalf("GetReportsPath = %q", got)
 	}
 }
@@ -131,7 +131,7 @@ func TestLoadReturnsErrorForUnreadableExistingConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("SUDO_USER", "")
 
-	configDir := filepath.Join(home, ".config", "jellywatch")
+	configDir := filepath.Join(home, ".config", "plex2jellyfin")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestLoadTightensConfigFilePermissions(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("SUDO_USER", "")
 
-	configDir := filepath.Join(home, ".config", "jellywatch")
+	configDir := filepath.Join(home, ".config", "plex2jellyfin")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}

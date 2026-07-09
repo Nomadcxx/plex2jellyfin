@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewLogger(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "jellywatch-activity-*")
+	tmpDir, err := os.MkdirTemp("", "plex2jellyfin-activity-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestNewLogger(t *testing.T) {
 }
 
 func TestLogEntry(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "jellywatch-activity-*")
+	tmpDir, err := os.MkdirTemp("", "plex2jellyfin-activity-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestLogEntry(t *testing.T) {
 }
 
 func TestPruneOld(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "jellywatch-activity-*")
+	tmpDir, err := os.MkdirTemp("", "plex2jellyfin-activity-*")
 	if err != nil {
 		t.Fatal(err)
 	}

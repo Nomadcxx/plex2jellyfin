@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/labeling"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/labeling"
 )
 
 // openTestDB opens a fresh in-process SQLite database for testing.

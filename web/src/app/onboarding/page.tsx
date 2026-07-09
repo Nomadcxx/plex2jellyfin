@@ -22,7 +22,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
-const ONBOARDING_KEY = 'jellywatch_onboarding_completed'
+const ONBOARDING_KEY = 'plex2jellyfin_onboarding_completed'
 
 interface Step {
   id: number
@@ -122,7 +122,7 @@ export default function OnboardingPage() {
             <Sparkles className="w-6 h-6 text-violet-400" />
           </div>
           <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-br from-white to-zinc-400 mb-3">
-            Welcome to Jellywatch
+            Welcome to Plex2Jellyfin
           </h1>
           <p className="text-lg text-zinc-400 max-w-md mx-auto">
             Let's get your media library organized and optimized for Jellyfin
@@ -374,7 +374,7 @@ export default function OnboardingPage() {
                           <div>
                             <h3 className="text-2xl font-bold text-white mb-3">You're all set!</h3>
                             <p className="text-zinc-400 max-w-sm mx-auto leading-relaxed">
-                              Your media library is now being monitored. Jellywatch will automatically
+                              Your media library is now being monitored. Plex2Jellyfin will automatically
                               organize new downloads and keep everything Jellyfin-ready.
                             </p>
                           </div>

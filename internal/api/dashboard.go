@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/Nomadcxx/jellywatch/api"
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/api"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 // DashboardData represents the full dashboard response

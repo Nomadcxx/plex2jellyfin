@@ -30,13 +30,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/logging"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
-	"github.com/Nomadcxx/jellywatch/internal/service"
-	"github.com/Nomadcxx/jellywatch/internal/tmdb"
-	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
+	"github.com/Nomadcxx/plex2jellyfin/internal/tmdb"
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 )
 
 // normalizeFolderTitle lowercases and collapses whitespace WITHOUT
@@ -257,7 +257,7 @@ func (e *Engine) Detect(ctx context.Context) (*DetectResult, error) {
 	e.detectStuckSync(ctx, res, enqueue)
 
 	// 7: parser drift repairs for successful movie imports created by
-	// JellyWatch before parser fixes landed.
+	// Plex2Jellyfin before parser fixes landed.
 	e.detectParserDriftRepairs(ctx, res, enqueue)
 
 	return res, nil
@@ -1091,12 +1091,12 @@ func (e *Engine) executeTask(ctx context.Context, t *database.HousekeepingTask) 
 		// in the same library (no cross-volume work).
 		return e.execMergeMove(ctx, t)
 	case database.TaskKindParserDriftRename:
-		// Naming workflow: JellyWatch previously organized a movie to a
+		// Naming workflow: Plex2Jellyfin previously organized a movie to a
 		// path derived from an older parser. The current parser now derives
 		// a better same-library path, so rename the folder/file in place.
 		return e.execParserDriftRename(t)
 	case database.TaskKindParserDriftTVRename:
-		// Naming workflow: JellyWatch previously organized a TV episode to
+		// Naming workflow: Plex2Jellyfin previously organized a TV episode to
 		// a path derived from an older parser. The current parser now
 		// derives a better same-library episode path, so move that file in
 		// place and reconcile the DB row.
@@ -1436,7 +1436,7 @@ func (e *Engine) execStuckSync(t *database.HousekeepingTask) error {
 
 // execConsolidateDuplicate resolves a duplicate group by deleting its
 // inferior copies, keeping the file flagged as `BestFile`. Reuses the
-// same service.CleanupService logic the CLI's `jellywatch duplicates
+// same service.CleanupService logic the CLI's `plex2jellyfin duplicates
 // execute` uses, so the daemon and CLI cannot diverge on what "the
 // inferior copy" means.
 //

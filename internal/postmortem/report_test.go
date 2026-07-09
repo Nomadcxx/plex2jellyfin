@@ -19,7 +19,7 @@ func TestMarkdownReportIncludesCountsAndNextSteps(t *testing.T) {
 		{Category: "polluted_name", Name: "Ratatouille RoDubbed (2007)", Marker: "RoDubbed"},
 	}, UnknownSeasonEvidence{ActionablePollutionEpisodes: 5})
 	for _, want := range []string{
-		"# JellyWatch Postmortem",
+		"# Plex2Jellyfin Postmortem",
 		"Processed decisions: 42",
 		"Repair events: 2",
 		"Season Unknown actionable: 5",

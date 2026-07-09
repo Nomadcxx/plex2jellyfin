@@ -40,9 +40,9 @@ func makeTestProjectRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	mkdirAll(t, filepath.Join(root, "cmd", "jellywatch"))
-	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/jellywatch\n")
-	writeFile(t, filepath.Join(root, "cmd", "jellywatch", "main.go"), "package main\nfunc main(){}\n")
+	mkdirAll(t, filepath.Join(root, "cmd", "plex2jellyfin"))
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/plex2jellyfin\n")
+	writeFile(t, filepath.Join(root, "cmd", "plex2jellyfin", "main.go"), "package main\nfunc main(){}\n")
 
 	return root
 }

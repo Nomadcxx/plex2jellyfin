@@ -17,7 +17,7 @@ func (m model) renderWelcome() string {
 		label string
 		desc  string
 	}{
-		{"Install JellyWatch", "Fresh installation with full configuration"},
+		{"Install Plex2Jellyfin", "Fresh installation with full configuration"},
 	}
 
 	if m.existingDBDetected {
@@ -25,14 +25,14 @@ func (m model) renderWelcome() string {
 			label string
 			desc  string
 		}{
-			{"Update JellyWatch", "Update binaries, preserve configuration"},
+			{"Update Plex2Jellyfin", "Update binaries, preserve configuration"},
 		}, options...)
 	}
 
 	options = append(options, struct {
 		label string
 		desc  string
-	}{"Uninstall JellyWatch", "Remove JellyWatch from your system"})
+	}{"Uninstall Plex2Jellyfin", "Remove Plex2Jellyfin from your system"})
 
 	for i, opt := range options {
 		prefix := "  "
@@ -57,12 +57,12 @@ func (m model) renderWelcome() string {
 func (m model) renderUninstallConfirm() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Uninstall JellyWatch"))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Uninstall Plex2Jellyfin"))
 	b.WriteString("\n\n")
 
 	b.WriteString("This will remove:\n")
-	b.WriteString("  • JellyWatch binaries from /usr/local/bin\n")
-	b.WriteString("  • Systemd service (jellywatchd)\n\n")
+	b.WriteString("  • Plex2Jellyfin binaries from /usr/local/bin\n")
+	b.WriteString("  • Systemd service (plex2jellyfin-daemon)\n\n")
 
 	// Three options for config/database handling
 	prefixes := []string{"  ", "  ", "  "}
@@ -77,7 +77,7 @@ func (m model) renderUninstallConfirm() string {
 	b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render("Keep settings but rebuild media.db on next install") + "\n\n")
 
 	b.WriteString(prefixes[2] + "Delete configuration and database\n")
-	b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render("Remove all JellyWatch data permanently") + "\n\n")
+	b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render("Remove all Plex2Jellyfin data permanently") + "\n\n")
 
 	if m.existingDBDetected {
 		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
@@ -463,7 +463,7 @@ func (m model) renderPermissions() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(tipStyle.Render("  📖 Full guide: https://github.com/Nomadcxx/jellywatch/blob/main/docs/permissions.md"))
+	b.WriteString(tipStyle.Render("  📖 Full guide: https://github.com/Nomadcxx/plex2jellyfin/blob/main/docs/permissions.md"))
 
 	return b.String()
 }
@@ -526,7 +526,7 @@ func (m model) renderWebService() string {
 	b.WriteString(fmt.Sprintf("%sPort:          %s\n", portPrefix, portValue))
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
-		"If enabled, installs jellyweb systemd service and listens on the selected port"))
+		"If enabled, installs plex2jellyfin-web systemd service and listens on the selected port"))
 
 	return b.String()
 }
@@ -728,23 +728,23 @@ func (m model) renderComplete() string {
 
 	if m.uninstallMode {
 		var msg strings.Builder
-		msg.WriteString("Uninstall complete.\nJellyWatch has been removed.\n\n")
+		msg.WriteString("Uninstall complete.\nPlex2Jellyfin has been removed.\n\n")
 
 		if m.keepConfig && m.keepDatabase {
-			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config and database preserved: ~/.config/jellywatch/"))
+			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config and database preserved: ~/.config/plex2jellyfin/"))
 			msg.WriteString("\n(Delete manually if no longer needed)")
 		} else if m.keepConfig && !m.keepDatabase {
-			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config preserved: ~/.config/jellywatch/config.toml"))
+			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config preserved: ~/.config/plex2jellyfin/config.toml"))
 			msg.WriteString("\n")
 			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Database deleted."))
 			msg.WriteString("\n\n")
 			msg.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("To rebuild the database after reinstalling:"))
 			msg.WriteString("\n")
-			msg.WriteString("  jellywatch scan\n")
+			msg.WriteString("  plex2jellyfin scan\n")
 			msg.WriteString("\n")
 			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Or with Sonarr/Radarr sync:"))
 			msg.WriteString("\n")
-			msg.WriteString("  jellywatch scan --sonarr --radarr\n")
+			msg.WriteString("  plex2jellyfin scan --sonarr --radarr\n")
 		} else {
 			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config and database deleted."))
 		}
@@ -764,7 +764,7 @@ func (m model) renderComplete() string {
 		b.WriteString("\n\n")
 		b.WriteString(muted.Render("Binaries updated and services restarted. Configuration preserved."))
 		b.WriteString("\n\n")
-		b.WriteString(muted.Render("Logs:  ") + cmd.Render("journalctl -u jellywatchd -f") + "\n")
+		b.WriteString(muted.Render("Logs:  ") + cmd.Render("journalctl -u plex2jellyfin-daemon -f") + "\n")
 		b.WriteString(muted.Render("Web:   ") + cmd.Render("http://localhost:5522") + "\n")
 		b.WriteString("\n")
 		b.WriteString(muted.Render("Press Enter to exit"))
@@ -815,13 +815,13 @@ func (m model) renderComplete() string {
 		b.WriteString(border.Render("└─────────────────────────────────────────────────┘"))
 		b.WriteString("\n\n")
 	} else {
-		b.WriteString(muted.Render("JellyWatch is ready. The daemon is running and watching your configured directories."))
+		b.WriteString(muted.Render("Plex2Jellyfin is ready. The daemon is running and watching your configured directories."))
 		b.WriteString("\n\n")
 	}
 
 	// ── What's Next ───────────────────────────────────────────────────────
 	b.WriteString(bold.Render("What's Next?") + "\n\n")
-	b.WriteString("  " + cmd.Render("jellywatch scan") + "  " + muted.Render("analyze your library for issues") + "\n")
+	b.WriteString("  " + cmd.Render("plex2jellyfin scan") + "  " + muted.Render("analyze your library for issues") + "\n")
 	b.WriteString("\n")
 	b.WriteString(muted.Render("  The scan will detect duplicates, scattered series, and") + "\n")
 	b.WriteString(muted.Render("  low-confidence parses, then guide you through next steps.") + "\n")
@@ -830,7 +830,7 @@ func (m model) renderComplete() string {
 
 	// ── Web UI ────────────────────────────────────────────────────────────
 	b.WriteString(bold.Render("Web UI") + "\n\n")
-	b.WriteString("  " + cmd.Render("sudo systemctl start jellyweb") + "  " + muted.Render("start the web interface") + "\n")
+	b.WriteString("  " + cmd.Render("sudo systemctl start plex2jellyfin-web") + "  " + muted.Render("start the web interface") + "\n")
 	b.WriteString("  " + muted.Render("Then open ") + cmd.Render("http://localhost:5522") + muted.Render(" in your browser") + "\n")
 	b.WriteString("\n")
 	b.WriteString(muted.Render("  💡 Set a password in config.toml to enable authentication") + "\n")
@@ -838,9 +838,9 @@ func (m model) renderComplete() string {
 
 	// ── Config paths ──────────────────────────────────────────────────────
 	pathStyle := muted.Italic(true)
-	b.WriteString(muted.Render("Config:   ") + pathStyle.Render("~/.config/jellywatch/config.toml") + "\n")
-	b.WriteString(muted.Render("Database: ") + pathStyle.Render("~/.config/jellywatch/media.db") + "\n")
-	b.WriteString(muted.Render("Logs:     ") + pathStyle.Render("journalctl -u jellywatchd -f") + "\n")
+	b.WriteString(muted.Render("Config:   ") + pathStyle.Render("~/.config/plex2jellyfin/config.toml") + "\n")
+	b.WriteString(muted.Render("Database: ") + pathStyle.Render("~/.config/plex2jellyfin/media.db") + "\n")
+	b.WriteString(muted.Render("Logs:     ") + pathStyle.Render("journalctl -u plex2jellyfin-daemon -f") + "\n")
 	b.WriteString("\n")
 
 	if len(m.errors) > 0 {
@@ -868,7 +868,7 @@ func (m model) renderArrIssues() string {
 	b.WriteString(warn.Render("Sonarr/Radarr Configuration Issues"))
 	b.WriteString("\n\n")
 
-	b.WriteString(muted.Render("The following settings may conflict with JellyWatch operation:"))
+	b.WriteString(muted.Render("The following settings may conflict with Plex2Jellyfin operation:"))
 	b.WriteString("\n\n")
 
 	for _, issue := range m.arrIssues {
@@ -892,7 +892,7 @@ func (m model) renderArrIssues() string {
 		prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
 	}
 	b.WriteString(prefix + "Fix automatically\n")
-	b.WriteString("    " + muted.Render("Update settings via API to match JellyWatch requirements") + "\n\n")
+	b.WriteString("    " + muted.Render("Update settings via API to match Plex2Jellyfin requirements") + "\n\n")
 
 	// Skip option
 	prefix = "  "

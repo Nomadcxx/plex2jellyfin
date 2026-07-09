@@ -3,8 +3,8 @@ package integration
 import (
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 )
 
 func TestAuditConfidenceFix(t *testing.T) {

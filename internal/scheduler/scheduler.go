@@ -1,4 +1,4 @@
-// Package scheduler provides a small cron-style runner for jellywatchd's
+// Package scheduler provides a small cron-style runner for plex2jellyfin-daemon's
 // recurring jobs (housekeeping detection, drain, etc.).
 //
 // Schedules are simple strings:
@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
 )
 
 // Job is a single registered task.

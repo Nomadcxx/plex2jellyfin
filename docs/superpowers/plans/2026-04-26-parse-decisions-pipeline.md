@@ -47,9 +47,9 @@ This rewrite incorporates the review findings from the first plan pass:
 | `internal/organizer/organizer_test.go` | Dedup and subtitle regression tests |
 | `internal/jellyfin/sweep.go` | Paginated unresolved-decision sweeper using existing Jellyfin client |
 | `internal/jellyfin/sweep_test.go` | Sweep lookback, TTL, and pagination tests |
-| `cmd/jellywatchd/main.go` | Start sweeper/labeler only when Jellyfin client is live |
-| `cmd/jellywatch/parses_cmd.go` | `jellywatch parses` command |
-| `cmd/jellywatch/parses_cmd_test.go` | CLI flag/output/override tests |
+| `cmd/plex2jellyfin-daemon/main.go` | Start sweeper/labeler only when Jellyfin client is live |
+| `cmd/plex2jellyfin/parses_cmd.go` | `plex2jellyfin parses` command |
+| `cmd/plex2jellyfin/parses_cmd_test.go` | CLI flag/output/override tests |
 | `internal/naming/naming.go` | Verbose parse wrappers preserving path-aware parsing |
 | `internal/naming/naming_test.go` | Stripped-token and obfuscated-path regression tests |
 | `internal/naming/corpus_test.go` | Corpus regression harness |
@@ -924,7 +924,7 @@ git commit -m "feat(jellyfin): sweep unresolved parse decisions"
 ### Task 4.4: Wire Sweeper in Daemon Main
 
 **Files:**
-- Modify: `cmd/jellywatchd/main.go`
+- Modify: `cmd/plex2jellyfin-daemon/main.go`
 
 **Step 1: Wire only when client is live**
 
@@ -943,7 +943,7 @@ Run the first sweep after a short delay and then every 6h. Use the existing `ctx
 Run:
 
 ```bash
-go build ./cmd/jellywatchd
+go build ./cmd/plex2jellyfin-daemon
 ```
 
 Expected: PASS.
@@ -951,7 +951,7 @@ Expected: PASS.
 **Step 3: Commit**
 
 ```bash
-git add cmd/jellywatchd/main.go
+git add cmd/plex2jellyfin-daemon/main.go
 git commit -m "feat(daemon): start Jellyfin parse-decision sweeper"
 ```
 
@@ -1042,7 +1042,7 @@ git commit -m "feat(labeling): derive parse decision labels"
 **Files:**
 - Create: `internal/labeling/runner.go`
 - Create: `internal/labeling/runner_test.go`
-- Modify: `cmd/jellywatchd/main.go`
+- Modify: `cmd/plex2jellyfin-daemon/main.go`
 
 **Step 1: Write tests**
 
@@ -1089,8 +1089,8 @@ Run every 15m after an initial short delay.
 
 ```bash
 go test ./internal/labeling -run TestRunner -v
-go build ./cmd/jellywatchd
-git add internal/labeling/runner.go internal/labeling/runner_test.go cmd/jellywatchd/main.go
+go build ./cmd/plex2jellyfin-daemon
+git add internal/labeling/runner.go internal/labeling/runner_test.go cmd/plex2jellyfin-daemon/main.go
 git commit -m "feat(daemon): label parse decisions in background"
 ```
 
@@ -1098,12 +1098,12 @@ git commit -m "feat(daemon): label parse decisions in background"
 
 ## Chunk 6: CLI and Corpus Harness
 
-### Task 6.1: Add `jellywatch parses` Command
+### Task 6.1: Add `plex2jellyfin parses` Command
 
 **Files:**
-- Create: `cmd/jellywatch/parses_cmd.go`
-- Create: `cmd/jellywatch/parses_cmd_test.go`
-- Modify: `cmd/jellywatch/main.go`
+- Create: `cmd/plex2jellyfin/parses_cmd.go`
+- Create: `cmd/plex2jellyfin/parses_cmd_test.go`
+- Modify: `cmd/plex2jellyfin/main.go`
 
 **Step 1: Implement testable command constructor**
 
@@ -1138,9 +1138,9 @@ Do not use `setupTestDB` from `internal/database`; it is package-local. Open a t
 **Step 3: Run tests and commit**
 
 ```bash
-go test ./cmd/jellywatch -run TestParsesCmd -v
-go build ./cmd/jellywatch
-git add cmd/jellywatch/parses_cmd.go cmd/jellywatch/parses_cmd_test.go cmd/jellywatch/main.go
+go test ./cmd/plex2jellyfin -run TestParsesCmd -v
+go build ./cmd/plex2jellyfin
+git add cmd/plex2jellyfin/parses_cmd.go cmd/plex2jellyfin/parses_cmd_test.go cmd/plex2jellyfin/main.go
 git commit -m "feat(cli): add parse decision query command"
 ```
 
@@ -1182,9 +1182,9 @@ git commit -m "test(naming): add deterministic parser corpus harness"
 Run targeted tests after each task. Before claiming the branch is complete, run:
 
 ```bash
-go test ./internal/database ./internal/naming ./internal/daemon ./internal/organizer ./internal/jellyfin ./internal/labeling ./internal/api ./cmd/jellywatch
-go build ./cmd/jellywatch
-go build ./cmd/jellywatchd
+go test ./internal/database ./internal/naming ./internal/daemon ./internal/organizer ./internal/jellyfin ./internal/labeling ./internal/api ./cmd/plex2jellyfin
+go build ./cmd/plex2jellyfin
+go build ./cmd/plex2jellyfin-daemon
 ```
 
 Do not run the real daemon against the default user config as a migration smoke test. Use package tests and temp DBs only.

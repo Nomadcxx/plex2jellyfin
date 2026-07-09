@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Nomadcxx/jellywatch/api"
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/api"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 // ManagerClient provides a unified interface for media manager operations

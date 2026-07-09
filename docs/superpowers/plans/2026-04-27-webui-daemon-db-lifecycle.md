@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bring full daemon and database lifecycle control into the webui — start/stop/restart/reload/recover the daemon, run "re-scan media" and "reset database" with TUI-installer-grade progress, recover from interrupted destructive ops, and add CLI parity (`jellywatch daemon …`). Builds directly on the IPC + Reload foundation laid in Plan 1.
+**Goal:** Bring full daemon and database lifecycle control into the webui — start/stop/restart/reload/recover the daemon, run "re-scan media" and "reset database" with TUI-installer-grade progress, recover from interrupted destructive ops, and add CLI parity (`plex2jellyfin daemon …`). Builds directly on the IPC + Reload foundation laid in Plan 1.
 
-**Architecture:** Extends the IPC protocol with streaming/lifecycle commands (`STOP`, `RESCAN`, `RESET_DB`, `ATTACH`, `CANCEL`) plus a daemon-side op registry and on-disk op log (`op_log.jsonl`) that survives crashes. `jellyweb` exposes REST endpoints that translate browser actions into IPC ops and relays progress via SSE. Frontend gets a `/settings/daemon` and `/settings/database` page with a TUI-installer-style `ProgressCard`, typed-confirm modals, and a recovery flow keyed off the op log.
+**Architecture:** Extends the IPC protocol with streaming/lifecycle commands (`STOP`, `RESCAN`, `RESET_DB`, `ATTACH`, `CANCEL`) plus a daemon-side op registry and on-disk op log (`op_log.jsonl`) that survives crashes. `plex2jellyfin-web` exposes REST endpoints that translate browser actions into IPC ops and relays progress via SSE. Frontend gets a `/settings/daemon` and `/settings/database` page with a TUI-installer-style `ProgressCard`, typed-confirm modals, and a recovery flow keyed off the op log.
 
 **Tech Stack:** Go (chi, net.UnixConn, context cancellation), SQLite (via existing `internal/database`), Next.js App Router, EventSource (browser-native SSE), shadcn/ui dialogs.
 
@@ -14,7 +14,7 @@
 - `internal/daemon/ipc.{Server,Client,FrameWriter}`, protocol types, error codes
 - `internal/daemon/reload.Supervisor` and `reload.Default`
 - `internal/config.AtomicWriteWithLock`
-- `cmd/jellywatchd/control.go` (where Plan 1 registers handlers)
+- `cmd/plex2jellyfin-daemon/control.go` (where Plan 1 registers handlers)
 
 ---
 
@@ -31,7 +31,7 @@ These are the real signatures we extend; deviations from them are bugs.
   Every test stub and handler in this plan **must** include `ctx`. We extend (not replace) this interface; see Task 4.1.
 - **`internal/database/database.go`** — entry points are `Open() (*MediaDB, error)` and `OpenPath(path string) (*MediaDB, error)`. `MediaDB` wraps a `*sql.DB`. A getter `(*MediaDB).SQL() *sql.DB` is added in Task 2.0 so maintenance code can use the raw handle.
 - **`internal/scanner`** — the scanner type is `FileScanner` (`NewFileScanner`, `NewFileScannerWithAI`). There is **no** `Scanner` type. The rescan capability is added as a method on `*FileScanner` in Task 2.1a, reusing the existing periodic walk path.
-- **`cmd/jellywatchd/control.go:14`** — the live status struct is `daemonStatus{PID, UptimeSeconds, ConfigLoaded}`. Task 1.6 extends this struct rather than introducing a parallel `statusPayload`.
+- **`cmd/plex2jellyfin-daemon/control.go:14`** — the live status struct is `daemonStatus{PID, UptimeSeconds, ConfigLoaded}`. Task 1.6 extends this struct rather than introducing a parallel `statusPayload`.
 - **`internal/daemon/ipc/server.go`** — `Server` does **not** export a `Path()` accessor. Task 1.4 adds `func (s *Server) Path() string { return s.path }`.
 - **`internal/daemon/ipc/server.go:38`** — `NewServer` does **not** allocate a registry. Task 1.4 changes `NewServer` to allocate a default `NewOpRegistry()` so `RegisterStreaming` is safe without an explicit `SetRegistry`.
 
@@ -55,20 +55,20 @@ If during execution any of these no longer match (e.g., main rebased), STOP and 
 - `internal/api/database_handlers_test.go`
 - `internal/api/sse_relay.go` — `/events/op/{op_id}` (and `/replay`)
 - `internal/api/sse_relay_test.go`
-- `internal/jellyweb/daemonctl/launcher.go` — strategy resolver: systemd-user → systemd-system → detached exec
-- `internal/jellyweb/daemonctl/launcher_test.go`
-- `cmd/jellywatch/daemon_cmd.go` — `jellywatch daemon {status,reload,stop}` CLI subcommands
-- `cmd/jellywatch/daemon_cmd_test.go`
+- `internal/daemonctl/launcher.go` — strategy resolver: systemd-user → systemd-system → detached exec
+- `internal/daemonctl/launcher_test.go`
+- `cmd/plex2jellyfin/daemon_cmd.go` — `plex2jellyfin daemon {status,reload,stop}` CLI subcommands
+- `cmd/plex2jellyfin/daemon_cmd_test.go`
 
 ### Backend (EDIT)
 - `internal/daemon/ipc/protocol.go` — add `CmdStop`, `CmdRescan`, `CmdResetDB`, `CmdAttach`, `CmdCancel`
 - `internal/daemon/ipc/server.go` — heartbeat goroutine on streaming handlers, frame muxing per op_id
 - `internal/daemon/ipc/client.go` — `Stream(ctx, cmd, args) (<-chan Frame, error)` API for streaming responses
-- `cmd/jellywatchd/control.go` — register the new IPC commands; on startup, run op-log recovery before accepting non-recovery commands
-- `cmd/jellywatchd/main.go` — pass scanner + database handles into the new handlers
+- `cmd/plex2jellyfin-daemon/control.go` — register the new IPC commands; on startup, run op-log recovery before accepting non-recovery commands
+- `cmd/plex2jellyfin-daemon/main.go` — pass scanner + database handles into the new handlers
 - `internal/api/server.go` — mount new routes
 - `api/openapi.yaml` — declare new endpoints
-- `cmd/jellywatch/main.go` — register `daemon` subcommand group
+- `cmd/plex2jellyfin/main.go` — register `daemon` subcommand group
 
 ### Frontend (NEW)
 - `web/src/components/settings/ProgressCard.tsx` — SSE-driven phase/percent feed
@@ -976,11 +976,11 @@ git commit -m "feat(ipc): client.Stream returns frames channel for long-running 
 
 ### Task 1.6: STOP command + recovery wiring in daemon main
 
-**Files:** Modify: `cmd/jellywatchd/control.go`, `cmd/jellywatchd/main.go`. Test: `cmd/jellywatchd/control_test.go` (extend).
+**Files:** Modify: `cmd/plex2jellyfin-daemon/control.go`, `cmd/plex2jellyfin-daemon/main.go`. Test: `cmd/plex2jellyfin-daemon/control_test.go` (extend).
 
 - [ ] **Step 1: Failing test**
 
-Append to `cmd/jellywatchd/control_test.go`:
+Append to `cmd/plex2jellyfin-daemon/control_test.go`:
 
 ```go
 func TestStopHandlerCallsShutdown(t *testing.T) {
@@ -1007,12 +1007,12 @@ func TestStopHandlerCallsShutdown(t *testing.T) {
 
 - [ ] **Step 2: Run, verify fail**
 
-Run: `go test ./cmd/jellywatchd/... -run TestStopHandler`
+Run: `go test ./cmd/plex2jellyfin-daemon/... -run TestStopHandler`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-In `cmd/jellywatchd/control.go`:
+In `cmd/plex2jellyfin-daemon/control.go`:
 
 ```go
 func stopHandler(stop func()) ipc.Handler {
@@ -1023,7 +1023,7 @@ func stopHandler(stop func()) ipc.Handler {
 }
 ```
 
-In `cmd/jellywatchd/main.go`, after the IPC server is constructed and reloadables registered:
+In `cmd/plex2jellyfin-daemon/main.go`, after the IPC server is constructed and reloadables registered:
 
 ```go
 controlServer.Register(ipc.CmdStop, stopHandler(func() {
@@ -1031,7 +1031,7 @@ controlServer.Register(ipc.CmdStop, stopHandler(func() {
 }))
 ```
 
-Also extend the existing `daemonStatus` struct in `cmd/jellywatchd/control.go` (do not introduce a parallel `statusPayload`). Add fields and update `statusHandler`:
+Also extend the existing `daemonStatus` struct in `cmd/plex2jellyfin-daemon/control.go` (do not introduce a parallel `statusPayload`). Add fields and update `statusHandler`:
 
 ```go
 type daemonStatus struct {
@@ -1097,13 +1097,13 @@ While `len(pending) > 0`, mutating IPC commands (`RESCAN`, `RESET_DB`) must reje
 
 - [ ] **Step 4: Run tests**
 
-Run: `go test ./cmd/jellywatchd/... -run TestStopHandler && go build ./...`
+Run: `go test ./cmd/plex2jellyfin-daemon/... -run TestStopHandler && go build ./...`
 Expected: PASS, clean build.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cmd/jellywatchd/
+git add cmd/plex2jellyfin-daemon/
 git commit -m "feat(daemon): STOP IPC + op-log recovery on startup"
 ```
 
@@ -1111,7 +1111,7 @@ git commit -m "feat(daemon): STOP IPC + op-log recovery on startup"
 
 ### Task 1.7: RECOVER command (discard / resume)
 
-**Files:** Modify: `internal/daemon/ipc/protocol.go`, `cmd/jellywatchd/control.go`. Test: `cmd/jellywatchd/control_test.go`.
+**Files:** Modify: `internal/daemon/ipc/protocol.go`, `cmd/plex2jellyfin-daemon/control.go`. Test: `cmd/plex2jellyfin-daemon/control_test.go`.
 
 The browser's `/daemon/recover` endpoint (Task 3.1) needs a daemon-side handler. Resume is out of scope for v1 (no destructive op is currently re-runnable mid-flight) — the handler accepts `discard` and rejects `resume` with `ErrNotImplemented`. Discard marks every pending op as `cancelled` in the op log and clears the daemon's in-memory pending slice so subsequent mutators are unblocked.
 
@@ -1154,7 +1154,7 @@ func TestRecoverDiscardClearsPending(t *testing.T) {
 - [ ] **Step 3: Implement**
 
 ```go
-// cmd/jellywatchd/control.go
+// cmd/plex2jellyfin-daemon/control.go
 type recoverArgs struct { Action string `json:"action"` }
 
 func recoverHandler(log *ipc.OpLog, getPending func() []ipc.OpLogEntry, clearPending func()) ipc.Handler {
@@ -1203,13 +1203,13 @@ controlServer.RegisterStreaming(ipc.CmdResetDB, guard(resetDBHandler(db, opLog))
 
 - [ ] **Step 4: Run tests**
 
-Run: `go test ./cmd/jellywatchd/... -run TestRecover && go test ./internal/daemon/ipc/...`
+Run: `go test ./cmd/plex2jellyfin-daemon/... -run TestRecover && go test ./internal/daemon/ipc/...`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/daemon/ipc/protocol.go cmd/jellywatchd/
+git add internal/daemon/ipc/protocol.go cmd/plex2jellyfin-daemon/
 git commit -m "feat(daemon): RECOVER IPC (discard) + interrupted-op gate on mutators"
 ```
 
@@ -1456,7 +1456,7 @@ import (
     "path/filepath"
     "testing"
 
-    "github.com/Nomadcxx/jellywatch/internal/database"
+    "github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 func TestFullRescanEmitsProgressAndHonorsCancel(t *testing.T) {
@@ -1524,7 +1524,7 @@ git commit -m "feat(scanner): FullRescan one-shot walk with progress channel and
 
 ### Task 2.2: RESCAN IPC handler
 
-**Files:** Modify: `cmd/jellywatchd/control.go`. Test: `cmd/jellywatchd/control_test.go`.
+**Files:** Modify: `cmd/plex2jellyfin-daemon/control.go`. Test: `cmd/plex2jellyfin-daemon/control_test.go`.
 
 - [ ] **Step 1: Failing test**
 
@@ -1575,12 +1575,12 @@ func (fakeScannerForTest) FullRescan(ctx context.Context, paths []string, dry bo
 
 - [ ] **Step 2: Run, verify fail**
 
-Run: `go test ./cmd/jellywatchd/... -run TestRescan`
+Run: `go test ./cmd/plex2jellyfin-daemon/... -run TestRescan`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-In `cmd/jellywatchd/control.go`:
+In `cmd/plex2jellyfin-daemon/control.go`:
 
 ```go
 type rescanArgs struct {
@@ -1626,13 +1626,13 @@ controlServer.RegisterStreaming(ipc.CmdRescan, rescanHandler(scanner, opLog))
 
 - [ ] **Step 5: Run tests**
 
-Run: `go test ./cmd/jellywatchd/... -run TestRescan && go build ./...`
+Run: `go test ./cmd/plex2jellyfin-daemon/... -run TestRescan && go build ./...`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cmd/jellywatchd/
+git add cmd/plex2jellyfin-daemon/
 git commit -m "feat(daemon): RESCAN IPC with progress streaming and op log"
 ```
 
@@ -1640,7 +1640,7 @@ git commit -m "feat(daemon): RESCAN IPC with progress streaming and op log"
 
 ### Task 2.3: RESET_DB IPC handler
 
-**Files:** Modify: `cmd/jellywatchd/control.go`. Test: `cmd/jellywatchd/control_test.go`.
+**Files:** Modify: `cmd/plex2jellyfin-daemon/control.go`. Test: `cmd/plex2jellyfin-daemon/control_test.go`.
 
 - [ ] **Step 1: Failing test**
 
@@ -1669,7 +1669,7 @@ func TestResetDBHandlerRequiresLiteralConfirm(t *testing.T) {
 
 - [ ] **Step 2: Run, verify fail**
 
-Run: `go test ./cmd/jellywatchd/... -run TestResetDBHandler`
+Run: `go test ./cmd/plex2jellyfin-daemon/... -run TestResetDBHandler`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
@@ -1724,13 +1724,13 @@ controlServer.Register(ipc.CmdCancel, cancelHandler(controlServer))
 
 - [ ] **Step 4: Run tests**
 
-Run: `go test ./cmd/jellywatchd/... && go build ./...`
+Run: `go test ./cmd/plex2jellyfin-daemon/... && go build ./...`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cmd/jellywatchd/
+git add cmd/plex2jellyfin-daemon/
 git commit -m "feat(daemon): RESET_DB IPC with typed-confirm gate, ATTACH/CANCEL wiring"
 ```
 
@@ -1754,7 +1754,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 )
 
 type stubDaemonIPC struct {
@@ -1801,8 +1801,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
-	"github.com/Nomadcxx/jellywatch/internal/jellyweb/daemonctl"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemonctl"
 )
 
 type DaemonHandlers struct {
@@ -1905,12 +1905,12 @@ git commit -m "feat(api): /daemon/{status,stop,reload,start,restart,recover}"
 
 ### Task 3.2: Launcher (start strategy resolver)
 
-**Files:** Create: `internal/jellyweb/daemonctl/launcher.go`, `_test.go`.
+**Files:** Create: `internal/daemonctl/launcher.go`, `_test.go`.
 
 - [ ] **Step 1: Failing test**
 
 ```go
-// internal/jellyweb/daemonctl/launcher_test.go
+// internal/daemonctl/launcher_test.go
 package daemonctl
 
 import (
@@ -1956,13 +1956,13 @@ func TestLauncherReturnsStrategyError(t *testing.T) {
 
 - [ ] **Step 2: Run, verify fail**
 
-Run: `go test ./internal/jellyweb/daemonctl/...`
+Run: `go test ./internal/daemonctl/...`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
 ```go
-// internal/jellyweb/daemonctl/launcher.go
+// internal/daemonctl/launcher.go
 package daemonctl
 
 import (
@@ -1972,7 +1972,7 @@ import (
 )
 
 type Launcher struct {
-	BinaryPath          string // path to jellywatchd
+	BinaryPath          string // path to plex2jellyfin-daemon
 	LogPath             string // path for detached stdout/stderr
 
 	// Hooks for unit testing — production code populates them in New().
@@ -1986,16 +1986,16 @@ type Launcher struct {
 func New(binary, logPath string) *Launcher {
 	l := &Launcher{BinaryPath: binary, LogPath: logPath}
 	l.systemdUserExists = func() bool {
-		return exec.Command("systemctl", "--user", "list-unit-files", "jellywatchd.service").Run() == nil
+		return exec.Command("systemctl", "--user", "list-unit-files", "plex2jellyfin-daemon.service").Run() == nil
 	}
 	l.systemdUserStart = func() error {
-		return exec.Command("systemctl", "--user", "start", "jellywatchd").Run()
+		return exec.Command("systemctl", "--user", "start", "plex2jellyfin-daemon").Run()
 	}
 	l.systemdSystemExists = func() bool {
-		return exec.Command("systemctl", "list-unit-files", "jellywatchd.service").Run() == nil
+		return exec.Command("systemctl", "list-unit-files", "plex2jellyfin-daemon.service").Run() == nil
 	}
 	l.systemdSystemStart = func() error {
-		return exec.Command("systemctl", "start", "jellywatchd").Run()
+		return exec.Command("systemctl", "start", "plex2jellyfin-daemon").Run()
 	}
 	l.directExec = func() error {
 		f, err := openLogFile(logPath)
@@ -2030,7 +2030,7 @@ func (l *Launcher) Start() error {
 ```
 
 ```go
-// internal/jellyweb/daemonctl/log_file.go
+// internal/daemonctl/log_file.go
 package daemonctl
 
 import "os"
@@ -2042,18 +2042,18 @@ func openLogFile(path string) (*os.File, error) {
 
 - [ ] **Step 4: Run tests**
 
-Run: `go test ./internal/jellyweb/daemonctl/...`
+Run: `go test ./internal/daemonctl/...`
 Expected: PASS.
 
-- [ ] **Step 5: Wire in jellyweb startup**
+- [ ] **Step 5: Wire in plex2jellyfin-web startup**
 
-In `cmd/jellyweb/main.go`, before constructing `api.Server`, build the launcher and pass it through. Add `Launcher *daemonctl.Launcher` to `api.Server`'s deps.
+In `cmd/plex2jellyfin-web/main.go`, before constructing `api.Server`, build the launcher and pass it through. Add `Launcher *daemonctl.Launcher` to `api.Server`'s deps.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add internal/jellyweb/daemonctl/ cmd/jellyweb/main.go internal/api/server.go
-git commit -m "feat(jellyweb): launcher with systemd-user → systemd-system → detached exec strategy"
+git add internal/daemonctl/ cmd/plex2jellyfin-web/main.go internal/api/server.go
+git commit -m "feat(plex2jellyfin-web): launcher with systemd-user → systemd-system → detached exec strategy"
 ```
 
 ---
@@ -2124,7 +2124,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/google/uuid"
 )
 
@@ -2299,7 +2299,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -2409,14 +2409,14 @@ git commit -m "feat(api): SSE relay for /events/op/{id} via IPC ATTACH"
 
 ## Phase 6 — CLI parity
 
-### Task 6.1: `jellywatch daemon {status,reload,stop}`
+### Task 6.1: `plex2jellyfin daemon {status,reload,stop}`
 
-**Files:** Create: `cmd/jellywatch/daemon_cmd.go`, `cmd/jellywatch/daemon_cmd_test.go`. Modify: `cmd/jellywatch/main.go`.
+**Files:** Create: `cmd/plex2jellyfin/daemon_cmd.go`, `cmd/plex2jellyfin/daemon_cmd_test.go`. Modify: `cmd/plex2jellyfin/main.go`.
 
 - [ ] **Step 1: Failing test**
 
 ```go
-// cmd/jellywatch/daemon_cmd_test.go
+// cmd/plex2jellyfin/daemon_cmd_test.go
 package main
 
 import (
@@ -2426,7 +2426,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 )
 
 func TestDaemonStatusCommandPrintsJSON(t *testing.T) {
@@ -2453,13 +2453,13 @@ func TestDaemonStatusCommandPrintsJSON(t *testing.T) {
 
 - [ ] **Step 2: Run, verify fail**
 
-Run: `go test ./cmd/jellywatch/... -run TestDaemonStatusCommand`
+Run: `go test ./cmd/plex2jellyfin/... -run TestDaemonStatusCommand`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
 ```go
-// cmd/jellywatch/daemon_cmd.go
+// cmd/plex2jellyfin/daemon_cmd.go
 package main
 
 import (
@@ -2468,8 +2468,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
-	"github.com/Nomadcxx/jellywatch/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -2482,7 +2482,7 @@ func newDaemonCmd() *cobra.Command {
 }
 
 func socketPath() string {
-	d, _ := paths.JellyWatchDir()
+	d, _ := paths.Plex2JellyfinDir()
 	return d + "/control.sock"
 }
 
@@ -2532,18 +2532,18 @@ func newDaemonStopCmd() *cobra.Command {
 }
 ```
 
-In `cmd/jellywatch/main.go`, register: `rootCmd.AddCommand(newDaemonCmd())`.
+In `cmd/plex2jellyfin/main.go`, register: `rootCmd.AddCommand(newDaemonCmd())`.
 
 - [ ] **Step 4: Run tests**
 
-Run: `go test ./cmd/jellywatch/... && go build ./...`
+Run: `go test ./cmd/plex2jellyfin/... && go build ./...`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cmd/jellywatch/daemon_cmd.go cmd/jellywatch/daemon_cmd_test.go cmd/jellywatch/main.go
-git commit -m "feat(cli): jellywatch daemon {status,reload,stop} via IPC"
+git add cmd/plex2jellyfin/daemon_cmd.go cmd/plex2jellyfin/daemon_cmd_test.go cmd/plex2jellyfin/main.go
+git commit -m "feat(cli): plex2jellyfin daemon {status,reload,stop} via IPC"
 ```
 
 ---
@@ -2887,7 +2887,7 @@ Expected: FAIL.
 import { useEffect, useState } from 'react';
 import type { OpEvent } from '@/components/settings/ProgressCard';
 
-const STORAGE_KEY = 'jellywatch.activeOp';
+const STORAGE_KEY = 'plex2jellyfin.activeOp';
 
 export function useOpStream(opID: string | null) {
   const [events, setEvents] = useState<OpEvent[]>([]);
@@ -3201,7 +3201,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/go-chi/chi/v5"
 )
 

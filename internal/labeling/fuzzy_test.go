@@ -3,7 +3,7 @@ package labeling_test
 import (
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/labeling"
+	"github.com/Nomadcxx/plex2jellyfin/internal/labeling"
 )
 
 func TestFuzzyTitleEqual(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/Nomadcxx/jellywatch/internal/naming"
-	"github.com/Nomadcxx/jellywatch/internal/video"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
 var (

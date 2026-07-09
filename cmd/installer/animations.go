@@ -688,8 +688,8 @@ type TypewriterTicker struct {
 }
 
 func NewTypewriterTicker() *TypewriterTicker {
-	roasts := make([]string, len(jellyWatchRoasts))
-	copy(roasts, jellyWatchRoasts)
+	roasts := make([]string, len(plex2jellyfinRoasts))
+	copy(roasts, plex2jellyfinRoasts)
 	rand.Shuffle(len(roasts), func(i, j int) {
 		roasts[i], roasts[j] = roasts[j], roasts[i]
 	})

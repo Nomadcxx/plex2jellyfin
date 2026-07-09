@@ -16,7 +16,7 @@ func TestGetDirtySeries(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show 1 (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series1)
 	if err != nil {
@@ -33,7 +33,7 @@ func TestGetDirtySeries(t *testing.T) {
 		Year:          2021,
 		CanonicalPath: "/tv/Test Show 2 (2021)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err = db.UpsertSeries(series2)
 	if err != nil {
@@ -63,7 +63,7 @@ func TestGetDirtyMovies(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/movies/Test Movie 1 (2020)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertMovie(movie1)
 	if err != nil {
@@ -80,7 +80,7 @@ func TestGetDirtyMovies(t *testing.T) {
 		Year:          2021,
 		CanonicalPath: "/movies/Test Movie 2 (2021)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err = db.UpsertMovie(movie2)
 	if err != nil {
@@ -110,7 +110,7 @@ func TestMarkSeriesSynced(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series)
 	if err != nil {
@@ -156,7 +156,7 @@ func TestMarkMovieSynced(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/movies/Test Movie (2020)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertMovie(movie)
 	if err != nil {
@@ -202,7 +202,7 @@ func TestGetSeriesByID(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series)
 	if err != nil {
@@ -240,7 +240,7 @@ func TestGetMovieByID(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/movies/Test Movie (2020)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertMovie(movie)
 	if err != nil {
@@ -279,7 +279,7 @@ func TestDirtyFlags_DatabaseClosed(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series)
 	if err != nil {
@@ -349,7 +349,7 @@ func TestDirtyFlags_InvalidID(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series)
 	if err != nil {
@@ -362,7 +362,7 @@ func TestDirtyFlags_InvalidID(t *testing.T) {
 		Year:          2021,
 		CanonicalPath: "/movies/Test Movie (2021)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err = db.UpsertMovie(movie)
 	if err != nil {
@@ -458,7 +458,7 @@ func TestDirtyFlags_ConcurrentWrites(t *testing.T) {
 			Year:          2020 + i,
 			CanonicalPath: fmt.Sprintf("/tv/Test Show %d (%d)", i, 2020+i),
 			LibraryRoot:   "/tv",
-			Source:        "jellywatch",
+			Source:        "plex2jellyfin",
 		}
 		_, err := db.UpsertSeries(series)
 		if err != nil {
@@ -540,7 +540,7 @@ func TestGetAllSeries_DatabaseLocked(t *testing.T) {
 			Year:          2020 + i,
 			CanonicalPath: fmt.Sprintf("/tv/Locked Test Show %d (%d)", i, 2020+i),
 			LibraryRoot:   "/tv",
-			Source:        "jellywatch",
+			Source:        "plex2jellyfin",
 		}
 		if _, err := db.UpsertSeries(series); err != nil {
 			t.Fatalf("UpsertSeries %d failed: %v", i, err)
@@ -606,7 +606,7 @@ func TestSetSeriesDirty_MultipleCalls(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series)
 	if err != nil {
@@ -641,7 +641,7 @@ func TestSetMovieDirty_MultipleCalls(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/movies/Test Movie (2020)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertMovie(movie)
 	if err != nil {
@@ -675,7 +675,7 @@ func TestMarkSeriesSynced_ClearsBothFlags(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series)
 	if err != nil {
@@ -722,7 +722,7 @@ func TestMarkMovieSynced_UpdatesTimestamp(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/movies/Test Movie (2020)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertMovie(movie)
 	if err != nil {
@@ -865,7 +865,7 @@ func TestDirtyFlags_DefaultToFalse(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series)
 	if err != nil {
@@ -896,7 +896,7 @@ func TestDirtyFlags_DefaultToFalse(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/movies/Test Movie (2020)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err = db.UpsertMovie(movie)
 	if err != nil {
@@ -932,7 +932,7 @@ func TestDirtyFlags_SurvivesRestart(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err = db1.UpsertSeries(series)
 	if err != nil {

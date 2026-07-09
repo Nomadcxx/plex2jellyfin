@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/api"
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/api"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 func TestAPIRouterRejectsLargeBodies(t *testing.T) {

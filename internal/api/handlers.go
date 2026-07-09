@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/api"
-	"github.com/Nomadcxx/jellywatch/internal/activity"
-	"github.com/Nomadcxx/jellywatch/internal/consolidate"
+	"github.com/Nomadcxx/plex2jellyfin/api"
+	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
+	"github.com/Nomadcxx/plex2jellyfin/internal/consolidate"
 	"github.com/google/uuid"
 )
 

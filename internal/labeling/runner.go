@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 const (

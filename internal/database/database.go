@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/Nomadcxx/jellywatch/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	_ "modernc.org/sqlite"
 )
 
-// MediaDB is the main database handle for JellyWatch media tracking
+// MediaDB is the main database handle for Plex2Jellyfin media tracking
 type MediaDB struct {
 	db   *sql.DB
 	path string

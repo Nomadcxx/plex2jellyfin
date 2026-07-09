@@ -1,11 +1,11 @@
-package jellywatch
+package plex2jellyfin
 
 import (
 	"io"
 	"strings"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/embedded"
+	"github.com/Nomadcxx/plex2jellyfin/embedded"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -28,7 +28,7 @@ func TestGetWebFSServesBuiltFrontend(t *testing.T) {
 	}
 
 	content := string(b)
-	if strings.Contains(content, "<body>jellywatch</body>") {
+	if strings.Contains(content, "<body>plex2jellyfin</body>") {
 		t.Fatalf("index.html is placeholder content, expected built frontend")
 	}
 	if !strings.Contains(content, "_next/static/") {

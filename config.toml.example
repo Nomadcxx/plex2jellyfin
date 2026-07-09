@@ -1,5 +1,5 @@
-# JellyWatch Configuration
-# Location: ~/.config/jellywatch/config.toml
+# Plex2Jellyfin Configuration
+# Location: ~/.config/plex2jellyfin/config.toml
 
 # Directories to watch for new media files
 [watch]

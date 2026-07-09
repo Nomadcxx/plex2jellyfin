@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 )
 
 type Collector struct {
@@ -33,8 +33,8 @@ var journalctlExcerpt = func(since time.Time) (string, error) {
 	}
 	out, err := exec.Command(
 		"journalctl",
-		"-u", "jellywatchd",
-		"-u", "jellyweb",
+		"-u", "plex2jellyfin-daemon",
+		"-u", "plex2jellyfin-web",
 		"--since", since.Local().Format("2006-01-02 15:04:05"),
 		"-n", "200",
 		"--no-pager",
@@ -77,7 +77,7 @@ func (c Collector) Collect() (BundlePaths, error) {
 		return BundlePaths{}, fmt.Errorf("report root is required")
 	}
 	if c.Workspace == "" {
-		c.Workspace = "/home/nomadx/Documents/jellywatch"
+		c.Workspace = "/home/nomadx/Documents/plex2jellyfin"
 	}
 
 	bundle := NewBundlePaths(c.Root, RunID(now))
@@ -548,7 +548,7 @@ func (c Collector) daemonLogExcerpt() string {
 	if text, err := journalctlExcerpt(c.Since); err == nil {
 		return lastLines(text, 200)
 	} else {
-		failures = append(failures, fmt.Sprintf("journalctl jellywatchd/jellyweb: %v", err))
+		failures = append(failures, fmt.Sprintf("journalctl plex2jellyfin-daemon/plex2jellyfin-web: %v", err))
 	}
 
 	return "daemon log unavailable\n" + strings.Join(failures, "\n")

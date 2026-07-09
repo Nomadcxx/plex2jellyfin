@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 func TestCollectorWritesSummaryAndParseDecisions(t *testing.T) {
@@ -41,7 +41,7 @@ func TestCollectorWritesSummaryAndParseDecisions(t *testing.T) {
 		Now:       func() time.Time { return now },
 		Since:     now.Add(-96 * time.Hour),
 		LogDir:    t.TempDir(),
-		Workspace: "/home/nomadx/Documents/jellywatch",
+		Workspace: "/home/nomadx/Documents/plex2jellyfin",
 	}
 	bundle, err := c.Collect()
 	if err != nil {
@@ -166,7 +166,7 @@ func TestCollectorWritesEmptySuspiciousItemsAsArray(t *testing.T) {
 		Now:       func() time.Time { return now },
 		Since:     now.Add(-96 * time.Hour),
 		LogDir:    t.TempDir(),
-		Workspace: "/home/nomadx/Documents/jellywatch",
+		Workspace: "/home/nomadx/Documents/plex2jellyfin",
 	}.Collect()
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
@@ -210,7 +210,7 @@ func TestDaemonLogExcerptReportsUnavailableWhenNoSourceWorks(t *testing.T) {
 func TestDaemonLogExcerptFallsBackToJournalctl(t *testing.T) {
 	oldJournalctlExcerpt := journalctlExcerpt
 	journalctlExcerpt = func(time.Time) (string, error) {
-		return "Jun 26 jellywatchd[1]: scanner complete", nil
+		return "Jun 26 plex2jellyfin-daemon[1]: scanner complete", nil
 	}
 	t.Cleanup(func() { journalctlExcerpt = oldJournalctlExcerpt })
 

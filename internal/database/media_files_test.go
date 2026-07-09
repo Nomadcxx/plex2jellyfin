@@ -8,7 +8,7 @@ import (
 
 func TestMediaFileMigrations(t *testing.T) {
 	// Create temporary database
-	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	tmpFile, err := os.CreateTemp("", "plex2jellyfin-test-*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestMediaFileMigrations(t *testing.T) {
 
 func TestMediaFileCRUD(t *testing.T) {
 	// Create temporary database
-	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	tmpFile, err := os.CreateTemp("", "plex2jellyfin-test-*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestMediaFileCRUD(t *testing.T) {
 }
 
 func TestGetLowConfidenceFilesUnderPathScopesToDirectoryAndExactFile(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	tmpFile, err := os.CreateTemp("", "plex2jellyfin-test-*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestUpsertMediaFileSetsExistingIDOnUpdate(t *testing.T) {
 
 func TestDuplicateDetection(t *testing.T) {
 	// Create temporary database
-	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	tmpFile, err := os.CreateTemp("", "plex2jellyfin-test-*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestDuplicateDetection(t *testing.T) {
 
 func TestEpisodeCRUD(t *testing.T) {
 	// Create temporary database
-	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	tmpFile, err := os.CreateTemp("", "plex2jellyfin-test-*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -454,7 +454,7 @@ func TestEpisodeCRUD(t *testing.T) {
 
 func TestConsolidationStats(t *testing.T) {
 	// Create temporary database
-	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	tmpFile, err := os.CreateTemp("", "plex2jellyfin-test-*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -533,7 +533,7 @@ func TestConsolidationStats(t *testing.T) {
 
 func TestMigration7NullableSourceFileID(t *testing.T) {
 	// Create temporary database
-	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	tmpFile, err := os.CreateTemp("", "plex2jellyfin-test-*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestMigration7NullableSourceFileID(t *testing.T) {
 }
 
 func TestMigration8AddConflictID(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "jellywatch-test-*.db")
+	tmpFile, err := os.CreateTemp("", "plex2jellyfin-test-*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}

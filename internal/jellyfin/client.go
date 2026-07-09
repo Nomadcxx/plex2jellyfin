@@ -36,7 +36,7 @@ func NewClient(cfg Config) *Client {
 
 	hostname, err := os.Hostname()
 	if err != nil || hostname == "" {
-		hostname = "jellywatch"
+		hostname = "plex2jellyfin"
 	}
 
 	httpClient := cfg.HTTPClient
@@ -53,12 +53,12 @@ func NewClient(cfg Config) *Client {
 		apiKey:     cfg.APIKey,
 		httpClient: httpClient,
 		hostname:   hostname,
-		deviceID:   fmt.Sprintf("jellywatch-%s-%d", hostname, time.Now().UnixNano()),
+		deviceID:   fmt.Sprintf("plex2jellyfin-%s-%d", hostname, time.Now().UnixNano()),
 	}
 }
 
 func (c *Client) authHeader() string {
-	return fmt.Sprintf(`MediaBrowser Token="%s", Client="jellywatch", Device="%s", DeviceId="%s", Version="1.0.0"`,
+	return fmt.Sprintf(`MediaBrowser Token="%s", Client="plex2jellyfin", Device="%s", DeviceId="%s", Version="1.0.0"`,
 		c.apiKey, c.hostname, c.deviceID)
 }
 

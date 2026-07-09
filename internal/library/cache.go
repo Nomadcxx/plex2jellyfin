@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 type SeriesCache struct {

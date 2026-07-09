@@ -37,14 +37,14 @@ export function LoginForm() {
       <CardHeader className="space-y-1">
         <div className="flex items-center justify-center mb-4">
           <Image
-            src="/jellywatch_brand.png"
-            alt="JellyWatch"
+            src="/plex2jellyfin_brand.png"
+            alt="Plex2Jellyfin"
             width={80}
             height={80}
             className="rounded"
           />
         </div>
-        <CardTitle className="text-2xl text-center">Welcome to JellyWatch</CardTitle>
+        <CardTitle className="text-2xl text-center">Welcome to Plex2Jellyfin</CardTitle>
         <CardDescription className="text-center">
           Enter your password to access the dashboard
         </CardDescription>

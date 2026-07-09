@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/activity"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 )
 
 // HandleJellyfinWebhook processes incoming events from the Jellyfin webhook plugin.
@@ -59,7 +59,7 @@ func (s *Server) validateWebhookSecret(r *http.Request) bool {
 		return false
 	}
 
-	provided := strings.TrimSpace(r.Header.Get("X-Jellywatch-Webhook-Secret"))
+	provided := strings.TrimSpace(r.Header.Get("X-Plex2Jellyfin-Webhook-Secret"))
 	if provided == "" {
 		return false
 	}
@@ -196,7 +196,7 @@ func (s *Server) handleItemRemoved(event jellyfin.WebhookEvent) {
 	}
 
 	s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, false,
-		"jellyfin removed item that jellywatch organized")
+		"jellyfin removed item that plex2jellyfin organized")
 }
 
 func (s *Server) handleTaskCompleted(event jellyfin.WebhookEvent) {

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
-	"github.com/Nomadcxx/jellywatch/internal/quality"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/quality"
 )
 
 // FileScanner scans libraries and populates the media_files database

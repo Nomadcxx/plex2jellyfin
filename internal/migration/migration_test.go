@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 func TestPathMismatchStructure(t *testing.T) {
@@ -40,7 +40,7 @@ func TestFixChoiceConstants(t *testing.T) {
 		choice FixChoice
 		want   string
 	}{
-		{FixChoiceKeepJellyWatch, "jellywatch"},
+		{FixChoiceKeepPlex2Jellyfin, "plex2jellyfin"},
 		{FixChoiceKeepSonarrRadarr, "arr"},
 		{FixChoiceSkip, "skip"},
 	}
@@ -408,7 +408,7 @@ func TestMigration_InvalidMismatchType(t *testing.T) {
 		Year:      2024,
 	}
 
-	err := FixSeriesMismatch(db, sonarrClient, movieAsSeries, FixChoiceKeepJellyWatch)
+	err := FixSeriesMismatch(db, sonarrClient, movieAsSeries, FixChoiceKeepPlex2Jellyfin)
 	if err == nil {
 		t.Error("expected error when passing movie mismatch to FixSeriesMismatch, got nil")
 	}
@@ -436,7 +436,7 @@ func TestMigration_InvalidMismatchType(t *testing.T) {
 		Year:      2024,
 	}
 
-	err = FixMovieMismatch(db, radarrClient, seriesAsMovie, FixChoiceKeepJellyWatch)
+	err = FixMovieMismatch(db, radarrClient, seriesAsMovie, FixChoiceKeepPlex2Jellyfin)
 	if err == nil {
 		t.Error("expected error when passing series mismatch to FixMovieMismatch, got nil")
 	}
@@ -976,12 +976,12 @@ func TestMigration_PartialFailure(t *testing.T) {
 		t.Fatalf("expected 3 mismatches, got %d", len(mismatches))
 	}
 
-	err = FixSeriesMismatch(db, sonarrClient, mismatches[0], FixChoiceKeepJellyWatch)
+	err = FixSeriesMismatch(db, sonarrClient, mismatches[0], FixChoiceKeepPlex2Jellyfin)
 	if err != nil {
 		t.Errorf("first fix should succeed: %v", err)
 	}
 
-	err = FixSeriesMismatch(db, sonarrClient, mismatches[1], FixChoiceKeepJellyWatch)
+	err = FixSeriesMismatch(db, sonarrClient, mismatches[1], FixChoiceKeepPlex2Jellyfin)
 	if err == nil {
 		t.Error("second fix should fail due to simulated network error")
 	}
@@ -989,7 +989,7 @@ func TestMigration_PartialFailure(t *testing.T) {
 		t.Logf("Got expected error on second fix: %v", err)
 	}
 
-	err = FixSeriesMismatch(db, sonarrClient, mismatches[2], FixChoiceKeepJellyWatch)
+	err = FixSeriesMismatch(db, sonarrClient, mismatches[2], FixChoiceKeepPlex2Jellyfin)
 	if err == nil {
 		t.Error("third fix should fail due to simulated network error")
 	}
@@ -1062,12 +1062,12 @@ func TestMigration_PartialFailure(t *testing.T) {
 		t.Fatalf("expected 2 movie mismatches, got %d", len(movieMismatches))
 	}
 
-	err = FixMovieMismatch(db, radarrClient, movieMismatches[0], FixChoiceKeepJellyWatch)
+	err = FixMovieMismatch(db, radarrClient, movieMismatches[0], FixChoiceKeepPlex2Jellyfin)
 	if err != nil {
 		t.Errorf("first movie fix should succeed: %v", err)
 	}
 
-	err = FixMovieMismatch(db, radarrClient, movieMismatches[1], FixChoiceKeepJellyWatch)
+	err = FixMovieMismatch(db, radarrClient, movieMismatches[1], FixChoiceKeepPlex2Jellyfin)
 	if err == nil {
 		t.Error("second movie fix should fail due to rate limit")
 	}
@@ -1076,7 +1076,7 @@ func TestMigration_PartialFailure(t *testing.T) {
 	}
 }
 
-func TestFixSeriesMismatch_KeepJellyWatch(t *testing.T) {
+func TestFixSeriesMismatch_KeepPlex2Jellyfin(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
@@ -1126,7 +1126,7 @@ func TestFixSeriesMismatch_KeepJellyWatch(t *testing.T) {
 		HasSonarrID:  true,
 	}
 
-	err = FixSeriesMismatch(db, sonarrClient, mismatch, FixChoiceKeepJellyWatch)
+	err = FixSeriesMismatch(db, sonarrClient, mismatch, FixChoiceKeepPlex2Jellyfin)
 	if err != nil {
 		t.Errorf("expected fix to succeed, got error: %v", err)
 	}
@@ -1310,7 +1310,7 @@ func TestFixSeriesMismatch_NoSonarrID(t *testing.T) {
 		HasSonarrID:  false,
 	}
 
-	err = FixSeriesMismatch(db, sonarrClient, mismatch, FixChoiceKeepJellyWatch)
+	err = FixSeriesMismatch(db, sonarrClient, mismatch, FixChoiceKeepPlex2Jellyfin)
 	if err == nil {
 		t.Error("expected error when no Sonarr ID provided, got nil")
 	}
@@ -1368,7 +1368,7 @@ func TestFixSeriesMismatch_APIFailure(t *testing.T) {
 		HasSonarrID:  true,
 	}
 
-	err = FixSeriesMismatch(db, sonarrClient, mismatch, FixChoiceKeepJellyWatch)
+	err = FixSeriesMismatch(db, sonarrClient, mismatch, FixChoiceKeepPlex2Jellyfin)
 	if err == nil {
 		t.Error("expected error when API fails, got nil")
 	}
@@ -1432,7 +1432,7 @@ func TestFixSeriesMismatch_NotFound(t *testing.T) {
 	}
 }
 
-func TestFixMovieMismatch_KeepJellyWatch(t *testing.T) {
+func TestFixMovieMismatch_KeepPlex2Jellyfin(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
@@ -1482,7 +1482,7 @@ func TestFixMovieMismatch_KeepJellyWatch(t *testing.T) {
 		HasRadarrID:  true,
 	}
 
-	err = FixMovieMismatch(db, radarrClient, mismatch, FixChoiceKeepJellyWatch)
+	err = FixMovieMismatch(db, radarrClient, mismatch, FixChoiceKeepPlex2Jellyfin)
 	if err != nil {
 		t.Errorf("expected fix to succeed, got error: %v", err)
 	}
@@ -1666,7 +1666,7 @@ func TestFixMovieMismatch_NoRadarrID(t *testing.T) {
 		HasRadarrID:  false,
 	}
 
-	err = FixMovieMismatch(db, radarrClient, mismatch, FixChoiceKeepJellyWatch)
+	err = FixMovieMismatch(db, radarrClient, mismatch, FixChoiceKeepPlex2Jellyfin)
 	if err == nil {
 		t.Error("expected error when no Radarr ID provided, got nil")
 	}
@@ -1724,7 +1724,7 @@ func TestFixMovieMismatch_APIFailure(t *testing.T) {
 		HasRadarrID:  true,
 	}
 
-	err = FixMovieMismatch(db, radarrClient, mismatch, FixChoiceKeepJellyWatch)
+	err = FixMovieMismatch(db, radarrClient, mismatch, FixChoiceKeepPlex2Jellyfin)
 	if err == nil {
 		t.Error("expected error when API fails, got nil")
 	}

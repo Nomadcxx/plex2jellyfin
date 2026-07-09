@@ -18,7 +18,7 @@ func TestMigration11_DirtyFlags(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 
 	_, err := db.UpsertSeries(series)
@@ -49,7 +49,7 @@ func TestMigration11_DirtyFlags(t *testing.T) {
 		Year:          2021,
 		CanonicalPath: "/movies/Test Movie (2021)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 
 	_, err = db.UpsertMovie(movie)

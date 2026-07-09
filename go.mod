@@ -1,4 +1,4 @@
-module github.com/Nomadcxx/jellywatch
+module github.com/Nomadcxx/plex2jellyfin
 
 go 1.24.0
 

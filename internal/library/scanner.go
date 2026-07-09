@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Nomadcxx/jellywatch/internal/video"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
 // ShowLocation represents a show found in a library

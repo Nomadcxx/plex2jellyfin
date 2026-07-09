@@ -1,4 +1,4 @@
-# JellyWatch Ponytail Audit — Master Summary
+# Plex2Jellyfin Ponytail Audit — Master Summary
 
 ## Totals
 
@@ -51,7 +51,7 @@
 |------|------|-------|
 | 1 | Context-wrapper pattern: every Radarr/Sonarr method has a `*Context` variant that just calls the context version with `context.Background()`. | ~120 |
 | 2 | `PluginClient` duplicates ~80% of `Client` struct fields, auth, get/post methods. Only difference is retry logic. | ~50 |
-| 3 | `isMediaFile` duplicated 4× across jellyfin/verify.go, cmd/jellywatch, cmd/jellywatchd, consolidate. | ~40 |
+| 3 | `isMediaFile` duplicated 4× across jellyfin/verify.go, cmd/plex2jellyfin, cmd/plex2jellyfin-daemon, consolidate. | ~40 |
 
 ### CLI & Commands
 | Rank | What | Lines |
@@ -78,8 +78,8 @@
 
 ### Media File Detection (5 items)
 - **C1** (Pipeline): `isVideoFile` (scanner.go) vs `Handler.IsMediaFile` (watcher.go) — two different video-file detection paths. Verify all Handler implementations use the same extension set.
-- **C1** (CLI): `isMediaFile`/`isVideoFile` spans cmd/jellywatch, cmd/jellywatchd, cmd/jellywatch/cleanup.go, and possibly internal/ packages.
-- **#3** (*arr): `isMediaFile` duplicated 4× across jellyfin/verify.go, cmd/jellywatch, cmd/jellywatchd, consolidate.
+- **C1** (CLI): `isMediaFile`/`isVideoFile` spans cmd/plex2jellyfin, cmd/plex2jellyfin-daemon, cmd/plex2jellyfin/cleanup.go, and possibly internal/ packages.
+- **#3** (*arr): `isMediaFile` duplicated 4× across jellyfin/verify.go, cmd/plex2jellyfin, cmd/plex2jellyfin-daemon, consolidate.
 - **CR3** (AI): `videoExtensions` map exists in analyzer, library, service — 3+ places.
 - **R1** (Parser): `KnownReleaseGroups` (10,992 entries) vs `knownReleaseGroups` (~80 entries) — measure accuracy on real filenames.
 

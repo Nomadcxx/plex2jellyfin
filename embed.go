@@ -1,10 +1,10 @@
-// Package jellywatch provides the embedded frontend filesystem.
+// Package plex2jellyfin provides the embedded frontend filesystem.
 //
 // This is the canonical embed point for frontend static files.
 // Used by internal/api/server.go for HTTP serving.
 //
 // Build: Run `make frontend` before `go build` to populate embedded/frontend/.
-package jellywatch
+package plex2jellyfin
 
 import (
 	"embed"

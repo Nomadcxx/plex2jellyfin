@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
-	"github.com/Nomadcxx/jellywatch/internal/video"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
 type Selector struct {

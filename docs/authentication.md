@@ -1,8 +1,8 @@
-# JellyWatch Authentication
+# Plex2Jellyfin Authentication
 
 ## Configuration
 
-Add to ~/.config/jellywatch/config.toml:
+Add to ~/.config/plex2jellyfin/config.toml:
 
 password = "your-password"
 secure_cookies = true

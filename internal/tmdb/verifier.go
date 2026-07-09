@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 )
 
 // MediaKind narrows search to movies or series.

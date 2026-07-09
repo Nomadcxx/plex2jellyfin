@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
 )
 
 func newTestScheduler(t *testing.T) (*Scheduler, *database.MediaDB) {

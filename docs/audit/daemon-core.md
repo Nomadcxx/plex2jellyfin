@@ -4,7 +4,7 @@
 
 | Rank | File:Line | What | Why | Fix | Lines Saved |
 |------|-----------|------|-----|-----|-------------|
-| 1 | daemon.go:1-88 | Entire file: `Daemon` struct, `NewDaemon`, `Start`, `Stop`, `Run` | Dead code. Zero callers anywhere in the codebase. `NewDaemon` only referenced in its own file. `Start`/`Run` never invoked. The real daemon lifecycle is in `cmd/jellywatchd/main.go`. | Delete the file. | ~80 |
+| 1 | daemon.go:1-88 | Entire file: `Daemon` struct, `NewDaemon`, `Start`, `Stop`, `Run` | Dead code. Zero callers anywhere in the codebase. `NewDaemon` only referenced in its own file. `Start`/`Run` never invoked. The real daemon lifecycle is in `cmd/plex2jellyfin-daemon/main.go`. | Delete the file. | ~80 |
 | 2 | handler.go:1297-1335 | `removeNonVideoContents` method | Dead code. Defined but never called anywhere. | Delete the method. | ~38 |
 | 3 | ipc/frame_ring.go:12 | `cursor int` field on `FrameRing` | Dead field. `Append` uses slice append+truncate, never reads or writes `cursor`. Vestigial from an earlier ring-buffer design. | Delete the field. | 1 |
 | 4 | ratelimit.go:59-61 | `Caps()` method on `AIRateLimiter` | Dead code. Zero callers. | Delete the method. | 3 |
@@ -37,9 +37,9 @@
 
 | # | Finding | Why cross-package |
 |---|---------|-------------------|
-| 1 | `ReadFlaggedForReview` in `enhancelog.go` | Standalone function that reads the enhance log for the CLI `review` command. Lives in the daemon package but is only called from `cmd/jellywatch`. Should move to a shared package or the CLI layer. |
+| 1 | `ReadFlaggedForReview` in `enhancelog.go` | Standalone function that reads the enhance log for the CLI `review` command. Lives in the daemon package but is only called from `cmd/plex2jellyfin`. Should move to a shared package or the CLI layer. |
 | 2 | `tvOrganizer`/`movieOrganizer` duplication in `NewMediaHandler` | Two separate `organizer.Organizer` instances created with nearly identical option chains. The `organizer` package could accept a media type parameter instead of requiring two instances. Would eliminate ~40 lines of construction code and the `wrapTransferer` closure. |
 | 3 | `processFile` regex path vs `organizeWithRegexFallback` | `organizeWithRegexFallback` is a near-verbatim copy of the regex branch in `processFile`. Could `processFile` be called directly for fallback items? Need to verify that `processFile`'s debounce/pending/transientRetry maps don't interfere with fallback execution. |
 | 4 | `runJellyfinVerificationPass` O(n) queries | Needs a `GetJellyfinItemsByPaths([]string)` batch method on `database.MediaDB`. Currently does N individual `GetJellyfinItemByPath` calls. |
 | 5 | `Stats` atomic migration | `Stats` is accessed from `handleMetrics` HTTP handler (read) and `processFile`/`applyAIResult` (write). `sync/atomic` would remove the `sync.RWMutex` but requires verifying no caller depends on mutual exclusion across multiple fields. |
-| 6 | `CmdDupScan`, `CmdVerifyFlagged`, `CmdTask*` commands in protocol.go | These are registered in `cmd/jellywatchd/main.go` but their handlers live outside the daemon package. The protocol constants are fine, but the command set is sprawling (30+ commands). Consider whether some could be consolidated (e.g. `TASK_GET` + `TASKS_BULK` + `TASK_GROUP`). |
+| 6 | `CmdDupScan`, `CmdVerifyFlagged`, `CmdTask*` commands in protocol.go | These are registered in `cmd/plex2jellyfin-daemon/main.go` but their handlers live outside the daemon package. The protocol constants are fine, but the command set is sprawling (30+ commands). Consider whether some could be consolidated (e.g. `TASK_GET` + `TASKS_BULK` + `TASK_GROUP`). |

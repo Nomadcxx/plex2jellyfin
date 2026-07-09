@@ -13,7 +13,7 @@ func TestUpsertSeries_SetsDirtyFlag(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series)
 	if err != nil {
@@ -56,7 +56,7 @@ func TestUpsertSeries_ScansNewColumns(t *testing.T) {
 		Year:           2020,
 		CanonicalPath:  "/tv/Test Show (2020)",
 		LibraryRoot:    "/tv",
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 75,
 		EpisodeCount:   10,
 	}
@@ -232,7 +232,7 @@ func TestGetAllSeries_IncludesDirtyFlags(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/tv/Test Show (2020)",
 		LibraryRoot:   "/tv",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertSeries(series)
 	if err != nil {

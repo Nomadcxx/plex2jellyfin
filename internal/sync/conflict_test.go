@@ -7,15 +7,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // setupTestLibrary creates a temporary library structure for testing
 func setupTestLibraryForConflict(t *testing.T) (libraryDir string, cleanup func()) {
-	libraryDir = filepath.Join(os.TempDir(), "jellywatch-test-lib-"+t.Name())
+	libraryDir = filepath.Join(os.TempDir(), "plex2jellyfin-test-lib-"+t.Name())
 	err := os.MkdirAll(libraryDir, 0755)
 	require.NoError(t, err)
 
@@ -53,8 +53,8 @@ func createTestShowForConflict(t *testing.T, libraryDir, showName string, season
 // TestSyncFromFilesystem_DetectsConflicts tests that filesystem sync detects conflicts
 func TestSyncFromFilesystem_DetectsConflicts(t *testing.T) {
 	// Create two library directories with unique names
-	lib1 := filepath.Join(os.TempDir(), "jellywatch-test-lib1-"+t.Name())
-	lib2 := filepath.Join(os.TempDir(), "jellywatch-test-lib2-"+t.Name())
+	lib1 := filepath.Join(os.TempDir(), "plex2jellyfin-test-lib1-"+t.Name())
+	lib2 := filepath.Join(os.TempDir(), "plex2jellyfin-test-lib2-"+t.Name())
 	
 	err := os.MkdirAll(lib1, 0755)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestSyncFromFilesystem_DetectsConflicts(t *testing.T) {
 	createTestShowForConflict(t, lib2, "Silo (2023)", 1, 2)
 
 	// Create database
-	dbPath := filepath.Join(os.TempDir(), "jellywatch-test-"+t.Name()+".db")
+	dbPath := filepath.Join(os.TempDir(), "plex2jellyfin-test-"+t.Name()+".db")
 	db, err := database.OpenPath(dbPath)
 	require.NoError(t, err)
 	defer func() {
@@ -79,7 +79,7 @@ func TestSyncFromFilesystem_DetectsConflicts(t *testing.T) {
 		os.Remove(dbPath)
 	}()
 
-	// Create sync service (this is what jellywatch scan uses)
+	// Create sync service (this is what plex2jellyfin scan uses)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelError, // Suppress info logs
 	}))

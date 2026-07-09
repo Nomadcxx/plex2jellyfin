@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 )
 
 // RadarrAdapter wraps the Radarr client to implement MediaManager

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 )
 
 // ComplianceResult represents the compliance check result for database storage

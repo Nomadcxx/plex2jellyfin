@@ -6,8 +6,8 @@
 - **API Server** (`internal/api/server.go`): Full REST API with routing
 - **Authentication**: Session-based auth, 24h TTL, HTTP-only cookies
 - **Next.js Web UI** (`web/`): Built and embedded via `go:embed`
-- **Daemon** (`cmd/jellywatchd/`): Runs file watcher & periodic scanner
-- **Systemd Service**: Unit file at `systemd/jellywatchd.service`
+- **Daemon** (`cmd/plex2jellyfin-daemon/`): Runs file watcher & periodic scanner
+- **Systemd Service**: Unit file at `systemd/plex2jellyfin-daemon.service`
 
 ### What's Missing ❌
 - API server not started in daemon
@@ -19,12 +19,12 @@
 
 ### Phase 1: Start API Server in Daemon
 
-**File:** `cmd/jellywatchd/main.go`
+**File:** `cmd/plex2jellyfin-daemon/main.go`
 
 Add API server goroutine alongside existing watcher:
 
 ```go
-import "jellywatch/internal/api"
+import "plex2jellyfin/internal/api"
 
 // In main() or run():
 apiServer := api.NewServer(cfg, db)
@@ -37,7 +37,7 @@ go func() {
 
 ### Phase 2: Update Systemd Service
 
-**File:** `systemd/jellywatchd.service`
+**File:** `systemd/plex2jellyfin-daemon.service`
 
 Ensure port 8080 is documented:
 
@@ -58,7 +58,7 @@ Add web UI section after "What's Next?":
 │  🌐 Web Interface                                    │
 ├──────────────────────────────────────────────────────┤
 │  URL:      http://localhost:8080                     │
-│  Status:   systemctl status jellywatchd              │
+│  Status:   systemctl status plex2jellyfin-daemon              │
 │                                                      │
 │  Auth:     [If password configured]                  │
 │            Username: admin                           │
@@ -95,7 +95,7 @@ For LAN access, installer should detect local IP and show:
 ## Verification Steps
 
 1. `make all` - builds everything
-2. `sudo systemctl restart jellywatchd`
+2. `sudo systemctl restart plex2jellyfin-daemon`
 3. `curl http://localhost:8080/api/health` - should return OK
 4. Open browser to http://localhost:8080 - should show UI
 

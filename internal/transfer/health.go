@@ -94,7 +94,7 @@ func CheckDiskHealthDetailed(path string, statTimeout, statfsTimeout, writeTimeo
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), writeTimeout)
 	defer writeCancel()
 	writeCh := make(chan error, 1)
-	testFile := filepath.Join(path, fmt.Sprintf(".jellywatch_health_check_%d", time.Now().UnixNano()))
+	testFile := filepath.Join(path, fmt.Sprintf(".plex2jellyfin_health_check_%d", time.Now().UnixNano()))
 
 	go func() {
 		f, err := os.Create(testFile)

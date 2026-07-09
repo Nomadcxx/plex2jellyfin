@@ -12,12 +12,12 @@ discovered during operator review and fixed subsequently.
 | H1 | `internal/daemon/handler.go` | Early-return paths in the organize flow left orphaned decision rows (no outcome ever written). | Mark decision with OUTCOME=`failed` + reason at every early return. |
 | H2 | — | (False positive: queueForAI path was correctly carrying `parse_decision_id` already.) | No code change. |
 | H3 | `cleanupSourceDir` | Source dir was purged before any SUCCESS row existed, so a later transient failure could leave the move half-applied with no breadcrumb. | Gate `PurgeNonAllowed` on `HasRecentSuccessForSource` (recent SUCCESS row for the source). |
-| H4 | `cmd/jellywatchd/main.go` | Labeler and sweeper goroutines could panic and tear down the daemon without a stack trace. | `defer recover()` at the top of each goroutine; log and continue. |
+| H4 | `cmd/plex2jellyfin-daemon/main.go` | Labeler and sweeper goroutines could panic and tear down the daemon without a stack trace. | `defer recover()` at the top of each goroutine; log and continue. |
 | H5 | `internal/jellyfin/sweep.go` | `UpdateOutcome` errors were swallowed. | Propagate error from `sweepByPath`. |
 | H6 | `internal/database/parse_decisions.go` | `UpdateOutcome` was non-idempotent — a retry could overwrite a real resolve. | Added `WHERE jellyfin_resolved_at IS NULL` first-write-wins guard. |
 | H7 | `internal/labeling/runner.go` | TOCTOU window: row read in `RunOnce`, written in `labelOne`, could be modified between the two. | Re-fetch via `GetDecision` inside `labelOne` before write. |
 | H8 | `internal/labeling/runner.go` + migration 15 | Stale labels never re-derived if upstream parser changed. | New `auto_label_at` column + `QueryStaleLabeledDecisions` + idempotent `UpdateAutoLabelAt` + 14-day re-derive pass. |
-| H9 | `cmd/jellywatch/parses_cmd.go` | `--failures` and `--drift` were both accepted simultaneously, producing nonsense output. | `MarkFlagsMutuallyExclusive("failures","drift")`. |
+| H9 | `cmd/plex2jellyfin/parses_cmd.go` | `--failures` and `--drift` were both accepted simultaneously, producing nonsense output. | `MarkFlagsMutuallyExclusive("failures","drift")`. |
 | **P-T** | `internal/jellyfin/sweep.go`, `internal/api/webhooks.go`, `internal/daemon/handler.go` | **Path translation gap: 0/16 production rows received provider IDs because Jellyfin's container-internal paths (e.g. `/tv5/...`) never matched daemon-side `target_path` rows (`/mnt/STORAGE5/TVSHOWS/...`).** | Added `JellyfinConfig.PathMappings` (TOML array of `{jellyfin, daemon}` pairs) + `jellyfin.PathTranslator` (longest-prefix-first). Wired into both webhook handlers (translate inbound `ItemPath` → daemon view) and the sweeper (translate `item.Path` before lookup). |
 
 ## MED-risk
@@ -27,7 +27,7 @@ discovered during operator review and fixed subsequently.
 | M1 | `internal/daemon/handler.go` | `existing_match_method` column was never populated. | Set `ExistingMatchMethod` in decision payload at every match site. |
 | M2 | `internal/daemon/handler.go` | AI-queued decisions were not flagged "queued" so a daemon restart would re-process them. | New `MarkDecisionQueued` column + write before `queueForAI` returns. |
 | M3 | `internal/jellyfin/sweep.go` | No rate limit between paginated Jellyfin requests. | Per-page sleep, default 50 ms, configurable via `SetPageDelay`, ctx-cancellable. |
-| M4 | `cmd/jellywatchd/main.go` | Startup delays were not cancellable. | Verified existing `select { case <-time.After(): ; case <-ctx.Done(): }` pattern in both labeler and sweeper. |
+| M4 | `cmd/plex2jellyfin-daemon/main.go` | Startup delays were not cancellable. | Verified existing `select { case <-time.After(): ; case <-ctx.Done(): }` pattern in both labeler and sweeper. |
 | M5 | `internal/jellyfin/client.go` | HTTP requests had no per-request timeout and no ctx propagation. | New `requestCtx` / `getCtx` helpers using `http.NewRequestWithContext`; 30 s per-request timeout. |
 | M6 | `internal/database/parse_decisions.go` | `UpdateAutoLabel` was non-idempotent. | New `UpdateAutoLabelAt` with `WHERE auto_label_at IS NULL` first-write-wins guard (same pattern as H6). |
 | M7 | `internal/labeling/runner.go` | TTL boundary was inclusive on one side, exclusive on the other. | Tightened comparison + added boundary tests. |

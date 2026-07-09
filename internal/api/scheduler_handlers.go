@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/go-chi/chi/v5"
 )
 

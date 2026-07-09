@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -115,7 +115,7 @@ func TestPutSectionRestoresConfigOnReloadFailure(t *testing.T) {
 	if !resp.RestoredPreviousConfig {
 		t.Fatalf("expected restored_previous_config: %+v", resp)
 	}
-	disk, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".config", "jellywatch", "config.toml"))
+	disk, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".config", "plex2jellyfin", "config.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}

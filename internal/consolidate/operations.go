@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 )
 
 // ExecutePlan executes a consolidation plan
@@ -67,7 +67,7 @@ func ensureTargetWritable(targetPath string) error {
 		return fmt.Errorf("target path is not writable: failed to create target directory %s: %w", targetPath, err)
 	}
 
-	checkFile, err := os.CreateTemp(targetPath, ".jellywatch_write_check_")
+	checkFile, err := os.CreateTemp(targetPath, ".plex2jellyfin_write_check_")
 	if err != nil {
 		return fmt.Errorf("target path is not writable: %s: %w", targetPath, err)
 	}

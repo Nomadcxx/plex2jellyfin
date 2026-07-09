@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 )
 
 // Level represents a logging level
@@ -79,7 +79,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Level:      "info",
-		File:       "", // Will be set to ~/.config/jellywatch/logs/jellywatch.log
+		File:       "", // Will be set to ~/.config/plex2jellyfin/logs/plex2jellyfin.log
 		MaxSizeMB:  10,
 		MaxBackups: 5,
 		MaxAgeDays: 0,
@@ -119,11 +119,11 @@ func New(cfg Config) (*Logger, error) {
 	}
 
 	if cfg.File == "" {
-		jwDir, err := paths.JellyWatchDir()
+		jwDir, err := paths.Plex2JellyfinDir()
 		if err != nil {
-			return nil, fmt.Errorf("unable to get jellywatch dir: %w", err)
+			return nil, fmt.Errorf("unable to get plex2jellyfin dir: %w", err)
 		}
-		cfg.File = filepath.Join(jwDir, "logs", "jellywatch.log")
+		cfg.File = filepath.Join(jwDir, "logs", "plex2jellyfin.log")
 	}
 
 	// Expand ~ in file path

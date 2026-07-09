@@ -1,8 +1,8 @@
 // cmd/installer/roasts.go
 package main
 
-// jellyWatchRoasts contains spicy Sonarr/Radarr roasts for the ticker
-var jellyWatchRoasts = []string{
+// plex2jellyfinRoasts contains spicy Sonarr/Radarr roasts for the ticker
+var plex2jellyfinRoasts = []string{
 	// Sonarr burns
 	"Sonarr: turning 'automated' into 'I'll do it myself'",
 	"Sonarr found your show! In the wrong quality. Again.",

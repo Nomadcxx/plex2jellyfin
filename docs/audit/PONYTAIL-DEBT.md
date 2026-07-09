@@ -1,4 +1,4 @@
-# JellyWatch Ponytail Debt Ledger
+# Plex2Jellyfin Ponytail Debt Ledger
 
 Generated 2026-06-24 from 9-domain ponytail audit. 280 findings across ~94K lines.
 
@@ -23,7 +23,7 @@ These are large line-count savings, dead code, or structural simplifications wit
 | H9 | `internal/transfer/transfer.go:148` | `MustNew` — deprecated per own doc comment | ~7 | Delete |
 | H10 | `internal/api/dashboard.go:12` | `DashboardData` local struct — never used, shadowed by generated type | ~40 | Delete struct + dependent types |
 | H11 | `cmd/installer/utils.go:55` | `detectPackageManager()` — zero callers | ~15 | Delete |
-| H12 | `cmd/jellywatchd/streaming_ops.go:340` | `notImplemented` function + unused `errors.New` import | ~10 | Delete both |
+| H12 | `cmd/plex2jellyfin-daemon/streaming_ops.go:340` | `notImplemented` function + unused `errors.New` import | ~10 | Delete both |
 | H13 | `internal/daemon/classify.go:19` | `ChangeStructural` constant — "reserved for future use" | 2 | Delete |
 | H14 | `internal/daemon/ratelimit.go:44,59` | `Record()` and `Caps()` — zero callers | 8 | Delete both |
 | H15 | `internal/daemon/ipc/frame_ring.go:12` | `cursor` field — never read or written | 1 | Delete field |
@@ -64,7 +64,7 @@ These are large line-count savings, dead code, or structural simplifications wit
 | H45 | `internal/plans/plans.go` | Save/Load/Delete/Archive repeated 3× for consolidate, duplicate, audit plans | ~150 | Single generic `SavePlan[T]`/`LoadPlan[T]`/`ArchivePlan` |
 | H46 | `internal/daemon/handler.go:1700` | `organizeWithRegexFallback` duplicates ~90 lines from `processFile` verbatim | ~90 | Call `processFile` directly |
 | H47 | `internal/housekeeping/engine.go:950` | `execParserDriftRename` and `execParserDriftTVRename` share ~80% structure | ~100 | Extract shared `execDriftRename` core |
-| H48 | `cmd/jellywatch/main.go:400` | Sonarr/Radarr command trees — ~150 lines of near-identical code | ~80 | Single `newArrCmd(name, clientFactory)` |
+| H48 | `cmd/plex2jellyfin/main.go:400` | Sonarr/Radarr command trees — ~150 lines of near-identical code | ~80 | Single `newArrCmd(name, clientFactory)` |
 | H49 | `cmd/installer/inputs.go` | 6 nearly identical `init*Inputs`/`save*Inputs` function pairs — same textinput styling repeated ~30 times | ~200 | Extract `newStyledInput()` helper |
 | H50 | `cmd/installer/validation.go:55` | `testSonarrCmd`/`testRadarrCmd`/`testJellyfinCmd` — 3 identical HTTP test functions | ~60 | Single `testServiceCmd()` |
 | H51 | `internal/api/test_handlers.go:45` | Sonarr/Radarr/Jellyfin test handlers — same copy-paste as installer | ~30 | Single generic test handler |
@@ -111,8 +111,8 @@ These are large line-count savings, dead code, or structural simplifications wit
 | # | Files | What | Lines | Fix |
 |---|-------|------|-------|-----|
 | H89 | 7 files across organizer, scanner, watcher, cleanup, dedup, pv | Video extension map duplicated 7× with slight variations | ~60 | One `var VideoExtensions` in shared package |
-| H90 | `cmd/jellywatch/main.go`, `cmd/jellywatchd/main.go`, `cmd/jellywatch/cleanup.go`, `internal/jellyfin/verify.go`, `internal/consolidate/consolidate.go` | `isMediaFile` duplicated 4-5× with different signatures | ~40 | Single shared function |
-| H91 | `cmd/jellywatch/audit_validation.go`, `cmd/jellywatch/scan_progress.go`, `cmd/jellywatch/audit_cmd.go` | 3 separate `ProgressBar` implementations | ~100 | One `ProgressBar` in `internal/progress/` |
+| H90 | `cmd/plex2jellyfin/main.go`, `cmd/plex2jellyfin-daemon/main.go`, `cmd/plex2jellyfin/cleanup.go`, `internal/jellyfin/verify.go`, `internal/consolidate/consolidate.go` | `isMediaFile` duplicated 4-5× with different signatures | ~40 | Single shared function |
+| H91 | `cmd/plex2jellyfin/audit_validation.go`, `cmd/plex2jellyfin/scan_progress.go`, `cmd/plex2jellyfin/audit_cmd.go` | 3 separate `ProgressBar` implementations | ~100 | One `ProgressBar` in `internal/progress/` |
 | H92 | `internal/consolidate/operations.go`, `internal/plans/plans.go`, `internal/housekeeping/engine.go` | `executeDelete` triplicated — 3 delete implementations with slight variations | ~60 | Single `DeleteMediaFile(db, path, dryRun)` |
 | H93 | `internal/housekeeping/engine.go`, `internal/consolidate/consolidate.go`, `internal/consolidate/safety.go` | `isAllDigits`/`allDigits`/`isAllDigitsOrPunct` + `isEmptyDir`/`CleanupEmptyDir` + `isSeasonDirectoryName`/`hasSeasonComponent` — scattered utilities | ~26 | Consolidate into shared location |
 | H94 | `internal/wizard/wizard.go`, `internal/llm/ollama_adapter.go`, `internal/consolidate/operations.go` | `formatBytes` duplicated 3× | ~10 | Extract to `internal/format` |
@@ -188,14 +188,14 @@ These are large line-count savings, dead code, or structural simplifications wit
 | H159 | `internal/sync/filesystem.go:288` | `countVideoFiles` duplicates video extension list | ~10 | Use shared `isMediaFile` (H90) |
 | H160 | `internal/sync/sync.go:233` + `internal/jellyfin/plugin.go:64` | Two different retry-with-backoff implementations | ~15 | Single shared retry helper |
 | H161 | `internal/jellyfin/metadata_recovery.go:36` + `internal/config/config.go:157` | Two `MetadataRecoveryConfig` structs with same name, different fields | 0 | Rename jellyfin one to `ReconcilerConfig` |
-| H162 | `cmd/jellywatch/audit_preview.go` | TUI preview using charmbracelet/bubbles/tea/lipgloss (210 lines) — same info could be plain text | ~210 | Replace with `fmt.Print` + `--show-all` flag |
-| H163 | `cmd/jellywatch/status_cmd.go:200` | `deploymentDriftWarnings` — SHA256 comparison of binaries, CI concern not runtime | ~70 | Delete, move to `make deploy-check` |
-| H164 | `cmd/jellywatch/audit_validation.go:20,60` | `inferTypeFromLibraryRoot` keyword matching + `validateMediaType` live API calls during generation | ~80 | Use config membership, remove API validation |
-| H165 | `cmd/jellywatch/consolidate_cmd.go:200` | `updateDatabaseAfterMove` + `createMediaFileEntry` — DB logic in CLI layer | ~30 | Move to `internal/database/` |
-| H166 | `cmd/jellywatch/daemon_cmd.go:40` | `formatDaemonIPCError` — error classification via string matching | ~15 | Use `errors.Is`/`errors.As` with typed sentinels |
-| H167 | `cmd/jellywatchd/control.go:200` + `cmd/jellywatchd/jobs_handlers.go:430` | `guardMutator` thin wrapper + `payloadIntPtrLocal` mirrors housekeeping | ~25 | Inline, import housekeeping version |
-| H168 | `cmd/jellywatch/audit_cmd.go:100` + `cmd/jellywatchd/streaming_ops.go:120` + `cmd/jellywatch/orphans.go:18` | `dbProvider` + `aiBatcher` + `orphansClient` — interfaces with one implementation each | ~18 | Delete interfaces, use concrete types |
-| H169 | `cmd/jellywatch/scan_cmd.go:280` + `cmd/jellywatch/consolidate_generate.go:140` + `cmd/jellywatch/config.go:330` | `shouldRunPostScanAnalysis` + `shouldReportSkippedConsolidationPlan` + `separator` — one-line functions called once | ~9 | Inline at call sites |
+| H162 | `cmd/plex2jellyfin/audit_preview.go` | TUI preview using charmbracelet/bubbles/tea/lipgloss (210 lines) — same info could be plain text | ~210 | Replace with `fmt.Print` + `--show-all` flag |
+| H163 | `cmd/plex2jellyfin/status_cmd.go:200` | `deploymentDriftWarnings` — SHA256 comparison of binaries, CI concern not runtime | ~70 | Delete, move to `make deploy-check` |
+| H164 | `cmd/plex2jellyfin/audit_validation.go:20,60` | `inferTypeFromLibraryRoot` keyword matching + `validateMediaType` live API calls during generation | ~80 | Use config membership, remove API validation |
+| H165 | `cmd/plex2jellyfin/consolidate_cmd.go:200` | `updateDatabaseAfterMove` + `createMediaFileEntry` — DB logic in CLI layer | ~30 | Move to `internal/database/` |
+| H166 | `cmd/plex2jellyfin/daemon_cmd.go:40` | `formatDaemonIPCError` — error classification via string matching | ~15 | Use `errors.Is`/`errors.As` with typed sentinels |
+| H167 | `cmd/plex2jellyfin-daemon/control.go:200` + `cmd/plex2jellyfin-daemon/jobs_handlers.go:430` | `guardMutator` thin wrapper + `payloadIntPtrLocal` mirrors housekeeping | ~25 | Inline, import housekeeping version |
+| H168 | `cmd/plex2jellyfin/audit_cmd.go:100` + `cmd/plex2jellyfin-daemon/streaming_ops.go:120` + `cmd/plex2jellyfin/orphans.go:18` | `dbProvider` + `aiBatcher` + `orphansClient` — interfaces with one implementation each | ~18 | Delete interfaces, use concrete types |
+| H169 | `cmd/plex2jellyfin/scan_cmd.go:280` + `cmd/plex2jellyfin/consolidate_generate.go:140` + `cmd/plex2jellyfin/config.go:330` | `shouldRunPostScanAnalysis` + `shouldReportSkippedConsolidationPlan` + `separator` — one-line functions called once | ~9 | Inline at call sites |
 | H170 | `internal/api/sse_relay.go:15` | `IPCAttacher` interface with one implementation (`*ipc.Client`) | ~4 | Delete interface, use concrete type |
 | H171 | `internal/api/media_managers.go:155` | `convertSonarrQueueItems` + `convertRadarrQueueItems` — near-identical converters | ~20 | Unify or use generic converter |
 | H172 | `internal/api/settings_handlers.go:110` | `preserveMaskedSectionSecrets` — repeated switch with same pattern | ~15 | Table-driven |
@@ -247,9 +247,9 @@ Small line-count savings, cosmetic improvements, or items requiring caller verif
 | L30 | `internal/sonarr/commands.go` + `internal/radarr/commands.go` | `WaitForCommand` structurally identical — acceptable duplication for different APIs | 0 | Keep |
 | L31 | `internal/sonarr/types.go` + `internal/radarr/types.go` | `SystemStatus` structs ~80% identical — risk of API divergence | 0 | Keep separate |
 | L32 | `internal/jellyfin/metadata_recovery.go:36` | `MetadataRecoveryConfig` name collision with config package | 0 | Rename for clarity |
-| L33 | `cmd/jellywatchd/streaming_ops.go` | `aiBatcher` interface — one method, one impl | ~5 | Remove interface |
-| L34 | `cmd/jellywatch/orphans.go` | `orphansClient` interface — one method, one impl | ~5 | Remove interface |
-| L35 | `cmd/jellywatch/audit_cmd.go` | `dbProvider` struct — one method, one impl | ~8 | Inline |
+| L33 | `cmd/plex2jellyfin-daemon/streaming_ops.go` | `aiBatcher` interface — one method, one impl | ~5 | Remove interface |
+| L34 | `cmd/plex2jellyfin/orphans.go` | `orphansClient` interface — one method, one impl | ~5 | Remove interface |
+| L35 | `cmd/plex2jellyfin/audit_cmd.go` | `dbProvider` struct — one method, one impl | ~8 | Inline |
 | L36 | `internal/ai/types.go` | `FlexInt`/`FlexIntSlice` — complex but legitimate for Ollama's inconsistent JSON | 0 | Keep |
 | L37 | `internal/ai/circuit_breaker.go` | Custom circuit breaker — standard pattern, well-implemented | 0 | Keep |
 | L38 | `internal/ai/keepalive.go:88` + `internal/ai/cache.go:148` | `fmt.Printf` instead of structured logger | 0 | Use `logging.Logger` |
@@ -273,7 +273,7 @@ These findings need caller analysis, cross-package tracing, or empirical measure
 
 | # | Finding | Investigation |
 |---|---------|---------------|
-| R1 | `isMediaFile`/`isVideoFile` spans cmd/jellywatch, cmd/jellywatchd, cmd/jellywatch/cleanup.go, internal/jellyfin/verify.go, internal/consolidate/consolidate.go, internal/analyzer, internal/library, internal/service | Verify all copies use same extension set. Consolidate into one `internal/mediautil.IsMediaFile(path)`. |
+| R1 | `isMediaFile`/`isVideoFile` spans cmd/plex2jellyfin, cmd/plex2jellyfin-daemon, cmd/plex2jellyfin/cleanup.go, internal/jellyfin/verify.go, internal/consolidate/consolidate.go, internal/analyzer, internal/library, internal/service | Verify all copies use same extension set. Consolidate into one `internal/mediautil.IsMediaFile(path)`. |
 | R2 | `KnownReleaseGroups` (10,992 entries) vs `knownReleaseGroups` (~80 entries) | Run both against 10,000+ real filenames. Measure accuracy and false positives. Delete 105KB file if 80-entry covers 95%+. |
 | R3 | `videoExtensions` map in analyzer, library, service — 3+ places | Consolidate to one canonical source. |
 
@@ -353,7 +353,7 @@ These findings need caller analysis, cross-package tracing, or empirical measure
 |---|---------|---------------|
 | R39 | ProgressBar proliferation — check `internal/scanner` for yet another copy | Consolidate into one `internal/progress` package. |
 | R40 | Plan file management — 11 plan-file functions for 3 plan types | Could be 3 generic functions. Check `internal/plans/` for refactor. |
-| R41 | `audit_preview.go` charmbracelet dependency — is bubbles/tea/lipgloss used elsewhere? | Check `cmd/jellywatch/scan_progress.go` (also uses lipgloss) and `go.mod`. |
+| R41 | `audit_preview.go` charmbracelet dependency — is bubbles/tea/lipgloss used elsewhere? | Check `cmd/plex2jellyfin/scan_progress.go` (also uses lipgloss) and `go.mod`. |
 | R42 | `classification-audit` and `test-hint` binaries — referenced by Makefile, CI, or docs? | Check before deleting. |
 
 ### AI/Infra Deep Dives (5 items)

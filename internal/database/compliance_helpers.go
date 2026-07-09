@@ -1,8 +1,8 @@
 package database
 
 import (
-	"github.com/Nomadcxx/jellywatch/internal/compliance"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/compliance"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 )
 
 // CheckCompliance runs Jellyfin compliance checks on a file path

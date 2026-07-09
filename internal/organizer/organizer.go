@@ -11,17 +11,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/analyzer"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/identity"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/library"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
-	"github.com/Nomadcxx/jellywatch/internal/quality"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
-	syncsvc "github.com/Nomadcxx/jellywatch/internal/sync"
-	"github.com/Nomadcxx/jellywatch/internal/transfer"
-	"github.com/Nomadcxx/jellywatch/internal/video"
+	"github.com/Nomadcxx/plex2jellyfin/internal/analyzer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/identity"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/library"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/quality"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
+	syncsvc "github.com/Nomadcxx/plex2jellyfin/internal/sync"
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
 type OrganizationResult struct {
@@ -487,7 +487,7 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 			Year:           yearInt,
 			CanonicalPath:  movieDir,
 			LibraryRoot:    libraryPath,
-			Source:         "jellywatch",
+			Source:         "plex2jellyfin",
 			SourcePriority: 100,
 		}
 		_, err := o.db.UpsertMovie(movieRecord)
@@ -729,7 +729,7 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 			Year:           yearInt,
 			CanonicalPath:  showDir,
 			LibraryRoot:    libraryPath,
-			Source:         "jellywatch",
+			Source:         "plex2jellyfin",
 			SourcePriority: 100,
 			EpisodeCount:   0,
 		}

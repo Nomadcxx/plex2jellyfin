@@ -1,4 +1,4 @@
-# Image Generation Prompts for Jellywatch UI
+# Image Generation Prompts for Plex2Jellyfin UI
 
 Use these prompts with DALL-E 3, Midjourney, or any AI image generator to create PNG illustrations.
 

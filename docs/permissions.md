@@ -1,6 +1,6 @@
-# JellyWatch Permissions Guide
+# Plex2Jellyfin Permissions Guide
 
-Understanding file permissions is critical for a smooth media server experience. This guide explains how to configure JellyWatch so that all your applications (Jellyfin, Sonarr, Radarr, and the jellywatch CLI) can access your media files.
+Understanding file permissions is critical for a smooth media server experience. This guide explains how to configure Plex2Jellyfin so that all your applications (Jellyfin, Sonarr, Radarr, and the plex2jellyfin CLI) can access your media files.
 
 ## The Problem
 
@@ -11,9 +11,9 @@ Your media stack typically runs as different users:
 | SABnzbd/qBittorrent | `sabnzbd`/`qbittorrent` | Downloads files |
 | Sonarr | `sonarr` | Manages TV shows |
 | Radarr | `radarr` | Manages movies |
-| JellyWatch daemon | `root` | Organizes files to library |
+| Plex2Jellyfin daemon | `root` | Organizes files to library |
 | Jellyfin/Plex | `jellyfin`/`plex` | Serves media |
-| jellywatch CLI | Your user | Manages duplicates, consolidation |
+| plex2jellyfin CLI | Your user | Manages duplicates, consolidation |
 
 If files are owned by the wrong user or have restrictive permissions, some applications won't be able to read, write, or delete them.
 
@@ -37,9 +37,9 @@ sudo usermod -aG media jellyfin
 sudo usermod -aG media $USER  # Your user for CLI access
 ```
 
-### Step 3: Configure JellyWatch Permissions
+### Step 3: Configure Plex2Jellyfin Permissions
 
-In your `~/.config/jellywatch/config.toml`:
+In your `~/.config/plex2jellyfin/config.toml`:
 
 ```toml
 [permissions]
@@ -109,9 +109,9 @@ dir_mode = "0775"
 
 ## Troubleshooting
 
-### "Permission denied" when running jellywatch CLI
+### "Permission denied" when running plex2jellyfin CLI
 
-**Symptom**: `jellywatch duplicates execute` fails with permission errors.
+**Symptom**: `plex2jellyfin duplicates execute` fails with permission errors.
 
 **Cause**: Files or directories don't allow your user to write/delete.
 
@@ -127,8 +127,8 @@ dir_mode = "0775"
 **Cause**: Daemon not running as root, or permission config incorrect.
 
 **Fix**:
-1. Verify daemon runs as root: `ps aux | grep jellywatchd`
-2. Check systemd service: `systemctl cat jellywatchd | grep User`
+1. Verify daemon runs as root: `ps aux | grep plex2jellyfin-daemon`
+2. Check systemd service: `systemctl cat plex2jellyfin-daemon | grep User`
 3. If not root, update service file to `User=root`
 
 ### Jellyfin can't see new files

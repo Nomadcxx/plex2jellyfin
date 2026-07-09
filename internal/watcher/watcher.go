@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/Nomadcxx/jellywatch/internal/video"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
 type EventType string
@@ -126,7 +126,7 @@ func (w *Watcher) addRecursive(root string) error {
 }
 
 func (w *Watcher) Start() error {
-	log.Println("Jellywatch started. Press Ctrl+C to stop.")
+	log.Println("Plex2Jellyfin started. Press Ctrl+C to stop.")
 
 	for {
 		select {

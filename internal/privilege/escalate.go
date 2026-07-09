@@ -10,7 +10,7 @@ import (
 
 // NeedsRoot returns true if the current process is not running as root.
 func NeedsRoot() bool {
-	if os.Getenv("JELLYWATCH_TEST_NO_ESCALATE") == "1" {
+	if os.Getenv("PLEX2JELLYFIN_TEST_NO_ESCALATE") == "1" {
 		return false
 	}
 	return os.Geteuid() != 0

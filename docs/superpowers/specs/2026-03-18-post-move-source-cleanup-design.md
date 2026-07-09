@@ -2,7 +2,7 @@
 
 ## Problem
 
-After jellywatchd successfully moves a media file from a watch directory to a library, the source directory is left behind. SABnzbd download folders accumulate as empty shells containing only junk files (`.txt` markers, `.nzb` files, etc.). This requires manual cleanup.
+After plex2jellyfin-daemon successfully moves a media file from a watch directory to a library, the source directory is left behind. SABnzbd download folders accumulate as empty shells containing only junk files (`.txt` markers, `.nzb` files, etc.). This requires manual cleanup.
 
 ## Examples
 

@@ -1,10 +1,10 @@
-# JellyWatch Jellyfin Plugin
+# Plex2Jellyfin Jellyfin Plugin
 
-Companion Jellyfin plugin for JellyWatch.
+Companion Jellyfin plugin for Plex2Jellyfin.
 
 It provides:
-- Custom `/jellywatch/*` endpoints for JellyWatch integrations
-- Event forwarding from Jellyfin to JellyWatch webhook endpoint
+- Custom `/plex2jellyfin/*` endpoints for Plex2Jellyfin integrations
+- Event forwarding from Jellyfin to Plex2Jellyfin webhook endpoint
 
 ## Compatibility
 
@@ -26,7 +26,7 @@ Or from `plugin/`:
 ```
 
 Build output:
-- `plugin/artifacts/jellywatch_1.0.0.zip`
+- `plugin/artifacts/plex2jellyfin_1.0.0.zip`
 - `plugin/artifacts/package/manifest.json` with computed `checksum`
 
 ## Install (Local Testing)
@@ -40,7 +40,7 @@ Build output:
 2. Install plugin files into Jellyfin plugin directory:
 
 ```bash
-./plugin/install.sh ~/.local/share/jellyfin/plugins/JellyWatch
+./plugin/install.sh ~/.local/share/jellyfin/plugins/Plex2Jellyfin
 ```
 
 3. Restart Jellyfin:
@@ -52,11 +52,11 @@ sudo systemctl restart jellyfin
 ## Configure In Jellyfin
 
 Open:
-- `Dashboard -> Plugins -> JellyWatch`
+- `Dashboard -> Plugins -> Plex2Jellyfin`
 
 Set:
-- `JellyWatch URL` (the JellyWatch API/webhook base you are running)
-- `Shared Secret` (must match JellyWatch webhook secret)
+- `Plex2Jellyfin URL` (the Plex2Jellyfin API/webhook base you are running)
+- `Shared Secret` (must match Plex2Jellyfin webhook secret)
 - Enable event forwarding options you want
 
 ## Webhook Contract
@@ -65,21 +65,21 @@ Event forwarder target:
 - `POST /api/v1/webhooks/jellyfin`
 
 Required auth header:
-- `X-Jellywatch-Webhook-Secret: <secret>`
+- `X-Plex2Jellyfin-Webhook-Secret: <secret>`
 
 ## Quick Test Checklist
 
 1. Plugin appears in Jellyfin Dashboard.
-2. `/jellywatch/health` returns 200 in Jellyfin API context.
-3. Trigger a playback start/stop and confirm JellyWatch receives webhook events.
-4. Validate JellyWatch logs do not show webhook auth failures.
+2. `/plex2jellyfin/health` returns 200 in Jellyfin API context.
+3. Trigger a playback start/stop and confirm Plex2Jellyfin receives webhook events.
+4. Validate Plex2Jellyfin logs do not show webhook auth failures.
 
 ## Troubleshooting
 
 - If build fails, run:
   - `dotnet --version`
-  - `dotnet build -c Release plugin/JellyWatch.Plugin.csproj`
+  - `dotnet build -c Release plugin/Plex2Jellyfin.Plugin.csproj`
 - If plugin does not load, verify:
-  - `manifest.json` exists beside `JellyWatch.Plugin.dll`
+  - `manifest.json` exists beside `Plex2Jellyfin.Plugin.dll`
   - `targetAbi` in manifest matches Jellyfin server ABI (`10.10.0.0`)
 - If webhooks fail with 401, confirm shared secret matches exactly.

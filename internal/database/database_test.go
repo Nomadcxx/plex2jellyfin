@@ -180,42 +180,42 @@ func TestSeriesSourcePriority(t *testing.T) {
 		t.Fatalf("failed to insert sonarr series: %v", err)
 	}
 
-	// Try to update with jellywatch source (priority 100) - different path
-	jellywatchSeries := &Series{
+	// Try to update with plex2jellyfin source (priority 100) - different path
+	plex2jellyfinSeries := &Series{
 		Title:          "Fallout",
 		Year:           2024,
 		CanonicalPath:  "/mnt/STORAGE7/TVSHOWS/Fallout (2024)",
 		LibraryRoot:    "/mnt/STORAGE7/TVSHOWS",
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 		EpisodeCount:   9,
 	}
 
-	shouldUpdate, err := db.UpsertSeries(jellywatchSeries)
+	shouldUpdate, err := db.UpsertSeries(plex2jellyfinSeries)
 	if err != nil {
-		t.Fatalf("failed to update with jellywatch: %v", err)
+		t.Fatalf("failed to update with plex2jellyfin: %v", err)
 	}
 
-	// JellyWatch priority wins, path changed, so should signal update
+	// Plex2Jellyfin priority wins, path changed, so should signal update
 	// Note: shouldUpdate would be true if sonarr_id was set
 	// For this test we didn't set it, so it should be false
 	if shouldUpdate {
 		t.Error("shouldUpdate should be false when sonarr_id is nil")
 	}
 
-	// Verify the path was updated to jellywatch path
+	// Verify the path was updated to plex2jellyfin path
 	retrieved, err := db.GetSeriesByTitle("Fallout", 2024)
 	if err != nil {
 		t.Fatalf("failed to retrieve series: %v", err)
 	}
 
-	if retrieved.CanonicalPath != jellywatchSeries.CanonicalPath {
-		t.Errorf("canonical_path = %q, want %q (jellywatch should win)",
-			retrieved.CanonicalPath, jellywatchSeries.CanonicalPath)
+	if retrieved.CanonicalPath != plex2jellyfinSeries.CanonicalPath {
+		t.Errorf("canonical_path = %q, want %q (plex2jellyfin should win)",
+			retrieved.CanonicalPath, plex2jellyfinSeries.CanonicalPath)
 	}
 
-	if retrieved.Source != "jellywatch" {
-		t.Errorf("source = %q, want 'jellywatch'", retrieved.Source)
+	if retrieved.Source != "plex2jellyfin" {
+		t.Errorf("source = %q, want 'plex2jellyfin'", retrieved.Source)
 	}
 
 	// Try to downgrade with lower priority - should be ignored
@@ -234,15 +234,15 @@ func TestSeriesSourcePriority(t *testing.T) {
 		t.Fatalf("failed to attempt filesystem update: %v", err)
 	}
 
-	// Verify path didn't change (jellywatch priority still wins)
+	// Verify path didn't change (plex2jellyfin priority still wins)
 	retrieved, err = db.GetSeriesByTitle("Fallout", 2024)
 	if err != nil {
 		t.Fatalf("failed to retrieve series: %v", err)
 	}
 
-	if retrieved.CanonicalPath != jellywatchSeries.CanonicalPath {
+	if retrieved.CanonicalPath != plex2jellyfinSeries.CanonicalPath {
 		t.Errorf("canonical_path changed to %q, should remain %q",
-			retrieved.CanonicalPath, jellywatchSeries.CanonicalPath)
+			retrieved.CanonicalPath, plex2jellyfinSeries.CanonicalPath)
 	}
 }
 
@@ -256,7 +256,7 @@ func TestIncrementEpisodeCount(t *testing.T) {
 		Year:           2005,
 		CanonicalPath:  "/mnt/STORAGE8/TVSHOWS/The Office (2005)",
 		LibraryRoot:    "/mnt/STORAGE8/TVSHOWS",
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 		EpisodeCount:   0,
 	}
@@ -299,7 +299,7 @@ func TestGetAllSeriesInLibrary(t *testing.T) {
 		Year:           2008,
 		CanonicalPath:  library + "/Breaking Bad (2008)",
 		LibraryRoot:    library,
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 	}
 
@@ -308,7 +308,7 @@ func TestGetAllSeriesInLibrary(t *testing.T) {
 		Year:           2015,
 		CanonicalPath:  library + "/Better Call Saul (2015)",
 		LibraryRoot:    library,
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 	}
 
@@ -318,7 +318,7 @@ func TestGetAllSeriesInLibrary(t *testing.T) {
 		Year:           2002,
 		CanonicalPath:  "/mnt/STORAGE2/TVSHOWS/The Wire (2002)",
 		LibraryRoot:    "/mnt/STORAGE2/TVSHOWS",
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 	}
 
@@ -401,7 +401,7 @@ func TestGetStats(t *testing.T) {
 		Year:           2020,
 		CanonicalPath:  "/test/series",
 		LibraryRoot:    "/test",
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 	}
 
@@ -410,7 +410,7 @@ func TestGetStats(t *testing.T) {
 		Year:           2020,
 		CanonicalPath:  "/test/movie",
 		LibraryRoot:    "/test",
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 	}
 
@@ -446,7 +446,7 @@ func TestConcurrentAccess(t *testing.T) {
 				Year:           2020 + n,
 				CanonicalPath:  fmt.Sprintf("/test/Concurrent Series (%d)", 2020+n),
 				LibraryRoot:    "/test",
-				Source:         "jellywatch",
+				Source:         "plex2jellyfin",
 				SourcePriority: 100,
 			}
 
@@ -484,7 +484,7 @@ func TestYearlessLookup(t *testing.T) {
 		Year:           2001, // UK version
 		CanonicalPath:  "/mnt/STORAGE1/TVSHOWS/The Office (2001)",
 		LibraryRoot:    "/mnt/STORAGE1/TVSHOWS",
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 		EpisodeCount:   14,
 	}
@@ -494,7 +494,7 @@ func TestYearlessLookup(t *testing.T) {
 		Year:           2005, // US version
 		CanonicalPath:  "/mnt/STORAGE2/TVSHOWS/The Office (2005)",
 		LibraryRoot:    "/mnt/STORAGE2/TVSHOWS",
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100,
 		EpisodeCount:   201,
 	}
@@ -749,24 +749,24 @@ func TestNoConflictOnHigherPriorityUpdate(t *testing.T) {
 		t.Fatalf("failed to upsert sonarr series: %v", err)
 	}
 
-	// JellyWatch learns the correct location (high priority)
+	// Plex2Jellyfin learns the correct location (high priority)
 	series2 := &Series{
 		Title:          "Fallout",
 		Year:           2024,
-		CanonicalPath:  "/jellywatch-path/Fallout (2024)",
-		LibraryRoot:    "/jellywatch-path",
-		Source:         "jellywatch",
+		CanonicalPath:  "/plex2jellyfin-path/Fallout (2024)",
+		LibraryRoot:    "/plex2jellyfin-path",
+		Source:         "plex2jellyfin",
 		SourcePriority: 100, // High priority - this is authoritative
 		EpisodeCount:   8,
 	}
 
 	_, err = db.UpsertSeries(series2)
 	if err != nil {
-		t.Fatalf("failed to upsert jellywatch series: %v", err)
+		t.Fatalf("failed to upsert plex2jellyfin series: %v", err)
 	}
 
 	// This should still record a conflict! The paths are different.
-	// Even though jellywatch is authoritative, we still want to know
+	// Even though plex2jellyfin is authoritative, we still want to know
 	// the show exists in multiple places.
 	conflicts, err := db.GetUnresolvedConflicts()
 	if err != nil {

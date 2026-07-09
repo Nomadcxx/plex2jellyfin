@@ -1,10 +1,10 @@
 {
-  "name": "JellyWatch",
+  "name": "Plex2Jellyfin",
   "target_url": "http://localhost:8080/api/v1/webhooks/jellyfin",
   "method": "POST",
   "content_type": "application/json",
   "headers": {
-    "X-Jellywatch-Webhook-Secret": "YOUR_SHARED_SECRET"
+    "X-Plex2Jellyfin-Webhook-Secret": "YOUR_SHARED_SECRET"
   },
   "events": [
     "ItemAdded",

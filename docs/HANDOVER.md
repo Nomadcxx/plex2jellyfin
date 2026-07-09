@@ -1,4 +1,4 @@
-# Jellywatch Project Handover
+# Plex2Jellyfin Project Handover
 
 **Last Updated**: 2026-02-21  
 **Session Context**: Visual polish completion + installer bug discovery
@@ -7,17 +7,17 @@
 
 ## Project Overview
 
-Jellywatch is a media file watcher and organizer for Jellyfin libraries. It consists of:
+Plex2Jellyfin is a media file watcher and organizer for Jellyfin libraries. It consists of:
 - **Go backend** (`internal/`): 28 packages covering naming, database, transfer, sync, AI, API, etc.
 - **Next.js web UI** (`web/`): TypeScript + Tailwind + shadcn/ui
-- **CLI tool** (`cmd/jellywatch/`): Cobra-based with 20+ subcommands
-- **Daemon service** (`cmd/jellywatchd/`): Background file watcher with systemd integration
-- **Web server** (`cmd/jellyweb/`): Serves the Next.js UI on port 5522
+- **CLI tool** (`cmd/plex2jellyfin/`): Cobra-based with 20+ subcommands
+- **Daemon service** (`cmd/plex2jellyfin-daemon/`): Background file watcher with systemd integration
+- **Web server** (`cmd/plex2jellyfin-web/`): Serves the Next.js UI on port 5522
 - **Installer** (`cmd/installer/`): Bubble Tea TUI for interactive setup
 
 **Architecture**:
-- `jellywatchd` - Background daemon (file watching, organizing, health checks at :8686)
-- `jellyweb` - Web server (serves Next.js UI + REST API at :5522)
+- `plex2jellyfin-daemon` - Background daemon (file watching, organizing, health checks at :8686)
+- `plex2jellyfin-web` - Web server (serves Next.js UI + REST API at :5522)
 - Both run as systemd services via installer
 
 ---
@@ -90,9 +90,9 @@ Goal: Systematically improve visual design/UX of all 11 routes.
 
 ### Issue: Web Server Silently Skipped During Installation
 
-**Problem**: User ran `./installer` but never saw the web server start. The installer did not fail — it silently skipped the `jellyweb` service.
+**Problem**: User ran `./installer` but never saw the web server start. The installer did not fail — it silently skipped the `plex2jellyfin-web` service.
 
-**Root Cause**: The installer shares the same `serviceEnabled`/`serviceStartNow` flags for both `jellywatchd` (daemon) AND `jellyweb` (web server). If the user said "No" to either prompt, the web service was skipped with no error or URL shown.
+**Root Cause**: The installer shares the same `serviceEnabled`/`serviceStartNow` flags for both `plex2jellyfin-daemon` (daemon) AND `plex2jellyfin-web` (web server). If the user said "No" to either prompt, the web service was skipped with no error or URL shown.
 
 **Affected Files**:
 
@@ -127,8 +127,8 @@ Goal: Systematically improve visual design/UX of all 11 routes.
    ```
 
 **Expected Behavior**: User should be able to:
-- Choose separately whether to enable/start the daemon (`jellywatchd`)
-- Choose separately whether to enable/start the web UI (`jellyweb`)
+- Choose separately whether to enable/start the daemon (`plex2jellyfin-daemon`)
+- Choose separately whether to enable/start the web UI (`plex2jellyfin-web`)
 - At minimum, always see the web UI URL (`:5522`) at the end of installation
 
 **Current Behavior**: Both services share flags, and no URL is shown if user opts out.
@@ -174,13 +174,13 @@ cmd/installer/
 
 ### Web Server (Works)
 ```
-cmd/jellyweb/main.go                 # Web server entrypoint (works correctly)
+cmd/plex2jellyfin-web/main.go                 # Web server entrypoint (works correctly)
 internal/api/server.go               # REST API + static file serving
 ```
 
 ### Daemon (Works)
 ```
-cmd/jellywatchd/main.go              # Daemon entrypoint (works correctly)
+cmd/plex2jellyfin-daemon/main.go              # Daemon entrypoint (works correctly)
 internal/daemon/                     # Background service logic
 ```
 
@@ -224,7 +224,7 @@ internal/daemon/                     # Background service logic
 cd web && npm run build
 
 # Build Go binaries
-cd /home/nomadx/Documents/jellywatch && go build ./...
+cd /home/nomadx/Documents/plex2jellyfin && go build ./...
 
 # Run web dev server
 cd web && npm run dev
@@ -236,14 +236,14 @@ make all
 sudo ./installer
 
 # Start web server manually
-jellyweb --port 5522 --host 0.0.0.0
+plex2jellyfin-web --port 5522 --host 0.0.0.0
 
 # Start daemon manually
-sudo jellywatchd
+sudo plex2jellyfin-daemon
 
 # Check systemd services
-systemctl status jellyweb
-systemctl status jellywatchd
+systemctl status plex2jellyfin-web
+systemctl status plex2jellyfin-daemon
 ```
 
 ---

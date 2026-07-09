@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

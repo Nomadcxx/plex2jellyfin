@@ -7,7 +7,7 @@ import (
 
 func MarkdownReport(s Summary, suspicious []SuspiciousItem, unknownSeasons UnknownSeasonEvidence) string {
 	var b strings.Builder
-	fmt.Fprintln(&b, "# JellyWatch Postmortem")
+	fmt.Fprintln(&b, "# Plex2Jellyfin Postmortem")
 	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "Run: %s\n\n", s.RunID)
 	fmt.Fprintln(&b, "## Summary")

@@ -1,4 +1,4 @@
-// Package paths provides sudo-aware path resolution for JellyWatch.
+// Package paths provides sudo-aware path resolution for Plex2Jellyfin.
 //
 // When running with sudo, these functions correctly resolve paths to the
 // original user's directories (via SUDO_USER) instead of root's directories.
@@ -37,40 +37,40 @@ func UserConfigDir() (string, error) {
 	return filepath.Join(homeDir, ".config"), nil
 }
 
-// JellyWatchDir returns the JellyWatch config directory.
-// This is ~/.config/jellywatch for the actual user.
-func JellyWatchDir() (string, error) {
+// Plex2JellyfinDir returns the Plex2Jellyfin config directory.
+// This is ~/.config/plex2jellyfin for the actual user.
+func Plex2JellyfinDir() (string, error) {
 	configDir, err := UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(configDir, "jellywatch"), nil
+	return filepath.Join(configDir, "plex2jellyfin"), nil
 }
 
-// DatabasePath returns the path to the JellyWatch database.
-// This is ~/.config/jellywatch/media.db for the actual user.
+// DatabasePath returns the path to the Plex2Jellyfin database.
+// This is ~/.config/plex2jellyfin/media.db for the actual user.
 func DatabasePath() (string, error) {
-	dir, err := JellyWatchDir()
+	dir, err := Plex2JellyfinDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "media.db"), nil
 }
 
-// ConfigPath returns the path to the JellyWatch config file.
-// This is ~/.config/jellywatch/config.toml for the actual user.
+// ConfigPath returns the path to the Plex2Jellyfin config file.
+// This is ~/.config/plex2jellyfin/config.toml for the actual user.
 func ConfigPath() (string, error) {
-	dir, err := JellyWatchDir()
+	dir, err := Plex2JellyfinDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "config.toml"), nil
 }
 
-// OpLogPath returns the path to the JellyWatch op log.
-// This is ~/.config/jellywatch/op_log.jsonl for the actual user.
+// OpLogPath returns the path to the Plex2Jellyfin op log.
+// This is ~/.config/plex2jellyfin/op_log.jsonl for the actual user.
 func OpLogPath() (string, error) {
-	dir, err := JellyWatchDir()
+	dir, err := Plex2JellyfinDir()
 	if err != nil {
 		return "", err
 	}
@@ -78,9 +78,9 @@ func OpLogPath() (string, error) {
 }
 
 // PlansDir returns the directory for plan files.
-// This is ~/.config/jellywatch/plans for the actual user.
+// This is ~/.config/plex2jellyfin/plans for the actual user.
 func PlansDir() (string, error) {
-	dir, err := JellyWatchDir()
+	dir, err := Plex2JellyfinDir()
 	if err != nil {
 		return "", err
 	}
@@ -88,9 +88,9 @@ func PlansDir() (string, error) {
 }
 
 // ReportsDir returns the directory for postmortem report bundles.
-// This is ~/.config/jellywatch/reports for the actual user.
+// This is ~/.config/plex2jellyfin/reports for the actual user.
 func ReportsDir() (string, error) {
-	dir, err := JellyWatchDir()
+	dir, err := Plex2JellyfinDir()
 	if err != nil {
 		return "", err
 	}

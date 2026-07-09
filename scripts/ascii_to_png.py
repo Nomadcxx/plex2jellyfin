@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convert jellywatch ASCII art to PNG with transparent background.
+Convert plex2jellyfin ASCII art to PNG with transparent background.
 
 Requirements:
     pip install pillow
@@ -9,16 +9,16 @@ Usage:
     python3 scripts/ascii_to_png.py [output_path]
 
 Example:
-    python3 scripts/ascii_to_png.py assets/jellywatch-header.png
+    python3 scripts/ascii_to_png.py assets/plex2jellyfin-header.png
 
 Note: This script is for generating the README header image.
-      The ASCII art is stored in /home/nomadx/bit/jellywatch.txt
+      The ASCII art is stored in /home/nomadx/bit/plex2jellyfin.txt
 """
 
 from PIL import Image, ImageDraw, ImageFont
 import sys
 
-# ASCII art (from /home/nomadx/bit/jellywatch.txt)
+# ASCII art (from /home/nomadx/bit/plex2jellyfin.txt)
 ASCII_ART = """  ▀▀        ▀██   ▀██                        ▄▄          ██    
  ▀██ ██▀▀██  ██    ██  ██  ██ ██ ▄ █ ▀▀▀▀██ ▀██▀▀ ██▀▀██ ██▀▀██
   ██ ██▀▀▀▀  ██    ██  ██  ██ ██▄█▄█ ██▀▀██  ██   ██  ▄▄ ██  ██
@@ -29,7 +29,7 @@ ASCII_ART = """  ▀▀        ▀██   ▀██                        ▄�
 JELLYFIN_PURPLE = "#AA5CC3"  # Primary purple
 
 
-def create_ascii_png(output_path="assets/jellywatch-header.png"):
+def create_ascii_png(output_path="assets/plex2jellyfin-header.png"):
     """Create PNG from ASCII art with transparent background."""
 
     # Calculate image dimensions
@@ -86,5 +86,5 @@ def create_ascii_png(output_path="assets/jellywatch-header.png"):
 
 
 if __name__ == "__main__":
-    output = sys.argv[1] if len(sys.argv) > 1 else "assets/jellywatch-header.png"
+    output = sys.argv[1] if len(sys.argv) > 1 else "assets/plex2jellyfin-header.png"
     create_ascii_png(output)

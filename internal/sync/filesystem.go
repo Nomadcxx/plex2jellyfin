@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
-	"github.com/Nomadcxx/jellywatch/internal/scanner"
-	"github.com/Nomadcxx/jellywatch/internal/video"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
 const filesystemSourcePriority = 50

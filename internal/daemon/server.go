@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/logging"
-	"github.com/Nomadcxx/jellywatch/internal/scanner"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 )
 
 type Server struct {
@@ -200,7 +200,7 @@ func (s *Server) validateWebhookSecret(r *http.Request) bool {
 	if s.webhookSecret == "" {
 		return isLoopbackRequest(r)
 	}
-	provided := strings.TrimSpace(r.Header.Get("X-Jellywatch-Webhook-Secret"))
+	provided := strings.TrimSpace(r.Header.Get("X-Plex2Jellyfin-Webhook-Secret"))
 	if provided == "" {
 		return false
 	}

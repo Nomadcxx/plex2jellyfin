@@ -18,7 +18,7 @@ type PathMapping struct {
 	// Jellyfin is the prefix as reported by the Jellyfin server (the
 	// container-internal path).
 	Jellyfin string `mapstructure:"jellyfin"`
-	// Daemon is the prefix as observed by the jellywatch daemon on the
+	// Daemon is the prefix as observed by the plex2jellyfin daemon on the
 	// host filesystem.
 	Daemon string `mapstructure:"daemon"`
 }

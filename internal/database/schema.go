@@ -29,7 +29,7 @@ var migrations = []migration{
 				library_root TEXT NOT NULL,
 				
 				-- Source tracking
-				source TEXT NOT NULL DEFAULT 'jellywatch',
+				source TEXT NOT NULL DEFAULT 'plex2jellyfin',
 				source_priority INTEGER NOT NULL DEFAULT 0,
 				
 				-- Stats
@@ -71,7 +71,7 @@ var migrations = []migration{
 				library_root TEXT NOT NULL,
 				
 				-- Source tracking
-				source TEXT NOT NULL DEFAULT 'jellywatch',
+				source TEXT NOT NULL DEFAULT 'plex2jellyfin',
 				source_priority INTEGER NOT NULL DEFAULT 0,
 				
 				-- Timestamps
@@ -651,7 +651,7 @@ var migrations = []migration{
 	{
 		version: 21,
 		// Persist metadata reconciliation/repair state for parse decisions so
-		// Jellywatch can retry with bounded backoff across daemon restarts.
+		// Plex2Jellyfin can retry with bounded backoff across daemon restarts.
 		up: []string{
 			`ALTER TABLE parse_decisions ADD COLUMN metadata_state TEXT`,
 			`ALTER TABLE parse_decisions ADD COLUMN metadata_error TEXT`,

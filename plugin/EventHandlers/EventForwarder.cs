@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using JellyWatch.Plugin.Configuration;
+using Plex2Jellyfin.Plugin.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
@@ -10,7 +10,7 @@ using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace JellyWatch.Plugin.EventHandlers;
+namespace Plex2Jellyfin.Plugin.EventHandlers;
 
 public class EventForwarder : IHostedService, IDisposable
 {
@@ -42,7 +42,7 @@ public class EventForwarder : IHostedService, IDisposable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        var config = JellyWatchPlugin.Instance?.Configuration;
+        var config = Plex2JellyfinPlugin.Instance?.Configuration;
         if (config?.EnableEventForwarding != true)
         {
             _logger.LogInformation("Event forwarding is disabled");
@@ -135,7 +135,7 @@ public class EventForwarder : IHostedService, IDisposable
 
     private static bool ShouldForwardEvent()
     {
-        return JellyWatchPlugin.Instance?.Configuration?.EnableEventForwarding == true;
+        return Plex2JellyfinPlugin.Instance?.Configuration?.EnableEventForwarding == true;
     }
 
     private object BuildItemPayload(BaseItem item)
@@ -231,10 +231,10 @@ public class EventForwarder : IHostedService, IDisposable
 
     private async Task ForwardEvent(string eventType, object payload)
     {
-        var config = JellyWatchPlugin.Instance?.Configuration;
+        var config = Plex2JellyfinPlugin.Instance?.Configuration;
         if (config == null) return;
 
-        var url = $"{config.JellyWatchUrl.TrimEnd('/')}/api/v1/webhooks/jellyfin";
+        var url = $"{config.Plex2JellyfinUrl.TrimEnd('/')}/api/v1/webhooks/jellyfin";
         var maxRetries = config.RetryCount;
         var timeout = TimeSpan.FromSeconds(config.RequestTimeoutSeconds);
 
@@ -262,13 +262,13 @@ public class EventForwarder : IHostedService, IDisposable
                     Content = new StringContent(json, Encoding.UTF8, "application/json")
                 };
 
-                request.Headers.Add("X-Jellywatch-Webhook-Secret", config.SharedSecret);
+                request.Headers.Add("X-Plex2Jellyfin-Webhook-Secret", config.SharedSecret);
                 request.Headers.Add("X-Jellyfin-Event", eventType);
 
                 var response = await client.SendAsync(request);
                 if (response.IsSuccessStatusCode)
                 {
-                    _logger.LogDebug("Forwarded {EventType} event to JellyWatch", eventType);
+                    _logger.LogDebug("Forwarded {EventType} event to Plex2Jellyfin", eventType);
                     return;
                 }
 

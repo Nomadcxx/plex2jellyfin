@@ -2,7 +2,7 @@
 
 ## What You Are Reviewing
 
-An implementation plan for a new feature in the **jellywatchd** Go daemon. The plan is at:
+An implementation plan for a new feature in the **plex2jellyfin-daemon** Go daemon. The plan is at:
 
 `docs/superpowers/plans/2026-03-18-post-move-source-cleanup.md`
 
@@ -14,7 +14,7 @@ The spec it is derived from is at:
 
 ## Feature Summary
 
-After jellywatchd successfully moves a media file from a SABnzbd download directory to a Jellyfin media library, the source download folder is left behind as an empty shell containing only junk files (SABnzbd `.txt` markers, etc.). The feature adds automatic cleanup: after each successful move the daemon removes the source directory, walks up to clean empty parent directories, and stops at the configured watch root boundary.
+After plex2jellyfin-daemon successfully moves a media file from a SABnzbd download directory to a Jellyfin media library, the source download folder is left behind as an empty shell containing only junk files (SABnzbd `.txt` markers, etc.). The feature adds automatic cleanup: after each successful move the daemon removes the source directory, walks up to clean empty parent directories, and stops at the configured watch root boundary.
 
 ---
 

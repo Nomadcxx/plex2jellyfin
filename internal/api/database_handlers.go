@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
-	"github.com/Nomadcxx/jellywatch/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	"github.com/google/uuid"
 )
 

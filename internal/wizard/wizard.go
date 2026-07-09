@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/service"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 )
 
 // Wizard provides an interactive cleanup experience
@@ -40,7 +40,7 @@ func New(db *database.MediaDB, opts Options) *Wizard {
 
 // Run executes the wizard
 func (w *Wizard) Run(opts Options) error {
-	fmt.Println("🧹 Jellywatch Fix Wizard")
+	fmt.Println("🧹 Plex2Jellyfin Fix Wizard")
 	if w.dryRun {
 		fmt.Println("   (DRY RUN - no changes will be made)")
 	}

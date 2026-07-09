@@ -16,13 +16,13 @@ func readUnitFile(t *testing.T, path string) string {
 }
 
 func TestPostmortemUserUnits(t *testing.T) {
-	service := readUnitFile(t, "jellywatch-postmortem.service")
-	timer := readUnitFile(t, "jellywatch-postmortem.timer")
+	service := readUnitFile(t, "plex2jellyfin-postmortem.service")
+	timer := readUnitFile(t, "plex2jellyfin-postmortem.timer")
 
 	for _, want := range []string{
-		"WorkingDirectory=/home/nomadx/Documents/jellywatch",
-		"ExecStart=/usr/local/bin/jellywatch postmortem collect --since 96h",
-		"ExecStartPost=/home/nomadx/Documents/jellywatch/scripts/jellywatch-postmortem-terminal.sh",
+		"WorkingDirectory=/home/nomadx/Documents/plex2jellyfin",
+		"ExecStart=/usr/local/bin/plex2jellyfin postmortem collect --since 96h",
+		"ExecStartPost=/home/nomadx/Documents/plex2jellyfin/scripts/plex2jellyfin-postmortem-terminal.sh",
 	} {
 		if !strings.Contains(service, want) {
 			t.Fatalf("service missing %q", want)

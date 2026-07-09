@@ -86,7 +86,7 @@ func (m *MediaDB) GetSeriesByTitle(title string, year int) (*Series, error) {
 
 // UpsertSeries inserts or updates a series record
 // Returns (shouldUpdateExternal, error) where shouldUpdateExternal=true means
-// JellyWatch path differs from existing and Sonarr/Radarr should be updated
+// Plex2Jellyfin path differs from existing and Sonarr/Radarr should be updated
 func (m *MediaDB) UpsertSeries(s *Series) (shouldUpdateExternal bool, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -234,8 +234,8 @@ func (m *MediaDB) UpsertSeries(s *Series) (shouldUpdateExternal bool, err error)
 
 		s.ID = existingID
 
-		// If JellyWatch is updating and path differs, signal external update needed
-		if s.Source == "jellywatch" && s.CanonicalPath != existingPath && existingSonarrID != nil {
+		// If Plex2Jellyfin is updating and path differs, signal external update needed
+		if s.Source == "plex2jellyfin" && s.CanonicalPath != existingPath && existingSonarrID != nil {
 			return true, nil
 		}
 	} else {
@@ -321,7 +321,7 @@ func (m *MediaDB) mergeSeriesIdentityCollisionLocked(duplicateID int64, title, n
 	incoming.TitleNormalized = normalized
 	incoming.Year = year
 
-	if incoming.Source == "jellywatch" && incoming.CanonicalPath != keeperPath && keeperSonarrID.Valid {
+	if incoming.Source == "plex2jellyfin" && incoming.CanonicalPath != keeperPath && keeperSonarrID.Valid {
 		return true, true, nil
 	}
 	return true, false, nil

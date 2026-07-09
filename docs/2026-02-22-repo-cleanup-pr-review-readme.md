@@ -12,27 +12,27 @@
 
 ## Context
 
-**Repo:** `/home/nomadx/Documents/jellywatch` (github.com/Nomadcxx/jellywatch)
+**Repo:** `/home/nomadx/Documents/plex2jellyfin` (github.com/Nomadcxx/plex2jellyfin)
 
-**Brand image (source):** `/home/nomadx/Downloads/jellywatch_brand.png`
+**Brand image (source):** `/home/nomadx/Downloads/plex2jellyfin_brand.png`
 
-**PR to review:** https://github.com/Nomadcxx/jellywatch/pull/3
+**PR to review:** https://github.com/Nomadcxx/plex2jellyfin/pull/3
 - Phase 2 Jellyfin webhook integration — 25 files, +2596/-86 lines
 - Key new packages: `internal/jellyfin/`, `internal/notify/`, `internal/organizer/` (playback safety)
 - DB schema v12 adds `jellyfin_items` table
 
 **Real CLI commands that exist** (used in README):
-- `jellywatch scan` — index library into DB
-- `jellywatch watch <directory>` — watch for incoming files
-- `jellywatch organize <source>` — rename/move a single file
-- `jellywatch audit generate` — find low-confidence parses
-- `jellywatch audit dry-run` — preview AI rename suggestions
-- `jellywatch audit execute` — apply AI rename fixes
-- `jellywatch duplicates generate` — detect duplicates
-- `jellywatch duplicates execute` — keep best copy, delete rest
-- `jellywatch consolidate generate` — find scattered TV series
-- `jellywatch consolidate execute` — merge scattered series into one location
-- `jellywatch migrate` — sync Sonarr/Radarr paths with DB
+- `plex2jellyfin scan` — index library into DB
+- `plex2jellyfin watch <directory>` — watch for incoming files
+- `plex2jellyfin organize <source>` — rename/move a single file
+- `plex2jellyfin audit generate` — find low-confidence parses
+- `plex2jellyfin audit dry-run` — preview AI rename suggestions
+- `plex2jellyfin audit execute` — apply AI rename fixes
+- `plex2jellyfin duplicates generate` — detect duplicates
+- `plex2jellyfin duplicates execute` — keep best copy, delete rest
+- `plex2jellyfin consolidate generate` — find scattered TV series
+- `plex2jellyfin consolidate execute` — merge scattered series into one location
+- `plex2jellyfin migrate` — sync Sonarr/Radarr paths with DB
 
 **DO NOT mention in README:** web dashboard, `serve` command, Jellyfin webhooks, phase 2/3 features.
 
@@ -229,8 +229,8 @@ Expected: clean working tree (or only untracked files that are gitignored).
 Invoke the `pr-review-toolkit:review-pr` skill with PR #3:
 
 ```
-PR URL: https://github.com/Nomadcxx/jellywatch/pull/3
-Repo: Nomadcxx/jellywatch
+PR URL: https://github.com/Nomadcxx/plex2jellyfin/pull/3
+Repo: Nomadcxx/plex2jellyfin
 ```
 
 The review should cover:
@@ -244,7 +244,7 @@ The review should cover:
 **Step 2: Run tests locally before reviewing**
 
 ```bash
-cd /home/nomadx/Documents/jellywatch
+cd /home/nomadx/Documents/plex2jellyfin
 go test ./internal/jellyfin/... -v 2>&1 | tail -20
 go test ./internal/database/... -v 2>&1 | tail -20
 go test ./internal/api/... -v 2>&1 | tail -20
@@ -256,7 +256,7 @@ Expected: all PASS.
 **Step 3: Checkout PR branch to inspect locally**
 
 ```bash
-gh pr checkout 3 --repo Nomadcxx/jellywatch
+gh pr checkout 3 --repo Nomadcxx/plex2jellyfin
 ```
 
 Then inspect key files:
@@ -288,7 +288,7 @@ The code reviewer subagent should produce:
 **Step 1: Verify source image exists**
 
 ```bash
-ls -lh /home/nomadx/Downloads/jellywatch_brand.png
+ls -lh /home/nomadx/Downloads/plex2jellyfin_brand.png
 ```
 
 Expected: file listed, non-zero size.
@@ -296,16 +296,16 @@ Expected: file listed, non-zero size.
 **Step 2: Copy to assets/**
 
 ```bash
-cp /home/nomadx/Downloads/jellywatch_brand.png /home/nomadx/Documents/jellywatch/assets/jellywatch_brand.png
+cp /home/nomadx/Downloads/plex2jellyfin_brand.png /home/nomadx/Documents/plex2jellyfin/assets/plex2jellyfin_brand.png
 ```
 
 **Step 3: Verify copy**
 
 ```bash
-ls -lh /home/nomadx/Documents/jellywatch/assets/
+ls -lh /home/nomadx/Documents/plex2jellyfin/assets/
 ```
 
-Expected: `jellywatch_brand.png` alongside existing `jellywooch.png` and `jellywatch-header.png`.
+Expected: `plex2jellyfin_brand.png` alongside existing `jellywooch.png` and `plex2jellyfin-header.png`.
 
 ---
 
@@ -314,7 +314,7 @@ Expected: `jellywatch_brand.png` alongside existing `jellywooch.png` and `jellyw
 **File:** `README.md`
 
 Replace the entire file with the content below. The README must:
-- Use the new brand image (`assets/jellywatch_brand.png`)
+- Use the new brand image (`assets/plex2jellyfin_brand.png`)
 - Keep the WIP warning banner
 - Show only real, working CLI commands
 - Reflect actual config keys (`[watch]`, `[libraries]`, `[ai]`, `[sonarr]`, `[radarr]`, `[permissions]`)
@@ -325,7 +325,7 @@ Replace the entire file with the content below. The README must:
 
 ```markdown
 <div align="center">
-  <img src="assets/jellywatch_brand.png" alt="JellyWatch" width="320" />
+  <img src="assets/plex2jellyfin_brand.png" alt="Plex2Jellyfin" width="320" />
 </div>
 
 ---
@@ -343,7 +343,7 @@ Because Sonarr and Radarr can't be trusted with naming conventions.
 Watches your download directories. Renames files to Jellyfin's naming standards. Moves them to the right place. Optionally asks a local AI (via Ollama) when it's not sure what something is.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
 ```
 
 ## The Problem
@@ -359,7 +359,7 @@ flowchart TB
     end
 
     B -->|drops file| C[Watch Directory]
-    C -->|detected by| D[JellyWatch Daemon]
+    C -->|detected by| D[Plex2Jellyfin Daemon]
 
     D -->|indexes & parses| DB[(SQLite DB)]
     DB -->|confidence check| D
@@ -382,16 +382,16 @@ See [docs/architecture.md](docs/architecture.md) for detailed flow.
 
 ```bash
 # Index your library into the database
-jellywatch scan
+plex2jellyfin scan
 
 # Watch a directory for new incoming files
-jellywatch watch /downloads
+plex2jellyfin watch /downloads
 
 # Organize a single file manually
-jellywatch organize /downloads/Movie.Name.2024.mkv
+plex2jellyfin organize /downloads/Movie.Name.2024.mkv
 
 # Sync Sonarr/Radarr path data with the database
-jellywatch migrate
+plex2jellyfin migrate
 ```
 
 ### AI Audit
@@ -399,9 +399,9 @@ jellywatch migrate
 Finds files with low parse confidence and proposes AI-assisted renames via Ollama:
 
 ```bash
-jellywatch audit generate        # Identify low-confidence files
-jellywatch audit dry-run         # Preview AI rename suggestions
-jellywatch audit execute         # Apply fixes
+plex2jellyfin audit generate        # Identify low-confidence files
+plex2jellyfin audit dry-run         # Preview AI rename suggestions
+plex2jellyfin audit execute         # Apply fixes
 ```
 
 The AI receives library type (Movies vs TV), folder path, and current parse as context.
@@ -410,11 +410,11 @@ See [docs/ai-context.md](docs/ai-context.md) for details.
 ### Duplicates & Consolidation
 
 ```bash
-jellywatch duplicates generate   # Find duplicate media files
-jellywatch duplicates execute    # Keep the best copy, remove the rest
+plex2jellyfin duplicates generate   # Find duplicate media files
+plex2jellyfin duplicates execute    # Keep the best copy, remove the rest
 
-jellywatch consolidate generate  # Find TV series split across multiple locations
-jellywatch consolidate execute   # Merge them into a single library path
+plex2jellyfin consolidate generate  # Find TV series split across multiple locations
+plex2jellyfin consolidate execute   # Merge them into a single library path
 ```
 
 ## Naming Rules
@@ -427,7 +427,7 @@ Release group noise is stripped automatically: `1080p`, `x264`, `WEB-DL`, `RARBG
 
 ## Configuration
 
-Lives at `~/.config/jellywatch/config.toml`
+Lives at `~/.config/plex2jellyfin/config.toml`
 
 ```toml
 [watch]
@@ -474,7 +474,7 @@ file_mode = "0644"
 dir_mode  = "0755"
 ```
 
-> **Note:** The `jellywatchd` daemon must run as root to set file ownership.
+> **Note:** The `plex2jellyfin-daemon` daemon must run as root to set file ownership.
 > The systemd service is configured with minimal capabilities (`CAP_CHOWN`, `CAP_FOWNER`, `CAP_DAC_OVERRIDE`).
 
 ## Daemon
@@ -482,8 +482,8 @@ dir_mode  = "0755"
 The installer sets up a systemd service. Manage it with:
 
 ```bash
-systemctl status jellywatchd
-journalctl -u jellywatchd -f
+systemctl status plex2jellyfin-daemon
+journalctl -u plex2jellyfin-daemon -f
 ```
 
 ## Install
@@ -491,14 +491,14 @@ journalctl -u jellywatchd -f
 **One-liner:**
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
 ```
 
 **Manual:**
 
 ```bash
-git clone https://github.com/Nomadcxx/jellywatch.git
-cd jellywatch
+git clone https://github.com/Nomadcxx/plex2jellyfin.git
+cd plex2jellyfin
 go build -o installer ./cmd/installer
 sudo ./installer
 ```
@@ -517,11 +517,11 @@ GPL-3.0 or later
 **Step 1: Stage changes**
 
 ```bash
-git add assets/jellywatch_brand.png README.md
+git add assets/plex2jellyfin_brand.png README.md
 git status
 ```
 
-Expected: 2 files staged — new `assets/jellywatch_brand.png` and modified `README.md`.
+Expected: 2 files staged — new `assets/plex2jellyfin_brand.png` and modified `README.md`.
 
 **Step 2: Commit**
 
@@ -529,7 +529,7 @@ Expected: 2 files staged — new `assets/jellywatch_brand.png` and modified `REA
 git commit -m "$(cat <<'EOF'
 docs: update README with new brand image and accurate feature set
 
-Replace jellywooch.png header with jellywatch_brand.png. Rewrite README
+Replace jellywooch.png header with plex2jellyfin_brand.png. Rewrite README
 to reflect actual CLI commands and config surface. Remove references to
 fictional commands and unreleased features. Keep WIP warning.
 
@@ -547,6 +547,6 @@ EOF
 - [ ] Task 3: Patch `.gitignore` with missing patterns
 - [ ] Task 4: Commit Phase 1
 - [ ] Task 5: Full PR #3 code review via pr-review-toolkit:review-pr
-- [ ] Task 6: Copy `jellywatch_brand.png` to `assets/`
+- [ ] Task 6: Copy `plex2jellyfin_brand.png` to `assets/`
 - [ ] Task 7: Rewrite `README.md`
 - [ ] Task 8: Commit Phase 3

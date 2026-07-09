@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/video"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
 // IssueType represents the type of mismatch between filesystem and Jellyfin.

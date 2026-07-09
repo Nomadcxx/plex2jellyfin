@@ -6,15 +6,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // setupTestLibrary creates a temporary library structure for testing
 func setupTestLibrary(t *testing.T) (libraryDir string, cleanup func()) {
-	libraryDir = filepath.Join(os.TempDir(), "jellywatch-test-library-"+t.Name())
+	libraryDir = filepath.Join(os.TempDir(), "plex2jellyfin-test-library-"+t.Name())
 	err := os.MkdirAll(libraryDir, 0755)
 	require.NoError(t, err)
 
@@ -73,7 +73,7 @@ func TestScanner_PopulatesDatabase(t *testing.T) {
 	createTestMovie(t, libraryDir, "The Matrix (1999)")
 
 	// Scan
-	dbPath := filepath.Join(os.TempDir(), "jellywatch-test-"+t.Name()+".db")
+	dbPath := filepath.Join(os.TempDir(), "plex2jellyfin-test-"+t.Name()+".db")
 	db, err := database.OpenPath(dbPath)
 	require.NoError(t, err)
 	defer func() {
@@ -119,7 +119,7 @@ func TestScanner_UsesParentFolderForObfuscatedEpisodeFilename(t *testing.T) {
 	require.NoError(t, f.Truncate(60*1024*1024))
 	require.NoError(t, f.Close())
 
-	dbPath := filepath.Join(os.TempDir(), "jellywatch-test-"+t.Name()+".db")
+	dbPath := filepath.Join(os.TempDir(), "plex2jellyfin-test-"+t.Name()+".db")
 	db, err := database.OpenPath(dbPath)
 	require.NoError(t, err)
 	defer func() {

@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// PluginClient communicates with the JellyWatch companion plugin endpoints.
+// PluginClient communicates with the Plex2Jellyfin companion plugin endpoints.
 type PluginClient struct {
 	baseURL    string
 	apiKey     string
@@ -32,7 +32,7 @@ func NewPluginClient(cfg Config) *PluginClient {
 
 	hostname, err := os.Hostname()
 	if err != nil || hostname == "" {
-		hostname = "jellywatch"
+		hostname = "plex2jellyfin"
 	}
 
 	httpClient := cfg.HTTPClient
@@ -50,13 +50,13 @@ func NewPluginClient(cfg Config) *PluginClient {
 		httpClient: httpClient,
 		timeout:    timeout,
 		hostname:   hostname,
-		deviceID:   fmt.Sprintf("jellywatch-%s-%d", hostname, time.Now().UnixNano()),
+		deviceID:   fmt.Sprintf("plex2jellyfin-%s-%d", hostname, time.Now().UnixNano()),
 	}
 }
 
 // authHeader returns the Jellyfin Authorization header value.
 func (pc *PluginClient) authHeader() string {
-	return fmt.Sprintf(`MediaBrowser Token="%s", Client="jellywatch", Device="%s", DeviceId="%s", Version="1.0.0"`,
+	return fmt.Sprintf(`MediaBrowser Token="%s", Client="plex2jellyfin", Device="%s", DeviceId="%s", Version="1.0.0"`,
 		pc.apiKey, pc.hostname, pc.deviceID)
 }
 
@@ -182,7 +182,7 @@ func (pc *PluginClient) post(endpoint string, payload, result interface{}) error
 // Health checks if the plugin is responsive.
 func (pc *PluginClient) Health() (*PluginHealth, error) {
 	var health PluginHealth
-	if err := pc.get("/JellyWatch/health", &health); err != nil {
+	if err := pc.get("/Plex2Jellyfin/health", &health); err != nil {
 		return nil, err
 	}
 	return &health, nil
@@ -190,7 +190,7 @@ func (pc *PluginClient) Health() (*PluginHealth, error) {
 
 // GetItemByPath retrieves a Jellyfin item by its file system path.
 func (pc *PluginClient) GetItemByPath(path string) (*PluginItem, error) {
-	endpoint := fmt.Sprintf("/JellyWatch/item-by-path?path=%s", url.QueryEscape(path))
+	endpoint := fmt.Sprintf("/Plex2Jellyfin/item-by-path?path=%s", url.QueryEscape(path))
 	var item PluginItem
 	if err := pc.get(endpoint, &item); err != nil {
 		return nil, err
@@ -200,7 +200,7 @@ func (pc *PluginClient) GetItemByPath(path string) (*PluginItem, error) {
 
 // GetLibraryByPath finds which library a file path belongs to.
 func (pc *PluginClient) GetLibraryByPath(path string) (*PluginLibrary, error) {
-	endpoint := fmt.Sprintf("/JellyWatch/library-by-path?path=%s", url.QueryEscape(path))
+	endpoint := fmt.Sprintf("/Plex2Jellyfin/library-by-path?path=%s", url.QueryEscape(path))
 	var library PluginLibrary
 	if err := pc.get(endpoint, &library); err != nil {
 		return nil, err
@@ -211,7 +211,7 @@ func (pc *PluginClient) GetLibraryByPath(path string) (*PluginLibrary, error) {
 // GetActiveScans returns currently running library scans.
 func (pc *PluginClient) GetActiveScans() (*ActiveScansResponse, error) {
 	var scans ActiveScansResponse
-	if err := pc.get("/JellyWatch/active-scans", &scans); err != nil {
+	if err := pc.get("/Plex2Jellyfin/active-scans", &scans); err != nil {
 		return nil, err
 	}
 	return &scans, nil
@@ -225,12 +225,12 @@ func (pc *PluginClient) TriggerScan(libraryID, path string) error {
 	if path != "" {
 		payload["path"] = path
 	}
-	return pc.post("/JellyWatch/scan-library", payload, nil)
+	return pc.post("/Plex2Jellyfin/scan-library", payload, nil)
 }
 
 // GetUnidentifiableItems retrieves items that Jellyfin couldn't identify.
 func (pc *PluginClient) GetUnidentifiableItems(libraryID string) (*UnidentifiableResponse, error) {
-	endpoint := "/JellyWatch/unidentifiable"
+	endpoint := "/Plex2Jellyfin/unidentifiable"
 	if libraryID != "" {
 		endpoint = fmt.Sprintf("%s?libraryId=%s", endpoint, url.QueryEscape(libraryID))
 	}
@@ -244,7 +244,7 @@ func (pc *PluginClient) GetUnidentifiableItems(libraryID string) (*Unidentifiabl
 // GetActivePlayback returns currently active playback sessions.
 func (pc *PluginClient) GetActivePlayback() (*ActivePlaybackResponse, error) {
 	var playback ActivePlaybackResponse
-	if err := pc.get("/JellyWatch/active-playback", &playback); err != nil {
+	if err := pc.get("/Plex2Jellyfin/active-playback", &playback); err != nil {
 		return nil, err
 	}
 	return &playback, nil

@@ -3,7 +3,7 @@ package labeling
 import (
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 // hasProviderID returns true when at least one external ID has been resolved

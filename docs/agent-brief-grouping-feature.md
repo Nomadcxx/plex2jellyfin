@@ -2,7 +2,7 @@
 
 ## Your Task
 
-Explore how JellyWatch can solve Jellyfin's cross-drive show grouping problem. Read the existing research, understand the codebase, evaluate the known approaches, and look for alternatives we may have missed. Return a structured recommendation covering all viable options ranked by effort and durability.
+Explore how Plex2Jellyfin can solve Jellyfin's cross-drive show grouping problem. Read the existing research, understand the codebase, evaluate the known approaches, and look for alternatives we may have missed. Return a structured recommendation covering all viable options ranked by effort and durability.
 
 ---
 
@@ -15,7 +15,7 @@ Jellyfin identifies TV shows by folder name, not by TMDB/TVDB ID. This causes tw
 
 Plex avoids both by grouping on IMDB/TMDB ID regardless of folder structure. Jellyfin does not — issue [#904](https://github.com/jellyfin/jellyfin/issues/904) has been open since 2019 and was explicitly closed as "not planned" at the core level.
 
-JellyWatch already fixes naming compliance (making folders Jellyfin-compliant). This feature would fix the grouping problem that naming compliance alone cannot solve.
+Plex2Jellyfin already fixes naming compliance (making folders Jellyfin-compliant). This feature would fix the grouping problem that naming compliance alone cannot solve.
 
 ---
 
@@ -23,7 +23,7 @@ JellyWatch already fixes naming compliance (making folders Jellyfin-compliant). 
 
 **Research report** (completed — read this before exploring anything else):
 ```
-/home/nomadx/Documents/jellywatch/docs/jellyfin-plugin-research.md
+/home/nomadx/Documents/plex2jellyfin/docs/jellyfin-plugin-research.md
 ```
 
 This covers every known plugin that touches the problem, how Jellyfin's internal grouping key (`SeriesPresentationUniqueKey`) works, what the plugin API can and cannot do, and all relevant open GitHub issues.
@@ -32,19 +32,19 @@ This covers every known plugin that touches the problem, how Jellyfin's internal
 
 ## The Codebase
 
-**Repo root:** `/home/nomadx/Documents/jellywatch/`
+**Repo root:** `/home/nomadx/Documents/plex2jellyfin/`
 
 Key areas to understand before forming recommendations:
 
 | Path | What it does |
 |---|---|
-| `plugin/` | Existing C# Jellyfin plugin (v1.1.0, targets 10.11) — already installed alongside JellyWatch |
-| `plugin/JellyWatchPlugin.cs` | Plugin entry point |
-| `plugin/EventHandlers/EventForwarder.cs` | Forwards Jellyfin events to JellyWatch |
-| `plugin/Api/JellyWatchController.cs` | Custom `/jellywatch/*` endpoints in Jellyfin |
+| `plugin/` | Existing C# Jellyfin plugin (v1.1.0, targets 10.11) — already installed alongside Plex2Jellyfin |
+| `plugin/Plex2JellyfinPlugin.cs` | Plugin entry point |
+| `plugin/EventHandlers/EventForwarder.cs` | Forwards Jellyfin events to Plex2Jellyfin |
+| `plugin/Api/Plex2JellyfinController.cs` | Custom `/plex2jellyfin/*` endpoints in Jellyfin |
 | `internal/jellyfin/` | Go Jellyfin API client (library refresh, item queries, remediation) |
 | `internal/housekeeping/engine.go` | Detect → drain housekeeping engine; existing task kinds here |
-| `internal/tmdb/verifier.go` | TMDB verifier — JellyWatch already resolves TMDB IDs for media items |
+| `internal/tmdb/verifier.go` | TMDB verifier — Plex2Jellyfin already resolves TMDB IDs for media items |
 | `internal/consolidate/` | Consolidation logic — moves/merges files across paths |
 
 ---
@@ -53,7 +53,7 @@ Key areas to understand before forming recommendations:
 
 One approach has already been identified as a candidate — **explore it, but do not treat it as the only option**:
 
-**Go daemon housekeeping task:** Add a new task kind to the existing housekeeping engine (`internal/housekeeping/engine.go`) that detects series split across multiple Jellyfin library entries (same TMDB/TVDB ID, different Jellyfin items), then calls Jellyfin's `/Items/MergeVersions` REST endpoint to link them as alternate versions. JellyWatch already has the TMDB knowledge and the Jellyfin API client to do this with minimal new code.
+**Go daemon housekeeping task:** Add a new task kind to the existing housekeeping engine (`internal/housekeeping/engine.go`) that detects series split across multiple Jellyfin library entries (same TMDB/TVDB ID, different Jellyfin items), then calls Jellyfin's `/Items/MergeVersions` REST endpoint to link them as alternate versions. Plex2Jellyfin already has the TMDB knowledge and the Jellyfin API client to do this with minimal new code.
 
 Assess this honestly — including its known weakness: duplicate Series rows survive in Jellyfin's DB and may re-appear on re-scan.
 
@@ -64,7 +64,7 @@ Assess this honestly — including its known weakness: duplicate Series rows sur
 **Do not just evaluate the known approach.** Actively look for alternatives we have not considered, including but not limited to:
 
 - Whether the existing C# plugin (`plugin/`) could be extended with an `ILibraryPostScanTask` or `IScheduledTask` to do something more durable
-- Whether JellyWatch's consolidation engine (`internal/consolidate/`) could emit a canonical on-disk layout (symlinks or moves) that makes the problem disappear before Jellyfin even scans
+- Whether Plex2Jellyfin's consolidation engine (`internal/consolidate/`) could emit a canonical on-disk layout (symlinks or moves) that makes the problem disappear before Jellyfin even scans
 - Whether NFO sidecar files, a custom metadata provider, or any other Jellyfin-side mechanism could enforce consistent provider IDs and prevent the split from occurring
 - Any approach that touches the problem from a completely different angle
 
@@ -97,4 +97,4 @@ Return a ranked recommendation table followed by a short write-up on your top pi
 
 ---
 
-*Brief written 2026-05-01. Research: `/home/nomadx/Documents/jellywatch/docs/jellyfin-plugin-research.md`*
+*Brief written 2026-05-01. Research: `/home/nomadx/Documents/plex2jellyfin/docs/jellyfin-plugin-research.md`*

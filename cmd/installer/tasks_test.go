@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	configpkg "github.com/Nomadcxx/jellywatch/internal/config"
+	configpkg "github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 func TestStartInstallation_WebUIDisabledSkipsWebTasks(t *testing.T) {
@@ -48,7 +48,7 @@ func TestStartInstallation_UpdateModeRefreshesSystemdUnits(t *testing.T) {
 
 func TestBuildWebServiceUnit_UsesConfiguredPort(t *testing.T) {
 	unit := buildWebServiceUnit("nomadx", "18080")
-	if !strings.Contains(unit, "ExecStart=/usr/local/bin/jellyweb --host 0.0.0.0 --port 18080") {
+	if !strings.Contains(unit, "ExecStart=/usr/local/bin/plex2jellyfin-web --host 0.0.0.0 --port 18080") {
 		t.Fatalf("expected configured port in service unit, got:\n%s", unit)
 	}
 	if !strings.Contains(unit, "Environment=SUDO_USER=nomadx") {
@@ -70,7 +70,7 @@ func TestBuildWebServiceUnit_AllowsWebToWriteLibraryMounts(t *testing.T) {
 }
 
 func TestExistingWebServicePortPreservesCustomPort(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "jellyweb.service")
+	path := filepath.Join(t.TempDir(), "plex2jellyfin-web.service")
 	unit := buildWebServiceUnit("nomadx", "18080")
 	if err := os.WriteFile(path, []byte(unit), 0600); err != nil {
 		t.Fatalf("failed to write test unit: %v", err)
@@ -120,7 +120,7 @@ func TestGenerateConfigString_IncludesJellyfinWebhookSecret(t *testing.T) {
 	if !strings.Contains(configStr, `plugin_shared_secret = "my-explicit-secret"`) {
 		t.Fatalf("expected companion plugin secret to match webhook secret in config, got:\n%s", configStr)
 	}
-	if !strings.Contains(configStr, "same value used for X-Jellywatch-Webhook-Secret") {
+	if !strings.Contains(configStr, "same value used for X-Plex2Jellyfin-Webhook-Secret") {
 		t.Fatalf("expected config comments to document webhook header contract, got:\n%s", configStr)
 	}
 }

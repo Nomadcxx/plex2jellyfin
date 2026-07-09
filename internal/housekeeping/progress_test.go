@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 )
 
 func TestTaskProgressFinishMarksRegistryOpDone(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 type fakeAIReconfigurer struct {

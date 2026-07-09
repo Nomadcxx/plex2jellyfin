@@ -55,7 +55,7 @@ func (PreflightHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		res.Warnings = append(res.Warnings, "not readable: "+err.Error())
 	}
 	if body.Kind == "library" {
-		testPath := filepath.Join(body.Path, ".jellywatch_write_test_"+time.Now().Format("150405.000000"))
+		testPath := filepath.Join(body.Path, ".plex2jellyfin_write_test_"+time.Now().Format("150405.000000"))
 		if f, err := os.Create(testPath); err == nil {
 			_ = f.Close()
 			_ = os.Remove(testPath)

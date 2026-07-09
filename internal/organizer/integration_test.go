@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,12 +49,12 @@ func TestOrganizeWorkflow_EndToEnd(t *testing.T) {
 	movie, err := db.GetMovieByTitle("The Matrix", 1999)
 	require.NoError(t, err)
 	assert.NotNil(t, movie, "Movie should be in database")
-	assert.Equal(t, "jellywatch", movie.Source)
+	assert.Equal(t, "plex2jellyfin", movie.Source)
 
 	series, err := db.GetSeriesByTitle("Silo", 2023)
 	require.NoError(t, err)
 	assert.NotNil(t, series, "Series should be in database")
-	assert.Equal(t, "jellywatch", series.Source)
+	assert.Equal(t, "plex2jellyfin", series.Source)
 
 	// Verify files in correct locations
 	moviePath := filepath.Join(libraryDir, "The Matrix (1999)", "The Matrix (1999).mkv")

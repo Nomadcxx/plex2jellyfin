@@ -37,8 +37,8 @@ func TestPluginClientHealth(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/JellyWatch/health" {
-			t.Errorf("expected path '/JellyWatch/health', got '%s'", r.URL.Path)
+		if r.URL.Path != "/Plex2Jellyfin/health" {
+			t.Errorf("expected path '/Plex2Jellyfin/health', got '%s'", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(mockResponse)
@@ -73,8 +73,8 @@ func TestPluginClientGetItemByPath(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/JellyWatch/item-by-path" {
-			t.Errorf("expected path '/JellyWatch/item-by-path', got '%s'", r.URL.Path)
+		if r.URL.Path != "/Plex2Jellyfin/item-by-path" {
+			t.Errorf("expected path '/Plex2Jellyfin/item-by-path', got '%s'", r.URL.Path)
 		}
 		path := r.URL.Query().Get("path")
 		if path == "" {
@@ -104,8 +104,8 @@ func TestPluginClientGetItemByPath(t *testing.T) {
 
 func TestPluginClientTriggerScan(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/JellyWatch/scan-library" {
-			t.Errorf("expected path '/JellyWatch/scan-library', got '%s'", r.URL.Path)
+		if r.URL.Path != "/Plex2Jellyfin/scan-library" {
+			t.Errorf("expected path '/Plex2Jellyfin/scan-library', got '%s'", r.URL.Path)
 		}
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST method, got '%s'", r.Method)
@@ -140,8 +140,8 @@ func TestPluginClientGetActiveScans(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/JellyWatch/active-scans" {
-			t.Errorf("expected path '/JellyWatch/active-scans', got '%s'", r.URL.Path)
+		if r.URL.Path != "/Plex2Jellyfin/active-scans" {
+			t.Errorf("expected path '/Plex2Jellyfin/active-scans', got '%s'", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(mockResponse)

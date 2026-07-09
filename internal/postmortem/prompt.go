@@ -3,7 +3,7 @@ package postmortem
 import "fmt"
 
 func ContextMarkdown() string {
-	return `# JellyWatch Postmortem Context
+	return `# Plex2Jellyfin Postmortem Context
 
 - CLI is for mass processing; WebUI is for targeted review.
 - Auto-repair must be conservative and auditable.
@@ -15,13 +15,13 @@ func ContextMarkdown() string {
 }
 
 func AgentPrompt(workspace, bundle string) string {
-	return fmt.Sprintf(`# JellyWatch Scheduled Postmortem
+	return fmt.Sprintf(`# Plex2Jellyfin Scheduled Postmortem
 
 Workspace:
 cd %s
 
 Objective:
-Analyze the latest JellyWatch report bundle and determine:
+Analyze the latest Plex2Jellyfin report bundle and determine:
 1. What worked.
 2. What failed.
 3. Whether parser drift, metadata drift, duplicate pollution, or bad auto-repair occurred.

@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: JellyWatch API
+  title: Plex2Jellyfin API
   description: API for managing media library cleanup operations
   version: 2.0.0
   license:
@@ -513,7 +513,7 @@ paths:
   /jellyfin/plugin/status:
     get:
       operationId: getJellyfinPluginStatus
-      summary: Get JellyWatch companion plugin status
+      summary: Get Plex2Jellyfin companion plugin status
       tags: [Jellyfin]
       responses:
         '200':

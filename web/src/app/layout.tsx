@@ -6,7 +6,7 @@ import { Providers } from './providers';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'JellyWatch',
+  title: 'Plex2Jellyfin',
   description: 'Media library organization dashboard',
 };
 

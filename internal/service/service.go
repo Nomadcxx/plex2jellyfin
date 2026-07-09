@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 // CleanupService provides operations for cleaning up media libraries

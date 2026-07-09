@@ -6,16 +6,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Nomadcxx/jellywatch"
-	"github.com/Nomadcxx/jellywatch/api"
-	"github.com/Nomadcxx/jellywatch/internal/activity"
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/jellyweb/daemonctl"
-	"github.com/Nomadcxx/jellywatch/internal/paths"
-	"github.com/Nomadcxx/jellywatch/internal/service"
+	"github.com/Nomadcxx/plex2jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/api"
+	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemonctl"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -69,7 +69,7 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 		}
 		s.pathTranslator = jellyfin.NewPathTranslator(mappings)
 	}
-	if configDir, err := paths.JellyWatchDir(); err == nil {
+	if configDir, err := paths.Plex2JellyfinDir(); err == nil {
 		s.ipc = ipc.NewClient(filepath.Join(configDir, "control.sock"))
 	}
 	return s
@@ -98,7 +98,7 @@ func (s *Server) ensureSessionStore() {
 
 // getConfigDir returns the config directory path using sudo-aware paths package
 func getConfigDir() (string, error) {
-	return paths.JellyWatchDir()
+	return paths.Plex2JellyfinDir()
 }
 
 // Handler returns the HTTP handler with CORS, API routes, and static file serving
@@ -129,7 +129,7 @@ func (s *Server) Handler() *chi.Mux {
 	r.Mount("/api/v1", s.apiRouter())
 
 	// Serve static files with SPA fallback
-	webFS := jellywatch.GetWebFS()
+	webFS := plex2jellyfin.GetWebFS()
 	r.Get("/*", spaFileServer(webFS))
 
 	return r

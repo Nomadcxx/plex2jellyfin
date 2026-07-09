@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/go-chi/chi/v5"
 )
 

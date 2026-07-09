@@ -6,10 +6,10 @@ import (
 )
 
 func TestAgentPromptContainsSafetyRulesAndEvidenceFiles(t *testing.T) {
-	prompt := AgentPrompt("/home/nomadx/Documents/jellywatch", "~/.config/jellywatch/reports/latest")
+	prompt := AgentPrompt("/home/nomadx/Documents/plex2jellyfin", "~/.config/plex2jellyfin/reports/latest")
 
 	for _, want := range []string{
-		"cd /home/nomadx/Documents/jellywatch",
+		"cd /home/nomadx/Documents/plex2jellyfin",
 		"summary.json",
 		"unknown-seasons.json",
 		"repair-events.json",

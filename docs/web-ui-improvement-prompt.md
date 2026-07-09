@@ -2,7 +2,7 @@
 
 ## Project Context
 
-**Jellywatch** is a media file organizer for Jellyfin. It has a Next.js 14 web UI that needs systematic visual improvement.
+**Plex2Jellyfin** is a media file organizer for Jellyfin. It has a Next.js 14 web UI that needs systematic visual improvement.
 
 ### Tech Stack
 - **Framework**: Next.js 14 (App Router, static export)
@@ -178,7 +178,7 @@ Systematically improve the visual design and UX of this web UI. The current UI i
 
 ### Verification After Each Change
 ```bash
-cd /home/nomadx/Documents/jellywatch/web
+cd /home/nomadx/Documents/plex2jellyfin/web
 npm run build
 # Should complete without errors
 ```

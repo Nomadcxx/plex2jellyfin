@@ -76,7 +76,7 @@ func (m *MediaDB) GetMovieByTitle(title string, year int) (*Movie, error) {
 
 // UpsertMovie inserts or updates a movie record
 // Returns (shouldUpdateExternal, error) where shouldUpdateExternal=true means
-// JellyWatch path differs from existing and Radarr should be updated
+// Plex2Jellyfin path differs from existing and Radarr should be updated
 func (m *MediaDB) UpsertMovie(mov *Movie) (shouldUpdateExternal bool, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -154,8 +154,8 @@ func (m *MediaDB) UpsertMovie(mov *Movie) (shouldUpdateExternal bool, err error)
 
 		mov.ID = existingID
 
-		// If JellyWatch is updating and path differs, signal external update needed
-		if mov.Source == "jellywatch" && mov.CanonicalPath != existingPath && existingRadarrID != nil {
+		// If Plex2Jellyfin is updating and path differs, signal external update needed
+		if mov.Source == "plex2jellyfin" && mov.CanonicalPath != existingPath && existingRadarrID != nil {
 			return true, nil
 		}
 	} else {

@@ -9,7 +9,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
-	"github.com/Nomadcxx/jellywatch/internal/video"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
 // Pre-compiled regexes for advanced parsing performance optimization

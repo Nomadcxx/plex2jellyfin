@@ -115,7 +115,7 @@ func (c *Client) FindEpisode(seriesID, seasonNumber, episodeNumber int) (*Episod
 }
 
 // UpdateSeriesPath updates the path for a series in Sonarr
-// This is used when JellyWatch moves a series to a new location
+// This is used when Plex2Jellyfin moves a series to a new location
 func (c *Client) UpdateSeriesPath(seriesID int, newPath string) error {
 	// First get the existing series
 	series, err := c.GetSeries(seriesID)

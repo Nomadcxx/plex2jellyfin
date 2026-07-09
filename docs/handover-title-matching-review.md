@@ -1,7 +1,7 @@
 # Implementation Review: Title Matching & Season Normalization Fixes
 
 ## Context
-This is a review of the implementation of 6 tasks to fix JellyWatch's media library organization bugs that were causing duplicate/nested folders and inconsistent season numbering.
+This is a review of the implementation of 6 tasks to fix Plex2Jellyfin's media library organization bugs that were causing duplicate/nested folders and inconsistent season numbering.
 
 **Original Plan:** `docs/plans/2026-03-18-title-matching-and-season-normalization.md`
 

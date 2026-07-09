@@ -21,7 +21,7 @@ One blocking issue must be resolved before merge.
 |------|----------|
 | `internal/daemon/handler.go` | **BLOCKING** |
 | `internal/daemon/server.go` | **BLOCKING** |
-| `cmd/jellywatchd/main.go` | **BLOCKING** |
+| `cmd/plex2jellyfin-daemon/main.go` | **BLOCKING** |
 
 The daemon webhook handler (`internal/daemon/handler.go`) only processes `PlaybackStart` and `PlaybackStop` events. It silently drops `ItemAdded`, `TaskCompleted`, and `LibraryChanged`.
 

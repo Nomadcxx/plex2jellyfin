@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/consolidate"
-	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/consolidate"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 func TestIntegrationConsolidator(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "jellywatch_consolidate_test")
+	tempDir, err := ioutil.TempDir("", "plex2jellyfin_consolidate_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestIntegrationConsolidator(t *testing.T) {
 }
 
 func TestConflictResolutionAfterMove(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "jellywatch_conflict_resolution_test")
+	tempDir, err := ioutil.TempDir("", "plex2jellyfin_conflict_resolution_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/jellywatch_brand.png" alt="JellyWatch" width="480" />
+  <img src="assets/plex2jellyfin_brand.png" alt="Plex2Jellyfin" width="480" />
 </div>
 
 ---
@@ -14,36 +14,36 @@ Because Sonarr and Radarr can't be trusted with naming conventions.
 
 ## What It Does
 
-JellyWatch watches download directories, parses media filenames, and renames files into a Jellyfin-compatible layout. `jellyweb` serves a web dashboard at port `5522` for monitoring, queue management, duplicate review, and configuration. An optional Ollama integration handles ambiguous filenames with AI-assisted parsing.
+Plex2Jellyfin watches download directories, parses media filenames, and renames files into a Jellyfin-compatible layout. `plex2jellyfin-web` serves a web dashboard at port `5522` for monitoring, queue management, duplicate review, and configuration. An optional Ollama integration handles ambiguous filenames with AI-assisted parsing.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
 ```
 
 ## The Problem
 
-Your *arr stack downloads `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv`. Jellyfin wants `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv`. JellyWatch fixes that automatically, with AI fallback for ambiguous filenames and a convergence loop that catches files the parser missed.
+Your *arr stack downloads `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv`. Jellyfin wants `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv`. Plex2Jellyfin fixes that automatically, with AI fallback for ambiguous filenames and a convergence loop that catches files the parser missed.
 
 ## Architecture
 
-JellyWatch ships **three** binaries:
+Plex2Jellyfin ships **three** binaries:
 
 | Binary | Role |
 |---|---|
-| `jellywatchd` | Background daemon. Watches download dirs, runs the periodic library scan, executes the housekeeping queue, and exposes a Unix-domain control socket at `~/.config/jellywatch/control.sock`. |
-| `jellyweb` | HTTP server (default `:5522`). Hosts the embedded Next.js dashboard and proxies API calls to `jellywatchd` over the control socket. |
-| `jellywatch` | CLI for one-shot scans, audits, organize/move operations, duplicate cleanup, and consolidation. |
+| `plex2jellyfin-daemon` | Background daemon. Watches download dirs, runs the periodic library scan, executes the housekeeping queue, and exposes a Unix-domain control socket at `~/.config/plex2jellyfin/control.sock`. |
+| `plex2jellyfin-web` | HTTP server (default `:5522`). Hosts the embedded Next.js dashboard and proxies API calls to `plex2jellyfin-daemon` over the control socket. |
+| `plex2jellyfin` | CLI for one-shot scans, audits, organize/move operations, duplicate cleanup, and consolidation. |
 
 ```mermaid
 flowchart TB
     A[Sonarr / Radarr] -->|downloads| B[Download Client]
     B -->|drops file| C[Watch Directory]
-    C -->|inotify| D[jellywatchd]
+    C -->|inotify| D[plex2jellyfin-daemon]
     D -->|rename + move| E[Jellyfin Library]
     D -->|state + audit| DB[(SQLite media.db)]
     D -.->|low confidence| O[Ollama]
     O -.->|suggested rename| D
-    D <-->|control.sock| W[jellyweb :5522]
+    D <-->|control.sock| W[plex2jellyfin-web :5522]
     W <-->|browser| U[You]
     D -->|periodic| H[Housekeeping queue]
     H -->|consolidate / dedupe / fix-naming| E
@@ -53,21 +53,21 @@ See [`docs/architecture.md`](docs/architecture.md) for details.
 
 ## CLI Commands
 
-`jellywatch --help` shows the primary workflows. Advanced and maintenance commands are available but hidden from the root help to keep it focused.
+`plex2jellyfin --help` shows the primary workflows. Advanced and maintenance commands are available but hidden from the root help to keep it focused.
 
 ### Primary Commands
 
 ```bash
-jellywatch scan                          # Index libraries into media.db
-jellywatch status                        # DB statistics and deployment health
-jellywatch duplicates generate           # Find duplicate media
-jellywatch duplicates dry-run            # Preview deletion plan
-jellywatch duplicates execute            # Keep the best copy, remove the rest
-jellywatch consolidate generate          # Find TV series scattered across drives
-jellywatch consolidate dry-run           # Preview consolidation moves
-jellywatch consolidate execute           # Merge into a single library path
-jellywatch config                        # Manage configuration
-jellywatch version                       # Print version information
+plex2jellyfin scan                          # Index libraries into media.db
+plex2jellyfin status                        # DB statistics and deployment health
+plex2jellyfin duplicates generate           # Find duplicate media
+plex2jellyfin duplicates dry-run            # Preview deletion plan
+plex2jellyfin duplicates execute            # Keep the best copy, remove the rest
+plex2jellyfin consolidate generate          # Find TV series scattered across drives
+plex2jellyfin consolidate dry-run           # Preview consolidation moves
+plex2jellyfin consolidate execute           # Merge into a single library path
+plex2jellyfin config                        # Manage configuration
+plex2jellyfin version                       # Print version information
 ```
 
 ### AI Audit
@@ -75,9 +75,9 @@ jellywatch version                       # Print version information
 Reviews files with low parse confidence and proposes renames via the configured LLM:
 
 ```bash
-jellywatch audit --generate             # Identify low-confidence files
-jellywatch audit --generate --dry-run   # Preview AI rename suggestions
-jellywatch audit --execute              # Apply approved fixes
+plex2jellyfin audit --generate             # Identify low-confidence files
+plex2jellyfin audit --generate --dry-run   # Preview AI rename suggestions
+plex2jellyfin audit --execute              # Apply approved fixes
 ```
 
 The audit sends the library kind (Movies vs TV), folder path, and current parse as context to the LLM. See [`docs/ai-context.md`](docs/ai-context.md).
@@ -89,28 +89,28 @@ The daemon runs a convergence loop that detects duplicates and scattered series,
 ### Advanced Commands (hidden from root help)
 
 ```bash
-jellywatch organize /downloads/file.mkv  # Organize a single file
-jellywatch organize-folder /downloads/X  # Organize a directory tree
-jellywatch watch /downloads              # Foreground watcher
-jellywatch validate <path>              # Check library against Jellyfin naming rules
-jellywatch cleanup                      # Remove cruft files / empty dirs
-jellywatch monitor                      # Tail jellywatchd activity log
-jellywatch daemon {start|stop|restart}  # Control the systemd service
-jellywatch serve                        # Run the API server in foreground
-jellywatch repair series-dedupe         # Repair duplicate series rows
-jellywatch database cleanup-housekeeping # Collapse duplicate housekeeping rows
-jellywatch postmortem collect --since 96h # Generate evidence bundle for review
-jellywatch sonarr ...                   # Sonarr integration commands
-jellywatch radarr ...                   # Radarr integration commands
-jellywatch health                       # Verify *arr setup is compatible
-jellywatch migrate                      # Reconcile DB paths against *arr current state
-jellywatch orphans                      # Detect / remediate orphaned Jellyfin episodes
-jellywatch parses                       # Query parse_decisions table
+plex2jellyfin organize /downloads/file.mkv  # Organize a single file
+plex2jellyfin organize-folder /downloads/X  # Organize a directory tree
+plex2jellyfin watch /downloads              # Foreground watcher
+plex2jellyfin validate <path>              # Check library against Jellyfin naming rules
+plex2jellyfin cleanup                      # Remove cruft files / empty dirs
+plex2jellyfin monitor                      # Tail plex2jellyfin-daemon activity log
+plex2jellyfin daemon {start|stop|restart}  # Control the systemd service
+plex2jellyfin serve                        # Run the API server in foreground
+plex2jellyfin repair series-dedupe         # Repair duplicate series rows
+plex2jellyfin database cleanup-housekeeping # Collapse duplicate housekeeping rows
+plex2jellyfin postmortem collect --since 96h # Generate evidence bundle for review
+plex2jellyfin sonarr ...                   # Sonarr integration commands
+plex2jellyfin radarr ...                   # Radarr integration commands
+plex2jellyfin health                       # Verify *arr setup is compatible
+plex2jellyfin migrate                      # Reconcile DB paths against *arr current state
+plex2jellyfin orphans                      # Detect / remediate orphaned Jellyfin episodes
+plex2jellyfin parses                       # Query parse_decisions table
 ```
 
 ## Web Dashboard
 
-`jellyweb` serves the dashboard at `http://<host>:5522/`. Routes:
+`plex2jellyfin-web` serves the dashboard at `http://<host>:5522/`. Routes:
 
 - `/` — overview (media counts, duplicate groups, recent activity)
 - `/queue` — current move queue
@@ -121,7 +121,7 @@ jellywatch parses                       # Query parse_decisions table
 - `/jellyfin` — Jellyfin connection + path-mapping status
 - `/onboarding`, `/login`, `/settings/*` — first-run and configuration
 
-Every settings page maps to a section of `~/.config/jellywatch/config.toml`.
+Every settings page maps to a section of `~/.config/plex2jellyfin/config.toml`.
 
 ## Naming Rules
 
@@ -133,7 +133,7 @@ The parser strips release-group noise (`1080p`, `x264`, `WEB-DL`, `RARBG`, `-YTS
 
 ## Configuration
 
-Config file: `~/.config/jellywatch/config.toml`. A full annotated template is in [`config.toml.example`](config.toml.example).
+Config file: `~/.config/plex2jellyfin/config.toml`. A full annotated template is in [`config.toml.example`](config.toml.example).
 
 ```toml
 [watch]
@@ -214,36 +214,36 @@ file_mode = "0644"
 dir_mode  = "0755"
 ```
 
-> **Note:** `jellywatchd` must run as root to chown files. The bundled systemd unit drops to a minimal capability set: `CAP_CHOWN`, `CAP_FOWNER`, `CAP_DAC_OVERRIDE`.
+> **Note:** `plex2jellyfin-daemon` must run as root to chown files. The bundled systemd unit drops to a minimal capability set: `CAP_CHOWN`, `CAP_FOWNER`, `CAP_DAC_OVERRIDE`.
 
 ## Services
 
 The installer registers three systemd units:
 
 ```bash
-systemctl status jellywatchd              # daemon
-systemctl status jellyweb                # web UI on :5522
-systemctl --user status jellywatch-postmortem.timer  # scheduled evidence collection
-journalctl -u jellywatchd -f
+systemctl status plex2jellyfin-daemon              # daemon
+systemctl status plex2jellyfin-web                # web UI on :5522
+systemctl --user status plex2jellyfin-postmortem.timer  # scheduled evidence collection
+journalctl -u plex2jellyfin-daemon -f
 ```
 
-`jellyweb` depends on `jellywatchd` and reaches it via the Unix-domain control socket. No TCP between them.
+`plex2jellyfin-web` depends on `plex2jellyfin-daemon` and reaches it via the Unix-domain control socket. No TCP between them.
 
-The postmortem timer runs every 4 days, collecting parse decisions, repair events, housekeeping state, and suspicious items into an evidence bundle at `~/.config/jellywatch/reports/latest/`. It opens a terminal with an `agent-prompt.md` for periodic human or LLM review.
+The postmortem timer runs every 4 days, collecting parse decisions, repair events, housekeeping state, and suspicious items into an evidence bundle at `~/.config/plex2jellyfin/reports/latest/`. It opens a terminal with an `agent-prompt.md` for periodic human or LLM review.
 
 ## Install
 
 **One-liner:**
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
 ```
 
 **Manual:**
 
 ```bash
-git clone https://github.com/Nomadcxx/jellywatch.git
-cd jellywatch
+git clone https://github.com/Nomadcxx/plex2jellyfin.git
+cd plex2jellyfin
 go build -o installer ./cmd/installer
 sudo ./installer
 ```
@@ -256,10 +256,10 @@ Requires **Go 1.24+** (see `go.mod`).
 
 ```bash
 make                                       # build all binaries into bin/
-go build -o bin/jellywatchd ./cmd/jellywatchd
-go build -o bin/jellyweb    ./cmd/jellyweb
-go build -o bin/jellywatch  ./cmd/jellywatch
-cd web && npm run build                    # rebuild dashboard (embedded into jellyweb)
+go build -o bin/plex2jellyfin-daemon ./cmd/plex2jellyfin-daemon
+go build -o bin/plex2jellyfin-web    ./cmd/plex2jellyfin-web
+go build -o bin/plex2jellyfin  ./cmd/plex2jellyfin
+cd web && npm run build                    # rebuild dashboard (embedded into plex2jellyfin-web)
 ./test-all.sh                              # full test sweep
 ```
 

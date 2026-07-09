@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make every section of `~/.config/jellywatch/config.toml` editable from the webui, with hot reload over IPC, atomic write safety, validation/connection-test affordances, and route-per-section UI.
+**Goal:** Make every section of `~/.config/plex2jellyfin/config.toml` editable from the webui, with hot reload over IPC, atomic write safety, validation/connection-test affordances, and route-per-section UI.
 
-**Architecture:** `jellyweb` becomes the only runtime config writer (atomic write + `flock`). Web saves use one canonical pipeline: re-read config, apply change, write a backup, atomically write the candidate config, trigger daemon `RELOAD`, and restore the previous config if reload fails. New `internal/daemon/ipc` package establishes a Unix-socket control plane carrying `STATUS` and `RELOAD` only (other commands ship in Plan 2). Each daemon subsystem implements a two-phase `Reloadable` interface so reload either fully applies or fully rolls back. Frontend gains a left-rail settings layout with one route per section and a shared `SettingsForm` save pipeline.
+**Architecture:** `plex2jellyfin-web` becomes the only runtime config writer (atomic write + `flock`). Web saves use one canonical pipeline: re-read config, apply change, write a backup, atomically write the candidate config, trigger daemon `RELOAD`, and restore the previous config if reload fails. New `internal/daemon/ipc` package establishes a Unix-socket control plane carrying `STATUS` and `RELOAD` only (other commands ship in Plan 2). Each daemon subsystem implements a two-phase `Reloadable` interface so reload either fully applies or fully rolls back. Frontend gains a left-rail settings layout with one route per section and a shared `SettingsForm` save pipeline.
 
 **Tech Stack:** Go (chi router, gorilla/websocket replaced by raw net for IPC), TOML via existing `internal/config`, Next.js App Router, React Query, shadcn/ui, Vitest + msw for tests.
 
@@ -17,7 +17,7 @@
 ### Backend (NEW)
 - `internal/daemon/ipc/protocol.go` — message types, command names, error codes
 - `internal/daemon/ipc/server.go` — listener, accept loop, dispatch
-- `internal/daemon/ipc/client.go` — client (used by jellyweb + future CLI)
+- `internal/daemon/ipc/client.go` — client (used by plex2jellyfin-web + future CLI)
 - `internal/daemon/ipc/peercred_linux.go` — `SO_PEERCRED` UID check
 - `internal/daemon/reload/supervisor.go` — two-phase prepare/commit runner
 - `internal/daemon/reload/registry.go` — global registration of `Reloadable` implementations
@@ -33,8 +33,8 @@
 - `internal/config/sections.go` — section registry, mapping name → struct field
 
 ### Backend (EDIT)
-- `cmd/jellyweb/main.go` — construct IPC client and pass it into API server
-- `cmd/jellywatchd/main.go` — start IPC server; register reloadables
+- `cmd/plex2jellyfin-web/main.go` — construct IPC client and pass it into API server
+- `cmd/plex2jellyfin-daemon/main.go` — start IPC server; register reloadables
 - `internal/api/server.go` — mount new routes
 - `internal/config/config.go` — add `Save()` flock+atomic; `secret:"true"` struct tags
 - `api/openapi.yaml` — declare new routes
@@ -404,7 +404,7 @@ func NewServer(path string) *Server {
 func (s *Server) Register(c Command, h Handler) { s.handlers[c] = h }
 
 // AddAllowedPeerUID permits a specific local UID to connect. This is used for
-// root/system daemon mode where jellyweb runs as the installing user.
+// root/system daemon mode where plex2jellyfin-web runs as the installing user.
 func (s *Server) AddAllowedPeerUID(uid int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -561,7 +561,7 @@ git commit -m "feat(ipc): unix-socket server with frame-writer dispatch"
 
 ---
 
-### Task 1.4: IPC client (used by jellyweb + future CLI)
+### Task 1.4: IPC client (used by plex2jellyfin-web + future CLI)
 
 **Files:** Create: `internal/daemon/ipc/client.go`, `internal/daemon/ipc/client_test.go`.
 
@@ -698,7 +698,7 @@ Expected: clean build.
 
 ```bash
 git add internal/daemon/ipc/client.go internal/daemon/ipc/client_test.go go.mod go.sum
-git commit -m "feat(ipc): client used by jellyweb and CLI"
+git commit -m "feat(ipc): client used by plex2jellyfin-web and CLI"
 ```
 
 ---
@@ -718,7 +718,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 type fake struct {
@@ -794,7 +794,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 type Commit func() error
@@ -892,12 +892,12 @@ git commit -m "feat(reload): two-phase supervisor with prepare/commit/rollback"
 
 ### Task 1.6: Wire IPC server into daemon main
 
-**Files:** Modify: `cmd/jellywatchd/main.go`. Test: `cmd/jellywatchd/main_test.go` (smoke test).
+**Files:** Modify: `cmd/plex2jellyfin-daemon/main.go`. Test: `cmd/plex2jellyfin-daemon/main_test.go` (smoke test).
 
 - [ ] **Step 1: Write smoke test**
 
 ```go
-// cmd/jellywatchd/ipc_smoke_test.go
+// cmd/plex2jellyfin-daemon/ipc_smoke_test.go
 package main
 
 import (
@@ -906,7 +906,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 )
 
 func TestStatusHandlerReturnsState(t *testing.T) {
@@ -942,12 +942,12 @@ func TestStatusHandlerReturnsState(t *testing.T) {
 
 - [ ] **Step 2: Run test, verify fail**
 
-Run: `go test ./cmd/jellywatchd/... -run TestStatusHandlerReturnsState`
+Run: `go test ./cmd/plex2jellyfin-daemon/... -run TestStatusHandlerReturnsState`
 Expected: FAIL — `registerStatusHandler` undefined.
 
 - [ ] **Step 3: Implement handler registration helper**
 
-Add to `cmd/jellywatchd/main.go`:
+Add to `cmd/plex2jellyfin-daemon/main.go`:
 
 ```go
 import (
@@ -957,10 +957,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
-	"github.com/Nomadcxx/jellywatch/internal/daemon/reload"
-	"github.com/Nomadcxx/jellywatch/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/reload"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 )
 
 var daemonStartTime = time.Now()
@@ -1001,7 +1001,7 @@ func registerReloadHandler(srv *ipc.Server) {
 }
 
 func startIPCServer(ctx context.Context, version string) (*ipc.Server, error) {
-	configDir, err := paths.JellyWatchDir()
+	configDir, err := paths.Plex2JellyfinDir()
 	if err != nil {
 		return nil, err
 	}
@@ -1025,13 +1025,13 @@ defer ipcSrv.Stop()
 
 - [ ] **Step 4: Run test**
 
-Run: `go test ./cmd/jellywatchd/... -run TestStatusHandlerReturnsState && go build ./...`
+Run: `go test ./cmd/plex2jellyfin-daemon/... -run TestStatusHandlerReturnsState && go build ./...`
 Expected: PASS, clean build.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cmd/jellywatchd/
+git add cmd/plex2jellyfin-daemon/
 git commit -m "feat(daemon): start IPC server and register STATUS+RELOAD handlers"
 ```
 
@@ -1051,7 +1051,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 func TestLoggingReloadableSwapsLevel(t *testing.T) {
@@ -1091,7 +1091,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 type loggingReloadable struct {
@@ -1125,7 +1125,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Wire into daemon main**
 
-Edit `cmd/jellywatchd/main.go`, in the same place IPC starts, register the logging reloadable:
+Edit `cmd/plex2jellyfin-daemon/main.go`, in the same place IPC starts, register the logging reloadable:
 
 ```go
 reload.Register(reload.NewLoggingReloadable(&loadedConfig.Logging.Level))
@@ -1141,7 +1141,7 @@ Expected: clean build.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/daemon/reload/logging_reloadable.go internal/daemon/reload/logging_reloadable_test.go cmd/jellywatchd/main.go
+git add internal/daemon/reload/logging_reloadable.go internal/daemon/reload/logging_reloadable_test.go cmd/plex2jellyfin-daemon/main.go
 git commit -m "feat(reload): logging-level reloadable wired into daemon"
 ```
 
@@ -1161,7 +1161,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 type fakeScanner struct {
@@ -1208,7 +1208,7 @@ package reload
 import (
 	"context"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 type ScannerLike interface {
@@ -1270,7 +1270,7 @@ Expected: PASS.
 
 - [ ] **Step 6: Wire into daemon main**
 
-In `cmd/jellywatchd/main.go`:
+In `cmd/plex2jellyfin-daemon/main.go`:
 
 ```go
 reload.Register(reload.NewScannerReloadable(scanner))
@@ -1279,7 +1279,7 @@ reload.Register(reload.NewScannerReloadable(scanner))
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/daemon/reload/scanner_reloadable.go internal/daemon/reload/scanner_reloadable_test.go internal/scanner/scanner.go cmd/jellywatchd/main.go
+git add internal/daemon/reload/scanner_reloadable.go internal/daemon/reload/scanner_reloadable_test.go internal/scanner/scanner.go cmd/plex2jellyfin-daemon/main.go
 git commit -m "feat(reload): scanner reloadable replaces watch path set atomically"
 ```
 
@@ -1300,7 +1300,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 type fakeAI struct {
@@ -1352,7 +1352,7 @@ package reload
 import (
 	"context"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 type AILike interface {
@@ -1407,7 +1407,7 @@ reload.Register(reload.NewAIReloadable(aiMatcher))
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/daemon/reload/ai_reloadable.go internal/daemon/reload/ai_reloadable_test.go internal/ai/matcher.go cmd/jellywatchd/main.go
+git add internal/daemon/reload/ai_reloadable.go internal/daemon/reload/ai_reloadable_test.go internal/ai/matcher.go cmd/plex2jellyfin-daemon/main.go
 git commit -m "feat(reload): ai matcher reloadable for endpoint+model swap"
 ```
 
@@ -1501,7 +1501,7 @@ import (
 
 // AtomicWriteWithLock writes content to path atomically, holding a
 // flock(2) advisory lock for the duration of the write. Use this for any
-// config.toml mutation to make CLI/installer/jellyweb writes mutually
+// config.toml mutation to make CLI/installer/plex2jellyfin-web writes mutually
 // exclusive.
 func AtomicWriteWithLock(path string, content []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -1593,7 +1593,7 @@ func (c *Config) Save() error {
 
 - [ ] **Step 6: Existing tests still pass**
 
-Run: `go test ./internal/config/... ./cmd/jellywatch/...`
+Run: `go test ./internal/config/... ./cmd/plex2jellyfin/...`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -1622,13 +1622,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
 
 func TestInstallerWritesViaAtomicLock(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	target := filepath.Join(dir, "jellywatch", "config.toml")
+	target := filepath.Join(dir, "plex2jellyfin", "config.toml")
 
 	if err := config.AtomicWriteWithLock(target, []byte("[watch]\nmovies = []\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -1655,7 +1655,7 @@ if err := config.AtomicWriteWithLock(configPath, []byte(configStr), 0600); err !
 }
 ```
 
-Add the import: `"github.com/Nomadcxx/jellywatch/internal/config"`.
+Add the import: `"github.com/Nomadcxx/plex2jellyfin/internal/config"`.
 
 - [ ] **Step 4: Build & test**
 
@@ -2076,8 +2076,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 )
 
 type failingReloadIPC struct{}
@@ -2130,8 +2130,8 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 )
 
 type IPCCaller interface {
@@ -2234,8 +2234,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -2322,7 +2322,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -2467,7 +2467,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Mount routes in api/server.go**
 
-In `internal/api/server.go`, add an `ipc IPCCaller` field to `Server`, pass it from `cmd/jellyweb/main.go`, then mount routes in `apiRouter`:
+In `internal/api/server.go`, add an `ipc IPCCaller` field to `Server`, pass it from `cmd/plex2jellyfin-web/main.go`, then mount routes in `apiRouter`:
 
 ```go
 settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}
@@ -2477,7 +2477,7 @@ r.Route("/settings", func(r chi.Router) {
 })
 ```
 
-(The production value is a `*ipc.Client` constructed in jellyweb startup using `paths.JellyWatchDir()/control.sock`; tests can pass a stub.)
+(The production value is a `*ipc.Client` constructed in plex2jellyfin-web startup using `paths.Plex2JellyfinDir()/control.sock`; tests can pass a stub.)
 
 - [ ] **Step 6: Commit**
 
@@ -2504,7 +2504,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -2593,7 +2593,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -2904,10 +2904,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 type TestHandlers struct{}
@@ -3100,7 +3100,7 @@ func (PreflightHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			res.Warnings = append(res.Warnings, "not readable: "+rerr.Error())
 		}
 		if body.Kind == "library" {
-			testFile := filepath.Join(body.Path, ".jellywatch_write_test_"+time.Now().Format("150405.000000"))
+			testFile := filepath.Join(body.Path, ".plex2jellyfin_write_test_"+time.Now().Format("150405.000000"))
 			if f, werr := os.Create(testFile); werr == nil {
 				f.Close()
 				os.Remove(testFile)
@@ -4681,7 +4681,7 @@ git commit -m "refactor(web): settings overview as section cards"
 
 ## Phase 6 — Integration & verification
 
-### Task 6.1: End-to-end smoke (jellyweb + jellywatchd)
+### Task 6.1: End-to-end smoke (plex2jellyfin-web + plex2jellyfin-daemon)
 
 **Files:** Create: `internal/api/integration_test.go`.
 
@@ -4703,9 +4703,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
-	"github.com/Nomadcxx/jellywatch/internal/daemon/reload"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/reload"
 )
 
 func TestSettingsRoundtripWithReload(t *testing.T) {
@@ -4713,8 +4713,8 @@ func TestSettingsRoundtripWithReload(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	// 1. Start IPC server (the "daemon" side).
-	sock := filepath.Join(dir, "jellywatch", "control.sock")
-	if err := config.AtomicWriteWithLock(filepath.Join(dir, "jellywatch", "config.toml"), []byte(""), 0600); err != nil {
+	sock := filepath.Join(dir, "plex2jellyfin", "control.sock")
+	if err := config.AtomicWriteWithLock(filepath.Join(dir, "plex2jellyfin", "config.toml"), []byte(""), 0600); err != nil {
 		t.Fatal(err)
 	}
 	loaded, _ := config.Load()
@@ -4738,7 +4738,7 @@ func TestSettingsRoundtripWithReload(t *testing.T) {
 	}
 	defer srv.Stop()
 
-	// 2. Wire jellyweb side: settings handler with a real IPC client.
+	// 2. Wire plex2jellyfin-web side: settings handler with a real IPC client.
 	cli := ipc.NewClient(sock)
 	h := &SettingsHandlers{Cfg: loaded, IPC: ipcCallerAdapter{c: cli}}
 
@@ -4775,7 +4775,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/Nomadcxx/jellywatch/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/go-chi/chi/v5"
 )
 

@@ -3,11 +3,11 @@ package scanner
 import (
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/logging"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
-	"github.com/Nomadcxx/jellywatch/internal/watcher"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/watcher"
 )
 
 type OrphanChecker interface {

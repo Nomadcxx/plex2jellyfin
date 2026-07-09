@@ -13,7 +13,7 @@ func TestUpsertMovie_SetsDirtyFlag(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/movies/Test Movie (2020)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertMovie(movie)
 	if err != nil {
@@ -56,7 +56,7 @@ func TestUpsertMovie_ScansNewColumns(t *testing.T) {
 		Year:           2020,
 		CanonicalPath:  "/movies/Test Movie (2020)",
 		LibraryRoot:    "/movies",
-		Source:         "jellywatch",
+		Source:         "plex2jellyfin",
 		SourcePriority: 75,
 	}
 
@@ -91,7 +91,7 @@ func TestGetAllMovies_IncludesDirtyFlags(t *testing.T) {
 		Year:          2020,
 		CanonicalPath: "/movies/Test Movie (2020)",
 		LibraryRoot:   "/movies",
-		Source:        "jellywatch",
+		Source:        "plex2jellyfin",
 	}
 	_, err := db.UpsertMovie(movie)
 	if err != nil {

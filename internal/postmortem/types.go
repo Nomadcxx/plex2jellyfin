@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 )
 
 const TimestampLayout = "2006-01-02T1504"

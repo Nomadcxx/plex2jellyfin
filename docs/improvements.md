@@ -2,7 +2,7 @@
 
 ## Summary
 
-Documenting proposed improvements to JellyWatch architecture based on research into:
+Documenting proposed improvements to Plex2Jellyfin architecture based on research into:
 1. Licensing
 2. Jellyfin API integration possibilities
 3. Naming compliance edge cases
@@ -23,7 +23,7 @@ Documenting proposed improvements to JellyWatch architecture based on research i
 
 ### Current Approach
 
-JellyWatch currently uses Sonarr and Radarr APIs for:
+Plex2Jellyfin currently uses Sonarr and Radarr APIs for:
 - Quality-based decisions (keep REMUX > BluRay > WEB-DL)
 - Initial metadata lookups (provider IDs, episode/movie info)
 - Download client interaction (check queues, grab status)
@@ -87,7 +87,7 @@ Use Jellyfin API for:
    ```go
    jellyfin.PostLibraryVirtualFoldersPaths(PostLibraryVirtualFoldersPathsParams{
        PathInfo: &LibraryPathInfo{
-           Name: "JellyWatch Movies",
+           Name: "Plex2Jellyfin Movies",
            Path: "/mnt/storage1/Movies",
        },
    })
@@ -102,7 +102,7 @@ Use Jellyfin API for:
 
 If Jellyfin adds quality metadata or plugin APIs, consider:
 1. Direct Jellyfin metadata provider queries
-2. Move quality decisions from Sonarr/Radarr to JellyWatch
+2. Move quality decisions from Sonarr/Radarr to Plex2Jellyfin
 3. Use Jellyfin's library refresh triggers more actively
 
 ---

@@ -17,19 +17,19 @@ check-frontend:
 		echo "ERROR: embedded/frontend/ not built. Run 'make frontend' first."; \
 		exit 1; \
 	fi
-	@if grep -q '<body>jellywatch</body>' embedded/frontend/index.html 2>/dev/null; then \
+	@if grep -q '<body>plex2jellyfin</body>' embedded/frontend/index.html 2>/dev/null; then \
 		echo "ERROR: embedded/frontend/index.html is placeholder content. Run 'make frontend'."; \
 		exit 1; \
 	fi
 	@echo "Frontend check passed."
 
 build: check-frontend
-	go build -o bin/jellywatchd ./cmd/jellywatchd
-	go build -o bin/jellywatch ./cmd/jellywatch
-	go build -o bin/jellyweb ./cmd/jellyweb
+	go build -o bin/plex2jellyfin-daemon ./cmd/plex2jellyfin-daemon
+	go build -o bin/plex2jellyfin ./cmd/plex2jellyfin
+	go build -o bin/plex2jellyfin-web ./cmd/plex2jellyfin-web
 
 dev:
-	go run ./cmd/jellywatchd --health-addr=:8686 &
+	go run ./cmd/plex2jellyfin-daemon --health-addr=:8686 &
 	cd web && npm run dev
 
 clean:

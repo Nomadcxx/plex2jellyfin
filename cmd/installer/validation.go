@@ -146,7 +146,7 @@ func testJellyfinCmd(url, apiKey string) tea.Cmd {
 		if err != nil {
 			return apiTestResultMsg{service: "jellyfin", success: false, err: err}
 		}
-		req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token="%s", Client="jellywatch-installer", Device="installer", DeviceId="installer", Version="1.0.0"`, apiKey))
+		req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token="%s", Client="plex2jellyfin-installer", Device="installer", DeviceId="installer", Version="1.0.0"`, apiKey))
 
 		resp, err := client.Do(req)
 		if err != nil {

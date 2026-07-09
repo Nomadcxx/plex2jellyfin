@@ -1,6 +1,6 @@
 # Dashboard Implementation Audit Prompt
 
-**Purpose:** This prompt is designed for an independent agent to audit the backend-frontend integration work completed for the Jellywatch dashboard.
+**Purpose:** This prompt is designed for an independent agent to audit the backend-frontend integration work completed for the Plex2Jellyfin dashboard.
 
 **Context:** A previous session implemented the dashboard API endpoints, authentication, media manager integration, and static file serving. This audit should verify correctness, security, and code quality.
 
@@ -8,7 +8,7 @@
 
 ## Audit Instructions
 
-You are auditing a Go + React project called Jellywatch - a media library organization tool with a web dashboard. The previous implementation session completed backend-frontend integration tasks. Your job is to thoroughly inspect the implementation for correctness, security, and best practices.
+You are auditing a Go + React project called Plex2Jellyfin - a media library organization tool with a web dashboard. The previous implementation session completed backend-frontend integration tasks. Your job is to thoroughly inspect the implementation for correctness, security, and best practices.
 
 ### Project Context
 
@@ -98,9 +98,9 @@ api/server.gen.go           # Generated server interface
 
 #### 4. Integration Testing
 
-- [ ] Build the project: `go build ./cmd/jellywatch`
+- [ ] Build the project: `go build ./cmd/plex2jellyfin`
 - [ ] Run tests: `go test ./internal/api/...`
-- [ ] Start server: `./jellywatch serve --addr :8765`
+- [ ] Start server: `./plex2jellyfin serve --addr :8765`
 - [ ] Test each endpoint:
 
 ```bash

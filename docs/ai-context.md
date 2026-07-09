@@ -2,7 +2,7 @@
 
 ## Overview
 
-JellyWatch uses local AI (Ollama) to parse media filenames and extract
+Plex2Jellyfin uses local AI (Ollama) to parse media filenames and extract
 clean metadata (title, year, season, episode). The AI receives contextual
 information to improve accuracy and prevent hallucinations.
 
@@ -56,7 +56,7 @@ AI suggestions are validated through multiple layers:
 
 ## Configuration
 
-AI matching is controlled via `~/.config/jellywatch/config.toml`:
+AI matching is controlled via `~/.config/plex2jellyfin/config.toml`:
 
 ```toml
 [ai]
@@ -81,4 +81,4 @@ timeout_seconds = 30
 If AI suggests movie for TV show or vice versa:
 - Check folder path (should be in correct library)
 - Verify library root config in config.toml
-- Run `jellywatch scan` to update database
+- Run `plex2jellyfin scan` to update database

@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-16
 **Status:** Approved
-**Problem:** The daemon (`jellywatchd`) organizes files using regex-only parsing, which produces data quality issues: missing apostrophes, missing years, title disambiguation failures. The AI infrastructure (`ai.Integrator`, `ai.Matcher`, Ollama Cloud) is fully built but only wired into manual CLI commands (`jellywatch scan`, `jellywatch audit`), not the live daemon path.
+**Problem:** The daemon (`plex2jellyfin-daemon`) organizes files using regex-only parsing, which produces data quality issues: missing apostrophes, missing years, title disambiguation failures. The AI infrastructure (`ai.Integrator`, `ai.Matcher`, Ollama Cloud) is fully built but only wired into manual CLI commands (`plex2jellyfin scan`, `plex2jellyfin audit`), not the live daemon path.
 
 **Goal:** Wire AI into the daemon's file organization pipeline to automatically fix low-confidence regex parses, while being conservative with cloud API calls and maintaining daemon reliability.
 
@@ -18,7 +18,7 @@
 | Rate limiting | Per-hour burst (10) + daily cap (50) | Belt and suspenders for cloud costs |
 | Safety valve | Hybrid: change category + confidence threshold | Predictable auto-apply rules, risky changes flagged |
 | Logging | Dedicated JSONL file | Easy to inspect, grep, tail |
-| Review workflow | JSONL log + `jellywatch review` CLI | Web UI can come later |
+| Review workflow | JSONL log + `plex2jellyfin review` CLI | Web UI can come later |
 
 ---
 
@@ -50,7 +50,7 @@ The `sizeFunc` parameter matches the existing closure pattern used by `OrganizeT
 
 ### 2. Two-Lane Processing
 
-The handler gains a ticker goroutine for processing the slow lane. This is a single `time.Ticker` started in `cmd/jellywatchd/main.go` alongside the existing watcher and periodic scanner goroutines — same pattern, same lifecycle management.
+The handler gains a ticker goroutine for processing the slow lane. This is a single `time.Ticker` started in `cmd/plex2jellyfin-daemon/main.go` alongside the existing watcher and periodic scanner goroutines — same pattern, same lifecycle management.
 
 **Fast lane** (confidence >= `AutoTriggerThreshold`, default 0.6):
 - Handler parses with `naming.ParseTVShowName()` (TV) / `naming.ParseMovieFromPath()` (movies)
@@ -176,7 +176,7 @@ When limits are hit, pending items stay queued. The ticker logs a rate limit eve
 
 ### 5. JSONL Enhancement Log
 
-**Location:** `~/.config/jellywatch/ai-enhancements.jsonl`
+**Location:** `~/.config/plex2jellyfin/ai-enhancements.jsonl`
 
 **Schema:** Single JSON object per line, differentiated by `action` field:
 
@@ -208,10 +208,10 @@ func (l *EnhanceLogger) Log(entry EnhanceLogEntry) error
 
 **Rotation:** On each write, checks file size. If > 10MB, renames current file to `.1` (shifting existing backups), creates new file. Keeps last 3 backups. No external dependencies.
 
-### 6. `jellywatch review` Command
+### 6. `plex2jellyfin review` Command
 
 ```
-$ jellywatch review
+$ plex2jellyfin review
 3 items flagged for review:
 
 1. weird.file.mkv
@@ -231,7 +231,7 @@ $ jellywatch review
 - **Conflict detection:** Before applying, checks if the source file still exists in the watch directory. If it's gone (already organized by a re-download, or manually moved), shows status and skips
 - On approve: calls `OrganizeTVWithParsed` / `OrganizeMovieWithParsed` with the AI metadata, appends `review_approved` to log
 - On reject: appends `review_rejected` to log
-- Non-interactive mode: `jellywatch review --list` (just prints, no prompts)
+- Non-interactive mode: `plex2jellyfin review --list` (just prints, no prompts)
 - **Organizer initialization:** The review command constructs an `Organizer` using the same config-based setup as the daemon (library paths, transfer backend, etc.), loaded from `config.toml`
 
 ---
@@ -245,8 +245,8 @@ $ jellywatch review
 | `internal/daemon/ratelimit.go` | **New file.** `AIRateLimiter` struct |
 | `internal/daemon/classify.go` | **New file.** `ClassifyChange()` function, change category types |
 | `internal/daemon/enhancelog.go` | **New file.** JSONL writer with rotation |
-| `cmd/jellywatch/review_cmd.go` | **New file.** `jellywatch review` command |
-| `cmd/jellywatchd/main.go` | Wire `ai.Matcher` into `MediaHandlerConfig`, start ticker goroutine |
+| `cmd/plex2jellyfin/review_cmd.go` | **New file.** `plex2jellyfin review` command |
+| `cmd/plex2jellyfin-daemon/main.go` | Wire `ai.Matcher` into `MediaHandlerConfig`, start ticker goroutine |
 | `internal/config/config.go` | Add `HourlyLimit`, `DailyLimit`, `EnhancementIntervalSeconds` to `AIConfig` struct (with `mapstructure` tags), update `ToTOML()` serialization |
 
 ## Files NOT Changed

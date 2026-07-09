@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 )
 
 // getConfigDir returns the config directory for the actual user (not root)
@@ -23,14 +23,14 @@ func getActualUser() string {
 	return paths.ActualUser()
 }
 
-// detectExistingInstall checks for existing JellyWatch installation
+// detectExistingInstall checks for existing Plex2Jellyfin installation
 func detectExistingInstall() (bool, string, time.Time) {
 	configDir, err := getConfigDir()
 	if err != nil {
 		return false, "", time.Time{}
 	}
 
-	dbPath := filepath.Join(configDir, "jellywatch", "media.db")
+	dbPath := filepath.Join(configDir, "plex2jellyfin", "media.db")
 	info, err := os.Stat(dbPath)
 	if err != nil {
 		return false, "", time.Time{}
@@ -80,7 +80,7 @@ func detectPackageManager() string {
 
 // CommandError captures command execution details for error reporting
 type CommandError struct {
-	Name    string // e.g., "jellywatch"
+	Name    string // e.g., "plex2jellyfin"
 	Command string // full command string
 	Output  string // combined stdout/stderr
 	Err     error  // underlying error
@@ -130,7 +130,7 @@ func runCommand(name string, cmd *exec.Cmd, logFile *os.File) error {
 	return nil
 }
 
-// resolveInstallerProjectRoot finds the jellywatch source root for build/install tasks.
+// resolveInstallerProjectRoot finds the plex2jellyfin source root for build/install tasks.
 func resolveInstallerProjectRoot() (string, error) {
 	cwd, _ := os.Getwd()
 	exe, _ := os.Executable()
@@ -160,7 +160,7 @@ func resolveProjectRoot(cwd, execPath string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("could not locate jellywatch source root (run installer from repository root)")
+	return "", fmt.Errorf("could not locate plex2jellyfin source root (run installer from repository root)")
 }
 
 func findProjectRoot(start string) (string, bool) {
@@ -169,7 +169,7 @@ func findProjectRoot(start string) (string, bool) {
 	}
 	dir := filepath.Clean(start)
 	for {
-		if fileExists(filepath.Join(dir, "go.mod")) && fileExists(filepath.Join(dir, "cmd", "jellywatch", "main.go")) {
+		if fileExists(filepath.Join(dir, "go.mod")) && fileExists(filepath.Join(dir, "cmd", "plex2jellyfin", "main.go")) {
 			return dir, true
 		}
 		parent := filepath.Dir(dir)

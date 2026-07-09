@@ -1,4 +1,4 @@
-# JellyWatch Architecture
+# Plex2Jellyfin Architecture
 
 ```mermaid
 graph TB
@@ -24,8 +24,8 @@ graph TB
     Radarr -- "sends movie" --> Downloader
     Downloader -- "drops file" --> WatchDir
 
-    %% --- ZONE 3: JELLYWATCH CORE ---
-    subgraph JellyWatchCore ["JellyWatch Core"]
+    %% --- ZONE 3: PLEX2JELLYFIN CORE ---
+    subgraph Plex2JellyfinCore ["Plex2Jellyfin Core"]
         direction TB
         Watcher[File Watcher]:::logic
         Parser[Name Parser]:::logic
@@ -46,7 +46,7 @@ graph TB
     Organizer -.->|"query movie info"| Radarr
 
     %% --- ZONE 4: PERSISTENCE ---
-    JWDB[(JellyWatch DB<br/>SQLite)]:::storage
+    JWDB[(Plex2Jellyfin DB<br/>SQLite)]:::storage
     
     subgraph Library ["Jellyfin Library"]
         direction LR
@@ -78,7 +78,7 @@ graph TB
 
     %% Style the subgraph titles
     style ArrStack fill:none,stroke:#586e75,stroke-width:1px,color:#839496
-    style JellyWatchCore fill:none,stroke:#2aa198,stroke-width:1px,color:#839496
+    style Plex2JellyfinCore fill:none,stroke:#2aa198,stroke-width:1px,color:#839496
     style Library fill:none,stroke:#b58900,stroke-width:1px,color:#839496
     style Maintenance fill:none,stroke:#cb4b16,stroke-width:1px,color:#839496
 ```
@@ -88,7 +88,7 @@ graph TB
 ### Real-time Ingestion (Top to Bottom)
 1. **Arr Stack**: Sonarr/Radarr send content to download clients
 2. **Ingestion**: Download client drops file to watch directory
-3. **JellyWatch Core**: 
+3. **Plex2Jellyfin Core**: 
    - File watcher detects new file
    - Name parser extracts title/year/episode info via regex
    - Confidence check: if < 0.8, queries local Ollama AI

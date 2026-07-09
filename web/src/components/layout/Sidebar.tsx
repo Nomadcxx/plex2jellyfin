@@ -26,12 +26,12 @@ export function Sidebar() {
       <div className="mb-8 flex items-center gap-3">
         <Image
           src="/jellywooch.png"
-          alt="JellyWatch"
+          alt="Plex2Jellyfin"
           width={36}
           height={36}
           className="rounded"
         />
-        <h1 className="text-xl font-bold">JellyWatch</h1>
+        <h1 className="text-xl font-bold">Plex2Jellyfin</h1>
       </div>
       <nav className="space-y-2">
         {navigation.map((item) => (

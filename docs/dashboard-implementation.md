@@ -5,20 +5,20 @@
 
 ## Executive Summary
 
-This document summarizes the backend-frontend integration work completed to enable the JellyWatch dashboard and web UI. The implementation successfully connected the React frontend to the Go backend API, enabling real-time monitoring of media libraries, duplicate detection, and queue management.
+This document summarizes the backend-frontend integration work completed to enable the Plex2Jellyfin dashboard and web UI. The implementation successfully connected the React frontend to the Go backend API, enabling real-time monitoring of media libraries, duplicate detection, and queue management.
 
 ## Project Architecture Overview
 
 ### Directory Structure
 
 ```
-jellywatch/
+plex2jellyfin/
 ├── api/                          # OpenAPI generated code
 │   ├── openapi.yaml              # API specification
 │   ├── server.gen.go             # Generated server interface
 │   └── types.gen.go              # Generated API types
 ├── cmd/
-│   └── jellywatch/               # Main CLI application
+│   └── plex2jellyfin/               # Main CLI application
 │       └── main.go               # Entry point with serve command
 ├── docs/                         # Documentation
 ├── embedded/

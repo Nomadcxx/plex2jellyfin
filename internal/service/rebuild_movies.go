@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 )
 
 type MovieRebuildResult struct {

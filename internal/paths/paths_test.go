@@ -92,18 +92,18 @@ func TestUserConfigDir(t *testing.T) {
 	}
 }
 
-func TestJellyWatchDir(t *testing.T) {
+func TestPlex2JellyfinDir(t *testing.T) {
 	os.Unsetenv("SUDO_USER")
 
-	got, err := JellyWatchDir()
+	got, err := Plex2JellyfinDir()
 	if err != nil {
-		t.Fatalf("JellyWatchDir() error = %v", err)
+		t.Fatalf("Plex2JellyfinDir() error = %v", err)
 	}
 
 	homeDir, _ := os.UserHomeDir()
-	expected := homeDir + "/.config/jellywatch"
+	expected := homeDir + "/.config/plex2jellyfin"
 	if got != expected {
-		t.Errorf("JellyWatchDir() = %q, want %q", got, expected)
+		t.Errorf("Plex2JellyfinDir() = %q, want %q", got, expected)
 	}
 }
 
@@ -116,7 +116,7 @@ func TestDatabasePath(t *testing.T) {
 	}
 
 	homeDir, _ := os.UserHomeDir()
-	expected := homeDir + "/.config/jellywatch/media.db"
+	expected := homeDir + "/.config/plex2jellyfin/media.db"
 	if got != expected {
 		t.Errorf("DatabasePath() = %q, want %q", got, expected)
 	}
@@ -131,7 +131,7 @@ func TestConfigPath(t *testing.T) {
 	}
 
 	homeDir, _ := os.UserHomeDir()
-	expected := homeDir + "/.config/jellywatch/config.toml"
+	expected := homeDir + "/.config/plex2jellyfin/config.toml"
 	if got != expected {
 		t.Errorf("ConfigPath() = %q, want %q", got, expected)
 	}
@@ -146,7 +146,7 @@ func TestPlansDir(t *testing.T) {
 	}
 
 	homeDir, _ := os.UserHomeDir()
-	expected := homeDir + "/.config/jellywatch/plans"
+	expected := homeDir + "/.config/plex2jellyfin/plans"
 	if got != expected {
 		t.Errorf("PlansDir() = %q, want %q", got, expected)
 	}

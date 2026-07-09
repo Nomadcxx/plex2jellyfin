@@ -10,18 +10,18 @@ import (
 	"strings"
 	"time"
 
-	configpkg "github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/scanner"
-	"github.com/Nomadcxx/jellywatch/internal/service"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	configpkg "github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 const (
-	daemonServicePath = "/etc/systemd/system/jellywatchd.service"
-	webServicePath    = "/etc/systemd/system/jellyweb.service"
+	daemonServicePath = "/etc/systemd/system/plex2jellyfin-daemon.service"
+	webServicePath    = "/etc/systemd/system/plex2jellyfin-web.service"
 )
 
 func (m model) startInstallation() (tea.Model, tea.Cmd) {
@@ -30,7 +30,7 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 	if m.uninstallMode {
 		m.tasks = []installTask{
 			{name: "Check privileges", description: "Checking root access", execute: checkPrivileges, status: statusPending},
-			{name: "Stop daemon", description: "Stopping jellywatchd service", execute: stopDaemon, status: statusPending},
+			{name: "Stop daemon", description: "Stopping plex2jellyfin-daemon service", execute: stopDaemon, status: statusPending},
 			{name: "Disable service", description: "Disabling systemd service", execute: disableService, status: statusPending},
 			{name: "Remove binaries", description: "Removing binaries", execute: removeBinaries, optional: true, status: statusPending},
 		}
@@ -58,7 +58,7 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 			{name: "Check privileges", description: "Checking root access", execute: checkPrivileges, status: statusPending},
 			{name: "Check dependencies", description: "Verifying Go installation", execute: checkDependencies, status: statusPending},
 			{name: "Stop services", description: "Stopping running services", execute: stopRunningServices, status: statusPending},
-			{name: "Build binaries", description: "Building jellywatch and jellywatchd", execute: buildBinaries, status: statusPending},
+			{name: "Build binaries", description: "Building plex2jellyfin and plex2jellyfin-daemon", execute: buildBinaries, status: statusPending},
 			{name: "Install binaries", description: "Installing to /usr/local/bin", execute: installBinaries, status: statusPending},
 			{name: "Refresh systemd", description: "Updating installed systemd units", execute: refreshSystemdUnits, status: statusPending},
 			{name: "Start services", description: "Restarting services", execute: restartServices, status: statusPending},
@@ -68,7 +68,7 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 		m.tasks = []installTask{
 			{name: "Check privileges", description: "Checking root access", execute: checkPrivileges, status: statusPending},
 			{name: "Check dependencies", description: "Verifying Go installation", execute: checkDependencies, status: statusPending},
-			{name: "Build binaries", description: "Building jellywatch and jellywatchd", execute: buildBinaries, status: statusPending},
+			{name: "Build binaries", description: "Building plex2jellyfin and plex2jellyfin-daemon", execute: buildBinaries, status: statusPending},
 			{name: "Install binaries", description: "Installing to /usr/local/bin", execute: installBinaries, status: statusPending},
 			{name: "Write config", description: "Writing configuration file", execute: writeConfig, status: statusPending},
 			// Scan happens here as a separate step (stepScanning) before systemd setup
@@ -76,12 +76,12 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 		// Add systemd tasks only - scan triggers separately before these
 		m.postScanTasks = []installTask{
 			{name: "Setup systemd", description: "Installing systemd service", execute: setupSystemd, status: statusPending},
-			{name: "Start service", description: "Starting jellywatchd", execute: startService, optional: true, status: statusPending},
+			{name: "Start service", description: "Starting plex2jellyfin-daemon", execute: startService, optional: true, status: statusPending},
 		}
 		if m.webEnabled {
 			m.postScanTasks = append(m.postScanTasks,
 				installTask{name: "Setup web service", description: "Installing web UI service", execute: setupWebSystemd, status: statusPending},
-				installTask{name: "Start web service", description: "Starting jellyweb", execute: startWebService, optional: true, status: statusPending},
+				installTask{name: "Start web service", description: "Starting plex2jellyfin-web", execute: startWebService, optional: true, status: statusPending},
 			)
 		}
 	}
@@ -115,10 +115,10 @@ func buildBinaries(m *model) error {
 		args []string
 		name string
 	}{
-		{[]string{"go", "build", "-o", "jellywatch", "./cmd/jellywatch"}, "jellywatch"},
-		{[]string{"go", "build", "-o", "jellywatchd", "./cmd/jellywatchd"}, "jellywatchd"},
-		{[]string{"go", "build", "-o", "jellyweb", "./cmd/jellyweb"}, "jellyweb"},
-		{[]string{"go", "build", "-o", "jellywatch-installer", "./cmd/installer"}, "installer"},
+		{[]string{"go", "build", "-o", "plex2jellyfin", "./cmd/plex2jellyfin"}, "plex2jellyfin"},
+		{[]string{"go", "build", "-o", "plex2jellyfin-daemon", "./cmd/plex2jellyfin-daemon"}, "plex2jellyfin-daemon"},
+		{[]string{"go", "build", "-o", "plex2jellyfin-web", "./cmd/plex2jellyfin-web"}, "plex2jellyfin-web"},
+		{[]string{"go", "build", "-o", "plex2jellyfin-installer", "./cmd/installer"}, "installer"},
 	}
 
 	for _, c := range cmds {
@@ -137,7 +137,7 @@ func installBinaries(m *model) error {
 		return err
 	}
 
-	binaries := []string{"jellywatch", "jellywatchd", "jellyweb", "jellywatch-installer"}
+	binaries := []string{"plex2jellyfin", "plex2jellyfin-daemon", "plex2jellyfin-web", "plex2jellyfin-installer"}
 	for _, bin := range binaries {
 		srcBin := filepath.Join(projectRoot, bin)
 		if _, err := os.Stat(srcBin); os.IsNotExist(err) {
@@ -158,8 +158,8 @@ func writeConfig(m *model) error {
 		return err
 	}
 
-	jellywatchDir := filepath.Join(configDir, "jellywatch")
-	if err := os.MkdirAll(jellywatchDir, 0700); err != nil {
+	plex2jellyfinDir := filepath.Join(configDir, "plex2jellyfin")
+	if err := os.MkdirAll(plex2jellyfinDir, 0700); err != nil {
 		return err
 	}
 
@@ -168,7 +168,7 @@ func writeConfig(m *model) error {
 		return err
 	}
 
-	configPath := filepath.Join(jellywatchDir, "config.toml")
+	configPath := filepath.Join(plex2jellyfinDir, "config.toml")
 	if err := os.WriteFile(configPath, []byte(configStr), 0600); err != nil {
 		return err
 	}
@@ -180,8 +180,8 @@ func writeConfig(m *model) error {
 		if m.permGroup != "" {
 			group = m.permGroup
 		}
-		if err := exec.Command("chown", "-R", actualUser+":"+group, jellywatchDir).Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to chown config dir %s: %v\n", jellywatchDir, err)
+		if err := exec.Command("chown", "-R", actualUser+":"+group, plex2jellyfinDir).Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to chown config dir %s: %v\n", plex2jellyfinDir, err)
 		}
 	}
 
@@ -280,24 +280,24 @@ enabled = true
 url = "%s"
 api_key = "%s"
 # Jellyfin webhook requests must send this same value in the
-# X-Jellywatch-Webhook-Secret header.
+# X-Plex2Jellyfin-Webhook-Secret header.
 webhook_secret = "%s"
-# Companion plugin shared secret; keep this the same value used for X-Jellywatch-Webhook-Secret.
+# Companion plugin shared secret; keep this the same value used for X-Plex2Jellyfin-Webhook-Secret.
 plugin_shared_secret = "%s"
 notify_on_import = true
 playback_safety = true
 verify_after_refresh = false
 
-# If Jellyfin reports paths from a different mount namespace than JellyWatch,
+# If Jellyfin reports paths from a different mount namespace than Plex2Jellyfin,
 # add one mapping per mounted library root.
 #
 # [[jellyfin.path_mappings]]
 # jellyfin = "/path/as/jellyfin/sees/it"
-# daemon = "/path/as/jellywatch/sees/it"
+# daemon = "/path/as/plex2jellyfin/sees/it"
 #
 # [[jellyfin.path_mappings]]
 # jellyfin = "/another/jellyfin/root"
-# daemon = "/another/jellywatch/root"
+# daemon = "/another/plex2jellyfin/root"
 `, m.jellyfinURL, m.jellyfinAPIKey, webhookSecret, webhookSecret)
 	}
 
@@ -337,7 +337,7 @@ func setupSystemd(m *model) error {
 
 	exec.Command("systemctl", "daemon-reload").Run()
 
-	if err := exec.Command("systemctl", "enable", "jellywatchd.service").Run(); err != nil {
+	if err := exec.Command("systemctl", "enable", "plex2jellyfin-daemon.service").Run(); err != nil {
 		return fmt.Errorf("failed to enable service")
 	}
 
@@ -346,7 +346,7 @@ func setupSystemd(m *model) error {
 
 func buildDaemonServiceUnit(actualUser string) string {
 	return fmt.Sprintf(`[Unit]
-Description=JellyWatch Media Organizer Daemon
+Description=Plex2Jellyfin Media Organizer Daemon
 After=network.target
 
 [Service]
@@ -354,7 +354,7 @@ Type=simple
 User=root
 Group=root
 Environment=SUDO_USER=%s
-ExecStart=/usr/local/bin/jellywatchd
+ExecStart=/usr/local/bin/plex2jellyfin-daemon
 Restart=on-failure
 RestartSec=5
 
@@ -375,7 +375,7 @@ func startService(m *model) error {
 		return nil
 	}
 
-	if err := exec.Command("systemctl", "start", "jellywatchd.service").Run(); err != nil {
+	if err := exec.Command("systemctl", "start", "plex2jellyfin-daemon.service").Run(); err != nil {
 		return fmt.Errorf("failed to start service")
 	}
 	return nil
@@ -402,7 +402,7 @@ func setupWebSystemd(m *model) error {
 
 	exec.Command("systemctl", "daemon-reload").Run()
 
-	if err := exec.Command("systemctl", "enable", "jellyweb.service").Run(); err != nil {
+	if err := exec.Command("systemctl", "enable", "plex2jellyfin-web.service").Run(); err != nil {
 		return fmt.Errorf("failed to enable web service")
 	}
 
@@ -414,7 +414,7 @@ func startWebService(m *model) error {
 		return nil
 	}
 
-	if err := exec.Command("systemctl", "start", "jellyweb.service").Run(); err != nil {
+	if err := exec.Command("systemctl", "start", "plex2jellyfin-web.service").Run(); err != nil {
 		return fmt.Errorf("failed to start web service")
 	}
 	return nil
@@ -440,29 +440,29 @@ func normalizedWebPort(port string) string {
 
 func buildWebServiceUnit(actualUser, port string) string {
 	return fmt.Sprintf(`[Unit]
-Description=JellyWatch Web UI Server
-Documentation=https://github.com/Nomadcxx/jellywatch
-After=network.target jellywatchd.service
-Wants=jellywatchd.service
+Description=Plex2Jellyfin Web UI Server
+Documentation=https://github.com/Nomadcxx/plex2jellyfin
+After=network.target plex2jellyfin-daemon.service
+Wants=plex2jellyfin-daemon.service
 
 [Service]
 Type=simple
 User=root
 Group=root
 Environment=SUDO_USER=%s
-ExecStart=/usr/local/bin/jellyweb --host 0.0.0.0 --port %s
+ExecStart=/usr/local/bin/plex2jellyfin-web --host 0.0.0.0 --port %s
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=jellyweb
+SyslogIdentifier=plex2jellyfin-web
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=full
-# ProtectHome left unset: jellyweb needs RW on the user's config dir
-# (config.toml + lock files + media.db live under ~/.config/jellywatch).
-# Jellyweb also executes user-triggered library maintenance actions such as
+# ProtectHome left unset: plex2jellyfin-web needs RW on the user's config dir
+# (config.toml + lock files + media.db live under ~/.config/plex2jellyfin).
+# Plex2Jellyfin web also executes user-triggered library maintenance actions such as
 # consolidation, so non-system media mounts must remain writable according to
 # their normal filesystem permissions rather than a hardcoded allow-list.
 PrivateTmp=true
@@ -518,20 +518,20 @@ func existingWebServicePort(path, fallback string) string {
 	return string(match[1])
 }
 
-// stopRunningServices stops jellywatchd and jellyweb before an update
+// stopRunningServices stops plex2jellyfin-daemon and plex2jellyfin-web before an update
 func stopRunningServices(m *model) error {
 	// Track what was running so we can restart only those
-	m.daemonWasRunning = exec.Command("systemctl", "is-active", "--quiet", "jellywatchd.service").Run() == nil
-	m.webEnabled = exec.Command("systemctl", "is-active", "--quiet", "jellyweb.service").Run() == nil
+	m.daemonWasRunning = exec.Command("systemctl", "is-active", "--quiet", "plex2jellyfin-daemon.service").Run() == nil
+	m.webEnabled = exec.Command("systemctl", "is-active", "--quiet", "plex2jellyfin-web.service").Run() == nil
 
 	if m.daemonWasRunning {
-		if err := exec.Command("systemctl", "stop", "jellywatchd.service").Run(); err != nil {
-			return fmt.Errorf("failed to stop jellywatchd: %w", err)
+		if err := exec.Command("systemctl", "stop", "plex2jellyfin-daemon.service").Run(); err != nil {
+			return fmt.Errorf("failed to stop plex2jellyfin-daemon: %w", err)
 		}
 	}
 	if m.webEnabled {
-		if err := exec.Command("systemctl", "stop", "jellyweb.service").Run(); err != nil {
-			return fmt.Errorf("failed to stop jellyweb: %w", err)
+		if err := exec.Command("systemctl", "stop", "plex2jellyfin-web.service").Run(); err != nil {
+			return fmt.Errorf("failed to stop plex2jellyfin-web: %w", err)
 		}
 	}
 	return nil
@@ -540,40 +540,40 @@ func stopRunningServices(m *model) error {
 // restartServices restarts services that were running before the update
 func restartServices(m *model) error {
 	if m.daemonWasRunning {
-		if err := exec.Command("systemctl", "start", "jellywatchd.service").Run(); err != nil {
-			return fmt.Errorf("failed to start jellywatchd: %w", err)
+		if err := exec.Command("systemctl", "start", "plex2jellyfin-daemon.service").Run(); err != nil {
+			return fmt.Errorf("failed to start plex2jellyfin-daemon: %w", err)
 		}
 	}
 	if m.webEnabled {
-		if err := exec.Command("systemctl", "start", "jellyweb.service").Run(); err != nil {
-			return fmt.Errorf("failed to start jellyweb: %w", err)
+		if err := exec.Command("systemctl", "start", "plex2jellyfin-web.service").Run(); err != nil {
+			return fmt.Errorf("failed to start plex2jellyfin-web: %w", err)
 		}
 	}
 	return nil
 }
 
 func stopDaemon(m *model) error {
-	exec.Command("systemctl", "stop", "jellywatchd.service").Run()
+	exec.Command("systemctl", "stop", "plex2jellyfin-daemon.service").Run()
 	return nil
 }
 
 func disableService(m *model) error {
-	exec.Command("systemctl", "stop", "jellywatchd.service").Run()
-	exec.Command("systemctl", "disable", "jellywatchd.service").Run()
-	os.Remove("/etc/systemd/system/jellywatchd.service")
-	exec.Command("systemctl", "stop", "jellyweb.service").Run()
-	exec.Command("systemctl", "disable", "jellyweb.service").Run()
-	os.Remove("/etc/systemd/system/jellyweb.service")
+	exec.Command("systemctl", "stop", "plex2jellyfin-daemon.service").Run()
+	exec.Command("systemctl", "disable", "plex2jellyfin-daemon.service").Run()
+	os.Remove("/etc/systemd/system/plex2jellyfin-daemon.service")
+	exec.Command("systemctl", "stop", "plex2jellyfin-web.service").Run()
+	exec.Command("systemctl", "disable", "plex2jellyfin-web.service").Run()
+	os.Remove("/etc/systemd/system/plex2jellyfin-web.service")
 	exec.Command("systemctl", "daemon-reload").Run()
 	return nil
 }
 
 func removeBinaries(m *model) error {
 	binaries := []string{
-		"/usr/local/bin/jellywatch",
-		"/usr/local/bin/jellywatchd",
-		"/usr/local/bin/jellyweb",
-		"/usr/local/bin/jellywatch-installer",
+		"/usr/local/bin/plex2jellyfin",
+		"/usr/local/bin/plex2jellyfin-daemon",
+		"/usr/local/bin/plex2jellyfin-web",
+		"/usr/local/bin/plex2jellyfin-installer",
 	}
 	for _, bin := range binaries {
 		os.Remove(bin)
@@ -587,10 +587,10 @@ func removeConfig(m *model) error {
 		return err
 	}
 
-	jellywatchDir := filepath.Join(configDir, "jellywatch")
+	plex2jellyfinDir := filepath.Join(configDir, "plex2jellyfin")
 
-	// Remove the entire jellywatch config directory
-	if err := os.RemoveAll(jellywatchDir); err != nil {
+	// Remove the entire plex2jellyfin config directory
+	if err := os.RemoveAll(plex2jellyfinDir); err != nil {
 		return fmt.Errorf("failed to remove config directory: %v", err)
 	}
 
@@ -603,7 +603,7 @@ func removeDatabase(m *model) error {
 		return err
 	}
 
-	dbPath := filepath.Join(configDir, "jellywatch", "media.db")
+	dbPath := filepath.Join(configDir, "plex2jellyfin", "media.db")
 
 	// Remove only the database file
 	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
@@ -666,7 +666,7 @@ func (m model) runInitialScan() tea.Cmd {
 		if err != nil {
 			return scanCompleteMsg{err: fmt.Errorf("failed to get config dir: %w", err)}
 		}
-		dbPath := filepath.Join(configDir, "jellywatch", "media.db")
+		dbPath := filepath.Join(configDir, "plex2jellyfin", "media.db")
 
 		db, err := database.OpenPath(dbPath)
 		if err != nil {
@@ -698,7 +698,7 @@ func (m model) runInitialScan() tea.Cmd {
 		// and we need to ensure the user can access it even if scan failed
 		actualUser := getActualUser()
 		if actualUser != "root" && actualUser != "" {
-			jellywatchDir := filepath.Dir(dbPath)
+			plex2jellyfinDir := filepath.Dir(dbPath)
 
 			// Use configured group if set, otherwise fall back to user's primary group
 			group := actualUser
@@ -707,8 +707,8 @@ func (m model) runInitialScan() tea.Cmd {
 			}
 
 			ownership := actualUser + ":" + group
-			if err := exec.Command("chown", "-R", ownership, jellywatchDir).Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to chown database dir %s: %v\n", jellywatchDir, err)
+			if err := exec.Command("chown", "-R", ownership, plex2jellyfinDir).Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to chown database dir %s: %v\n", plex2jellyfinDir, err)
 			}
 		}
 
@@ -744,7 +744,7 @@ func (m model) runInitialScan() tea.Cmd {
 	}
 }
 
-// validateArrSettings checks Sonarr/Radarr configuration for jellywatch compatibility.
+// validateArrSettings checks Sonarr/Radarr configuration for plex2jellyfin compatibility.
 func (m model) validateArrSettings() tea.Cmd {
 	sonarrEnabled := m.sonarrEnabled
 	sonarrURL := m.sonarrURL

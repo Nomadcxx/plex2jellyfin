@@ -39,8 +39,8 @@ const (
 	TaskKindSeriesConsolidate = "series_consolidate" // auto, move one TV series' scattered episodes onto a single volume
 	// Naming workflow:
 	TaskKindFolderRename        = "folder_rename"          // auto, rename folder in-place to canonical case (no cross-volume work)
-	TaskKindParserDriftRename   = "parser_drift_rename"    // auto, repair JellyWatch-created movie path after parser fixes
-	TaskKindParserDriftTVRename = "parser_drift_tv_rename" // auto, repair JellyWatch-created TV episode path after parser fixes
+	TaskKindParserDriftRename   = "parser_drift_rename"    // auto, repair Plex2Jellyfin-created movie path after parser fixes
+	TaskKindParserDriftTVRename = "parser_drift_tv_rename" // auto, repair Plex2Jellyfin-created TV episode path after parser fixes
 )
 
 // HousekeepingTask is a queued (or completed) housekeeping action.

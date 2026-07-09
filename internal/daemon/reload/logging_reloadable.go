@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
 )
 
 type loggingReloadable struct {

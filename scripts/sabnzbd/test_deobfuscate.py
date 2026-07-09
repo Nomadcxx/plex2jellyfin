@@ -11,7 +11,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from jellywatch_deobfuscate import (  # noqa: E402
+from plex2jellyfin_deobfuscate import (  # noqa: E402
     ensure_sabnzbd_import_path,
     is_obfuscated,
     recover_from_par2,

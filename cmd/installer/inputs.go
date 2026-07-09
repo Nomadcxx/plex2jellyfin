@@ -22,7 +22,7 @@ func (m *model) initPathsInputs() {
 		ti.Width = 50
 		ti.CharLimit = 500
 		ti.SetValue(m.watchFolders[i].Paths)
-	styleTextInput(&ti)
+		styleTextInput(&ti)
 		m.inputs = append(m.inputs, ti)
 	}
 

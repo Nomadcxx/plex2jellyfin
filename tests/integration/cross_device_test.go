@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/plans"
-	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/plans"
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 )
 
 func TestAuditMove_CrossDevice(t *testing.T) {

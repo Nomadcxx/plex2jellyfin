@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/analyzer"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
-	"github.com/Nomadcxx/jellywatch/internal/naming"
-	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/analyzer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,8 +50,8 @@ func (t *failAfterFirstMoveTransferer) Name() string    { return "fail-after-fir
 
 // setupTestEnv creates temporary directories for testing
 func setupTestEnv(t *testing.T) (sourceDir, libraryDir string, cleanup func()) {
-	sourceDir = filepath.Join(os.TempDir(), "jellywatch-test-source-"+t.Name())
-	libraryDir = filepath.Join(os.TempDir(), "jellywatch-test-library-"+t.Name())
+	sourceDir = filepath.Join(os.TempDir(), "plex2jellyfin-test-source-"+t.Name())
+	libraryDir = filepath.Join(os.TempDir(), "plex2jellyfin-test-library-"+t.Name())
 
 	err := os.MkdirAll(sourceDir, 0755)
 	require.NoError(t, err)
@@ -69,7 +69,7 @@ func setupTestEnv(t *testing.T) (sourceDir, libraryDir string, cleanup func()) {
 
 // setupTestDB creates a temporary database for testing
 func setupTestDB(t *testing.T) (*database.MediaDB, func()) {
-	dbPath := filepath.Join(os.TempDir(), "jellywatch-test-"+t.Name()+".db")
+	dbPath := filepath.Join(os.TempDir(), "plex2jellyfin-test-"+t.Name()+".db")
 	db, err := database.OpenPath(dbPath)
 	require.NoError(t, err)
 
@@ -132,7 +132,7 @@ func TestOrganizeMovie_Basic(t *testing.T) {
 	movie, err := db.GetMovieByTitle("The Matrix", 1999)
 	require.NoError(t, err)
 	require.NotNil(t, movie, "Movie should be in database")
-	assert.Equal(t, "jellywatch", movie.Source, "Source should be jellywatch")
+	assert.Equal(t, "plex2jellyfin", movie.Source, "Source should be plex2jellyfin")
 	assert.Equal(t, 100, movie.SourcePriority, "Source priority should be 100")
 	assert.Equal(t, filepath.Join(libraryDir, "The Matrix (1999)"), movie.CanonicalPath)
 }
@@ -289,7 +289,7 @@ func TestOrganizeMovie_DatabaseUpdate(t *testing.T) {
 	movie, err := db.GetMovieByTitle("Inception", 2010)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
-	assert.Equal(t, "jellywatch", movie.Source)
+	assert.Equal(t, "plex2jellyfin", movie.Source)
 	assert.Equal(t, 100, movie.SourcePriority)
 	assert.Equal(t, filepath.Join(libraryDir, "Inception (2010)"), movie.CanonicalPath)
 	assert.Equal(t, libraryDir, movie.LibraryRoot)
@@ -346,7 +346,7 @@ func TestOrganizeTVEpisode_Basic(t *testing.T) {
 	series, err := db.GetSeriesByTitle("Silo", 2023)
 	require.NoError(t, err)
 	require.NotNil(t, series, "Series should be in database")
-	assert.Equal(t, "jellywatch", series.Source, "Source should be jellywatch")
+	assert.Equal(t, "plex2jellyfin", series.Source, "Source should be plex2jellyfin")
 	assert.Equal(t, 100, series.SourcePriority, "Source priority should be 100")
 	assert.Equal(t, filepath.Join(libraryDir, "Silo (2023)"), series.CanonicalPath)
 }
@@ -383,7 +383,7 @@ func TestOrganizeTVEpisode_DatabaseUpdate(t *testing.T) {
 	series, err := db.GetSeriesByTitle("Breaking Bad", 2008)
 	require.NoError(t, err)
 	require.NotNil(t, series)
-	assert.Equal(t, "jellywatch", series.Source)
+	assert.Equal(t, "plex2jellyfin", series.Source)
 	assert.Equal(t, 100, series.SourcePriority)
 	assert.Equal(t, filepath.Join(libraryDir, "Breaking Bad (2008)"), series.CanonicalPath)
 }

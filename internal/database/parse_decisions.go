@@ -471,7 +471,7 @@ func (m *MediaDB) HasRecentSuccessForSource(sourcePath string, lookback time.Dur
 }
 
 // QueryRecentSuccessfulMovieImports returns recent movie organize successes
-// that JellyWatch can use as repair candidates. Rows must have both a source
+// that Plex2Jellyfin can use as repair candidates. Rows must have both a source
 // filename and target path so callers can reparse the original release name
 // and compare it against the current library location.
 func (m *MediaDB) QueryRecentSuccessfulMovieImports(lookback time.Duration, limit int) ([]*ParseDecision, error) {
@@ -511,7 +511,7 @@ func (m *MediaDB) QueryRecentSuccessfulMovieImports(lookback time.Duration, limi
 }
 
 // QueryRecentSuccessfulTVImports returns recent TV organize successes that
-// JellyWatch can use as repair candidates. Rows must have both a source
+// Plex2Jellyfin can use as repair candidates. Rows must have both a source
 // filename and target path so callers can reparse the original release name
 // and compare it against the current library location.
 func (m *MediaDB) QueryRecentSuccessfulTVImports(lookback time.Duration, limit int) ([]*ParseDecision, error) {
@@ -1060,7 +1060,7 @@ func (m *MediaDB) CountParseDecisions() (int, error) {
 
 // AuditParseDecisionsPage performs a no-op pass over a slice of rows. The
 // streaming audit op exists to surface progress and let cancellation work; the
-// underlying audit logic lives in cmd/jellywatch (CLI) and labeling/runner.go.
+// underlying audit logic lives in cmd/plex2jellyfin (CLI) and labeling/runner.go.
 // This page-iterator simply scans rows so the operator sees granular progress
 // while the labeler ticker runs separately. Returns the number of rows
 // inspected (0 when offset is past the end).

@@ -3,9 +3,9 @@ package migration
 import (
 	"fmt"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 type PathMismatch struct {
@@ -121,7 +121,7 @@ func DetectMovieMismatches(db *database.MediaDB, radarrClient *radarr.Client) ([
 type FixChoice string
 
 const (
-	FixChoiceKeepJellyWatch   FixChoice = "jellywatch"
+	FixChoiceKeepPlex2Jellyfin   FixChoice = "plex2jellyfin"
 	FixChoiceKeepSonarrRadarr FixChoice = "arr"
 	FixChoiceSkip             FixChoice = "skip"
 )
@@ -132,7 +132,7 @@ func FixSeriesMismatch(db *database.MediaDB, sonarrClient *sonarr.Client, mismat
 	}
 
 	switch choice {
-	case FixChoiceKeepJellyWatch:
+	case FixChoiceKeepPlex2Jellyfin:
 		if mismatch.SonarrID == nil {
 			return fmt.Errorf("series has no Sonarr ID")
 		}
@@ -180,7 +180,7 @@ func FixMovieMismatch(db *database.MediaDB, radarrClient *radarr.Client, mismatc
 	}
 
 	switch choice {
-	case FixChoiceKeepJellyWatch:
+	case FixChoiceKeepPlex2Jellyfin:
 		if mismatch.RadarrID == nil {
 			return fmt.Errorf("movie has no Radarr ID")
 		}

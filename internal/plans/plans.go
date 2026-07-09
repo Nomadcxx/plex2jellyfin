@@ -9,11 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/paths"
-	"github.com/Nomadcxx/jellywatch/internal/permissions"
-	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/permissions"
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 )
 
 // FileInfo represents a media file in a plan

@@ -5,7 +5,7 @@
 ### Critical Bug Fix — `findExistingMediaFile` Deletion Bug
 **File:** `internal/organizer/organizer.go` (lines 638-654 and 787-803)
 
-**Problem:** When organizing a new episode into a season folder that already contained a different episode's video file, jellywatchd was deleting the existing episode. This happened because:
+**Problem:** When organizing a new episode into a season folder that already contained a different episode's video file, plex2jellyfin-daemon was deleting the existing episode. This happened because:
 1. `findExistingMediaFile(seasonDir)` returned the "best quality" video in the folder — NOT the matching episode
 2. The `sameEpisode` check at line 642 correctly identified "different episode" and returned early (didn't overwrite)
 3. But the code then fell through to line 695 which still executed `os.Remove(existingFile)` — deleting the previous episode
@@ -14,7 +14,7 @@ This is why BEEF lost episodes S01E01, S01E03-E10, S02E01-E05, S02E07-E08 — on
 
 **Fix:** When `sameEpisode=false` (different episode already exists), the code now sets `existingFile=""` and `existingQuality=nil` to prevent the deletion block at line 695 from firing. Now different episodes are simply skipped, not deleted.
 
-**Deployment:** Binary rebuilt, deployed to `/usr/local/bin/jellywatchd`, systemd service restarted. Confirmed running cleanly — initial scan completed with 0 errors, periodic scanner and AI enhancement ticker both active.
+**Deployment:** Binary rebuilt, deployed to `/usr/local/bin/plex2jellyfin-daemon`, systemd service restarted. Confirmed running cleanly — initial scan completed with 0 errors, periodic scanner and AI enhancement ticker both active.
 
 ### Rate Limiter / AI Error Handling Fixes (Prior Session)
 **Files:** `internal/ai/types.go`, `internal/ai/matcher.go`, `internal/daemon/handler.go`
@@ -37,7 +37,7 @@ Sonarr needs to re-download the following lost episodes:
 | S01 | E01, E03, E04, E05, E06, E07, E08, E09, E10 |
 | S02 | E01, E02, E03, E04, E05, E07, E08 |
 
-**Do not rely on jellywatch to re-import these** — the files are gone. Use Sonarr's "Season -> Manual Import" or force a re-grab.
+**Do not rely on plex2jellyfin to re-import these** — the files are gone. Use Sonarr's "Season -> Manual Import" or force a re-grab.
 
 ### Re-grab Other Affected Shows
 The malware cleanup deleted entire show folders. Re-grab via Sonarr:
@@ -52,7 +52,7 @@ The malware cleanup deleted entire show folders. Re-grab via Sonarr:
 ### One Piece EPxxxx Parser (`EPxxxx` format)
 **File likely to need changes:** `internal/naming/`
 
-Files like `One.Piece.EP1156.Episode.1156.1080p.NF.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub.mkv` are failing to parse. The `EP1156` pattern (absolute episode numbering) is not recognized by the current TV parser. Jellywatch falls back to using the folder name but then fails because no episode markers are found in the parent folders.
+Files like `One.Piece.EP1156.Episode.1156.1080p.NF.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub.mkv` are failing to parse. The `EP1156` pattern (absolute episode numbering) is not recognized by the current TV parser. Plex2Jellyfin falls back to using the folder name but then fails because no episode markers are found in the parent folders.
 
 This needs an absolute episode parser that:
 1. Detects `EPxxxx` pattern
@@ -69,24 +69,24 @@ This needs either:
 
 ## Ongoing Operations
 
-### Check jellywatchd Status
+### Check plex2jellyfin-daemon Status
 ```bash
-sudo systemctl status jellywatchd
+sudo systemctl status plex2jellyfin-daemon
 ```
 
-### Watch jellywatchd Logs
+### Watch plex2jellyfin-daemon Logs
 ```bash
-tail -f /root/.config/jellywatch/logs/jellywatch.log
+tail -f /root/.config/plex2jellyfin/logs/plex2jellyfin.log
 ```
 
 ### Check Activity Log
 ```bash
-tail -f /root/.config/jellywatch/activity/activity-$(date +%Y-%m-%d).jsonl
+tail -f /root/.config/plex2jellyfin/activity/activity-$(date +%Y-%m-%d).jsonl
 ```
 
-### Restart jellywatchd If Needed
+### Restart plex2jellyfin-daemon If Needed
 ```bash
-sudo systemctl restart jellywatchd
+sudo systemctl restart plex2jellyfin-daemon
 ```
 
 ### Key Log Patterns
@@ -95,7 +95,7 @@ sudo systemctl restart jellywatchd
 - `[handler] AI enhancement skipped` — low confidence, file queued for later
 - `[organizer] warning: failed to remove existing file` — potential deletion issue
 - `[daemon] Periodic scan starting` — scheduled scan triggered
-- `JellyWatchd started` — daemon successfully restarted
+- `Plex2Jellyfin daemon started` — daemon successfully restarted
 
 ### jellyfin Library Health
 After re-grabbing missing episodes, verify in jellyfin:

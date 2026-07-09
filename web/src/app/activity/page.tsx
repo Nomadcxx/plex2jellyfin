@@ -71,7 +71,7 @@ export default function ActivityPage() {
               Activity Feed
             </h1>
             <p className="text-zinc-400 mt-2 max-w-xl">
-              Real-time events from the Jellywatch daemon, including scans, organizations, and errors.
+              Real-time events from the Plex2Jellyfin daemon, including scans, organizations, and errors.
             </p>
           </div>
           

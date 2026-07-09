@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Plex2Jellyfin postmortem every four days
+
+[Timer]
+OnBootSec=20m
+OnUnitActiveSec=96h
+Persistent=true
+Unit=plex2jellyfin-postmortem.service
+
+[Install]
+WantedBy=timers.target

@@ -1,6 +1,6 @@
 // Package embedded provides helper functions for embedded content.
 //
-// Note: The canonical embed point is root embed.go (jellywatch.GetWebFS).
+// Note: The canonical embed point is root embed.go (plex2jellyfin.GetWebFS).
 // This package provides HasFrontend() for build-time validation tests.
 package embedded
 
@@ -13,7 +13,7 @@ import (
 var frontendFS embed.FS
 
 // Frontend returns the embedded frontend filesystem.
-// Prefer using jellywatch.GetWebFS() for serving.
+// Prefer using plex2jellyfin.GetWebFS() for serving.
 func Frontend() (fs.FS, error) {
 	return fs.Sub(frontendFS, "frontend")
 }

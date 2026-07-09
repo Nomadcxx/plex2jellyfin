@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 )
 
 type RadarrNotifier struct {

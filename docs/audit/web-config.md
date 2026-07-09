@@ -23,7 +23,7 @@
 | **17** | `internal/config/config.go:122-145` | `ParseFileMode` and `ParseDirMode` are identical except for which field they read | Same logic: trim, pad to 3-char octal, parse. | Single `parseMode(raw string) (os.FileMode, error)`. Callers pass `p.FileMode` or `p.DirMode`. | ~10 |
 | **18** | `internal/api/handlers.go:380-420` | `generateEventID` uses `uuid.NewMD5(uuid.Nil, ...)` — cryptographic hash for a display-only activity ID | MD5 of UUID namespace + timestamp+action+source is overkill for a UI event ID. | `fmt.Sprintf("%d-%s", entry.Timestamp.UnixNano(), entry.Action)` — unique enough for a scrolling activity feed. | ~3 |
 | **19** | `internal/api/auth.go:28-32` | `secureRandomRead = rand.Read` — package-level variable wrapping a stdlib function | Indirection with no benefit. Only used in `generateToken`. | Call `rand.Read` directly. | ~1 |
-| **20** | `internal/api/server.go:170-175` | `getConfigDir()` is a 3-line wrapper that just calls `paths.JellyWatchDir()` | Unnecessary indirection. Only called once in `NewServer`. | Inline the call. | ~3 |
+| **20** | `internal/api/server.go:170-175` | `getConfigDir()` is a 3-line wrapper that just calls `paths.Plex2JellyfinDir()` | Unnecessary indirection. Only called once in `NewServer`. | Inline the call. | ~3 |
 
 ## Needs Deeper Research
 

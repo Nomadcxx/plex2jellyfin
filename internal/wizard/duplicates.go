@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Nomadcxx/jellywatch/internal/service"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 )
 
 func (w *Wizard) handleDuplicates(analysis *service.DuplicateAnalysis) error {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 // HealthIssue represents a detected configuration issue.
@@ -24,7 +24,7 @@ type HealthReport struct {
 	Healthy bool
 }
 
-// CheckSonarrConfig validates Sonarr settings for jellywatch compatibility.
+// CheckSonarrConfig validates Sonarr settings for plex2jellyfin compatibility.
 func CheckSonarrConfig(client *sonarr.Client) ([]HealthIssue, error) {
 	var issues []HealthIssue
 
@@ -39,7 +39,7 @@ func CheckSonarrConfig(client *sonarr.Client) ([]HealthIssue, error) {
 			Current:  "true",
 			Expected: "false",
 			Severity: "critical",
-			FixCmd:   "jellywatch health --fix",
+			FixCmd:   "plex2jellyfin health --fix",
 		})
 	}
 
@@ -54,14 +54,14 @@ func CheckSonarrConfig(client *sonarr.Client) ([]HealthIssue, error) {
 			Current:  "false",
 			Expected: "true",
 			Severity: "warning",
-			FixCmd:   "jellywatch health --fix",
+			FixCmd:   "plex2jellyfin health --fix",
 		})
 	}
 
 	return issues, nil
 }
 
-// CheckRadarrConfig validates Radarr settings for jellywatch compatibility.
+// CheckRadarrConfig validates Radarr settings for plex2jellyfin compatibility.
 func CheckRadarrConfig(client *radarr.Client) ([]HealthIssue, error) {
 	var issues []HealthIssue
 
@@ -76,7 +76,7 @@ func CheckRadarrConfig(client *radarr.Client) ([]HealthIssue, error) {
 			Current:  "true",
 			Expected: "false",
 			Severity: "critical",
-			FixCmd:   "jellywatch health --fix",
+			FixCmd:   "plex2jellyfin health --fix",
 		})
 	}
 
@@ -91,7 +91,7 @@ func CheckRadarrConfig(client *radarr.Client) ([]HealthIssue, error) {
 			Current:  "false",
 			Expected: "true",
 			Severity: "warning",
-			FixCmd:   "jellywatch health --fix",
+			FixCmd:   "plex2jellyfin health --fix",
 		})
 	}
 

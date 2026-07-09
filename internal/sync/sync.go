@@ -8,10 +8,10 @@ import (
 	stdsync "sync"
 	"time"
 
-	"github.com/Nomadcxx/jellywatch/internal/database"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/scanner"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 // SyncService manages periodic synchronization from multiple sources
@@ -384,7 +384,7 @@ func (s *SyncService) runRetryLoop(ctx context.Context) {
 	}
 }
 
-// UpdateSonarrPath updates a series path in Sonarr to match JellyWatch
+// UpdateSonarrPath updates a series path in Sonarr to match Plex2Jellyfin
 func (s *SyncService) UpdateSonarrPath(ctx context.Context, sonarrID int, newPath string) error {
 	if s.sonarr == nil {
 		s.logger.Debug("sonarr not configured, cannot update path")
@@ -401,7 +401,7 @@ func (s *SyncService) UpdateSonarrPath(ctx context.Context, sonarrID int, newPat
 	return nil
 }
 
-// UpdateRadarrPath updates a movie path in Radarr to match JellyWatch
+// UpdateRadarrPath updates a movie path in Radarr to match Plex2Jellyfin
 func (s *SyncService) UpdateRadarrPath(ctx context.Context, radarrID int, newPath string) error {
 	if s.radarr == nil {
 		s.logger.Debug("radarr not configured, cannot update path")
