@@ -27,14 +27,19 @@ func UserHomeDir() (string, error) {
 }
 
 // UserConfigDir returns the config directory of the actual user.
-// If running with sudo, returns the SUDO_USER's config directory, not root's.
-// On Linux this is typically ~/.config
+// If running with sudo, returns the SUDO_USER's config directory, not root's
+// (built from their home directory, since we cannot know their XDG_CONFIG_HOME).
+// Otherwise it defers to os.UserConfigDir(), which honors $XDG_CONFIG_HOME when
+// set and falls back to ~/.config on Linux (and containers set $HOME directly).
 func UserConfigDir() (string, error) {
-	homeDir, err := UserHomeDir()
-	if err != nil {
-		return "", err
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && sudoUser != "root" {
+		homeDir, err := UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(homeDir, ".config"), nil
 	}
-	return filepath.Join(homeDir, ".config"), nil
+	return os.UserConfigDir()
 }
 
 // Plex2JellyfinDir returns the Plex2Jellyfin config directory.

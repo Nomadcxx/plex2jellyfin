@@ -92,6 +92,47 @@ func TestUserConfigDir(t *testing.T) {
 	}
 }
 
+func TestUserConfigDir_HonorsXDGConfigHome(t *testing.T) {
+	os.Unsetenv("SUDO_USER")
+
+	xdg := t.TempDir()
+	os.Setenv("XDG_CONFIG_HOME", xdg)
+	defer os.Unsetenv("XDG_CONFIG_HOME")
+
+	got, err := UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir() error = %v", err)
+	}
+
+	if got != xdg {
+		t.Errorf("UserConfigDir() = %q, want %q (XDG_CONFIG_HOME)", got, xdg)
+	}
+}
+
+func TestUserConfigDir_SudoIgnoresXDGConfigHome(t *testing.T) {
+	currentUser, err := user.Current()
+	if err != nil {
+		t.Skip("Cannot get current user")
+	}
+
+	os.Setenv("SUDO_USER", currentUser.Username)
+	defer os.Unsetenv("SUDO_USER")
+
+	xdg := t.TempDir()
+	os.Setenv("XDG_CONFIG_HOME", xdg)
+	defer os.Unsetenv("XDG_CONFIG_HOME")
+
+	got, err := UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir() error = %v", err)
+	}
+
+	expected := currentUser.HomeDir + "/.config"
+	if got != expected {
+		t.Errorf("UserConfigDir() = %q, want %q (sudo user's home, ignoring invoking process's XDG_CONFIG_HOME)", got, expected)
+	}
+}
+
 func TestPlex2JellyfinDir(t *testing.T) {
 	os.Unsetenv("SUDO_USER")
 
