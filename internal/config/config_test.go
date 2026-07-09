@@ -150,6 +150,33 @@ func TestLoadReturnsErrorForUnreadableExistingConfig(t *testing.T) {
 	}
 }
 
+func TestLoadTightensConfigFilePermissions(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SUDO_USER", "")
+
+	configDir := filepath.Join(home, ".config", "jellywatch")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte("[libraries]\ntv = [\"/tv\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("config mode = %o, want 0600", got)
+	}
+}
+
 func TestDefaultConfig_JellyfinDefaults(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Jellyfin.Enabled {

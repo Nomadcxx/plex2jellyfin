@@ -376,7 +376,10 @@ func Load() (*Config, error) {
 	v.SetConfigFile(configPath)
 
 	// Read config file if it exists
-	if _, err := os.Stat(configPath); err == nil {
+	if info, err := os.Stat(configPath); err == nil {
+		if err := ensureConfigFilePrivate(configPath, info.Mode().Perm()); err != nil {
+			return nil, err
+		}
 		if err := v.ReadInConfig(); err != nil {
 			return nil, fmt.Errorf("cannot read config file %s: %w", configPath, err)
 		}
@@ -411,6 +414,16 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func ensureConfigFilePrivate(path string, mode os.FileMode) error {
+	if mode&0o077 == 0 {
+		return nil
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("cannot secure config file %s: %w", path, err)
+	}
+	return nil
 }
 
 // findUnknownKeys returns config keys present in the loaded TOML but absent
