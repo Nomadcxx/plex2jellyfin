@@ -2,22 +2,45 @@ package daemon
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/jellywatch/internal/organizer"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func newTestAIMatcher(t *testing.T, handler http.HandlerFunc) (*ai.Matcher, *httptest.Server, *int32) {
+	t.Helper()
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		handler(w, r)
+	}))
+	matcher, err := ai.NewMatcher(config.AIConfig{
+		Enabled:             true,
+		Model:               "test-model",
+		OllamaEndpoint:      server.URL,
+		ConfidenceThreshold: 0.8,
+		TimeoutSeconds:      1,
+	})
+	require.NoError(t, err)
+	return matcher, server, &calls
+}
 
 func TestMediaHandler_SeparateLibraries(t *testing.T) {
 	cfg := MediaHandlerConfig{
@@ -250,6 +273,92 @@ func TestProcessFile_SkipsUnpackPaths(t *testing.T) {
 	if snap.TVProcessed > 0 || snap.MoviesProcessed > 0 {
 		t.Errorf("processFile should not have processed transient unpack paths")
 	}
+}
+
+func TestProcessFile_SkipsObfuscatedHashWhenNamedSiblingExists(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	releaseDir := filepath.Join(watchDir, "Dutton.Ranch.S01E08.1080p.WEB.h264-GRACE")
+	if err := os.MkdirAll(releaseDir, 0755); err != nil {
+		t.Fatalf("create release dir: %v", err)
+	}
+
+	hashFile := filepath.Join(releaseDir, "VKYruuvSDX5KQecePvxwyD8ycDM31TAK.mkv")
+	namedFile := filepath.Join(releaseDir, "Dutton.Ranch.S01E08.1080p.WEB.h264-GRACE.mkv")
+	if err := os.WriteFile(hashFile, []byte("hash"), 0644); err != nil {
+		t.Fatalf("create hash file: %v", err)
+	}
+	if err := os.WriteFile(namedFile, []byte("named"), 0644); err != nil {
+		t.Fatalf("create named file: %v", err)
+	}
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       true,
+		AIConfig:        config.AIConfig{AutoTriggerThreshold: 0.6},
+		ConfigDir:       t.TempDir(),
+	}
+	handler, err := NewMediaHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+
+	handler.processFile(hashFile)
+
+	if len(handler.pendingAI) != 0 {
+		t.Fatalf("expected stale hash sibling to skip AI, got %d pending AI items", len(handler.pendingAI))
+	}
+	snap := handler.stats.Snapshot()
+	if snap.Errors != 0 {
+		t.Fatalf("expected stale hash sibling to skip without errors, got %d", snap.Errors)
+	}
+	if snap.TVProcessed != 0 || snap.MoviesProcessed != 0 {
+		t.Fatalf("expected stale hash sibling not to organize media, got tv=%d movies=%d", snap.TVProcessed, snap.MoviesProcessed)
+	}
+	if _, err := os.Stat(hashFile); err != nil {
+		t.Fatalf("hash source should be left untouched: %v", err)
+	}
+}
+
+func TestProcessFile_SkipsMissingSourceBeforeParseDecision(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	releaseDir := filepath.Join(watchDir, "My.Adventures.with.Superman.S03E04.1080p.WEB.h264-EDITH")
+	require.NoError(t, os.MkdirAll(releaseDir, 0755))
+
+	missingPath := filepath.Join(releaseDir, "DDkTaYHq53x2Wa5v3qRrKwCUbRe50aLs.mkv")
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{},
+		Logger:          logging.Nop(),
+		AIEnabled:       false,
+		Database:        db,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	handler.processFile(missingPath)
+
+	rows, err := db.QueryDecisions(database.QueryFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 0)
+
+	snap := handler.stats.Snapshot()
+	assert.Equal(t, int64(0), snap.Errors)
+	assert.Equal(t, int64(0), snap.TVProcessed)
+	assert.Equal(t, int64(0), snap.MoviesProcessed)
 }
 
 func TestHandleFileEventDefersTransientUnpackOnce(t *testing.T) {
@@ -514,6 +623,101 @@ func TestProcessPendingAI_SkipsMissingFiles(t *testing.T) {
 	if len(handler.pendingAI) != 0 {
 		t.Errorf("expected missing file to be removed, got %d pending", len(handler.pendingAI))
 	}
+}
+
+func TestProcessPendingAI_OpenCircuitSkipsMatcher(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	srcFile := filepath.Join(watchDir, "Some.Movie.2024.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0644))
+
+	matcher, server, calls := newTestAIMatcher(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"model":"test-model","response":"{\"title\":\"Some Movie\",\"type\":\"movie\",\"year\":2024,\"confidence\":0.99}","done":true}`))
+	})
+	defer server.Close()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		MovieWatchPaths: []string{watchDir},
+		Logger:          logging.Nop(),
+		AIEnabled:       true,
+		AIMatcher:       matcher,
+		AIConfig: config.AIConfig{
+			Model:                "test-model",
+			AutoTriggerThreshold: 0.95,
+			CircuitBreaker: config.CircuitBreakerConfig{
+				FailureThreshold:     1,
+				FailureWindowSeconds: 60,
+				CooldownSeconds:      3600,
+			},
+		},
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+	handler.aiCircuit.RecordFailure("already open")
+	handler.pendingAI[srcFile] = &PendingItem{
+		Path:       srcFile,
+		Filename:   filepath.Base(srcFile),
+		MediaType:  "movie",
+		MovieInfo:  &naming.MovieInfo{Title: "Some Movie", Year: "2024"},
+		Confidence: 0.4,
+		QueuedAt:   time.Now(),
+		TargetLib:  tmpLib,
+	}
+
+	handler.ProcessPendingAI(context.Background())
+
+	assert.Equal(t, int32(0), atomic.LoadInt32(calls), "open circuit must not call matcher")
+	assert.Equal(t, ai.CircuitOpen, handler.aiCircuit.State())
+}
+
+func TestProcessPendingAI_FailuresOpenCircuit(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	srcFile := filepath.Join(watchDir, "Some.Movie.2024.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0644))
+
+	matcher, server, calls := newTestAIMatcher(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("boom"))
+	})
+	defer server.Close()
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{tmpLib},
+		MovieLibs:       []string{tmpLib},
+		MovieWatchPaths: []string{watchDir},
+		Logger:          logging.Nop(),
+		AIEnabled:       true,
+		AIMatcher:       matcher,
+		AIConfig: config.AIConfig{
+			Model:                "test-model",
+			AutoTriggerThreshold: 0.95,
+			CircuitBreaker: config.CircuitBreakerConfig{
+				FailureThreshold:     1,
+				FailureWindowSeconds: 60,
+				CooldownSeconds:      3600,
+			},
+		},
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+	handler.pendingAI[srcFile] = &PendingItem{
+		Path:       srcFile,
+		Filename:   filepath.Base(srcFile),
+		MediaType:  "movie",
+		MovieInfo:  &naming.MovieInfo{Title: "Some Movie", Year: "2024"},
+		Confidence: 0.4,
+		QueuedAt:   time.Now(),
+		TargetLib:  tmpLib,
+	}
+
+	handler.ProcessPendingAI(context.Background())
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(calls))
+	assert.Equal(t, ai.CircuitOpen, handler.aiCircuit.State())
 }
 
 func makeHandler(t *testing.T, watchRoots []string) *MediaHandler {
@@ -1090,6 +1294,19 @@ func TestAIItemHasParseDecisionID(t *testing.T) {
 	assert.NotZero(t, item.ParseDecisionID, "PendingItem should carry ParseDecisionID for AI path")
 }
 
+func TestUpdateDecisionOrganizeReturnsDBError(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	handler := &MediaHandler{db: db, logger: logging.Nop()}
+
+	err = handler.updateDecisionOrganize(1, &organizer.OrganizationResult{Success: true, TargetPath: "/library/movie.mkv"}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "UpdateOrganize")
+}
+
 func TestRegexFallback_WritesParseDecision(t *testing.T) {
 	tmpLib := t.TempDir()
 	watchDir := t.TempDir()
@@ -1183,6 +1400,25 @@ func TestHandleJellyfinWebhookEvent_ItemAddedUpdatesParseDecision(t *testing.T) 
 	assert.NotNil(t, dec.JellyfinFirstSeenAt)
 	require.NotNil(t, dec.JellyfinIdentified)
 	assert.True(t, *dec.JellyfinIdentified)
+}
+
+func TestHandleJellyfinWebhookEvent_ItemAddedReturnsDBError(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	handler := &MediaHandler{db: db}
+
+	err = handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventItemAdded,
+		ItemID:           "jf-item-001",
+		ItemPath:         "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv",
+		ItemName:         "The Matrix",
+		ItemType:         "Movie",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "upsert Jellyfin item")
 }
 
 func TestHandleJellyfinWebhookEvent_ItemAddedSkipsResolved(t *testing.T) {
@@ -1350,7 +1586,7 @@ func TestShutdown_InvalidatesPendingGens(t *testing.T) {
 	path := "/downloads/test.mkv"
 	handler.mu.Lock()
 	handler.pendingGen[path] = 1
-	handler.pending[path] = time.AfterFunc(time.Hour, func() {})
+	handler.schedulePendingTimerLocked(path, time.Hour, 1)
 	handler.mu.Unlock()
 
 	handler.Shutdown()
@@ -1359,6 +1595,30 @@ func TestShutdown_InvalidatesPendingGens(t *testing.T) {
 	_, inGen := handler.pendingGen[path]
 	handler.mu.Unlock()
 	assert.False(t, inGen, "pendingGen should be cleared on shutdown")
+}
+
+func TestHandleFileEventAfterShutdownDoesNotScheduleTimer(t *testing.T) {
+	watchDir := t.TempDir()
+	mediaPath := filepath.Join(watchDir, "movie.mkv")
+
+	cfg := MediaHandlerConfig{
+		TVLibraries:     []string{filepath.Join(t.TempDir(), "tv")},
+		MovieLibs:       []string{filepath.Join(t.TempDir(), "movies")},
+		TVWatchPaths:    []string{watchDir},
+		MovieWatchPaths: []string{watchDir},
+		DebounceTime:    time.Hour,
+	}
+	handler, err := NewMediaHandler(cfg)
+	require.NoError(t, err)
+
+	handler.Shutdown()
+	err = handler.HandleFileEvent(watcher.FileEvent{Path: mediaPath, Type: watcher.EventCreate})
+	require.NoError(t, err)
+
+	handler.mu.Lock()
+	pending := len(handler.pending)
+	handler.mu.Unlock()
+	assert.Equal(t, 0, pending, "events after shutdown must not schedule timers")
 }
 
 func TestReplayDeferredOperation_RespectsShutdown(t *testing.T) {

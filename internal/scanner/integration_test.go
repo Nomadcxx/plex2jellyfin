@@ -44,8 +44,8 @@ func createTestShow(t *testing.T, libraryDir, showName string, season, episodeCo
 		episodeFile := filepath.Join(seasonDir, naming.FormatTVEpisodeFilename(title, year, season, i, "mkv"))
 		f, err := os.Create(episodeFile)
 		require.NoError(t, err)
-		f.Write(make([]byte, 500*1024*1024)) // 500MB
-		f.Close()
+		require.NoError(t, f.Truncate(500*1024*1024)) // 500MB
+		require.NoError(t, f.Close())
 	}
 }
 
@@ -58,8 +58,8 @@ func createTestMovie(t *testing.T, libraryDir, movieName string) {
 	movieFile := filepath.Join(movieDir, movieName+".mkv")
 	f, err := os.Create(movieFile)
 	require.NoError(t, err)
-	f.Write(make([]byte, 2*1024*1024*1024)) // 2GB
-	f.Close()
+	require.NoError(t, f.Truncate(2*1024*1024*1024)) // 2GB
+	require.NoError(t, f.Close())
 }
 
 // TestScanner_PopulatesDatabase tests that scanner populates the database correctly

@@ -16,6 +16,14 @@ func TestNeedsRoot_AsNonRoot(t *testing.T) {
 	}
 }
 
+func TestNeedsRoot_TestBypass(t *testing.T) {
+	t.Setenv("JELLYWATCH_TEST_NO_ESCALATE", "1")
+
+	if NeedsRoot() {
+		t.Error("NeedsRoot() = true, want false when test bypass is enabled")
+	}
+}
+
 func TestNeedsRoot_AsRoot(t *testing.T) {
 	// This test only makes sense when running as root
 	if os.Geteuid() != 0 {

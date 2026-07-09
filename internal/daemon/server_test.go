@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
@@ -237,6 +239,35 @@ func TestServerJellyfinWebhookSecretValidation_EmptySecretNonLoopbackDenied(t *t
 	server.handleJellyfinWebhook(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for non-loopback request when webhook secret is empty, got %d", w.Code)
+	}
+}
+
+func TestServerJellyfinWebhookReturnsServerErrorOnProcessingFailure(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "webhook.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := &MediaHandler{db: db}
+	server := NewServer(handler, nil, ":0", nil, "secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{
+		"NotificationType":"ItemAdded",
+		"ItemId":"jf-1",
+		"ItemPath":"/library/Movie.mkv",
+		"Name":"Movie",
+		"ItemType":"Movie"
+	}`))
+	req.Header.Set("X-Jellywatch-Webhook-Secret", "secret")
+	w := httptest.NewRecorder()
+
+	server.handleJellyfinWebhook(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 on processing failure, got %d", w.Code)
 	}
 }
 

@@ -187,7 +187,10 @@ func (s *Server) handleJellyfinWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.handler != nil {
-		s.handler.HandleJellyfinWebhookEvent(event)
+		if err := s.handler.HandleJellyfinWebhookEvent(event); err != nil {
+			http.Error(w, "webhook processing failed", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)

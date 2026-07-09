@@ -45,7 +45,8 @@ func (p *PVTransferer) Move(src, dst string, opts TransferOptions) (*TransferRes
 
 		if err := RemoveWithTimeout(src, 30*time.Second); err != nil {
 			result.SourceRemoved = false
-			return result, nil
+			result.Error = fmt.Errorf("transfer succeeded but failed to remove source: %w", err)
+			return result, result.Error
 		}
 		result.SourceRemoved = true
 	}

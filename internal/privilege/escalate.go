@@ -10,6 +10,9 @@ import (
 
 // NeedsRoot returns true if the current process is not running as root.
 func NeedsRoot() bool {
+	if os.Getenv("JELLYWATCH_TEST_NO_ESCALATE") == "1" {
+		return false
+	}
 	return os.Geteuid() != 0
 }
 
@@ -27,10 +30,12 @@ func Escalate(reason string) error {
 	fmt.Println("Requesting sudo access...")
 	fmt.Println()
 
-	// Build args: ["sudo", "jellywatch", "duplicates", "execute", ...]
-	args := append([]string{"sudo"}, os.Args...)
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot determine executable path: %w", err)
+	}
 
-	// Replace current process with sudo
-	// This call does not return on success
+	args := append([]string{"sudo", exe}, os.Args[1:]...)
+
 	return syscall.Exec(sudoPath, args, os.Environ())
 }

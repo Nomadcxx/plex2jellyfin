@@ -144,3 +144,23 @@ func TestSchedulerDoesNotInfoLogEmptySuccessfulResult(t *testing.T) {
 		t.Fatalf("empty successful result should not produce info log, got:\n%s", data)
 	}
 }
+
+func TestSchedulerFireRecoversPanicWithoutDB(t *testing.T) {
+	sched := New(nil, nil)
+	rj := &registeredJob{
+		def: Job{
+			Name: "panic.job",
+			Run: func(ctx context.Context) (string, error) {
+				panic("boom")
+			},
+		},
+		running: true,
+	}
+
+	sched.wg.Add(1)
+	sched.fire(context.Background(), "panic.job", rj)
+
+	if rj.running {
+		t.Fatal("panic recovery should clear running flag")
+	}
+}

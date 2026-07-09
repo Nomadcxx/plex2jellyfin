@@ -23,6 +23,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/organizer"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/jellywatch/internal/video"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 )
 
@@ -41,9 +42,11 @@ type MediaHandler struct {
 	seasonPackActive map[string]struct{}
 	seasonPackDone   map[string]time.Time
 	mu               sync.Mutex
-	parseDecisionMu  sync.Mutex // serializes webhook + processFile writes to parse_decisions
+	parseDecisionMu  sync.Mutex       // serializes webhook + processFile writes to parse_decisions
 	pendingGen       map[string]int64 // generation counter to invalidate stale timer callbacks
 	shutdownWg       sync.WaitGroup
+	timerWg          sync.WaitGroup
+	shuttingDown     bool
 	ctx              context.Context
 	cancel           context.CancelFunc
 	dryRun           bool
@@ -59,6 +62,7 @@ type MediaHandler struct {
 	pendingAICap     int
 	aiMatcher        *ai.Matcher
 	aiCache          *ai.Cache
+	aiCircuit        *ai.CircuitBreaker
 	aiConfig         config.AIConfig
 	aiRateLimiter    *AIRateLimiter
 	enhanceLogger    *EnhanceLogger
@@ -242,9 +246,28 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 
 	var enhanceLog *EnhanceLogger
 	var rateLimiter *AIRateLimiter
+	var aiCircuit *ai.CircuitBreaker
 	if cfg.AIEnabled && cfg.ConfigDir != "" {
 		enhanceLog = NewEnhanceLogger(cfg.ConfigDir)
 		rateLimiter = NewAIRateLimiter(cfg.AIConfig.HourlyLimit, cfg.AIConfig.DailyLimit)
+	}
+	if cfg.AIEnabled {
+		cbCfg := cfg.AIConfig.CircuitBreaker
+		defaultCB := config.DefaultAIConfig().CircuitBreaker
+		if cbCfg.FailureThreshold <= 0 {
+			cbCfg.FailureThreshold = defaultCB.FailureThreshold
+		}
+		if cbCfg.FailureWindowSeconds <= 0 {
+			cbCfg.FailureWindowSeconds = defaultCB.FailureWindowSeconds
+		}
+		if cbCfg.CooldownSeconds <= 0 {
+			cbCfg.CooldownSeconds = defaultCB.CooldownSeconds
+		}
+		aiCircuit = ai.NewCircuitBreaker(
+			cbCfg.FailureThreshold,
+			time.Duration(cbCfg.FailureWindowSeconds)*time.Second,
+			time.Duration(cbCfg.CooldownSeconds)*time.Second,
+		)
 	}
 
 	// Wire an AI cache into the daemon path so duplicate filenames during
@@ -350,6 +373,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		pendingAICap:      100,
 		aiMatcher:         cfg.AIMatcher,
 		aiCache:           aiCache,
+		aiCircuit:         aiCircuit,
 		aiConfig:          cfg.AIConfig,
 		aiRateLimiter:     rateLimiter,
 		enhanceLogger:     enhanceLog,
@@ -430,6 +454,9 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 	if action == ingestDefer {
 		h.mu.Lock()
 		defer h.mu.Unlock()
+		if h.shuttingDown {
+			return nil
+		}
 
 		if h.transientRetries[normalizedPath] >= 1 {
 			// First skip → WARN once; subsequent skips → DEBUG so a SABnzbd
@@ -443,9 +470,6 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 					logging.F("path", normalizedPath),
 					logging.F("reason", reason))
 				h.transientWarned[normalizedPath] = true
-				if len(h.transientWarned) > 2000 {
-					h.transientWarned = make(map[string]bool)
-				}
 			} else {
 				h.logger.Debug("handler", "Skipping repeated transient path retry",
 					logging.F("path", normalizedPath),
@@ -454,17 +478,12 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 			return nil
 		}
 
-		if timer, exists := h.pending[normalizedPath]; exists {
-			timer.Stop()
-			delete(h.pending, normalizedPath)
-		}
+		h.stopPendingTimerLocked(normalizedPath)
 
 		gen := h.pendingGen[normalizedPath] + 1
 		h.pendingGen[normalizedPath] = gen
 		h.transientRetries[normalizedPath]++
-		h.pending[normalizedPath] = time.AfterFunc(transientRetryDelay, func() {
-			h.processFileWithGen(normalizedPath, gen)
-		})
+		h.schedulePendingTimerLocked(normalizedPath, transientRetryDelay, gen)
 
 		h.logger.Info("handler", "Deferred transient path",
 			logging.F("path", normalizedPath),
@@ -475,19 +494,36 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
-	if timer, exists := h.pending[normalizedPath]; exists {
-		timer.Stop()
-		delete(h.pending, normalizedPath)
+	if h.shuttingDown {
+		return nil
 	}
+
+	h.stopPendingTimerLocked(normalizedPath)
 
 	gen := h.pendingGen[normalizedPath] + 1
 	h.pendingGen[normalizedPath] = gen
-	h.pending[normalizedPath] = time.AfterFunc(h.debounceTime, func() {
-		h.processFileWithGen(normalizedPath, gen)
-	})
+	h.schedulePendingTimerLocked(normalizedPath, h.debounceTime, gen)
 
 	return nil
+}
+
+func (h *MediaHandler) schedulePendingTimerLocked(path string, delay time.Duration, gen int64) {
+	h.timerWg.Add(1)
+	h.pending[path] = time.AfterFunc(delay, func() {
+		defer h.timerWg.Done()
+		h.processFileWithGen(path, gen)
+	})
+}
+
+func (h *MediaHandler) stopPendingTimerLocked(path string) {
+	timer, exists := h.pending[path]
+	if !exists {
+		return
+	}
+	if timer.Stop() {
+		h.timerWg.Done()
+	}
+	delete(h.pending, path)
 }
 
 func (h *MediaHandler) logEntry(
@@ -593,9 +629,6 @@ func (h *MediaHandler) shouldLogError(path, errMsg string) bool {
 		return false
 	}
 	h.loggedErrors[key] = struct{}{}
-	if len(h.loggedErrors) > 2000 {
-		h.loggedErrors = make(map[string]struct{})
-	}
 	return true
 }
 
@@ -687,11 +720,40 @@ func (h *MediaHandler) processFileWithGen(path string, expectedGen int64) {
 	h.processFile(path)
 }
 
+func hasNamedVideoSibling(path string) bool {
+	dir := filepath.Dir(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+
+	base := filepath.Base(path)
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() == base {
+			continue
+		}
+		if !naming.IsObfuscatedFilename(entry.Name()) && video.IsVideo(filepath.Join(dir, entry.Name())) {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *MediaHandler) processFile(path string) {
 	// Skip files still inside Sabnzbd's transient unpack staging folders.
 	// After extraction, Sabnzbd renames the folder and the watcher/scanner picks up the real path.
 	if isSABTransientUnpackPath(path) {
 		h.logger.Info("handler", "Skipping SAB transient unpack path — extraction still in progress",
+			logging.F("path", path))
+		h.mu.Lock()
+		delete(h.pending, path)
+		delete(h.transientRetries, path)
+		h.mu.Unlock()
+		return
+	}
+
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		h.logger.Debug("handler", "Skipping missing source path before processing",
 			logging.F("path", path))
 		h.mu.Lock()
 		delete(h.pending, path)
@@ -708,6 +770,20 @@ func (h *MediaHandler) processFile(path string) {
 		h.logger.Debug("handler", "Skipping obfuscated SAB temp-hash filename",
 			logging.F("path", path))
 		h.unparseableCache.Record(path, "obfuscated SAB temp-hash filename; waiting for SAB rename")
+		h.mu.Lock()
+		delete(h.pending, path)
+		delete(h.transientRetries, path)
+		h.mu.Unlock()
+		return
+	}
+
+	// SAB can briefly expose both the temp hash and final release filename in
+	// the same folder. Once the named sibling exists, the hash is stale context,
+	// not another media item to parse or send to AI.
+	if naming.IsObfuscatedFilename(filepath.Base(path)) && hasNamedVideoSibling(path) {
+		h.logger.Debug("handler", "Skipping stale obfuscated SAB hash with named video sibling",
+			logging.F("path", path))
+		h.unparseableCache.Record(path, "stale obfuscated SAB hash; named video sibling exists")
 		h.mu.Lock()
 		delete(h.pending, path)
 		delete(h.transientRetries, path)
@@ -1465,13 +1541,20 @@ func (h *MediaHandler) Shutdown() {
 	h.shutdownWg.Wait()
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
+	h.shuttingDown = true
 	for path, timer := range h.pending {
-		timer.Stop()
+		if timer.Stop() {
+			h.timerWg.Done()
+		}
 		delete(h.pending, path)
 	}
 	h.pendingGen = make(map[string]int64)
+	h.mu.Unlock()
+
+	h.timerWg.Wait()
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	if h.notifyManager != nil {
 		h.notifyManager.Close()
@@ -1497,13 +1580,13 @@ func identifiedFromJellyfinEvent(event jellyfin.WebhookEvent) bool {
 }
 
 // HandleJellyfinWebhookEvent mutates playback state from webhook events.
-func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
+func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) error {
 	rawPath := strings.TrimSpace(event.ItemPath)
 	path := h.pathTranslator.JellyfinToDaemon(rawPath)
 	switch event.NotificationType {
 	case jellyfin.EventPlaybackStart:
 		if path == "" || h.playbackLocks == nil {
-			return
+			return nil
 		}
 		h.playbackLocks.Lock(path, jellyfin.PlaybackInfo{
 			UserName:   event.UserName,
@@ -1517,7 +1600,7 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 		}
 	case jellyfin.EventPlaybackStop:
 		if path == "" {
-			return
+			return nil
 		}
 		if h.playbackLocks != nil {
 			h.playbackLocks.Unlock(path)
@@ -1535,12 +1618,13 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 				if h.logger != nil {
 					h.logger.Warn("handler", "Failed to upsert Jellyfin item", logging.F("path", path), logging.F("item_id", itemID), logging.F("error", err.Error()))
 				}
-				return
+				return fmt.Errorf("upsert Jellyfin item: %w", err)
 			}
 			if dec, err := h.db.GetUnresolvedDecisionByTargetPath(path); err != nil {
 				if h.logger != nil {
 					h.logger.Warn("handler", "Failed to query parse decision for path", logging.F("path", path), logging.F("error", err.Error()))
 				}
+				return fmt.Errorf("query parse decision for path: %w", err)
 			} else if dec != nil {
 				now := time.Now().UTC()
 				identified := identifiedFromJellyfinEvent(event)
@@ -1556,6 +1640,7 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 					if h.logger != nil {
 						h.logger.Warn("handler", "Failed to update parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", updateErr.Error()))
 					}
+					return fmt.Errorf("update parse decision outcome: %w", updateErr)
 				}
 			}
 		}
@@ -1571,12 +1656,13 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 				if h.logger != nil {
 					h.logger.Warn("handler", "Failed to upsert Jellyfin item", logging.F("path", path), logging.F("item_id", itemID), logging.F("error", err.Error()))
 				}
-				return
+				return fmt.Errorf("upsert Jellyfin item: %w", err)
 			}
 			if dec, err := h.db.GetDecisionByTargetPath(path); err != nil {
 				if h.logger != nil {
 					h.logger.Warn("handler", "Failed to query parse decision for path", logging.F("path", path), logging.F("error", err.Error()))
 				}
+				return fmt.Errorf("query parse decision for path: %w", err)
 			} else if dec != nil {
 				now := time.Now().UTC()
 				identified := identifiedFromJellyfinEvent(event)
@@ -1592,6 +1678,7 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 					if h.logger != nil {
 						h.logger.Warn("handler", "Failed to upgrade parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", updateErr.Error()))
 					}
+					return fmt.Errorf("upgrade parse decision outcome: %w", updateErr)
 				}
 			}
 		}
@@ -1604,9 +1691,13 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 				if h.logger != nil {
 					h.logger.Warn("handler", "Failed to query parse decision for removed path", logging.F("path", path), logging.F("error", err.Error()))
 				}
+				return fmt.Errorf("query parse decision for removed path: %w", err)
 			} else if dec != nil {
-				if clearErr := h.db.ClearOutcome(dec.ID); clearErr != nil && h.logger != nil {
-					h.logger.Warn("handler", "Failed to clear parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", clearErr.Error()))
+				if clearErr := h.db.ClearOutcome(dec.ID); clearErr != nil {
+					if h.logger != nil {
+						h.logger.Warn("handler", "Failed to clear parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", clearErr.Error()))
+					}
+					return fmt.Errorf("clear parse decision outcome: %w", clearErr)
 				}
 			}
 		}
@@ -1627,6 +1718,7 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
 		}
 		h.logJellyfinActivity("jellyfin_library_changed", event.ServerName, event.ItemName, true, "")
 	}
+	return nil
 }
 
 func (h *MediaHandler) logJellyfinActivity(action, source, target string, success bool, errMsg string) {
@@ -1720,16 +1812,7 @@ func (h *MediaHandler) replayDeferredOperation(op jellyfin.DeferredOp) {
 	default:
 	}
 
-	h.shutdownWg.Add(1)
-	go func() {
-		defer h.shutdownWg.Done()
-		select {
-		case <-h.ctx.Done():
-			return
-		default:
-		}
-		h.processFile(op.SourcePath)
-	}()
+	h.processFile(op.SourcePath)
 }
 
 func (h *MediaHandler) ProcessPendingAI(ctx context.Context) {
@@ -1881,6 +1964,24 @@ func (h *MediaHandler) processPendingAI(ctx context.Context, progress chan<- dat
 			}
 		}
 		if !fromCache {
+			if h.aiCircuit != nil && !h.aiCircuit.Allow() {
+				h.logger.Warn("handler", "AI circuit open, falling back to regex",
+					logging.F("filename", item.Filename),
+					logging.F("cooldown_remaining", h.aiCircuit.CooldownRemaining().Round(time.Second).String()),
+					logging.F("last_error", h.aiCircuit.LastError()))
+				if h.enhanceLogger != nil {
+					h.enhanceLogger.Log(EnhanceLogEntry{
+						Action: "circuit_open",
+						File:   item.Filename,
+						Reason: h.aiCircuit.LastError(),
+					})
+				}
+				h.mu.Lock()
+				delete(h.pendingAI, item.Path)
+				h.mu.Unlock()
+				h.organizeWithRegexFallback(item)
+				continue
+			}
 			aiResult, err = h.aiMatcher.ParseWithRetry(ctx, item.Filename)
 		}
 
@@ -1907,6 +2008,9 @@ func (h *MediaHandler) processPendingAI(ctx context.Context, progress chan<- dat
 		}
 
 		if err != nil {
+			if h.aiCircuit != nil {
+				h.aiCircuit.RecordFailure(err.Error())
+			}
 			item.AttemptCount++
 			item.LastAttemptAt = time.Now()
 
@@ -1961,6 +2065,9 @@ func (h *MediaHandler) processPendingAI(ctx context.Context, progress chan<- dat
 				}
 			}
 			continue
+		}
+		if h.aiCircuit != nil && !fromCache {
+			h.aiCircuit.RecordSuccess()
 		}
 
 		// Cache successful upstream results so re-queued identical
@@ -2064,9 +2171,9 @@ func (h *MediaHandler) markDecisionQueued(id int64) {
 
 // updateDecisionOrganize updates the organize columns of a parse decision row.
 // It is a no-op when the DB is not configured or the decision ID is zero.
-func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.OrganizationResult, err error) {
+func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.OrganizationResult, err error) error {
 	if h.db == nil || id == 0 {
-		return
+		return nil
 	}
 
 	u := database.OrganizeUpdate{}
@@ -2105,7 +2212,9 @@ func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.Organi
 		h.logger.Warn("handler", "failed to update parse decision organize columns",
 			logging.F("decision_id", id),
 			logging.F("error", updateErr.Error()))
+		return updateErr
 	}
+	return nil
 }
 
 func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {

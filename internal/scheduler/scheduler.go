@@ -137,6 +137,14 @@ func (s *Scheduler) start(ctx context.Context, name string) error {
 
 func (s *Scheduler) fire(ctx context.Context, name string, rj *registeredJob) {
 	defer func() {
+		if r := recover(); r != nil {
+			if s.logger != nil {
+				s.logger.Error("scheduler", fmt.Sprintf("job %s panicked: %v", name, r), nil)
+			}
+			if s.db != nil {
+				_ = s.db.RecordScheduledJobRun(name, "", fmt.Sprintf("panic: %v", r), 0, time.Time{})
+			}
+		}
 		s.mu.Lock()
 		rj.running = false
 		delete(s.cancels, name)
@@ -144,12 +152,17 @@ func (s *Scheduler) fire(ctx context.Context, name string, rj *registeredJob) {
 		s.wg.Done()
 	}()
 
-	_ = s.db.MarkScheduledJobRunning(name, true)
+	if s.db != nil {
+		_ = s.db.MarkScheduledJobRunning(name, true)
+	}
 	start := time.Now()
 	result, err := rj.def.Run(ctx)
 	dur := time.Since(start)
 
-	row, _ := s.db.GetScheduledJob(name)
+	var row *database.ScheduledJob
+	if s.db != nil {
+		row, _ = s.db.GetScheduledJob(name)
+	}
 	next := time.Time{}
 	if row != nil {
 		next = nextRun(row.Schedule, time.Now())
@@ -158,8 +171,10 @@ func (s *Scheduler) fire(ctx context.Context, name string, rj *registeredJob) {
 	if err != nil {
 		errStr = err.Error()
 	}
-	if recErr := s.db.RecordScheduledJobRun(name, result, errStr, dur, next); recErr != nil && s.logger != nil {
-		s.logger.Warn("scheduler", fmt.Sprintf("record run failed name=%s err=%v", name, recErr))
+	if s.db != nil {
+		if recErr := s.db.RecordScheduledJobRun(name, result, errStr, dur, next); recErr != nil && s.logger != nil {
+			s.logger.Warn("scheduler", fmt.Sprintf("record run failed name=%s err=%v", name, recErr))
+		}
 	}
 	if s.logger != nil {
 		if err != nil {
