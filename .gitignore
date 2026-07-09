@@ -114,3 +114,16 @@ build/
 
 # Backups
 *.bak
+
+# Local databases (never commit library data)
+media.db
+*.db
+
+# Generated reports containing real library contents
+docs/reports/
+
+# Python bytecode
+__pycache__/
+
+# Unrelated scratch files
+/copilot-malformed-tool-calls-review.md
