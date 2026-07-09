@@ -163,17 +163,19 @@ func archivePlan(filename string) error {
 
 // --- Consolidate wrappers ---
 
-func SaveConsolidatePlans(plan *ConsolidatePlan) error       { return savePlan(plan, "consolidate.json") }
-func LoadConsolidatePlans() (*ConsolidatePlan, error)        { return loadPlan[ConsolidatePlan]("consolidate.json") }
-func DeleteConsolidatePlans() error                          { return deletePlan("consolidate.json") }
-func ArchiveConsolidatePlans() error                         { return archivePlan("consolidate.json") }
+func SaveConsolidatePlans(plan *ConsolidatePlan) error { return savePlan(plan, "consolidate.json") }
+func LoadConsolidatePlans() (*ConsolidatePlan, error) {
+	return loadPlan[ConsolidatePlan]("consolidate.json")
+}
+func DeleteConsolidatePlans() error  { return deletePlan("consolidate.json") }
+func ArchiveConsolidatePlans() error { return archivePlan("consolidate.json") }
 
 // --- Duplicate wrappers ---
 
-func SaveDuplicatePlans(plan *DuplicatePlan) error           { return savePlan(plan, "duplicates.json") }
-func LoadDuplicatePlans() (*DuplicatePlan, error)            { return loadPlan[DuplicatePlan]("duplicates.json") }
-func DeleteDuplicatePlans() error                            { return deletePlan("duplicates.json") }
-func ArchiveDuplicatePlans() error                           { return archivePlan("duplicates.json") }
+func SaveDuplicatePlans(plan *DuplicatePlan) error { return savePlan(plan, "duplicates.json") }
+func LoadDuplicatePlans() (*DuplicatePlan, error)  { return loadPlan[DuplicatePlan]("duplicates.json") }
+func DeleteDuplicatePlans() error                  { return deletePlan("duplicates.json") }
+func ArchiveDuplicatePlans() error                 { return archivePlan("duplicates.json") }
 
 // AuditItem represents a low-confidence file that needs review
 type AuditItem struct {
@@ -235,10 +237,10 @@ type AuditPlan struct {
 
 // --- Audit wrappers ---
 
-func SaveAuditPlans(plan *AuditPlan) error   { return savePlan(plan, "audit.json") }
-func LoadAuditPlans() (*AuditPlan, error)    { return loadPlan[AuditPlan]("audit.json") }
-func DeleteAuditPlans() error                { return deletePlan("audit.json") }
-func ArchiveAuditPlans() error               { return archivePlan("audit.json") }
+func SaveAuditPlans(plan *AuditPlan) error { return savePlan(plan, "audit.json") }
+func LoadAuditPlans() (*AuditPlan, error)  { return loadPlan[AuditPlan]("audit.json") }
+func DeleteAuditPlans() error              { return deletePlan("audit.json") }
+func ArchiveAuditPlans() error             { return archivePlan("audit.json") }
 
 // ExecuteAuditAction executes an audit action (rename or delete) on a file
 func ExecuteAuditAction(db *database.MediaDB, item AuditItem, action AuditAction, dryRun bool, cfg *config.Config) error {

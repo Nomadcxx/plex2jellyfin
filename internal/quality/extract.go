@@ -4,11 +4,11 @@ import "path/filepath"
 
 // QualityMetadata contains all extracted quality information for database storage
 type QualityMetadata struct {
-	Resolution  string // "2160p", "1080p", "720p", "480p", "unknown"
-	SourceType  string // "REMUX", "BluRay", "WEB-DL", "WEBRip", "HDTV", "DVDRip", "unknown"
-	Codec       string // "x265", "x264", "AV1", "unknown"
-	AudioFormat string // "Atmos", "TrueHD", "DTS-HD MA", "DD+", "AAC", "unknown"
-	QualityScore int   // Computed score for comparison
+	Resolution   string // "2160p", "1080p", "720p", "480p", "unknown"
+	SourceType   string // "REMUX", "BluRay", "WEB-DL", "WEBRip", "HDTV", "DVDRip", "unknown"
+	Codec        string // "x265", "x264", "AV1", "unknown"
+	AudioFormat  string // "Atmos", "TrueHD", "DTS-HD MA", "DD+", "AAC", "unknown"
+	QualityScore int    // Computed score for comparison
 }
 
 // ExtractMetadata extracts all quality metadata from a file path and size
@@ -80,9 +80,10 @@ func ExtractEpisodeMetadata(path string, fileSize int64) QualityMetadata {
 
 // CompareWithSize compares two files including size and returns which is better
 // Returns:
-//   -1 if file1 is better (higher quality)
-//    0 if equal quality
-//   +1 if file2 is better (higher quality)
+//
+//	-1 if file1 is better (higher quality)
+//	 0 if equal quality
+//	+1 if file2 is better (higher quality)
 func CompareWithSize(path1 string, size1 int64, path2 string, size2 int64, isEpisode bool) int {
 	meta1 := ExtractMetadata(path1, size1, isEpisode)
 	meta2 := ExtractMetadata(path2, size2, isEpisode)

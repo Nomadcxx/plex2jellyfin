@@ -129,37 +129,37 @@ func reloadHandler(
 }
 
 type recoverArgs struct {
-Action string `json:"action"`
+	Action string `json:"action"`
 }
 
 func recoverHandler(log *ipc.OpLog, getPending func() []ipc.OpLogEntry, clearPending func()) ipc.Handler {
-return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
-var a recoverArgs
-if err := json.Unmarshal(req.Args, &a); err != nil {
-w.Error(req.ID, ipc.ErrBadRequest, err.Error())
-return
-}
-switch a.Action {
-case "discard":
-for _, p := range getPending() {
-if err := log.MarkDiscarded(p.ID); err != nil {
-w.Error(req.ID, ipc.ErrInternal, err.Error())
-return
-}
-}
-clearPending()
-w.Result(req.ID, json.RawMessage(`{"discarded":true}`))
-case "resume":
-w.Error(req.ID, ipc.ErrNotImplemented, "resume not supported in v1")
-default:
-w.Error(req.ID, ipc.ErrBadRequest, "action must be discard or resume")
-}
-}
+	return func(ctx context.Context, req ipc.Request, w ipc.FrameWriter) {
+		var a recoverArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			w.Error(req.ID, ipc.ErrBadRequest, err.Error())
+			return
+		}
+		switch a.Action {
+		case "discard":
+			for _, p := range getPending() {
+				if err := log.MarkDiscarded(p.ID); err != nil {
+					w.Error(req.ID, ipc.ErrInternal, err.Error())
+					return
+				}
+			}
+			clearPending()
+			w.Result(req.ID, json.RawMessage(`{"discarded":true}`))
+		case "resume":
+			w.Error(req.ID, ipc.ErrNotImplemented, "resume not supported in v1")
+		default:
+			w.Error(req.ID, ipc.ErrBadRequest, "action must be discard or resume")
+		}
+	}
 }
 
 type rescanArgs struct {
-Paths  []string `json:"paths,omitempty"`
-DryRun bool     `json:"dry_run"`
+	Paths  []string `json:"paths,omitempty"`
+	DryRun bool     `json:"dry_run"`
 }
 
 type rescanScanner interface {
@@ -167,78 +167,78 @@ type rescanScanner interface {
 }
 
 func rescanHandler(scanner rescanScanner, defaultPaths func() []string, log *ipc.OpLog) ipc.StreamingHandler {
-return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
-var args rescanArgs
-if len(raw) > 0 {
-_ = json.Unmarshal(raw, &args)
-}
-if len(args.Paths) == 0 && defaultPaths != nil {
-args.Paths = defaultPaths()
-}
-_ = log.Begin(op.ID, ipc.CmdRescan, map[string]any{"paths": args.Paths, "dry_run": args.DryRun})
-if len(args.Paths) == 0 {
-w.Error(op.ID, ipc.ErrBadRequest, "no library paths configured; set libraries.tv or libraries.movies first")
-_ = log.End(op.ID, "error", "no library paths configured")
-return
-}
-progress := make(chan database.ProgressEvent, 64)
-doneCh := make(chan struct{})
-go relayProgress(progress, w, op.ID, doneCh)
-err := scanner.FullRescan(ctx, args.Paths, args.DryRun, progress)
-close(progress)
-<-doneCh
-if err != nil {
-w.Error(op.ID, ipc.ErrInternal, err.Error())
-_ = log.End(op.ID, "error", err.Error())
-return
-}
-w.Done(op.ID, json.RawMessage(`{"ok":true}`))
-_ = log.End(op.ID, "done", "")
-}
+	return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
+		var args rescanArgs
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &args)
+		}
+		if len(args.Paths) == 0 && defaultPaths != nil {
+			args.Paths = defaultPaths()
+		}
+		_ = log.Begin(op.ID, ipc.CmdRescan, map[string]any{"paths": args.Paths, "dry_run": args.DryRun})
+		if len(args.Paths) == 0 {
+			w.Error(op.ID, ipc.ErrBadRequest, "no library paths configured; set libraries.tv or libraries.movies first")
+			_ = log.End(op.ID, "error", "no library paths configured")
+			return
+		}
+		progress := make(chan database.ProgressEvent, 64)
+		doneCh := make(chan struct{})
+		go relayProgress(progress, w, op.ID, doneCh)
+		err := scanner.FullRescan(ctx, args.Paths, args.DryRun, progress)
+		close(progress)
+		<-doneCh
+		if err != nil {
+			w.Error(op.ID, ipc.ErrInternal, err.Error())
+			_ = log.End(op.ID, "error", err.Error())
+			return
+		}
+		w.Done(op.ID, json.RawMessage(`{"ok":true}`))
+		_ = log.End(op.ID, "done", "")
+	}
 }
 
 type resetArgs struct {
-Confirm  string   `json:"confirm"`
-Preserve []string `json:"preserve,omitempty"`
+	Confirm  string   `json:"confirm"`
+	Preserve []string `json:"preserve,omitempty"`
 }
 
 func resetDBHandler(db *sql.DB, log *ipc.OpLog) ipc.StreamingHandler {
-return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
-var args resetArgs
-if err := json.Unmarshal(raw, &args); err != nil {
-w.Error(op.ID, ipc.ErrBadRequest, err.Error())
-return
-}
-if args.Confirm != "media.db" {
-w.Error(op.ID, ipc.ErrBadRequest, `confirm must equal "media.db"`)
-return
-}
-_ = log.Begin(op.ID, ipc.CmdResetDB, map[string]any{"preserve": args.Preserve})
-progress := make(chan database.ProgressEvent, 64)
-doneCh := make(chan struct{})
-go relayProgress(progress, w, op.ID, doneCh)
-err := database.ResetDatabase(ctx, db, args.Preserve, progress)
-close(progress)
-<-doneCh
-if err != nil {
-w.Error(op.ID, ipc.ErrInternal, err.Error())
-_ = log.End(op.ID, "error", err.Error())
-return
-}
-w.Done(op.ID, json.RawMessage(`{"ok":true}`))
-_ = log.End(op.ID, "done", "")
-}
+	return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
+		var args resetArgs
+		if err := json.Unmarshal(raw, &args); err != nil {
+			w.Error(op.ID, ipc.ErrBadRequest, err.Error())
+			return
+		}
+		if args.Confirm != "media.db" {
+			w.Error(op.ID, ipc.ErrBadRequest, `confirm must equal "media.db"`)
+			return
+		}
+		_ = log.Begin(op.ID, ipc.CmdResetDB, map[string]any{"preserve": args.Preserve})
+		progress := make(chan database.ProgressEvent, 64)
+		doneCh := make(chan struct{})
+		go relayProgress(progress, w, op.ID, doneCh)
+		err := database.ResetDatabase(ctx, db, args.Preserve, progress)
+		close(progress)
+		<-doneCh
+		if err != nil {
+			w.Error(op.ID, ipc.ErrInternal, err.Error())
+			_ = log.End(op.ID, "error", err.Error())
+			return
+		}
+		w.Done(op.ID, json.RawMessage(`{"ok":true}`))
+		_ = log.End(op.ID, "done", "")
+	}
 }
 
 // guardMutator rejects mutator ops while interrupted ops are still pending
 // (operator hasn't called RECOVER yet). Wrap streaming handlers for RESCAN
 // and RESET_DB at registration time in main.
 func guardMutator(getPending func() []ipc.OpLogEntry, h ipc.StreamingHandler) ipc.StreamingHandler {
-return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
-if getPending != nil && len(getPending()) > 0 {
-w.Error(op.ID, ipc.ErrConflict, "interrupted ops pending; call RECOVER first")
-return
-}
-h(ctx, raw, w, op)
-}
+	return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
+		if getPending != nil && len(getPending()) > 0 {
+			w.Error(op.ID, ipc.ErrConflict, "interrupted ops pending; call RECOVER first")
+			return
+		}
+		h(ctx, raw, w, op)
+	}
 }

@@ -48,8 +48,6 @@ func ExtractPartialResult(response string) (*Result, bool) {
 	return &result, true
 }
 
-
-
 // GetNudgePrompt returns a corrective prompt to help the AI fix malformed JSON responses.
 // This is a necessary public API function for the recovery mechanism.
 func GetNudgePrompt() string {

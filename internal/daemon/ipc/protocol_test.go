@@ -27,9 +27,9 @@ func TestErrorCodeIsString(t *testing.T) {
 }
 
 func TestLifecycleCommandsDefined(t *testing.T) {
-for _, c := range []Command{CmdStop, CmdRescan, CmdResetDB, CmdAttach, CmdCancel, CmdRecover} {
-if string(c) == "" {
-t.Errorf("command constant empty")
-}
-}
+	for _, c := range []Command{CmdStop, CmdRescan, CmdResetDB, CmdAttach, CmdCancel, CmdRecover} {
+		if string(c) == "" {
+			t.Errorf("command constant empty")
+		}
+	}
 }

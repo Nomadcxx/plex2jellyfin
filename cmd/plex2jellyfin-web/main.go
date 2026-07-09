@@ -13,8 +13,8 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/api"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
-	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemonctl"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	"github.com/spf13/cobra"
 )

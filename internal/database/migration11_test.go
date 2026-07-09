@@ -154,7 +154,7 @@ func TestMigration11_IdempotentApplication(t *testing.T) {
 	// Apply first time - skip schema_version INSERT for manual test
 	for _, stmt := range migration11.up {
 		if strings.Contains(stmt, "INSERT INTO schema_version") {
-			continue  // Skip on first run
+			continue // Skip on first run
 		}
 		_, err = db.DB().Exec(stmt)
 		if err != nil {
@@ -168,7 +168,7 @@ func TestMigration11_IdempotentApplication(t *testing.T) {
 	// Apply second time - should not error beyond duplicate column warnings
 	for _, stmt := range migration11.up {
 		if strings.Contains(stmt, "INSERT INTO schema_version") {
-			continue  // Always skip
+			continue // Always skip
 		}
 		_, err = db.DB().Exec(stmt)
 		if err != nil && !strings.Contains(err.Error(), "duplicate column") {

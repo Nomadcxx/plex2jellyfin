@@ -46,60 +46,60 @@ const (
 // nested companion plugin format ({"eventType":"...","payload":{"item":{...}}})
 // into a single WebhookEvent representation.
 func (e *WebhookEvent) UnmarshalJSON(data []byte) error {
-type Alias WebhookEvent
-flat := (*Alias)(e)
-if err := json.Unmarshal(data, flat); err != nil {
-return err
-}
+	type Alias WebhookEvent
+	flat := (*Alias)(e)
+	if err := json.Unmarshal(data, flat); err != nil {
+		return err
+	}
 
-if e.NotificationType != "" {
-return nil
-}
+	if e.NotificationType != "" {
+		return nil
+	}
 
-var nested struct {
-EventType string `json:"eventType"`
-Timestamp string `json:"timestamp"`
-Payload   struct {
-Item struct {
-ID          string            `json:"id"`
-Path        string            `json:"path"`
-Name        string            `json:"name"`
-Type        string            `json:"type"`
-ProviderIDs map[string]string `json:"providerIds"`
-} `json:"item"`
-} `json:"payload"`
-}
-if err := json.Unmarshal(data, &nested); err != nil {
-return err
-}
+	var nested struct {
+		EventType string `json:"eventType"`
+		Timestamp string `json:"timestamp"`
+		Payload   struct {
+			Item struct {
+				ID          string            `json:"id"`
+				Path        string            `json:"path"`
+				Name        string            `json:"name"`
+				Type        string            `json:"type"`
+				ProviderIDs map[string]string `json:"providerIds"`
+			} `json:"item"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(data, &nested); err != nil {
+		return err
+	}
 
-if nested.EventType != "" {
-e.NotificationType = nested.EventType
-if e.Timestamp == "" {
-e.Timestamp = nested.Timestamp
-}
-if e.ItemID == "" {
-e.ItemID = nested.Payload.Item.ID
-}
-if e.ItemPath == "" {
-e.ItemPath = nested.Payload.Item.Path
-}
-if e.ItemName == "" {
-e.ItemName = nested.Payload.Item.Name
-}
-if e.ItemType == "" {
-e.ItemType = nested.Payload.Item.Type
-}
-if e.ProviderImdb == "" {
-e.ProviderImdb = nested.Payload.Item.ProviderIDs["Imdb"]
-}
-if e.ProviderTmdb == "" {
-e.ProviderTmdb = nested.Payload.Item.ProviderIDs["Tmdb"]
-}
-if e.ProviderTvdb == "" {
-e.ProviderTvdb = nested.Payload.Item.ProviderIDs["Tvdb"]
-}
-}
+	if nested.EventType != "" {
+		e.NotificationType = nested.EventType
+		if e.Timestamp == "" {
+			e.Timestamp = nested.Timestamp
+		}
+		if e.ItemID == "" {
+			e.ItemID = nested.Payload.Item.ID
+		}
+		if e.ItemPath == "" {
+			e.ItemPath = nested.Payload.Item.Path
+		}
+		if e.ItemName == "" {
+			e.ItemName = nested.Payload.Item.Name
+		}
+		if e.ItemType == "" {
+			e.ItemType = nested.Payload.Item.Type
+		}
+		if e.ProviderImdb == "" {
+			e.ProviderImdb = nested.Payload.Item.ProviderIDs["Imdb"]
+		}
+		if e.ProviderTmdb == "" {
+			e.ProviderTmdb = nested.Payload.Item.ProviderIDs["Tmdb"]
+		}
+		if e.ProviderTvdb == "" {
+			e.ProviderTvdb = nested.Payload.Item.ProviderIDs["Tvdb"]
+		}
+	}
 
-return nil
+	return nil
 }

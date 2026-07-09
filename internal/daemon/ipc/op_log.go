@@ -98,7 +98,9 @@ func (l *OpLog) Pending() ([]OpLogEntry, error) {
 	return out, nil
 }
 
-func (l *OpLog) MarkDiscarded(id string) error { return l.End(id, "cancelled", "discarded by recovery") }
+func (l *OpLog) MarkDiscarded(id string) error {
+	return l.End(id, "cancelled", "discarded by recovery")
+}
 
 // RecentByCmd returns the most recent finished entries (most-recent first)
 // for the given command, merged with their Begin metadata so callers can

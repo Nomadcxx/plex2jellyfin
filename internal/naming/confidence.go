@@ -213,5 +213,3 @@ func hasReleaseMarkers(filename string) bool {
 	}
 	return false
 }
-
-

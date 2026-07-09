@@ -5,7 +5,7 @@ import (
 )
 
 func TestRealWorldMovieParsing(t *testing.T) {
-	cases := []struct{
+	cases := []struct {
 		input, wantTitle, wantYear string
 	}{
 		{"epic.elvis.presley.in.concert.2025.1080p.webrip.x264.aac5.1-yts.bz.mp4", "epic elvis presley in concert", "2025"},

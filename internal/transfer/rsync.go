@@ -226,4 +226,3 @@ func (r *RsyncTransferer) parseProgress(stdout *bufio.Reader, progressFn func(cu
 		}
 	}
 }
-

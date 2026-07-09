@@ -121,9 +121,9 @@ func DetectMovieMismatches(db *database.MediaDB, radarrClient *radarr.Client) ([
 type FixChoice string
 
 const (
-	FixChoiceKeepPlex2Jellyfin   FixChoice = "plex2jellyfin"
-	FixChoiceKeepSonarrRadarr FixChoice = "arr"
-	FixChoiceSkip             FixChoice = "skip"
+	FixChoiceKeepPlex2Jellyfin FixChoice = "plex2jellyfin"
+	FixChoiceKeepSonarrRadarr  FixChoice = "arr"
+	FixChoiceSkip              FixChoice = "skip"
 )
 
 func FixSeriesMismatch(db *database.MediaDB, sonarrClient *sonarr.Client, mismatch PathMismatch, choice FixChoice) error {

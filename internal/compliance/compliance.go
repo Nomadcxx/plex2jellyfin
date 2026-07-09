@@ -16,14 +16,14 @@ type ComplianceResult struct {
 
 // IssueType categorizes compliance issues
 const (
-	IssueInvalidFilename      = "invalid_filename"
-	IssueReleaseMarkers       = "release_markers"
-	IssueMissingYear          = "missing_year"
-	IssueInvalidYearFormat    = "invalid_year_format"
+	IssueInvalidFilename        = "invalid_filename"
+	IssueReleaseMarkers         = "release_markers"
+	IssueMissingYear            = "missing_year"
+	IssueInvalidYearFormat      = "invalid_year_format"
 	IssueInvalidFolderStructure = "invalid_folder_structure"
-	IssueWrongSeasonFolder    = "wrong_season_folder"
-	IssueSpecialCharacters    = "special_characters"
-	IssueInvalidPadding       = "invalid_padding"
+	IssueWrongSeasonFolder      = "wrong_season_folder"
+	IssueSpecialCharacters      = "special_characters"
+	IssueInvalidPadding         = "invalid_padding"
 )
 
 // Checker validates media files against Jellyfin naming conventions
@@ -44,11 +44,11 @@ func NewChecker(libraryRoot string) *Checker {
 //   - Movies/Movie Name (YYYY)/Movie Name (YYYY).ext
 //
 // Checks:
-//   1. File is in a movie folder with year
-//   2. Filename matches folder name
-//   3. Year is in parentheses format (YYYY)
-//   4. No release markers (1080p, BluRay, x264, etc)
-//   5. No special characters that break Jellyfin
+//  1. File is in a movie folder with year
+//  2. Filename matches folder name
+//  3. Year is in parentheses format (YYYY)
+//  4. No release markers (1080p, BluRay, x264, etc)
+//  5. No special characters that break Jellyfin
 func (c *Checker) CheckMovie(fullPath string) ComplianceResult {
 	result := ComplianceResult{
 		IsCompliant: true,
@@ -111,12 +111,12 @@ func (c *Checker) CheckMovie(fullPath string) ComplianceResult {
 //   - TV Shows/Show Name (Year)/Season XX/Show Name (Year) SXXEXX.ext
 //
 // Checks:
-//   1. File is in proper Season folder
-//   2. Season number is zero-padded (Season 01, not Season 1)
-//   3. Filename contains SXXEXX format with zero-padding
-//   4. No release markers
-//   5. Year in parentheses
-//   6. No special characters
+//  1. File is in proper Season folder
+//  2. Season number is zero-padded (Season 01, not Season 1)
+//  3. Filename contains SXXEXX format with zero-padding
+//  4. No release markers
+//  5. Year in parentheses
+//  6. No special characters
 func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 	result := ComplianceResult{
 		IsCompliant: true,

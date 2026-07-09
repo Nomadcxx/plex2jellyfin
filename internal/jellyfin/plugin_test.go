@@ -10,9 +10,9 @@ import (
 
 func TestNewPluginClient(t *testing.T) {
 	cfg := Config{
-		URL:       "http://localhost:8096",
-		APIKey:    "test-key",
-		Timeout:   30 * time.Second,
+		URL:     "http://localhost:8096",
+		APIKey:  "test-key",
+		Timeout: 30 * time.Second,
 	}
 
 	client := NewPluginClient(cfg)
@@ -131,9 +131,9 @@ func TestPluginClientGetActiveScans(t *testing.T) {
 	mockResponse := ActiveScansResponse{
 		Scans: []LibraryScan{
 			{
-				LibraryID: "lib-1",
-				LibraryName: "Movies",
-				StartedAt: time.Now().Add(-5 * time.Minute),
+				LibraryID:    "lib-1",
+				LibraryName:  "Movies",
+				StartedAt:    time.Now().Add(-5 * time.Minute),
 				ItemsScanned: 50,
 			},
 		},

@@ -207,47 +207,47 @@ func (c *Client) GetPublicInfo() (*PublicSystemInfo, error) {
 // RemoteSearchResult mirrors a single Jellyfin RemoteSearch hit. Only
 // fields we actually use are decoded; Jellyfin returns many more.
 type RemoteSearchResult struct {
-Name           string `json:"Name"`
-ProductionYear int    `json:"ProductionYear"`
-TmdbID         string `json:"-"`
-ImdbID         string `json:"-"`
-TvdbID         string `json:"-"`
-ProviderIDs    map[string]string `json:"ProviderIds"`
+	Name           string            `json:"Name"`
+	ProductionYear int               `json:"ProductionYear"`
+	TmdbID         string            `json:"-"`
+	ImdbID         string            `json:"-"`
+	TvdbID         string            `json:"-"`
+	ProviderIDs    map[string]string `json:"ProviderIds"`
 }
 
 // RemoteSearch queries Jellyfin's metadata-provider search for a title.
 // kind must be "movie" or "series". Returns matches with ProviderIDs
 // populated (Tmdb/Imdb/Tvdb).
 func (c *Client) RemoteSearch(ctx context.Context, kind, name string) ([]RemoteSearchResult, error) {
-endpoint := "/Items/RemoteSearch/Movie"
-if kind == "series" || kind == "tv" {
-endpoint = "/Items/RemoteSearch/Series"
-}
-payload := map[string]any{
-"SearchInfo": map[string]any{
-"Name": name,
-},
-}
-body, err := json.Marshal(payload)
-if err != nil {
-return nil, err
-}
-resp, err := c.requestCtx(ctx, http.MethodPost, endpoint, bytes.NewReader(body), true)
-if err != nil {
-return nil, err
-}
-defer resp.Body.Close()
+	endpoint := "/Items/RemoteSearch/Movie"
+	if kind == "series" || kind == "tv" {
+		endpoint = "/Items/RemoteSearch/Series"
+	}
+	payload := map[string]any{
+		"SearchInfo": map[string]any{
+			"Name": name,
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.requestCtx(ctx, http.MethodPost, endpoint, bytes.NewReader(body), true)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-var out []RemoteSearchResult
-if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-return nil, fmt.Errorf("decode RemoteSearch: %w", err)
-}
-for i := range out {
-if out[i].ProviderIDs != nil {
-out[i].TmdbID = out[i].ProviderIDs["Tmdb"]
-out[i].ImdbID = out[i].ProviderIDs["Imdb"]
-out[i].TvdbID = out[i].ProviderIDs["Tvdb"]
-}
-}
-return out, nil
+	var out []RemoteSearchResult
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode RemoteSearch: %w", err)
+	}
+	for i := range out {
+		if out[i].ProviderIDs != nil {
+			out[i].TmdbID = out[i].ProviderIDs["Tmdb"]
+			out[i].ImdbID = out[i].ProviderIDs["Imdb"]
+			out[i].TvdbID = out[i].ProviderIDs["Tvdb"]
+		}
+	}
+	return out, nil
 }

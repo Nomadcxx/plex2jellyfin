@@ -139,13 +139,13 @@ func tasksListHandler(db *database.MediaDB) ipc.Handler {
 		out := make([]map[string]any, 0, len(tasks))
 		for _, t := range tasks {
 			row := map[string]any{
-				"id":       t.ID,
-				"job_name": t.JobName,
-				"kind":     t.Kind,
-				"payload":  t.Payload,
-				"status":   t.Status,
-				"attempts": t.Attempts,
-				"priority": t.Priority,
+				"id":         t.ID,
+				"job_name":   t.JobName,
+				"kind":       t.Kind,
+				"payload":    t.Payload,
+				"status":     t.Status,
+				"attempts":   t.Attempts,
+				"priority":   t.Priority,
 				"created_at": t.CreatedAt,
 			}
 			if t.LastError.Valid {
@@ -389,17 +389,17 @@ func taskGroupHandler(db *database.MediaDB) ipc.Handler {
 			})
 		}
 		data, _ := json.Marshal(map[string]any{
-			"group_id":          group.ID,
-			"media_type":        group.MediaType,
-			"title":             group.Title,
-			"year":              group.Year,
-			"season":            group.Season,
-			"episode":           group.Episode,
-			"best_file_id":      group.BestFileID,
-			"reclaimable_bytes": group.ReclaimableBytes,
-			"confidence":        level,
+			"group_id":           group.ID,
+			"media_type":         group.MediaType,
+			"title":              group.Title,
+			"year":               group.Year,
+			"season":             group.Season,
+			"episode":            group.Episode,
+			"best_file_id":       group.BestFileID,
+			"reclaimable_bytes":  group.ReclaimableBytes,
+			"confidence":         level,
 			"confidence_reasons": reasons,
-			"files":             files,
+			"files":              files,
 		})
 		w.Result(req.ID, data)
 	}

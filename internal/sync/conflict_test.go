@@ -55,12 +55,12 @@ func TestSyncFromFilesystem_DetectsConflicts(t *testing.T) {
 	// Create two library directories with unique names
 	lib1 := filepath.Join(os.TempDir(), "plex2jellyfin-test-lib1-"+t.Name())
 	lib2 := filepath.Join(os.TempDir(), "plex2jellyfin-test-lib2-"+t.Name())
-	
+
 	err := os.MkdirAll(lib1, 0755)
 	require.NoError(t, err)
 	err = os.MkdirAll(lib2, 0755)
 	require.NoError(t, err)
-	
+
 	defer func() {
 		os.RemoveAll(lib1)
 		os.RemoveAll(lib2)
@@ -97,7 +97,7 @@ func TestSyncFromFilesystem_DetectsConflicts(t *testing.T) {
 	// Note: SyncFromFilesystem processes all libraries in one call
 	_, err = syncService.SyncFromFilesystem(ctx)
 	require.NoError(t, err)
-	
+
 	// Verify both shows were processed
 	series1, _ := db.GetSeriesByTitle("Silo", 2023)
 	require.NotNil(t, series1, "Series should exist after sync")

@@ -44,8 +44,8 @@ func TestCheckMovie_NonCompliantFile(t *testing.T) {
 	checker := NewChecker("/media/Movies")
 
 	tests := []struct {
-		name          string
-		path          string
+		name           string
+		path           string
 		expectedIssues []string
 	}{
 		{
@@ -156,8 +156,8 @@ func TestCheckEpisode_NonCompliantFile(t *testing.T) {
 	checker := NewChecker("/media/TV")
 
 	tests := []struct {
-		name          string
-		path          string
+		name           string
+		path           string
 		expectedIssues []string
 	}{
 		{

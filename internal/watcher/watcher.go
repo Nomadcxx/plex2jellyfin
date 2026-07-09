@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/Nomadcxx/plex2jellyfin/internal/video"
+	"github.com/fsnotify/fsnotify"
 )
 
 type EventType string
