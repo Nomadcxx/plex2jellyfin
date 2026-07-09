@@ -5,6 +5,7 @@
 /installer-test
 /plex2jellyfin-web
 bin/
+dist/
 
 # Test binary
 *.test
@@ -29,6 +30,7 @@ Thumbs.db
 *.yml
 !config.example.toml
 !docker-compose.example.yml
+!.goreleaser.yaml
 
 # Development documentation
 AGENTS.md

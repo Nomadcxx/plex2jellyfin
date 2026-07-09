@@ -48,7 +48,7 @@ func TestStartInstallation_UpdateModeRefreshesSystemdUnits(t *testing.T) {
 
 func TestBuildWebServiceUnit_UsesConfiguredPort(t *testing.T) {
 	unit := buildWebServiceUnit("nomadx", "18080")
-	if !strings.Contains(unit, "ExecStart=/usr/local/bin/plex2jellyfin-web --host 0.0.0.0 --port 18080") {
+	if !strings.Contains(unit, "ExecStart=/usr/bin/plex2jellyfin-web --host 0.0.0.0 --port 18080") {
 		t.Fatalf("expected configured port in service unit, got:\n%s", unit)
 	}
 	if !strings.Contains(unit, "Environment=SUDO_USER=nomadx") {

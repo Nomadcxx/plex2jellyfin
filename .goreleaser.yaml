@@ -1,0 +1,65 @@
+version: 2
+project_name: plex2jellyfin
+
+before:
+  hooks:
+    - make frontend
+
+builds:
+  - id: cli
+    main: ./cmd/plex2jellyfin
+    binary: plex2jellyfin
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+  - id: daemon
+    main: ./cmd/plex2jellyfin-daemon
+    binary: plex2jellyfin-daemon
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+  - id: web
+    main: ./cmd/plex2jellyfin-web
+    binary: plex2jellyfin-web
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+  - id: installer
+    main: ./cmd/installer
+    binary: plex2jellyfin-installer
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+
+nfpms:
+  - id: packages
+    package_name: plex2jellyfin
+    formats: [deb, rpm]
+    license: GPL-3.0-or-later
+    maintainer: "Nomadcxx <nomadcxx@users.noreply.github.com>"
+    description: |-
+      Migrate your Plex library to Jellyfin and keep it clean forever.
+      Mass rename, dedupe, and consolidate an existing library, then a
+      daemon guards new downloads as they arrive.
+    homepage: https://github.com/Nomadcxx/plex2jellyfin
+    ids: [cli, daemon, web]
+    contents:
+      - src: systemd/plex2jellyfin-daemon.service
+        dst: /usr/lib/systemd/system/plex2jellyfin-daemon.service
+      - src: systemd/plex2jellyfin-web.service
+        dst: /usr/lib/systemd/system/plex2jellyfin-web.service
+      - src: config.toml.example
+        dst: /usr/share/doc/plex2jellyfin/config.toml.example
+    scripts:
+      postinstall: packaging/postinstall.sh
+      preremove: packaging/preremove.sh
+
+archives:
+  - id: tarballs
+    ids: [cli, daemon, web, installer]
+
+release:
+  github:
+    owner: Nomadcxx
+    name: plex2jellyfin
+  draft: true

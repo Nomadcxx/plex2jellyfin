@@ -61,7 +61,7 @@ func (m model) renderUninstallConfirm() string {
 	b.WriteString("\n\n")
 
 	b.WriteString("This will remove:\n")
-	b.WriteString("  • Plex2Jellyfin binaries from /usr/local/bin\n")
+	b.WriteString("  • Plex2Jellyfin binaries from /usr/bin\n")
 	b.WriteString("  • Systemd service (plex2jellyfin-daemon)\n\n")
 
 	// Three options for config/database handling

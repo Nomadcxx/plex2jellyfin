@@ -59,7 +59,7 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 			{name: "Check dependencies", description: "Verifying Go installation", execute: checkDependencies, status: statusPending},
 			{name: "Stop services", description: "Stopping running services", execute: stopRunningServices, status: statusPending},
 			{name: "Build binaries", description: "Building plex2jellyfin and plex2jellyfin-daemon", execute: buildBinaries, status: statusPending},
-			{name: "Install binaries", description: "Installing to /usr/local/bin", execute: installBinaries, status: statusPending},
+			{name: "Install binaries", description: "Installing to /usr/bin", execute: installBinaries, status: statusPending},
 			{name: "Refresh systemd", description: "Updating installed systemd units", execute: refreshSystemdUnits, status: statusPending},
 			{name: "Start services", description: "Restarting services", execute: restartServices, status: statusPending},
 		}
@@ -69,7 +69,7 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 			{name: "Check privileges", description: "Checking root access", execute: checkPrivileges, status: statusPending},
 			{name: "Check dependencies", description: "Verifying Go installation", execute: checkDependencies, status: statusPending},
 			{name: "Build binaries", description: "Building plex2jellyfin and plex2jellyfin-daemon", execute: buildBinaries, status: statusPending},
-			{name: "Install binaries", description: "Installing to /usr/local/bin", execute: installBinaries, status: statusPending},
+			{name: "Install binaries", description: "Installing to /usr/bin", execute: installBinaries, status: statusPending},
 			{name: "Write config", description: "Writing configuration file", execute: writeConfig, status: statusPending},
 			// Scan happens here as a separate step (stepScanning) before systemd setup
 		}
@@ -143,7 +143,7 @@ func installBinaries(m *model) error {
 		if _, err := os.Stat(srcBin); os.IsNotExist(err) {
 			continue
 		}
-		cmd := exec.Command("install", "-Dm755", srcBin, filepath.Join("/usr/local/bin", bin))
+		cmd := exec.Command("install", "-Dm755", srcBin, filepath.Join("/usr/bin", bin))
 		if err := runCommand("install "+bin, cmd, m.logFile); err != nil {
 			return err
 		}
@@ -354,7 +354,7 @@ Type=simple
 User=root
 Group=root
 Environment=SUDO_USER=%s
-ExecStart=/usr/local/bin/plex2jellyfin-daemon
+ExecStart=/usr/bin/plex2jellyfin-daemon
 Restart=on-failure
 RestartSec=5
 
@@ -450,7 +450,7 @@ Type=simple
 User=root
 Group=root
 Environment=SUDO_USER=%s
-ExecStart=/usr/local/bin/plex2jellyfin-web --host 0.0.0.0 --port %s
+ExecStart=/usr/bin/plex2jellyfin-web --host 0.0.0.0 --port %s
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -570,10 +570,10 @@ func disableService(m *model) error {
 
 func removeBinaries(m *model) error {
 	binaries := []string{
-		"/usr/local/bin/plex2jellyfin",
-		"/usr/local/bin/plex2jellyfin-daemon",
-		"/usr/local/bin/plex2jellyfin-web",
-		"/usr/local/bin/plex2jellyfin-installer",
+		"/usr/bin/plex2jellyfin",
+		"/usr/bin/plex2jellyfin-daemon",
+		"/usr/bin/plex2jellyfin-web",
+		"/usr/bin/plex2jellyfin-installer",
 	}
 	for _, bin := range binaries {
 		os.Remove(bin)
