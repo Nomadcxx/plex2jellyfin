@@ -46,9 +46,9 @@ Three binaries:
 
 | Binary | Role |
 |---|---|
-| `plex2jellyfin` | CLI for migration: scan, audit, duplicates, consolidation, one-shot organize. |
+| `plex2jellyfin` | CLI for migration: scan, audit, duplicates, consolidation, one-shot organize. The primary interface. |
 | `plex2jellyfin-daemon` | Background daemon. Watches download dirs, runs the periodic library scan, executes the housekeeping queue, exposes a Unix-domain control socket. |
-| `plex2jellyfin-web` | HTTP server (default `:5522`). Hosts the embedded dashboard and proxies API calls to the daemon over the control socket. |
+| `plex2jellyfin-web` | HTTP server (default `:5522`). Hosts the embedded dashboard and proxies API calls to the daemon over the control socket. **Work in progress**; the CLI and daemon carry the core workflow. |
 
 ```mermaid
 flowchart TB
@@ -135,6 +135,8 @@ plex2jellyfin orphans                        # Detect / remediate orphaned Jelly
 ```
 
 ## Web Dashboard
+
+> **Work in progress.** Plex2Jellyfin is first a CLI tool and daemon; the dashboard trails behind them. Expect rough edges and prefer the CLI for anything destructive.
 
 `plex2jellyfin-web` serves the dashboard at `http://<host>:5522/`. Routes:
 
