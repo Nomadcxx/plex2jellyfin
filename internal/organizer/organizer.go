@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/analyzer"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/identity"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
@@ -490,8 +492,18 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 		}
 		_, err := o.db.UpsertMovie(movieRecord)
 		if err != nil {
-			log.Printf("[organizer] CRITICAL: DB upsert failed after file move — filesystem and database are inconsistent: %v", err)
-		} else if o.syncService != nil {
+			return &OrganizationResult{
+				Success:       false,
+				SourcePath:    sourcePath,
+				TargetPath:    targetPath,
+				BytesCopied:   result.BytesCopied,
+				Duration:      result.Duration,
+				Attempts:      result.Attempts,
+				SourceQuality: sourceQuality,
+				Error:         fmt.Errorf("DB upsert failed after file move — filesystem and database are inconsistent: %w", err),
+			}, nil
+		}
+		if o.syncService != nil {
 			o.db.SetMovieDirty(movieRecord.ID)
 			o.syncService.QueueSync("movie", movieRecord.ID)
 		}
@@ -559,9 +571,31 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 	sourceQuality := quality.Parse(filename)
 
 	showDir := findExistingShowDir(libraryPath, tv.Title)
+	reusingExistingShowDir := showDir != ""
 	if showDir == "" {
 		showName := naming.NormalizeMediaName(tv.Title, tv.Year)
 		showDir = filepath.Join(libraryPath, showName)
+	}
+	if reusingExistingShowDir {
+		yearInt := 0
+		if tv.Year != "" {
+			fmt.Sscanf(tv.Year, "%d", &yearInt)
+		}
+		decision := identity.CompareSeries(
+			identity.SeriesIdentity{Title: tv.Title, Year: yearInt, Path: sourcePath},
+			identity.SeriesIdentity{Path: showDir},
+		)
+		if decision.Verdict != identity.VerdictSame {
+			reason := fmt.Sprintf("identity safety: %s", strings.Join(decision.Reasons, "; "))
+			return &OrganizationResult{
+				Success:    false,
+				SourcePath: sourcePath,
+				TargetPath: showDir,
+				Skipped:    true,
+				SkipReason: reason,
+				Error:      fmt.Errorf("%s", reason),
+			}, nil
+		}
 	}
 
 	seasonDir := findExistingSeasonDir(showDir, tv.Season)
@@ -701,8 +735,18 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		}
 		_, err := o.db.UpsertSeries(seriesRecord)
 		if err != nil {
-			log.Printf("[organizer] CRITICAL: DB upsert failed after file move — filesystem and database are inconsistent: %v", err)
-		} else if o.syncService != nil {
+			return &OrganizationResult{
+				Success:       false,
+				SourcePath:    sourcePath,
+				TargetPath:    targetPath,
+				BytesCopied:   result.BytesCopied,
+				Duration:      result.Duration,
+				Attempts:      result.Attempts,
+				SourceQuality: sourceQuality,
+				Error:         fmt.Errorf("DB upsert failed after file move — filesystem and database are inconsistent: %w", err),
+			}, nil
+		}
+		if o.syncService != nil {
 			o.db.SetSeriesDirty(seriesRecord.ID)
 			o.syncService.QueueSync("series", seriesRecord.ID)
 		}
@@ -791,6 +835,12 @@ func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func
 			result.BytesCopied += itemResult.BytesCopied
 			if itemResult.Error != nil && !itemResult.Skipped {
 				result.Error = itemResult.Error
+				result.SkipReason = "season_pack_partial_failure"
+				if rollbackErr := rollbackSeasonPackImports(result.Imported); rollbackErr != nil {
+					result.Error = fmt.Errorf("%w; rollback failed: %v", result.Error, rollbackErr)
+				}
+				result.Success = false
+				return result, nil
 			}
 		}
 	}
@@ -807,6 +857,37 @@ func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func
 		result.SkipReason = "season_pack_partial_failure"
 	}
 	return result, nil
+}
+
+func rollbackSeasonPackImports(imported []*OrganizationResult) error {
+	var errs []error
+	for i := len(imported) - 1; i >= 0; i-- {
+		item := imported[i]
+		if item == nil || !item.Success || item.SourcePath == "" || item.TargetPath == "" {
+			continue
+		}
+		if _, err := os.Stat(item.TargetPath); err != nil {
+			if !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("stat target %s: %w", item.TargetPath, err))
+			}
+			continue
+		}
+		if _, err := os.Stat(item.SourcePath); err == nil {
+			errs = append(errs, fmt.Errorf("source already exists, not overwriting: %s", item.SourcePath))
+			continue
+		} else if !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("stat source %s: %w", item.SourcePath, err))
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(item.SourcePath), 0755); err != nil {
+			errs = append(errs, fmt.Errorf("create rollback dir %s: %w", filepath.Dir(item.SourcePath), err))
+			continue
+		}
+		if err := os.Rename(item.TargetPath, item.SourcePath); err != nil {
+			errs = append(errs, fmt.Errorf("rollback %s -> %s: %w", item.TargetPath, item.SourcePath, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func collectVideoFiles(root string) ([]string, error) {

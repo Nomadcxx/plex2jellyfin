@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -17,6 +18,35 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failAfterFirstMoveTransferer struct {
+	moves int
+}
+
+func (t *failAfterFirstMoveTransferer) Move(src, dst string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
+	t.moves++
+	if t.moves > 1 {
+		return &transfer.TransferResult{Success: false, Error: fmt.Errorf("forced move failure")}, fmt.Errorf("forced move failure")
+	}
+	info, err := os.Stat(src)
+	if err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	return &transfer.TransferResult{Success: true, SourceRemoved: true, BytesCopied: info.Size(), BytesTotal: info.Size(), Attempts: 1}, nil
+}
+
+func (t *failAfterFirstMoveTransferer) Copy(src, dst string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
+	return nil, fmt.Errorf("copy not implemented")
+}
+
+func (t *failAfterFirstMoveTransferer) CanResume() bool { return false }
+func (t *failAfterFirstMoveTransferer) Name() string    { return "fail-after-first" }
 
 // setupTestEnv creates temporary directories for testing
 func setupTestEnv(t *testing.T) (sourceDir, libraryDir string, cleanup func()) {
@@ -155,11 +185,11 @@ func TestOrganizeMovie_DuplicateExists(t *testing.T) {
 	require.NoError(t, err)
 
 	existingFile := filepath.Join(movieDir, "The.Matrix.1999.1080p.BluRay.mkv")
-	createTestFile(t, existingFile, 1*1024*1024*1024) // 1GB (lower quality)
+	createTestFile(t, existingFile, 1024) // lower quality by filename
 
 	// Create new higher quality file
 	newFile := filepath.Join(sourceDir, "The.Matrix.1999.2160p.REMUX.mkv")
-	createTestFile(t, newFile, 4*1024*1024*1024) // 4GB (higher quality)
+	createTestFile(t, newFile, 4096) // higher quality by filename
 
 	// Create organizer
 	transferer, err := transfer.New(transfer.BackendRsync)
@@ -175,7 +205,7 @@ func TestOrganizeMovie_DuplicateExists(t *testing.T) {
 	// Organize
 	result, err := org.OrganizeMovie(newFile, libraryDir)
 	require.NoError(t, err)
-	require.True(t, result.Success, "Organization should succeed")
+	require.True(t, result.Success, "Organization should succeed: %v", result.Error)
 
 	// Verify higher quality file exists
 	expectedPath := filepath.Join(movieDir, "The Matrix (1999).mkv")
@@ -185,7 +215,7 @@ func TestOrganizeMovie_DuplicateExists(t *testing.T) {
 	// The file should be the new one (larger size)
 	info, err := os.Stat(expectedPath)
 	require.NoError(t, err)
-	assert.Greater(t, info.Size(), int64(2*1024*1024*1024), "File should be the larger one")
+	assert.Equal(t, int64(4096), info.Size(), "File should be the replacement")
 }
 
 // TestOrganizeMovie_ExistingFilePreservedOnTransferFailure verifies that
@@ -406,6 +436,34 @@ func TestOrganizeTVEpisode_ExistingShow(t *testing.T) {
 	// Note: The existing episode might be removed if the organizer thinks it's a duplicate
 	// This is actually correct behavior - the organizer removes lower quality duplicates
 	// For this test, we just verify the new episode was added correctly
+}
+
+func TestOrganizeTVWithParsed_BlocksIdentityUnsafeExistingShow(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	showDir := filepath.Join(libraryDir, "Utopia (2013)")
+	seasonDir := filepath.Join(showDir, "Season 02")
+	require.NoError(t, os.MkdirAll(seasonDir, 0755))
+
+	sourcePath := filepath.Join(sourceDir, "Utopia.2014.S02E07.mkv")
+	createTestFile(t, sourcePath, 500*1024*1024)
+
+	org, err := NewOrganizer([]string{libraryDir}, WithBackend(transfer.BackendNative))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, naming.TVShowInfo{
+		Title:   "Utopia",
+		Year:    "2014",
+		Season:  2,
+		Episode: 7,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Skipped)
+	require.Contains(t, result.SkipReason, "identity safety")
+	assert.FileExists(t, sourcePath, "identity-unsafe source should not be moved")
+	assert.NoFileExists(t, filepath.Join(seasonDir, "Utopia (2014) S02E07.mkv"))
 }
 
 func TestPlaybackSafetyBlocksActiveStream(t *testing.T) {
@@ -804,6 +862,36 @@ func TestOrganizeTVSeasonPackAuto_ImportsEpisodeFiles(t *testing.T) {
 	assert.FileExists(t, filepath.Join(libraryDir, "Supergirl", "Season 03", "Supergirl S03E02.mkv"))
 	assert.NoFileExists(t, ep1)
 	assert.NoFileExists(t, ep2)
+}
+
+func TestOrganizeTVSeasonPackAuto_RollsBackImportedFilesOnPartialFailure(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	packDir := filepath.Join(sourceDir, "Supergirl.S03.1080p.BluRay.x264-GROUP")
+	require.NoError(t, os.MkdirAll(packDir, 0755))
+	ep1 := filepath.Join(packDir, "Supergirl.S03E01.1080p.BluRay.x264-GROUP.mkv")
+	ep2 := filepath.Join(packDir, "Supergirl.S03E02.1080p.BluRay.x264-GROUP.mkv")
+	createTestFile(t, ep1, 1024)
+	createTestFile(t, ep2, 1024)
+
+	org, err := NewOrganizer([]string{libraryDir}, WithTransferer(&failAfterFirstMoveTransferer{}))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVSeasonPackAuto(packDir, func(p string) (int64, error) {
+		info, err := os.Stat(p)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	})
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Error(t, result.Error)
+	assert.Equal(t, "season_pack_partial_failure", result.SkipReason)
+	assert.FileExists(t, ep1, "first imported file should be rolled back to source")
+	assert.FileExists(t, ep2, "failed file should remain at source")
+	assert.NoFileExists(t, filepath.Join(libraryDir, "Supergirl", "Season 03", "Supergirl S03E01.mkv"))
 }
 
 func TestOrganizeTVSeasonPackAuto_SkipsUnresolvedSeasonOnlyFile(t *testing.T) {
