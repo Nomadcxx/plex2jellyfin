@@ -1,38 +1,54 @@
 <div align="center">
-  <img src="assets/plex2jellyfin_brand.png" alt="Plex2Jellyfin" width="480" />
+  <img src="assets/plex2jellyfin-header.png" alt="plex2jellyfin" width="640" />
+
+  **Migrate your Plex library to Jellyfin. Keep it clean forever.**
 </div>
 
 ---
 
-> ⚠️ **WORK IN PROGRESS — NOT STABLE**
->
-> This project is under active development. Features may change, break, or disappear without notice. Not recommended for production use. Use at your own risk.
+> **Beta.** Every destructive operation runs as generate → dry-run → execute, so you can preview each change before it touches a file. Still: back up anything you can't re-download.
 
----
+## Why this exists
 
-Because Sonarr and Radarr can't be trusted with naming conventions.
+I moved my Plex libraries to Jellyfin and watched Jellyfin shred them. Usenet and torrent releases name the same show a dozen different ways, and Plex spent years papering over that mess with fuzzy matching. Jellyfin takes your folder names at face value. One show splits into four entries because of release-group suffixes. Seasons land under "Season Unknown". Movies appear titled `1080p.BluRay.x265`.
 
-## What It Does
+Plex2Jellyfin is the tool I built to fix my own migration, then kept building. It takes the library Plex left behind, renames every file into the layout Jellyfin expects, merges the duplicates, consolidates series scattered across drives, and then stays running to guard the library as new downloads arrive. It is written in Go because mass-renaming tens of thousands of files needs to be fast, and it has organized my own multi-drive library daily since January 2026.
 
-Plex2Jellyfin watches download directories, parses media filenames, and renames files into a Jellyfin-compatible layout. `plex2jellyfin-web` serves a web dashboard at port `5522` for monitoring, queue management, duplicate review, and configuration. An optional Ollama integration handles ambiguous filenames with AI-assisted parsing.
+## What it does
+
+**Migration (one-shot).** Point the CLI at your existing library:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
+plex2jellyfin scan                       # index everything into a local SQLite db
+plex2jellyfin status                     # see what you have and what's broken
+plex2jellyfin duplicates generate        # find the same content stored twice
+plex2jellyfin duplicates dry-run         # preview which copies would be removed
+plex2jellyfin duplicates execute         # keep the best copy, delete the rest
+plex2jellyfin consolidate generate       # find series scattered across drives
+plex2jellyfin consolidate execute        # merge each series onto one drive
+plex2jellyfin audit --generate           # AI-assisted rename proposals for the stragglers
+plex2jellyfin audit --execute            # apply approved fixes
 ```
 
-## The Problem
+When it finishes, Jellyfin scans a library it understands on the first pass: no duplicate show entries, no Season Unknown, no release-tag titles.
 
-Your *arr stack downloads `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv`. Jellyfin wants `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv`. Plex2Jellyfin fixes that automatically, with AI fallback for ambiguous filenames and a convergence loop that catches files the parser missed.
+**Librarian (daemon).** After migration, `plex2jellyfin-daemon` watches your download directories. Sonarr or Radarr drops `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv` into the watch folder; the daemon parses it, renames it to `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv`, moves it to the right drive, and tells Jellyfin. A convergence loop re-checks the library on a schedule and feeds anything drifting back toward chaos into a housekeeping queue you can review from the web dashboard.
+
+Ambiguous filenames go to an optional local LLM (Ollama) behind a confidence threshold, a response cache, and a circuit breaker. The regex parser handles the bulk of files without ever calling it.
+
+## What it does not do
+
+Plex2Jellyfin migrates the media files themselves. Plex server metadata stays behind: user accounts, watch states, ratings, and playlists are out of scope.
 
 ## Architecture
 
-Plex2Jellyfin ships **three** binaries:
+Three binaries:
 
 | Binary | Role |
 |---|---|
-| `plex2jellyfin-daemon` | Background daemon. Watches download dirs, runs the periodic library scan, executes the housekeeping queue, and exposes a Unix-domain control socket at `~/.config/plex2jellyfin/control.sock`. |
-| `plex2jellyfin-web` | HTTP server (default `:5522`). Hosts the embedded Next.js dashboard and proxies API calls to `plex2jellyfin-daemon` over the control socket. |
-| `plex2jellyfin` | CLI for one-shot scans, audits, organize/move operations, duplicate cleanup, and consolidation. |
+| `plex2jellyfin` | CLI for migration: scan, audit, duplicates, consolidation, one-shot organize. |
+| `plex2jellyfin-daemon` | Background daemon. Watches download dirs, runs the periodic library scan, executes the housekeeping queue, exposes a Unix-domain control socket. |
+| `plex2jellyfin-web` | HTTP server (default `:5522`). Hosts the embedded dashboard and proxies API calls to the daemon over the control socket. |
 
 ```mermaid
 flowchart TB
@@ -51,61 +67,71 @@ flowchart TB
 
 See [`docs/architecture.md`](docs/architecture.md) for details.
 
-## CLI Commands
+## Install
 
-`plex2jellyfin --help` shows the primary workflows. Advanced and maintenance commands are available but hidden from the root help to keep it focused.
-
-### Primary Commands
+**One-liner:**
 
 ```bash
-plex2jellyfin scan                          # Index libraries into media.db
-plex2jellyfin status                        # DB statistics and deployment health
-plex2jellyfin duplicates generate           # Find duplicate media
-plex2jellyfin duplicates dry-run            # Preview deletion plan
-plex2jellyfin duplicates execute            # Keep the best copy, remove the rest
-plex2jellyfin consolidate generate          # Find TV series scattered across drives
-plex2jellyfin consolidate dry-run           # Preview consolidation moves
-plex2jellyfin consolidate execute           # Merge into a single library path
-plex2jellyfin config                        # Manage configuration
-plex2jellyfin version                       # Print version information
+curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
 ```
 
-### AI Audit
+**Manual:**
+
+```bash
+git clone https://github.com/Nomadcxx/plex2jellyfin.git
+cd plex2jellyfin
+go build -o installer ./cmd/installer
+sudo ./installer
+```
+
+The installer walks you through watch paths, library paths, *arr keys, AI, permissions, and systemd units. Re-run it to update; it preserves your existing `config.toml`. Requires **Go 1.24+** to build from source.
+
+## CLI Commands
+
+`plex2jellyfin --help` shows the primary workflows. Advanced and maintenance commands exist but stay hidden from the root help.
+
+### Primary
+
+```bash
+plex2jellyfin scan                        # Index libraries into media.db
+plex2jellyfin status                      # DB statistics and deployment health
+plex2jellyfin duplicates generate         # Find duplicate media
+plex2jellyfin duplicates dry-run          # Preview deletion plan
+plex2jellyfin duplicates execute          # Keep the best copy, remove the rest
+plex2jellyfin consolidate generate        # Find TV series scattered across drives
+plex2jellyfin consolidate dry-run         # Preview consolidation moves
+plex2jellyfin consolidate execute         # Merge into a single library path
+plex2jellyfin config                      # Manage configuration
+```
+
+### AI audit
 
 Reviews files with low parse confidence and proposes renames via the configured LLM:
 
 ```bash
-plex2jellyfin audit --generate             # Identify low-confidence files
-plex2jellyfin audit --generate --dry-run   # Preview AI rename suggestions
-plex2jellyfin audit --execute              # Apply approved fixes
+plex2jellyfin audit --generate            # Identify low-confidence files
+plex2jellyfin audit --generate --dry-run  # Preview AI rename suggestions
+plex2jellyfin audit --execute             # Apply approved fixes
 ```
 
-The audit sends the library kind (Movies vs TV), folder path, and current parse as context to the LLM. See [`docs/ai-context.md`](docs/ai-context.md).
+The audit sends library kind (Movies vs TV), folder path, and current parse as context. See [`docs/ai-context.md`](docs/ai-context.md).
 
-### Duplicates & Consolidation
-
-The daemon runs a convergence loop that detects duplicates and scattered series, feeding them into the housekeeping queue. You can see the queue in the web UI at `/scheduler`. The CLI commands above handle one-off manual maintenance.
-
-### Advanced Commands (hidden from root help)
+### Advanced (hidden from root help)
 
 ```bash
-plex2jellyfin organize /downloads/file.mkv  # Organize a single file
-plex2jellyfin organize-folder /downloads/X  # Organize a directory tree
-plex2jellyfin watch /downloads              # Foreground watcher
-plex2jellyfin validate <path>              # Check library against Jellyfin naming rules
-plex2jellyfin cleanup                      # Remove cruft files / empty dirs
-plex2jellyfin monitor                      # Tail plex2jellyfin-daemon activity log
-plex2jellyfin daemon {start|stop|restart}  # Control the systemd service
-plex2jellyfin serve                        # Run the API server in foreground
-plex2jellyfin repair series-dedupe         # Repair duplicate series rows
-plex2jellyfin database cleanup-housekeeping # Collapse duplicate housekeeping rows
+plex2jellyfin organize /downloads/file.mkv   # Organize a single file
+plex2jellyfin organize-folder /downloads/X   # Organize a directory tree
+plex2jellyfin watch /downloads               # Foreground watcher
+plex2jellyfin validate <path>                # Check library against Jellyfin naming rules
+plex2jellyfin cleanup                        # Remove cruft files / empty dirs
+plex2jellyfin monitor                        # Tail daemon activity log
+plex2jellyfin daemon {start|stop|restart}    # Control the systemd service
+plex2jellyfin repair series-dedupe           # Repair duplicate series rows
 plex2jellyfin postmortem collect --since 96h # Generate evidence bundle for review
-plex2jellyfin sonarr ...                   # Sonarr integration commands
-plex2jellyfin radarr ...                   # Radarr integration commands
-plex2jellyfin health                       # Verify *arr setup is compatible
-plex2jellyfin migrate                      # Reconcile DB paths against *arr current state
-plex2jellyfin orphans                      # Detect / remediate orphaned Jellyfin episodes
-plex2jellyfin parses                       # Query parse_decisions table
+plex2jellyfin sonarr ...                     # Sonarr integration commands
+plex2jellyfin radarr ...                     # Radarr integration commands
+plex2jellyfin health                         # Verify *arr setup is compatible
+plex2jellyfin orphans                        # Detect / remediate orphaned Jellyfin episodes
 ```
 
 ## Web Dashboard
@@ -196,8 +222,8 @@ api_key        = "..."
 webhook_secret = "..."
 
 [[jellyfin.path_mappings]]
-jellyfin = "/tv5"
-daemon   = "/mnt/STORAGE5/TVSHOWS"
+jellyfin = "/tv"
+daemon   = "/mnt/storage1/TVSHOWS"
 ```
 
 Without these, the sweeper labels parse-decision rows for organized files as FAIL.
@@ -221,46 +247,25 @@ dir_mode  = "0755"
 The installer registers three systemd units:
 
 ```bash
-systemctl status plex2jellyfin-daemon              # daemon
-systemctl status plex2jellyfin-web                # web UI on :5522
+systemctl status plex2jellyfin-daemon                    # daemon
+systemctl status plex2jellyfin-web                       # web UI on :5522
 systemctl --user status plex2jellyfin-postmortem.timer  # scheduled evidence collection
 journalctl -u plex2jellyfin-daemon -f
 ```
 
 `plex2jellyfin-web` depends on `plex2jellyfin-daemon` and reaches it via the Unix-domain control socket. No TCP between them.
 
-The postmortem timer runs every 4 days, collecting parse decisions, repair events, housekeeping state, and suspicious items into an evidence bundle at `~/.config/plex2jellyfin/reports/latest/`. It opens a terminal with an `agent-prompt.md` for periodic human or LLM review.
-
-## Install
-
-**One-liner:**
-
-```bash
-curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
-```
-
-**Manual:**
-
-```bash
-git clone https://github.com/Nomadcxx/plex2jellyfin.git
-cd plex2jellyfin
-go build -o installer ./cmd/installer
-sudo ./installer
-```
-
-The installer walks you through watch paths, library paths, *arr keys, AI, permissions, and systemd units. You can re-run it to update without losing your existing `config.toml`.
-
-Requires **Go 1.24+** (see `go.mod`).
+The postmortem timer runs every 4 days, collecting parse decisions, repair events, housekeeping state, and suspicious items into an evidence bundle at `~/.config/plex2jellyfin/reports/latest/`. Review it yourself or hand `agent-prompt.md` to an LLM.
 
 ## Building from source
 
 ```bash
-make                                       # build all binaries into bin/
-go build -o bin/plex2jellyfin-daemon ./cmd/plex2jellyfin-daemon
-go build -o bin/plex2jellyfin-web    ./cmd/plex2jellyfin-web
-go build -o bin/plex2jellyfin  ./cmd/plex2jellyfin
-cd web && npm run build                    # rebuild dashboard (embedded into plex2jellyfin-web)
-./test-all.sh                              # full test sweep
+make                                                    # build all binaries into bin/
+go build -o bin/plex2jellyfin         ./cmd/plex2jellyfin
+go build -o bin/plex2jellyfin-daemon  ./cmd/plex2jellyfin-daemon
+go build -o bin/plex2jellyfin-web     ./cmd/plex2jellyfin-web
+cd web && npm run build                                 # rebuild dashboard (embedded into plex2jellyfin-web)
+./test-all.sh                                           # full test sweep
 ```
 
 ## License
