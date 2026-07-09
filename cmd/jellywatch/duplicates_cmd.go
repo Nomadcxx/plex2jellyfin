@@ -52,11 +52,6 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 }
 
 func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
-	// Escalate to root if needed for file operations
-	if privilege.NeedsRoot() {
-		return privilege.Escalate("delete files and modify ownership")
-	}
-
 	plan, err := plans.LoadDuplicatePlans()
 	if err != nil {
 		return fmt.Errorf("failed to load plans: %w", err)
@@ -66,6 +61,18 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 		fmt.Println("No pending plans found.")
 		fmt.Println("Run 'jellywatch duplicates generate' first to create plans.")
 		return nil
+	}
+
+	if issues := duplicatePlanRootIssues(plan, cfg); len(issues) > 0 {
+		fmt.Println("❌ Duplicate deletion plan failed safety validation; refusing to execute.")
+		printConsolidateSafetyIssues(issues)
+		fmt.Println("\nRegenerate after planner fixes, or inspect the plan file.")
+		return nil
+	}
+
+	// Escalate only after validating the plan. Unsafe plans should not require sudo.
+	if privilege.NeedsRoot() {
+		return privilege.Escalate("delete files and modify ownership")
 	}
 
 	fmt.Printf("⚠️  WARNING: This will permanently DELETE %d files.\n", plan.Summary.FilesToDelete)
@@ -145,4 +152,21 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 	fmt.Printf("📦 Space reclaimed:      %s\n", formatBytes(reclaimedBytes))
 
 	return nil
+}
+
+func duplicatePlanRootIssues(plan *plans.DuplicatePlan, cfg *config.Config) []string {
+	roots := configuredLibraryRoots(cfg)
+	if len(roots) == 0 || plan == nil {
+		return nil
+	}
+	var issues []string
+	for _, group := range plan.Plans {
+		if issue := rootBoundPathIssue("duplicate delete path", group.Delete.Path, roots); issue != "" {
+			issues = append(issues, issue)
+		}
+		if issue := rootBoundPathIssue("duplicate keep path", group.Keep.Path, roots); issue != "" {
+			issues = append(issues, issue)
+		}
+	}
+	return issues
 }

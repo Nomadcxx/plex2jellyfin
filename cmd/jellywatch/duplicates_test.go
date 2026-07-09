@@ -86,6 +86,39 @@ func TestDeleteDuplicateDatabaseCleanupOnFailure(t *testing.T) {
 	}
 }
 
+func TestDuplicatePlanRootIssuesBlocksPathsOutsideConfiguredLibraries(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Libraries.Movies = []string{"/library-movies"}
+	cfg.Libraries.TV = nil
+	plan := &plans.DuplicatePlan{
+		Plans: []plans.DuplicateGroup{{
+			Keep:   plans.FileInfo{Path: "/library-movies/Movie (2020)/Movie (2020).mkv"},
+			Delete: plans.FileInfo{Path: "/tmp/evil.mkv"},
+		}},
+	}
+
+	issues := duplicatePlanRootIssues(plan, cfg)
+	if !containsIssue(issues, "outside configured library roots") {
+		t.Fatalf("expected root safety issue, got %#v", issues)
+	}
+}
+
+func TestDuplicatePlanRootIssuesAllowsConfiguredLibraries(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Libraries.Movies = []string{"/library-movies"}
+	cfg.Libraries.TV = nil
+	plan := &plans.DuplicatePlan{
+		Plans: []plans.DuplicateGroup{{
+			Keep:   plans.FileInfo{Path: "/library-movies/Movie (2020)/Movie (2020).mkv"},
+			Delete: plans.FileInfo{Path: "/library-movies/Movie (2020)/Movie (2020) duplicate.mkv"},
+		}},
+	}
+
+	if issues := duplicatePlanRootIssues(plan, cfg); len(issues) != 0 {
+		t.Fatalf("expected no root safety issues, got %#v", issues)
+	}
+}
+
 func TestDuplicateGroupLooksUnsafeTVMovie(t *testing.T) {
 	root := t.TempDir()
 	tvRoot := filepath.Join(root, "TVSHOWS")
@@ -127,6 +160,7 @@ func TestDuplicateGroupLooksUnsafeTVMovie(t *testing.T) {
 func TestRunDuplicatesExecuteReportsDeleteFailures(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("JELLYWATCH_TEST_NO_ESCALATE", "1")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	db, err := database.OpenPath(dbPath)
@@ -203,6 +237,7 @@ func TestRunDuplicatesExecuteReportsDeleteFailures(t *testing.T) {
 func TestRunDuplicatesExecuteArchivesPlanOnPartialFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("JELLYWATCH_TEST_NO_ESCALATE", "1")
 
 	db, err := database.OpenPath(filepath.Join(tmpDir, "test.db"))
 	if err != nil {

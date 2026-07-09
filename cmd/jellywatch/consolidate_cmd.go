@@ -26,7 +26,7 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 		return nil
 	}
 
-	if issues := consolidatePlanSafetyIssues(plan); len(issues) > 0 {
+	if issues := append(consolidatePlanSafetyIssues(plan), consolidatePlanRootIssues(plan, cfg)...); len(issues) > 0 {
 		fmt.Println("❌ Consolidation plan failed safety validation; refusing to execute.")
 		printConsolidateSafetyIssues(issues)
 		fmt.Println("\nRegenerate after planner fixes, or inspect with 'jellywatch consolidate dry-run'.")
@@ -145,6 +145,31 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 	fmt.Printf("📦 Data relocated:     %s\n", formatBytes(movedBytes))
 
 	return nil
+}
+
+func consolidatePlanRootIssues(plan *plans.ConsolidatePlan, cfg *config.Config) []string {
+	roots := configuredLibraryRoots(cfg)
+	if len(roots) == 0 || plan == nil {
+		return nil
+	}
+	var issues []string
+	for _, group := range plan.Plans {
+		if issue := rootBoundPathIssue("target location", group.TargetLocation, roots); issue != "" {
+			issues = append(issues, issue)
+		}
+		for _, op := range group.Operations {
+			if op.Action != "move" {
+				continue
+			}
+			if issue := rootBoundPathIssue("source path", op.SourcePath, roots); issue != "" {
+				issues = append(issues, issue)
+			}
+			if issue := rootBoundPathIssue("target path", op.TargetPath, roots); issue != "" {
+				issues = append(issues, issue)
+			}
+		}
+	}
+	return issues
 }
 
 func consolidatePlanSafetyIssues(plan *plans.ConsolidatePlan) []string {

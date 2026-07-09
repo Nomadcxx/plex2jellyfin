@@ -620,11 +620,6 @@ func modelsFromAuditSkipReasons(items []plans.AuditItem) map[string]struct{} {
 }
 
 func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan, cfg *config.Config) error {
-	// Escalate to root if needed for file operations
-	if privilege.NeedsRoot() {
-		return privilege.Escalate("rename/delete files and modify ownership")
-	}
-
 	fmt.Printf("\n🚀 Executing Audit Plan\n")
 
 	threshold := auditOpts.Threshold
@@ -640,6 +635,18 @@ func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan, cfg *config.C
 			fmt.Printf("Skipped %d unsafe stale action(s), such as sample/extra or obfuscated source files. Regenerate the audit plan.\n", blockedActions)
 		}
 		return nil
+	}
+
+	if issues := auditPlanRootIssues(plan, filteredIndices, cfg); len(issues) > 0 {
+		fmt.Println("❌ Audit plan failed safety validation; refusing to execute.")
+		printConsolidateSafetyIssues(issues)
+		fmt.Println("\nRegenerate the audit plan before retrying.")
+		return nil
+	}
+
+	// Escalate only after validating the plan. Unsafe plans should not require sudo.
+	if privilege.NeedsRoot() {
+		return privilege.Escalate("rename/delete files and modify ownership")
 	}
 
 	fmt.Printf("Found %d actions to execute (confidence >= %.2f)\n\n", len(filteredIndices), threshold)
@@ -715,6 +722,35 @@ func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan, cfg *config.C
 	}
 
 	return nil
+}
+
+func auditPlanRootIssues(plan *plans.AuditPlan, actionIndices []int, cfg *config.Config) []string {
+	roots := configuredLibraryRoots(cfg)
+	if len(roots) == 0 || plan == nil {
+		return nil
+	}
+	var issues []string
+	for _, idx := range actionIndices {
+		if idx < 0 || idx >= len(plan.Actions) {
+			issues = append(issues, fmt.Sprintf("action index out of range: %d", idx))
+			continue
+		}
+		action := plan.Actions[idx]
+		if action.ItemIndex < 0 || action.ItemIndex >= len(plan.Items) {
+			issues = append(issues, fmt.Sprintf("item index out of range: %d", action.ItemIndex))
+			continue
+		}
+		item := plan.Items[action.ItemIndex]
+		if issue := rootBoundPathIssue("audit source path", item.Path, roots); issue != "" {
+			issues = append(issues, issue)
+		}
+		if action.NewPath != "" {
+			if issue := rootBoundPathIssue("audit target path", action.NewPath, roots); issue != "" {
+				issues = append(issues, issue)
+			}
+		}
+	}
+	return issues
 }
 
 func executableAuditActionIndices(plan *plans.AuditPlan, threshold float64) []int {

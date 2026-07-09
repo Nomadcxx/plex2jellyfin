@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/consolidate"
 	"github.com/Nomadcxx/jellywatch/internal/plans"
 )
@@ -79,6 +80,49 @@ func TestConsolidatePlanSafetyIssuesAllowsCrossRootSeasonMove(t *testing.T) {
 
 	if issues := consolidatePlanSafetyIssues(plan); len(issues) != 0 {
 		t.Fatalf("expected safe plan, got %#v", issues)
+	}
+}
+
+func TestConsolidatePlanRootIssuesBlocksPathsOutsideConfiguredLibraries(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Libraries.TV = []string{"/library-tv"}
+	cfg.Libraries.Movies = []string{"/library-movies"}
+	plan := &plans.ConsolidatePlan{
+		Plans: []plans.ConsolidateGroup{{
+			Title:          "Example",
+			TargetLocation: "/tmp/outside",
+			Operations: []plans.MoveOperation{{
+				Action:     "move",
+				SourcePath: "/library-tv/Show (2020)/Season 01/Show S01E01.mkv",
+				TargetPath: "/tmp/outside/Show S01E01.mkv",
+			}},
+		}},
+	}
+
+	issues := consolidatePlanRootIssues(plan, cfg)
+	if !containsIssue(issues, "outside configured library roots") {
+		t.Fatalf("expected root safety issue, got %#v", issues)
+	}
+}
+
+func TestConsolidatePlanRootIssuesAllowsConfiguredLibraries(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Libraries.TV = []string{"/library-tv-a", "/library-tv-b"}
+	cfg.Libraries.Movies = nil
+	plan := &plans.ConsolidatePlan{
+		Plans: []plans.ConsolidateGroup{{
+			Title:          "Example",
+			TargetLocation: "/library-tv-b/Show (2020)",
+			Operations: []plans.MoveOperation{{
+				Action:     "move",
+				SourcePath: "/library-tv-a/Show (2020)/Season 01/Show S01E01.mkv",
+				TargetPath: "/library-tv-b/Show (2020)/Season 01/Show S01E01.mkv",
+			}},
+		}},
+	}
+
+	if issues := consolidatePlanRootIssues(plan, cfg); len(issues) != 0 {
+		t.Fatalf("expected no root safety issues, got %#v", issues)
 	}
 }
 

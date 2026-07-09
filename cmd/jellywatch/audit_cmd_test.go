@@ -321,6 +321,43 @@ func TestExecutableAuditActionIndicesSkipsUnsafeStalePlanActions(t *testing.T) {
 	}
 }
 
+func TestAuditPlanRootIssuesBlocksPathsOutsideConfiguredLibraries(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Libraries.Movies = []string{"/library-movies"}
+	cfg.Libraries.TV = nil
+	plan := &plans.AuditPlan{
+		Items: []plans.AuditItem{
+			{Path: "/library-movies/Movie (2020)/Movie (2020).mkv"},
+		},
+		Actions: []plans.AuditAction{
+			{ItemIndex: 0, Action: "rename", NewPath: "/tmp/evil.mkv", Confidence: 0.99},
+		},
+	}
+
+	issues := auditPlanRootIssues(plan, []int{0}, cfg)
+	if !containsIssue(issues, "outside configured library roots") {
+		t.Fatalf("expected root safety issue, got %#v", issues)
+	}
+}
+
+func TestAuditPlanRootIssuesAllowsConfiguredLibraries(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Libraries.Movies = []string{"/library-movies"}
+	cfg.Libraries.TV = nil
+	plan := &plans.AuditPlan{
+		Items: []plans.AuditItem{
+			{Path: "/library-movies/Movie (2020)/bad.mkv"},
+		},
+		Actions: []plans.AuditAction{
+			{ItemIndex: 0, Action: "rename", NewPath: "/library-movies/Movie (2020)/Movie (2020).mkv", Confidence: 0.99},
+		},
+	}
+
+	if issues := auditPlanRootIssues(plan, []int{0}, cfg); len(issues) != 0 {
+		t.Fatalf("expected no root safety issues, got %#v", issues)
+	}
+}
+
 func TestAuditPreAISkipReasonAllowsNonDeterministicSemanticFilename(t *testing.T) {
 	file := &database.MediaFile{
 		Path:            "/library/Movies/s7-hangover2.1080.mkv",
