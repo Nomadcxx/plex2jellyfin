@@ -16,6 +16,9 @@ dist/
 # Dependency directories
 vendor/
 
+# MkDocs build output
+site/
+
 # IDE
 .vscode/
 .idea/
@@ -31,6 +34,8 @@ Thumbs.db
 !config.example.toml
 !docker-compose.example.yml
 !.goreleaser.yaml
+!mkdocs.yml
+!.github/workflows/*.yml
 
 # Development documentation
 AGENTS.md
