@@ -12,6 +12,7 @@ const config = {
   basePath,
   images: { unoptimized: true },
   turbopack: { root: import.meta.dirname },
+  env: { NEXT_PUBLIC_BASE_PATH: basePath },
 };
 
 export default withMDX(config);
