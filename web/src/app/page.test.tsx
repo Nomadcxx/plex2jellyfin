@@ -19,6 +19,11 @@ vi.mock('@/components/layout/AppShell', () => ({
   AppShell: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
+vi.mock('@/hooks/useJellystat', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/hooks/useJellystat')>();
+  return { ...mod, useJellystatOverview: () => ({ data: { enabled: false } }) };
+});
+
 vi.mock('@/hooks/useDashboard', () => ({
   useDashboard: () => ({
     data: {

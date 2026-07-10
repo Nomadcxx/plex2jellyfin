@@ -12,6 +12,9 @@ export const handlers = [
       mediaManagers: [{ id: 'sonarr', name: 'Sonarr', type: 'sonarr', online: true }],
     })
   ),
+  http.get('/api/v1/jellystat/overview', () =>
+    HttpResponse.json({ enabled: false })
+  ),
   http.get('/api/v1/files/trace', () =>
     HttpResponse.json({
       items: [

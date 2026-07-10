@@ -20,6 +20,7 @@ var sections = map[string]sectionAccessor{
 	"sonarr":      {get: func(c *Config) any { return c.Sonarr }, set: setSonarr},
 	"radarr":      {get: func(c *Config) any { return c.Radarr }, set: setRadarr},
 	"jellyfin":    {get: func(c *Config) any { return c.Jellyfin }, set: setJellyfin},
+	"jellystat":   {get: func(c *Config) any { return c.Jellystat }, set: setJellystat},
 	"tmdb":        {get: func(c *Config) any { return c.TMDB }, set: setTMDB},
 	"ai":          {get: func(c *Config) any { return c.AI }, set: setAI},
 	"daemon":      {get: func(c *Config) any { return c.Daemon }, set: setDaemon},
@@ -110,6 +111,15 @@ func setJellyfin(c *Config, raw json.RawMessage) error {
 		return err
 	}
 	c.Jellyfin = v
+	return nil
+}
+
+func setJellystat(c *Config, raw json.RawMessage) error {
+	var v JellystatConfig
+	if err := decodeSection(raw, &v); err != nil {
+		return err
+	}
+	c.Jellystat = v
 	return nil
 }
 

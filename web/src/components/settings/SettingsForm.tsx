@@ -27,7 +27,7 @@ type Props = {
   title: string;
   description: string;
   fields: SettingsField[];
-  connectionTest?: 'sonarr' | 'radarr' | 'jellyfin';
+  connectionTest?: 'sonarr' | 'radarr' | 'jellyfin' | 'jellystat';
 };
 
 export function SettingsForm({ section, title, description, fields, connectionTest }: Props) {

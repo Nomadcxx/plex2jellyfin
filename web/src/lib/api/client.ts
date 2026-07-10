@@ -74,6 +74,7 @@ export type SettingsSection =
   | 'sonarr'
   | 'radarr'
   | 'jellyfin'
+  | 'jellystat'
   | 'tmdb'
   | 'ai'
   | 'options'
@@ -138,7 +139,7 @@ export async function preflightPath(path: string, kind: 'watch' | 'library') {
   return api.post<PreflightResult>('/paths/preflight', { path, kind });
 }
 
-export async function testSettingsConnection(service: 'sonarr' | 'radarr' | 'jellyfin', payload: Record<string, unknown>) {
+export async function testSettingsConnection(service: 'sonarr' | 'radarr' | 'jellyfin' | 'jellystat', payload: Record<string, unknown>) {
   return api.post<ConnectionTestResult>(`/settings/${service}/test`, payload);
 }
 

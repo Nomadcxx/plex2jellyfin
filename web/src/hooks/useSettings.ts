@@ -167,7 +167,7 @@ export function useRemoveSettingsPath(collection: 'paths' | 'libraries', kind: P
   });
 }
 
-export function useTestSettingsConnection(service: 'sonarr' | 'radarr' | 'jellyfin') {
+export function useTestSettingsConnection(service: 'sonarr' | 'radarr' | 'jellyfin' | 'jellystat') {
   return useMutation({
     mutationFn: (payload: Record<string, unknown>) => testSettingsConnection(service, payload),
   });

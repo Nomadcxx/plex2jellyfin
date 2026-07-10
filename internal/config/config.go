@@ -33,6 +33,7 @@ type Config struct {
 	Sonarr           SonarrConfig           `mapstructure:"sonarr"`
 	Radarr           RadarrConfig           `mapstructure:"radarr"`
 	Jellyfin         JellyfinConfig         `mapstructure:"jellyfin"`
+	Jellystat        JellystatConfig        `mapstructure:"jellystat"`
 	TMDB             TMDBConfig             `mapstructure:"tmdb"`
 	Logging          LoggingConfig          `mapstructure:"logging"`
 	Permissions      PermissionsConfig      `mapstructure:"permissions"`
@@ -240,6 +241,15 @@ type TMDBConfig struct {
 }
 
 // JellyfinConfig contains Jellyfin integration settings.
+// JellystatConfig connects to a Jellystat instance
+// (https://github.com/CyferShepard/Jellystat) for watch statistics. Purely
+// additive: nothing in the pipeline depends on it.
+type JellystatConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	URL     string `mapstructure:"url"`
+	APIKey  string `mapstructure:"api_key" secret:"true"`
+}
+
 type JellyfinConfig struct {
 	Enabled            bool   `mapstructure:"enabled"`
 	URL                string `mapstructure:"url"`
@@ -750,6 +760,12 @@ allowed_origins = %s
 			perm += fmt.Sprintf("dir_mode = \"%s\"\n", c.Permissions.DirMode)
 		}
 		base += perm
+	}
+
+	// Append Jellystat if configured.
+	if c.Jellystat.Enabled || c.Jellystat.URL != "" {
+		base += fmt.Sprintf("\n# ============================================================================\n# JELLYSTAT INTEGRATION\n# Optional: watch statistics from a Jellystat instance\n# ============================================================================\n[jellystat]\nenabled = %v\nurl = \"%s\"\napi_key = \"%s\"\n",
+			c.Jellystat.Enabled, c.Jellystat.URL, c.Jellystat.APIKey)
 	}
 
 	// Top-level keys must be emitted before the first [table] header — a bare

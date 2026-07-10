@@ -8,6 +8,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellystat"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
@@ -95,4 +96,21 @@ func (h *TestHandlers) Jellyfin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, testResult{OK: true, Version: info.Version})
+}
+
+func (h *TestHandlers) Jellystat(w http.ResponseWriter, r *http.Request) {
+	p, err := decodeTestPayload(r)
+	if err != nil {
+		writeJSON(w, http.StatusOK, testResult{OK: false, Error: err.Error()})
+		return
+	}
+	if h.Cfg != nil {
+		p.APIKey = h.resolveSecret(p.APIKey, h.Cfg.Jellystat.APIKey)
+	}
+	cli := jellystat.NewClient(jellystat.Config{URL: p.URL, APIKey: p.APIKey, Timeout: 5 * time.Second})
+	if err := cli.Test(); err != nil {
+		writeJSON(w, http.StatusOK, testResult{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, testResult{OK: true})
 }

@@ -8,7 +8,7 @@ type Props = {
   title: string;
   description: string;
   fields: SettingsField[];
-  connectionTest?: 'sonarr' | 'radarr' | 'jellyfin';
+  connectionTest?: 'sonarr' | 'radarr' | 'jellyfin' | 'jellystat';
 };
 
 export function SettingsSectionPage(props: Props) {

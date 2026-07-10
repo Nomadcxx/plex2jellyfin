@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bot, Database, FolderOpen, HardDrive, ListChecks, LockKeyhole, Radio, Search, Server, Settings, ShieldCheck, SlidersHorizontal, Wrench } from 'lucide-react';
+import { BarChart3, Bot, Database, FolderOpen, HardDrive, ListChecks, LockKeyhole, Radio, Search, Server, Settings, ShieldCheck, SlidersHorizontal, Wrench } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { useDaemon } from '@/hooks/useDaemon';
 
@@ -13,6 +13,7 @@ const nav = [
   { href: '/settings/sonarr', label: 'Sonarr', icon: Radio },
   { href: '/settings/radarr', label: 'Radarr', icon: Radio },
   { href: '/settings/jellyfin', label: 'Jellyfin', icon: ListChecks },
+  { href: '/settings/jellystat', label: 'Jellystat', icon: BarChart3 },
   { href: '/settings/tmdb', label: 'TMDB', icon: Search },
   { href: '/settings/ai', label: 'AI', icon: Bot },
   { href: '/settings/options', label: 'Options', icon: SlidersHorizontal },

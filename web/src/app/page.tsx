@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { AppShell } from '@/components/layout/AppShell';
 import { useDashboard, useJellyfinIdentification } from '@/hooks/useDashboard';
 import { useDuplicates } from '@/hooks/useDashboard';
+import { useJellystatOverview, mostViewedName, mostViewedPlays, JellystatRow } from '@/hooks/useJellystat';
 import { formatBytes } from '@/lib/utils';
-import { Database, HardDrive, Copy, FolderTree, Film, Tv, ListVideo, AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-react';
+import { Database, HardDrive, Copy, FolderTree, Film, Tv, ListVideo, AlertTriangle, CheckCircle2, HelpCircle, BarChart3 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function DashboardPage() {
@@ -134,6 +135,8 @@ export default function DashboardPage() {
           )}
         </div>
 
+        <JellystatSection />
+
         <div className="mt-8">
           <h2 className="text-xl font-semibold mb-4">Media Managers</h2>
           <div className="space-y-3">
@@ -152,6 +155,61 @@ export default function DashboardPage() {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+function MostViewedList({ title, rows }: { title: string; rows?: JellystatRow[] }) {
+  return (
+    <div className="bg-zinc-900 p-6 rounded-lg border border-zinc-800">
+      <p className="text-sm text-zinc-400 mb-3">{title}</p>
+      {rows && rows.length > 0 ? (
+        <ol className="space-y-2">
+          {rows.slice(0, 5).map((row, i) => {
+            const plays = mostViewedPlays(row);
+            return (
+              <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="text-zinc-200 truncate">
+                  <span className="text-zinc-600 mr-2">{i + 1}.</span>
+                  {mostViewedName(row)}
+                </span>
+                {plays != null && (
+                  <span className="text-zinc-500 whitespace-nowrap">{plays} plays</span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <p className="text-sm text-zinc-600">No plays recorded in the last 30 days.</p>
+      )}
+    </div>
+  );
+}
+
+// Watch statistics from Jellystat. Renders nothing unless the integration
+// is enabled in Settings → Jellystat.
+function JellystatSection() {
+  const { data } = useJellystatOverview();
+  if (!data?.enabled) return null;
+
+  return (
+    <div className="mt-8">
+      <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+        <BarChart3 className="h-5 w-5 text-zinc-500" />
+        Watch Statistics
+        <span className="text-xs font-normal text-zinc-600">via Jellystat, last 30 days</span>
+      </h2>
+      {data.error && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>Jellystat error: {data.error}</AlertDescription>
+        </Alert>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MostViewedList title="Most watched movies" rows={data.most_viewed_movies} />
+        <MostViewedList title="Most watched series" rows={data.most_viewed_series} />
+      </div>
+    </div>
   );
 }
 

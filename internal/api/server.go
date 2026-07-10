@@ -150,6 +150,7 @@ func (s *Server) apiRouter() *chi.Mux {
 	r.Post("/settings/sonarr/test", testH.Sonarr)
 	r.Post("/settings/radarr/test", testH.Radarr)
 	r.Post("/settings/jellyfin/test", testH.Jellyfin)
+	r.Post("/settings/jellystat/test", testH.Jellystat)
 	r.Post("/ai/test-connection", s.TestAIConnection)
 	r.Post("/ai/test-prompt", s.TestAIPrompt)
 	r.Get("/ai/models", s.ListAIModels)
@@ -258,6 +259,11 @@ func (s *Server) apiRouter() *chi.Mux {
 
 	// Per-file pipeline traces (spec'd in openapi.yaml, mounted manually).
 	r.Get("/files/trace", s.GetFileTrace)
+
+	// Jellystat watch-statistics passthrough (additive; {"enabled":false}
+	// when not configured).
+	r.Get("/jellystat/overview", s.GetJellystatOverview)
+	r.Get("/jellystat/item-stats", s.GetJellystatItemStats)
 
 	// Mount generated API routes
 	api.HandlerFromMux(s, r)
