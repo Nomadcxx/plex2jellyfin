@@ -58,12 +58,10 @@ pre,
 #nd-docs-layout.docs-shell {
   --fd-header-height: 56px;
   grid-template:
-    'header header header header header' var(--fd-header-height)
-    'sidebar sidebar toc-popover toc toc'
-    'sidebar sidebar main toc toc' 1fr /
-    minmax(min-content, 1fr) var(--fd-sidebar-col)
-    minmax(0, calc(var(--fd-layout-width, 97rem) - var(--fd-sidebar-width) - var(--fd-toc-width)))
-    var(--fd-toc-width) minmax(min-content, 1fr) !important;
+    'header header header' var(--fd-header-height)
+    'sidebar toc-popover toc'
+    'sidebar main toc' 1fr /
+    var(--fd-sidebar-col) minmax(0, 1fr) var(--fd-toc-width) !important;
 }
 
 .operator-header {
@@ -288,40 +286,54 @@ pre,
   line-height: 1.55;
 }
 
-.quick-start {
+.install-options {
   width: min(100%, 760px);
   margin-top: 36px;
-  border: 1px solid #2a3236;
-  border-radius: 5px;
-  background: #141819;
-  overflow: hidden;
+  border-block: 1px solid #2a3236;
 }
 
-.quick-start-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
+.install-options > a {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.36fr) minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 18px;
+  min-height: 62px;
   border-bottom: 1px solid #2a3236;
-  padding: 9px 13px;
-  color: #9aa4a6;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 10px;
+  padding: 10px 12px;
+  color: #f2f4f3;
+  text-decoration: none;
 }
 
-.quick-start-label span:first-child {
+.install-options > a:last-child {
+  border-bottom: 0;
+}
+
+.install-options > a:hover,
+.install-options > a:focus-visible {
+  background: #141819;
   color: #6fcfe0;
 }
 
-.quick-start pre {
-  margin: 0;
-  overflow-x: auto;
-  border: 0;
-  border-radius: 0;
-  padding: 16px;
-  background: transparent;
-  color: #f2f4f3;
+.install-options > a:focus-visible {
+  outline: 2px solid #6fcfe0;
+  outline-offset: 2px;
+}
+
+.install-options strong {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.install-options span {
+  color: #9aa4a6;
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.45;
+}
+
+.install-options svg {
+  width: 16px;
+  height: 16px;
 }
 
 .migration-flow,
@@ -474,16 +486,24 @@ pre,
     font-size: 17px;
   }
 
-  .quick-start {
+  .install-options {
     margin-top: 28px;
   }
 
-  .quick-start-label span:last-child {
-    display: none;
+  .install-options > a {
+    grid-template-columns: 1fr 18px;
+    gap: 4px 12px;
+    padding-block: 12px;
   }
 
-  .quick-start pre {
-    font-size: 12px;
+  .install-options strong,
+  .install-options span {
+    grid-column: 1;
+  }
+
+  .install-options svg {
+    grid-column: 2;
+    grid-row: 1 / 3;
   }
 
   .section-heading,

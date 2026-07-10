@@ -18,6 +18,29 @@ const links = [
   ['Troubleshooting', 'Permissions, mappings, parsing, and services', '/docs/troubleshooting'],
 ] as const;
 
+const installOptions = [
+  [
+    'Guided installer',
+    'Interactive Linux setup for paths, permissions, services, integrations, and the initial scan.',
+    '/docs/getting-started/installation#quick-install',
+  ],
+  [
+    'Docker',
+    'Run the daemon and Web UI together with bind-mounted config, watch, and library paths.',
+    '/docs/getting-started/docker',
+  ],
+  [
+    'Deb / RPM',
+    'Install release-built packages, then configure and enable the systemd services.',
+    '/docs/getting-started/packages',
+  ],
+  [
+    'Source build',
+    'Build the installer locally when a release package is not suitable for the host.',
+    '/docs/getting-started/installation#build-from-source',
+  ],
+] as const;
+
 export function DocsHome() {
   return (
     <div className="docs-home">
@@ -33,16 +56,15 @@ export function DocsHome() {
         <p id="docs-home-purpose">
           Migrate a Plex-organized media library to Jellyfin, then keep every new arrival clean.
         </p>
-        <div className="quick-start" aria-label="Quick start">
-          <div className="quick-start-label">
-            <span>QUICK START</span>
-            <span>LINUX / AMD64</span>
-          </div>
-          <pre>
-            <code>{`curl -fsSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sh
-plex2jellyfin scan /path/to/library`}</code>
-          </pre>
-        </div>
+        <nav className="install-options" aria-label="Install options">
+          {installOptions.map(([title, description, href]) => (
+            <Link key={title} href={href} data-install-option={title}>
+              <strong>{title}</strong>
+              <span>{description}</span>
+              <ArrowRight aria-hidden="true" />
+            </Link>
+          ))}
+        </nav>
       </section>
 
       <section className="migration-flow" aria-labelledby="migration-flow-title">

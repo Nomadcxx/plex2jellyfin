@@ -42,7 +42,14 @@ assert.ok(
   'search client is missing the deployment base path',
 );
 assert.match(docsHtml, /brand\/plex2jellyfin-wordmark\.png/, 'docs home is missing the full wordmark');
-assert.match(docsHtml, /curl -fsSL/, 'docs home is missing the quick-start install command');
+for (const option of ['Guided installer', 'Docker', 'Deb / RPM', 'Source build']) {
+  assert.ok(docsHtml.includes(`data-install-option="${option}"`), `docs home is missing ${option}`);
+}
+assert.doesNotMatch(
+  docsHtml,
+  /plex2jellyfin scan \/path\/to\/library/,
+  'docs home contains a scan command before configuration',
+);
 for (const stage of ['scan', 'duplicates', 'consolidate', 'audit', 'daemon']) {
   assert.match(docsHtml, new RegExp(`data-migration-stage="${stage}"`), `docs home is missing ${stage}`);
 }
