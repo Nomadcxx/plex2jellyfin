@@ -1,4 +1,10 @@
 {
   "title": "plex2jellyfin",
-  "pages": ["index", "getting-started", "reference", "troubleshooting"]
+  "pages": [
+    "index",
+    "getting-started",
+    "guides",
+    "reference",
+    "troubleshooting"
+  ]
 }

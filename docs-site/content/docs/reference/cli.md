@@ -20,6 +20,21 @@ The core one-shot migration workflow. See the [Migration Guide](/docs/getting-st
 | `plex2jellyfin consolidate dry-run` | Preview consolidation moves. |
 | `plex2jellyfin consolidate execute` | Merge scattered series into a single library path. |
 | `plex2jellyfin config` | Manage configuration (see [below](#config)). |
+| `plex2jellyfin trace [fragment]` | Show what the daemon did to a file, step by step. |
+
+### trace
+
+Human-readable per-file pipeline journeys, newest first: when a file was
+detected, how it was parsed (and what release noise was stripped), where it
+was moved, and whether Jellyfin confirmed it. With no argument it shows the
+most recent files; pass a filename fragment to filter, `--limit N` for more.
+
+```bash
+plex2jellyfin trace                 # recent activity
+plex2jellyfin trace "Show Name"     # one show's files
+```
+
+The web UI's **Trace** page renders the same data.
 
 ### scan flags
 

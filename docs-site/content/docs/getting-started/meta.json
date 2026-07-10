@@ -1,4 +1,10 @@
 {
   "title": "Getting Started",
-  "pages": ["installation", "docker", "migration-guide"]
+  "pages": [
+    "installation",
+    "packages",
+    "docker",
+    "jellyfin-plugin",
+    "migration-guide"
+  ]
 }
