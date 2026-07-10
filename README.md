@@ -96,6 +96,24 @@ go build -o installer ./cmd/installer
 sudo ./installer
 ```
 
+### Jellyfin Plugin — install this too
+
+The companion plugin ([`plugin/`](plugin/)) is **not optional** if you want
+the feedback loop: it forwards item-added/updated/removed and playback
+events from Jellyfin back to plex2jellyfin, which is how organized files
+get confirmed against real Jellyfin items (and how orphan detection
+works). Without it, plex2jellyfin can move files but never sees whether
+Jellyfin actually recognized them.
+
+```bash
+./plugin/build.sh
+./plugin/install.sh /var/lib/jellyfin/plugins/Plex2Jellyfin   # path varies by install
+sudo systemctl restart jellyfin
+```
+
+Then set `webhook_secret` under `[jellyfin]` in your config so the events
+authenticate.
+
 ## What It Does
 
 Plex papers over messy release names with fuzzy matching; Jellyfin takes your folders at face value. Point it at a Plex-era library and shows split into duplicate entries, seasons land under "Season Unknown", and movies show up titled `1080p.BluRay.x265`.
@@ -152,7 +170,8 @@ plex2jellyfin orphans                        # Detect / remediate orphaned Jelly
 
 ```mermaid
 flowchart TB
-    A[Sonarr / Radarr] -->|downloads| B[Download Client]
+    A[Sonarr / Radarr] -->|downloads| B["Download Client
+    (SABnzbd, NZBGet, qBittorrent, ...)"]
     B -->|drops file| C[Watch Directory]
     C -->|inotify| D[plex2jellyfin-daemon]
     D -->|rename + move| E[Jellyfin Library]
@@ -163,6 +182,8 @@ flowchart TB
     W <-->|browser| U[You]
     D -->|periodic| H[Housekeeping queue]
     H -->|consolidate / dedupe / fix-naming| E
+    J[Plex2Jellyfin plugin in Jellyfin] -->|item + playback webhooks| W
+    E -.->|scanned by| J
 ```
 
 More detail in [`docs/architecture.md`](docs/architecture.md).
