@@ -104,6 +104,10 @@ web/out/
 web/dist/
 web/next-env.d.ts
 web/tsconfig.tsbuildinfo
+docs-site/node_modules/
+docs-site/.next/
+docs-site/.source/
+docs-site/out/
 
 # Build output (binaries produced by `make` or `go build -o build/`)
 build/

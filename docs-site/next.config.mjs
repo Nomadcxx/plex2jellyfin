@@ -1,0 +1,17 @@
+import { createMDX } from 'fumadocs-mdx/next';
+
+const withMDX = createMDX();
+
+const basePath = process.env.GITHUB_ACTIONS === 'true' ? '/plex2jellyfin' : '';
+
+/** @type {import('next').NextConfig} */
+const config = {
+  output: 'export',
+  reactStrictMode: true,
+  trailingSlash: true,
+  basePath,
+  images: { unoptimized: true },
+  turbopack: { root: import.meta.dirname },
+};
+
+export default withMDX(config);
