@@ -8,7 +8,8 @@ It provides:
 
 ## Compatibility
 
-- Jellyfin: `10.10.x`
+- Jellyfin: `10.11.x` (targetAbi 10.11.0.0; 10.11 moved to .NET 9, so the
+  plugin targets `net9.0` — it will not load on 10.10 or older)
 - .NET SDK: `9.0+`
 
 ## Build
