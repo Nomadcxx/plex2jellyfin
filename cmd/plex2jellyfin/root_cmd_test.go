@@ -32,7 +32,7 @@ func TestNewRootCmdShowsCoreManualCommandsOnly(t *testing.T) {
 	names := subcommandNames(cmd)
 	visible := visibleSubcommandNames(names, hiddenSubcommandMap(cmd))
 
-	want := []string{"config", "consolidate", "duplicates", "scan", "status", "version"}
+	want := []string{"config", "consolidate", "duplicates", "scan", "status", "trace", "version"}
 	if !reflect.DeepEqual(visible, want) {
 		t.Fatalf("visible root commands mismatch:\n got %v\nwant %v", visible, want)
 	}
