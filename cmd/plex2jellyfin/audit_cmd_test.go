@@ -108,6 +108,17 @@ func TestNewAuditCmd_LimitFlagDefault(t *testing.T) {
 	}
 }
 
+func TestGetAuditPlansPathHonorsXDGConfigHome(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("SUDO_USER", "")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	want := filepath.Join(xdg, "plex2jellyfin", "plans", "audit.json")
+	if got := getAuditPlansPath(); got != want {
+		t.Fatalf("getAuditPlansPath() = %q, want %q", got, want)
+	}
+}
+
 func TestRenderAuditCard_StableVisibleWidth(t *testing.T) {
 	year := 2024
 	item := plans.AuditItem{

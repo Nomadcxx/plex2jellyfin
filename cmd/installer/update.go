@@ -12,7 +12,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Calculate header height: 4 lines for ASCII art + 2 for padding
+		// Calculate header height: 6 lines for ASCII art.
 		headerHeight := 6
 		if m.beams == nil {
 			m.beams = NewBeamsTextEffect(msg.Width, headerHeight, asciiHeader)

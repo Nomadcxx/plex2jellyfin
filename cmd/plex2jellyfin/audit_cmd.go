@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	"github.com/Nomadcxx/plex2jellyfin/internal/plans"
 	"github.com/Nomadcxx/plex2jellyfin/internal/privilege"
 )
@@ -809,11 +809,11 @@ func calculateAvgConfidence(files []*database.MediaFile) float64 {
 }
 
 func getAuditPlansPath() string {
-	homeDir, err := os.UserHomeDir()
+	plansDir, err := paths.PlansDir()
 	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("%s/.config/plex2jellyfin/plans/audit.json", homeDir)
+	return filepath.Join(plansDir, "audit.json")
 }
 
 // newAuditCmd returns the audit command

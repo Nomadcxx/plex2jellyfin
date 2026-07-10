@@ -16,12 +16,12 @@ fi
 
 if ! command -v go &> /dev/null; then
     echo "Error: Go is not installed"
-    echo "Please install Go 1.21 or later from https://golang.org/dl/"
+    echo "Please install Go 1.24 or later from https://go.dev/dl/"
     exit 1
 fi
 
 GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-REQUIRED_VERSION="1.21"
+REQUIRED_VERSION="1.24"
 
 if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$GO_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
     echo "Error: Go version $GO_VERSION is too old"
