@@ -435,6 +435,56 @@ paths:
         '200':
           description: Logged out
 
+  /auth/setup:
+    post:
+      operationId: setupAuth
+      summary: First-run setup - create the admin password
+      description: Only permitted while no password is configured. Creates the password and logs the caller in.
+      tags: [Auth]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: Password created, session issued
+        '400':
+          description: Password too short
+        '409':
+          description: Auth already configured
+
+  /auth/password:
+    post:
+      operationId: changePassword
+      summary: Change the admin password
+      description: Requires an authenticated session. Invalidates all other sessions.
+      tags: [Auth]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: Password changed, fresh session issued
+        '400':
+          description: New password too short
+        '401':
+          description: Current password incorrect
+
   # ============ JELLYFIN VERIFICATION ============
   /jellyfin/verify:
     get:

@@ -249,6 +249,13 @@ func (s *Server) apiRouter() *chi.Mux {
 		})
 	}
 
+	// Auth lifecycle endpoints are spec'd in openapi.yaml but mounted
+	// manually (like the settings routes) because the generated router
+	// predates them. /auth/setup is public via authMiddleware's allowlist;
+	// /auth/password requires a valid session.
+	r.Post("/auth/setup", s.SetupAuth)
+	r.Post("/auth/password", s.ChangePassword)
+
 	// Mount generated API routes
 	api.HandlerFromMux(s, r)
 
@@ -280,6 +287,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			"/auth/login",
 			"/auth/logout",
 			"/auth/status",
+			"/auth/setup",
 			"/health",
 			"/webhooks/jellyfin",
 		}

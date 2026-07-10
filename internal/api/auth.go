@@ -366,3 +366,176 @@ func parseJSONBody(r *http.Request, v interface{}) error {
 	defer r.Body.Close()
 	return json.NewDecoder(r.Body).Decode(v)
 }
+
+const minPasswordLength = 8
+
+// DeleteAll removes every session (used when the password changes).
+func (s *SessionStore) DeleteAll() {
+	s.mu.Lock()
+	s.sessions = make(map[string]*Session)
+	s.mu.Unlock()
+}
+
+// persistPasswordHash writes the new hash to config.toml and updates the
+// server's in-memory config. It loads the on-disk config first so a password
+// change doesn't clobber settings saved by another handler since boot.
+func (s *Server) persistPasswordHash(hash string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = s.cfg
+	}
+	cfg.PasswordHash = hash
+	cfg.Password = ""
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	s.cfg.PasswordHash = hash
+	s.cfg.Password = ""
+	return nil
+}
+
+// issueSession creates a session and sets the cookie on the response.
+func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) error {
+	s.ensureSessionStore()
+	token, err := s.sessions.Create()
+	if err != nil {
+		return err
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   s.shouldSetSecureCookie(r),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(SessionDuration.Seconds()),
+	})
+	return nil
+}
+
+// SetupAuth implements api.ServerInterface — first-run password creation.
+// Only permitted while no password is configured; logs the caller in.
+func (s *Server) SetupAuth(w http.ResponseWriter, r *http.Request) {
+	var req api.SetupAuthJSONRequestBody
+	if err := parseJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	if s.AuthEnabled() {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Authentication is already configured",
+		})
+		return
+	}
+
+	if len(req.Password) < minPasswordLength {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Password must be at least 8 characters",
+		})
+		return
+	}
+
+	hash, err := config.HashPassword(req.Password)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Could not hash password",
+		})
+		return
+	}
+
+	if err := s.persistPasswordHash(hash); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Could not save configuration",
+		})
+		return
+	}
+
+	if err := s.issueSession(w, r); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Password saved but session could not be created; log in manually",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+	})
+}
+
+// ChangePassword implements api.ServerInterface. The auth middleware already
+// requires a valid session; the current password is re-verified as
+// confirmation. All existing sessions are invalidated and a fresh one issued.
+func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req api.ChangePasswordJSONRequestBody
+	if err := parseJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	if !s.AuthEnabled() {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Authentication is not configured; use setup",
+		})
+		return
+	}
+
+	limiter := s.ensureLoginLimiter()
+	remoteKey := loginRateLimitKey(r)
+	if !limiter.allow(remoteKey, time.Now()) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "Too many failed attempts",
+		})
+		return
+	}
+
+	if !s.verifyLoginPassword(req.CurrentPassword) {
+		limiter.recordFailure(remoteKey, time.Now())
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error": "Current password is incorrect",
+		})
+		return
+	}
+	limiter.recordSuccess(remoteKey)
+
+	if len(req.NewPassword) < minPasswordLength {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Password must be at least 8 characters",
+		})
+		return
+	}
+
+	hash, err := config.HashPassword(req.NewPassword)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Could not hash password",
+		})
+		return
+	}
+
+	if err := s.persistPasswordHash(hash); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Could not save configuration",
+		})
+		return
+	}
+
+	if s.sessions != nil {
+		s.sessions.DeleteAll()
+	}
+
+	if err := s.issueSession(w, r); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Password changed but session could not be created; log in manually",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+	})
+}

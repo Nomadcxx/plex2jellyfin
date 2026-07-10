@@ -94,3 +94,31 @@ func looksLikeOneWriter(s string) bool {
 	}
 	return false
 }
+
+func TestPasswordHashSurvivesSaveLoadRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SUDO_USER", "")
+
+	hash, err := HashPassword("round-trip-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := DefaultConfig()
+	cfg.PasswordHash = hash
+	cfg.SecureCookies = true
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if loaded.PasswordHash != hash {
+		t.Errorf("PasswordHash lost in round trip: got %q", loaded.PasswordHash)
+	}
+	if !loaded.SecureCookies {
+		t.Error("SecureCookies lost in round trip")
+	}
+}

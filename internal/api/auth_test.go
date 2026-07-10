@@ -410,3 +410,147 @@ func TestAuthMiddleware(t *testing.T) {
 		})
 	}
 }
+
+func newAuthLifecycleServer(t *testing.T, cfg *config.Config) *Server {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SUDO_USER", "")
+	return &Server{cfg: cfg}
+}
+
+func postJSON(t *testing.T, h http.Handler, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	return w
+}
+
+func sessionCookie(t *testing.T, w *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	for _, c := range w.Result().Cookies() {
+		if c.Name == SessionCookieName && c.Value != "" {
+			return c
+		}
+	}
+	t.Fatal("expected session cookie in response")
+	return nil
+}
+
+func TestSetupAuthFirstRun(t *testing.T) {
+	server := newAuthLifecycleServer(t, &config.Config{})
+	router := server.apiRouter()
+
+	w := postJSON(t, router, "/auth/setup", `{"password":"correct horse"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("setup status = %d body %s", w.Code, w.Body.String())
+	}
+	sessionCookie(t, w)
+
+	if !server.AuthEnabled() {
+		t.Error("AuthEnabled() = false after setup")
+	}
+	if server.cfg.PasswordHash == "" {
+		t.Error("PasswordHash not set after setup")
+	}
+	if !server.verifyLoginPassword("correct horse") {
+		t.Error("configured password does not verify")
+	}
+}
+
+func TestSetupAuthRejectsWhenConfigured(t *testing.T) {
+	hash, err := config.HashPassword("existing-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := newAuthLifecycleServer(t, &config.Config{PasswordHash: hash})
+
+	w := postJSON(t, server.apiRouter(), "/auth/setup", `{"password":"new password"}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("setup on configured server status = %d, want 409", w.Code)
+	}
+}
+
+func TestSetupAuthRejectsShortPassword(t *testing.T) {
+	server := newAuthLifecycleServer(t, &config.Config{})
+
+	w := postJSON(t, server.apiRouter(), "/auth/setup", `{"password":"short"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("short password status = %d, want 400", w.Code)
+	}
+	if server.AuthEnabled() {
+		t.Error("AuthEnabled() = true after rejected setup")
+	}
+}
+
+func TestChangePasswordLifecycle(t *testing.T) {
+	server := newAuthLifecycleServer(t, &config.Config{})
+	router := server.apiRouter()
+
+	// First-run setup, keep the session cookie.
+	w := postJSON(t, router, "/auth/setup", `{"password":"original-pass"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("setup status = %d", w.Code)
+	}
+	oldCookie := sessionCookie(t, w)
+
+	// Wrong current password is rejected.
+	w = postJSON(t, router, "/auth/password",
+		`{"current_password":"wrong","new_password":"replacement-pass"}`, oldCookie)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong current password status = %d, want 401", w.Code)
+	}
+
+	// Short new password is rejected.
+	w = postJSON(t, router, "/auth/password",
+		`{"current_password":"original-pass","new_password":"tiny"}`, oldCookie)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("short new password status = %d, want 400", w.Code)
+	}
+
+	// Valid change succeeds and rotates the session.
+	w = postJSON(t, router, "/auth/password",
+		`{"current_password":"original-pass","new_password":"replacement-pass"}`, oldCookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("change password status = %d body %s", w.Code, w.Body.String())
+	}
+	newCookie := sessionCookie(t, w)
+
+	if !server.verifyLoginPassword("replacement-pass") {
+		t.Error("new password does not verify")
+	}
+	if server.verifyLoginPassword("original-pass") {
+		t.Error("old password still verifies")
+	}
+
+	// Old session was invalidated; the fresh one works.
+	req := httptest.NewRequest(http.MethodPost, "/auth/password", strings.NewReader(
+		`{"current_password":"replacement-pass","new_password":"replacement-pass2"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(oldCookie)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("old session after change status = %d, want 401", rec.Code)
+	}
+
+	w = postJSON(t, router, "/auth/password",
+		`{"current_password":"replacement-pass","new_password":"replacement-pass2"}`, newCookie)
+	if w.Code != http.StatusOK {
+		t.Errorf("fresh session change status = %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestChangePasswordRequiresAuthConfigured(t *testing.T) {
+	server := newAuthLifecycleServer(t, &config.Config{})
+
+	w := postJSON(t, server.apiRouter(), "/auth/password",
+		`{"current_password":"","new_password":"whatever-pass"}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("change without setup status = %d, want 409", w.Code)
+	}
+}

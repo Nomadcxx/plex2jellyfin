@@ -42,3 +42,30 @@ export function useLogout() {
     },
   });
 }
+
+export function useSetupAuth() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (password: string) =>
+      api.post('/auth/setup', { password }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: authKeys.status });
+    },
+  });
+}
+
+export function useChangePassword() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params: { currentPassword: string; newPassword: string }) =>
+      api.post('/auth/password', {
+        current_password: params.currentPassword,
+        new_password: params.newPassword,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: authKeys.status });
+    },
+  });
+}

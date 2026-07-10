@@ -4,6 +4,8 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -22,6 +24,13 @@ const (
 	Series DuplicateGroupMediaType = "series"
 )
 
+// Defines values for JellyfinMismatchIssue.
+const (
+	Missing      JellyfinMismatchIssue = "missing"
+	Orphaned     JellyfinMismatchIssue = "orphaned"
+	Unidentified JellyfinMismatchIssue = "unidentified"
+)
+
 // Defines values for LLMProviderInfoType.
 const (
 	LLMProviderInfoTypeAnthropic LLMProviderInfoType = "anthropic"
@@ -34,6 +43,7 @@ const (
 // Defines values for MediaManagerInfoType.
 const (
 	MediaManagerInfoTypeCustom          MediaManagerInfoType = "custom"
+	MediaManagerInfoTypeJellyfin        MediaManagerInfoType = "jellyfin"
 	MediaManagerInfoTypeMediadownloader MediaManagerInfoType = "mediadownloader"
 	MediaManagerInfoTypeRadarr          MediaManagerInfoType = "radarr"
 	MediaManagerInfoTypeSonarr          MediaManagerInfoType = "sonarr"
@@ -45,6 +55,23 @@ const (
 	Failed    ScanStatusStatus = "failed"
 	Idle      ScanStatusStatus = "idle"
 	Scanning  ScanStatusStatus = "scanning"
+)
+
+// Defines values for RemoveSettingsLibraryParamsKind.
+const (
+	RemoveSettingsLibraryParamsKindMovies RemoveSettingsLibraryParamsKind = "movies"
+	RemoveSettingsLibraryParamsKindTv     RemoveSettingsLibraryParamsKind = "tv"
+)
+
+// Defines values for RemoveSettingsPathParamsKind.
+const (
+	RemoveSettingsPathParamsKindMovies RemoveSettingsPathParamsKind = "movies"
+	RemoveSettingsPathParamsKindTv     RemoveSettingsPathParamsKind = "tv"
+)
+
+// Defines values for GetSettingsSectionParamsReveal.
+const (
+	N1 GetSettingsSectionParamsReveal = 1
 )
 
 // AISettings defines model for AISettings.
@@ -80,6 +107,17 @@ type ConsolidationResult struct {
 	Success    *bool     `json:"success,omitempty"`
 }
 
+// DaemonStatus defines model for DaemonStatus.
+type DaemonStatus struct {
+	Pid *int `json:"pid,omitempty"`
+
+	// State One of running, stopped, starting, stopping, degraded
+	State                *string                `json:"state,omitempty"`
+	UptimeSeconds        *int                   `json:"uptime_seconds,omitempty"`
+	Version              *string                `json:"version,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
 // DashboardData defines model for DashboardData.
 type DashboardData struct {
 	LibraryStats   *LibraryStats          `json:"libraryStats,omitempty"`
@@ -109,6 +147,46 @@ type DuplicateGroup struct {
 
 // DuplicateGroupMediaType defines model for DuplicateGroup.MediaType.
 type DuplicateGroupMediaType string
+
+// JellyfinMismatch defines model for JellyfinMismatch.
+type JellyfinMismatch struct {
+	Issue    *JellyfinMismatchIssue `json:"issue,omitempty"`
+	ItemId   *string                `json:"itemId,omitempty"`
+	ItemName *string                `json:"itemName,omitempty"`
+	Path     *string                `json:"path,omitempty"`
+}
+
+// JellyfinMismatchIssue defines model for JellyfinMismatch.Issue.
+type JellyfinMismatchIssue string
+
+// JellyfinPluginStatus defines model for JellyfinPluginStatus.
+type JellyfinPluginStatus struct {
+	Healthy   *bool   `json:"healthy,omitempty"`
+	Installed *bool   `json:"installed,omitempty"`
+	Libraries *int    `json:"libraries,omitempty"`
+	Message   *string `json:"message,omitempty"`
+	Version   *string `json:"version,omitempty"`
+}
+
+// JellyfinVerificationResult defines model for JellyfinVerificationResult.
+type JellyfinVerificationResult struct {
+	IdentifiedCount   *int                `json:"identifiedCount,omitempty"`
+	LastRun           *time.Time          `json:"lastRun,omitempty"`
+	LibraryPath       *string             `json:"libraryPath,omitempty"`
+	Mismatches        *[]JellyfinMismatch `json:"mismatches,omitempty"`
+	ScannedCount      *int                `json:"scannedCount,omitempty"`
+	UnidentifiedCount *int                `json:"unidentifiedCount,omitempty"`
+}
+
+// JellyfinVerificationStatus defines model for JellyfinVerificationStatus.
+type JellyfinVerificationStatus struct {
+	Connected         *bool      `json:"connected,omitempty"`
+	Enabled           *bool      `json:"enabled,omitempty"`
+	LastVerification  *time.Time `json:"lastVerification,omitempty"`
+	LibrariesVerified *int       `json:"librariesVerified,omitempty"`
+	PluginEnabled     *bool      `json:"pluginEnabled,omitempty"`
+	TotalMismatches   *int       `json:"totalMismatches,omitempty"`
+}
 
 // LLMCapabilities defines model for LLMCapabilities.
 type LLMCapabilities struct {
@@ -207,6 +285,11 @@ type MediaManagerSummary struct {
 	Type       *string `json:"type,omitempty"`
 }
 
+// OpAccepted defines model for OpAccepted.
+type OpAccepted struct {
+	OpId string `json:"op_id"`
+}
+
 // OperationResult defines model for OperationResult.
 type OperationResult struct {
 	BytesAffected *int64  `json:"bytesAffected,omitempty"`
@@ -227,6 +310,35 @@ type QueueItem struct {
 	Status         *string  `json:"status,omitempty"`
 	TimeLeft       *string  `json:"timeLeft,omitempty"`
 	Title          *string  `json:"title,omitempty"`
+}
+
+// RecoverRequest defines model for RecoverRequest.
+type RecoverRequest struct {
+	// Action Recovery action (e.g. discard)
+	Action string `json:"action"`
+}
+
+// ReloadResult defines model for ReloadResult.
+type ReloadResult struct {
+	Failed *[]struct {
+		Error *string `json:"error,omitempty"`
+		Name  *string `json:"name,omitempty"`
+	} `json:"failed,omitempty"`
+	Ok       *bool     `json:"ok,omitempty"`
+	Reloaded *[]string `json:"reloaded,omitempty"`
+}
+
+// RescanRequest defines model for RescanRequest.
+type RescanRequest struct {
+	DryRun *bool     `json:"dry_run,omitempty"`
+	Paths  *[]string `json:"paths,omitempty"`
+}
+
+// ResetRequest defines model for ResetRequest.
+type ResetRequest struct {
+	// Confirm Must equal "media.db" to authorize the reset
+	Confirm  string    `json:"confirm"`
+	Preserve *[]string `json:"preserve,omitempty"`
 }
 
 // ScanStatus defines model for ScanStatus.
@@ -268,6 +380,15 @@ type ServiceStatus struct {
 	Version    *string `json:"version,omitempty"`
 }
 
+// UnidentifiableItem defines model for UnidentifiableItem.
+type UnidentifiableItem struct {
+	DateAdded *time.Time `json:"dateAdded,omitempty"`
+	Id        *string    `json:"id,omitempty"`
+	Name      *string    `json:"name,omitempty"`
+	Path      *string    `json:"path,omitempty"`
+	Type      *string    `json:"type,omitempty"`
+}
+
 // GetActivityParams defines parameters for GetActivity.
 type GetActivityParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
@@ -278,9 +399,36 @@ type LoginJSONBody struct {
 	Password string `json:"password"`
 }
 
+// ChangePasswordJSONBody defines parameters for ChangePassword.
+type ChangePasswordJSONBody struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// SetupAuthJSONBody defines parameters for SetupAuth.
+type SetupAuthJSONBody struct {
+	Password string `json:"password"`
+}
+
 // DeleteDuplicateParams defines parameters for DeleteDuplicate.
 type DeleteDuplicateParams struct {
 	FileId *int64 `form:"fileId,omitempty" json:"fileId,omitempty"`
+}
+
+// GetJellyfinUnidentifiableItemsParams defines parameters for GetJellyfinUnidentifiableItems.
+type GetJellyfinUnidentifiableItemsParams struct {
+	LibraryId *string `form:"libraryId,omitempty" json:"libraryId,omitempty"`
+}
+
+// GetJellyfinVerificationResultsParams defines parameters for GetJellyfinVerificationResults.
+type GetJellyfinVerificationResultsParams struct {
+	LibraryId *string `form:"libraryId,omitempty" json:"libraryId,omitempty"`
+}
+
+// RunJellyfinVerificationJSONBody defines parameters for RunJellyfinVerification.
+type RunJellyfinVerificationJSONBody struct {
+	LibraryId   *string `json:"libraryId,omitempty"`
+	LibraryPath *string `json:"libraryPath,omitempty"`
 }
 
 // GetMediaManagerQueueParams defines parameters for GetMediaManagerQueue.
@@ -303,16 +451,221 @@ type ClearStuckItemsParams struct {
 	Blocklist *bool `form:"blocklist,omitempty" json:"blocklist,omitempty"`
 }
 
+// PreflightPathJSONBody defines parameters for PreflightPath.
+type PreflightPathJSONBody = map[string]interface{}
+
 // ConsolidateItemJSONBody defines parameters for ConsolidateItem.
 type ConsolidateItemJSONBody struct {
 	DryRun *bool `json:"dryRun,omitempty"`
 }
 
+// TestJellyfinConnectionJSONBody defines parameters for TestJellyfinConnection.
+type TestJellyfinConnectionJSONBody = map[string]interface{}
+
+// AddSettingsLibraryJSONBody defines parameters for AddSettingsLibrary.
+type AddSettingsLibraryJSONBody = map[string]interface{}
+
+// ReplaceSettingsLibrariesJSONBody defines parameters for ReplaceSettingsLibraries.
+type ReplaceSettingsLibrariesJSONBody = map[string]interface{}
+
+// RemoveSettingsLibraryParamsKind defines parameters for RemoveSettingsLibrary.
+type RemoveSettingsLibraryParamsKind string
+
+// AddSettingsPathJSONBody defines parameters for AddSettingsPath.
+type AddSettingsPathJSONBody = map[string]interface{}
+
+// ReplaceSettingsPathsJSONBody defines parameters for ReplaceSettingsPaths.
+type ReplaceSettingsPathsJSONBody = map[string]interface{}
+
+// RemoveSettingsPathParamsKind defines parameters for RemoveSettingsPath.
+type RemoveSettingsPathParamsKind string
+
+// TestRadarrConnectionJSONBody defines parameters for TestRadarrConnection.
+type TestRadarrConnectionJSONBody = map[string]interface{}
+
+// TestSonarrConnectionJSONBody defines parameters for TestSonarrConnection.
+type TestSonarrConnectionJSONBody = map[string]interface{}
+
+// GetSettingsSectionParams defines parameters for GetSettingsSection.
+type GetSettingsSectionParams struct {
+	Reveal *GetSettingsSectionParamsReveal `form:"reveal,omitempty" json:"reveal,omitempty"`
+}
+
+// GetSettingsSectionParamsReveal defines parameters for GetSettingsSection.
+type GetSettingsSectionParamsReveal int
+
+// PutSettingsSectionJSONBody defines parameters for PutSettingsSection.
+type PutSettingsSectionJSONBody = map[string]interface{}
+
+// JellyfinWebhookJSONBody defines parameters for JellyfinWebhook.
+type JellyfinWebhookJSONBody map[string]interface{}
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody LoginJSONBody
+
+// ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
+type ChangePasswordJSONRequestBody ChangePasswordJSONBody
+
+// SetupAuthJSONRequestBody defines body for SetupAuth for application/json ContentType.
+type SetupAuthJSONRequestBody SetupAuthJSONBody
+
+// RecoverDaemonJSONRequestBody defines body for RecoverDaemon for application/json ContentType.
+type RecoverDaemonJSONRequestBody = RecoverRequest
+
+// RescanDatabaseJSONRequestBody defines body for RescanDatabase for application/json ContentType.
+type RescanDatabaseJSONRequestBody = RescanRequest
+
+// ResetDatabaseJSONRequestBody defines body for ResetDatabase for application/json ContentType.
+type ResetDatabaseJSONRequestBody = ResetRequest
+
+// RunJellyfinVerificationJSONRequestBody defines body for RunJellyfinVerification for application/json ContentType.
+type RunJellyfinVerificationJSONRequestBody RunJellyfinVerificationJSONBody
 
 // TriggerManagerScanJSONRequestBody defines body for TriggerManagerScan for application/json ContentType.
 type TriggerManagerScanJSONRequestBody TriggerManagerScanJSONBody
 
+// PreflightPathJSONRequestBody defines body for PreflightPath for application/json ContentType.
+type PreflightPathJSONRequestBody = PreflightPathJSONBody
+
 // ConsolidateItemJSONRequestBody defines body for ConsolidateItem for application/json ContentType.
 type ConsolidateItemJSONRequestBody ConsolidateItemJSONBody
+
+// TestJellyfinConnectionJSONRequestBody defines body for TestJellyfinConnection for application/json ContentType.
+type TestJellyfinConnectionJSONRequestBody = TestJellyfinConnectionJSONBody
+
+// AddSettingsLibraryJSONRequestBody defines body for AddSettingsLibrary for application/json ContentType.
+type AddSettingsLibraryJSONRequestBody = AddSettingsLibraryJSONBody
+
+// ReplaceSettingsLibrariesJSONRequestBody defines body for ReplaceSettingsLibraries for application/json ContentType.
+type ReplaceSettingsLibrariesJSONRequestBody = ReplaceSettingsLibrariesJSONBody
+
+// AddSettingsPathJSONRequestBody defines body for AddSettingsPath for application/json ContentType.
+type AddSettingsPathJSONRequestBody = AddSettingsPathJSONBody
+
+// ReplaceSettingsPathsJSONRequestBody defines body for ReplaceSettingsPaths for application/json ContentType.
+type ReplaceSettingsPathsJSONRequestBody = ReplaceSettingsPathsJSONBody
+
+// TestRadarrConnectionJSONRequestBody defines body for TestRadarrConnection for application/json ContentType.
+type TestRadarrConnectionJSONRequestBody = TestRadarrConnectionJSONBody
+
+// TestSonarrConnectionJSONRequestBody defines body for TestSonarrConnection for application/json ContentType.
+type TestSonarrConnectionJSONRequestBody = TestSonarrConnectionJSONBody
+
+// PutSettingsSectionJSONRequestBody defines body for PutSettingsSection for application/json ContentType.
+type PutSettingsSectionJSONRequestBody = PutSettingsSectionJSONBody
+
+// JellyfinWebhookJSONRequestBody defines body for JellyfinWebhook for application/json ContentType.
+type JellyfinWebhookJSONRequestBody JellyfinWebhookJSONBody
+
+// Getter for additional properties for DaemonStatus. Returns the specified
+// element and whether it was found
+func (a DaemonStatus) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for DaemonStatus
+func (a *DaemonStatus) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for DaemonStatus to handle AdditionalProperties
+func (a *DaemonStatus) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["pid"]; found {
+		err = json.Unmarshal(raw, &a.Pid)
+		if err != nil {
+			return fmt.Errorf("error reading 'pid': %w", err)
+		}
+		delete(object, "pid")
+	}
+
+	if raw, found := object["state"]; found {
+		err = json.Unmarshal(raw, &a.State)
+		if err != nil {
+			return fmt.Errorf("error reading 'state': %w", err)
+		}
+		delete(object, "state")
+	}
+
+	if raw, found := object["uptime_seconds"]; found {
+		err = json.Unmarshal(raw, &a.UptimeSeconds)
+		if err != nil {
+			return fmt.Errorf("error reading 'uptime_seconds': %w", err)
+		}
+		delete(object, "uptime_seconds")
+	}
+
+	if raw, found := object["version"]; found {
+		err = json.Unmarshal(raw, &a.Version)
+		if err != nil {
+			return fmt.Errorf("error reading 'version': %w", err)
+		}
+		delete(object, "version")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for DaemonStatus to handle AdditionalProperties
+func (a DaemonStatus) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Pid != nil {
+		object["pid"], err = json.Marshal(a.Pid)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'pid': %w", err)
+		}
+	}
+
+	if a.State != nil {
+		object["state"], err = json.Marshal(a.State)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'state': %w", err)
+		}
+	}
+
+	if a.UptimeSeconds != nil {
+		object["uptime_seconds"], err = json.Marshal(a.UptimeSeconds)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'uptime_seconds': %w", err)
+		}
+	}
+
+	if a.Version != nil {
+		object["version"], err = json.Marshal(a.Version)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'version': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}

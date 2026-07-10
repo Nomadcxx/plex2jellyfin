@@ -1,8 +1,10 @@
 import { http, HttpResponse } from 'msw';
 
 export const handlers = [
+  // enabled:true = a password is configured; enabled:false now renders the
+  // first-run SetupForm, so tests default to a configured, signed-in state.
   http.get('/api/v1/auth/status', () =>
-    HttpResponse.json({ enabled: false, authenticated: true })
+    HttpResponse.json({ enabled: true, authenticated: true })
   ),
   http.get('/api/v1/dashboard', () =>
     HttpResponse.json({
