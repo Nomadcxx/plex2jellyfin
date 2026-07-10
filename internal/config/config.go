@@ -17,12 +17,12 @@ import (
 
 type PermissionsConfig struct {
 	// User can be a username (e.g., "jellyfin") or numeric UID (e.g., "1000").
-	User string `mapstructure:"user"`
+	User string `mapstructure:"user" json:"user"`
 	// Group can be a group name (e.g., "jellyfin") or numeric GID (e.g., "1000").
-	Group string `mapstructure:"group"`
+	Group string `mapstructure:"group" json:"group"`
 	// Modes are strings in octal (e.g., "0644" or "644"). Empty means preserve source.
-	FileMode string `mapstructure:"file_mode"`
-	DirMode  string `mapstructure:"dir_mode"`
+	FileMode string `mapstructure:"file_mode" json:"file_mode"`
+	DirMode  string `mapstructure:"dir_mode" json:"dir_mode"`
 }
 
 type Config struct {

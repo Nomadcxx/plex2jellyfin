@@ -71,6 +71,12 @@ func TestSetupStatusMasksSecretsAndDetectsFreshInstall(t *testing.T) {
 	if got.Draft.Sonarr.APIKey != "****3456" {
 		t.Fatalf("secret was not masked: %q", got.Draft.Sonarr.APIKey)
 	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"tv":[]`)) || !bytes.Contains(w.Body.Bytes(), []byte(`"path_mappings":[]`)) {
+		t.Fatalf("empty setup collections must be arrays: %s", w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"permissions":{"user":"","group":"","file_mode":"","dir_mode":""}`)) {
+		t.Fatalf("permissions must use the documented wire names: %s", w.Body.String())
+	}
 }
 
 func TestSetupStatusBypassesLegacyConfiguredInstall(t *testing.T) {

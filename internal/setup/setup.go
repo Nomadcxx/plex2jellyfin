@@ -100,7 +100,7 @@ func DraftFromConfig(cfg *config.Config) Draft {
 		Radarr:    ServiceDraft{Enabled: cfg.Radarr.Enabled, URL: cfg.Radarr.URL, APIKey: mask(cfg.Radarr.APIKey)},
 		Jellyfin: JellyfinDraft{
 			Enabled: cfg.Jellyfin.Enabled, URL: cfg.Jellyfin.URL, APIKey: mask(cfg.Jellyfin.APIKey),
-			PathMappings: append([]config.JellyfinPathMapping(nil), cfg.Jellyfin.PathMappings...),
+			PathMappings: append([]config.JellyfinPathMapping{}, cfg.Jellyfin.PathMappings...),
 		},
 		AI: AIDraft{
 			Enabled: cfg.AI.Enabled, Endpoint: cfg.AI.OllamaEndpoint,
@@ -266,7 +266,7 @@ func nonEmpty(values []string) []string {
 }
 
 func clone(values []string) []string {
-	return append([]string(nil), values...)
+	return append([]string{}, values...)
 }
 
 func envInt(name string, fallback int) int {

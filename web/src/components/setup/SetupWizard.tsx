@@ -186,7 +186,7 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
                 />
               )}
               {current.id === 'ai' && <AIStep draft={draft} setDraft={setDraft} checks={checks} setChecks={setChecks} />}
-              {current.id === 'runtime' && <RuntimeStep draft={draft} setDraft={setDraft} runtime={runtime} uid={status.runtime.uid} gid={status.runtime.gid} />}
+              {current.id === 'runtime' && <RuntimeStep draft={draft} setDraft={setDraft} setChecks={setChecks} runtime={runtime} uid={status.runtime.uid} gid={status.runtime.gid} />}
               {current.id === 'review' && <ReviewStep draft={draft} runtime={runtime} />}
 
               {visibleErrors.length > 0 && (
@@ -287,7 +287,7 @@ function PathEditor({ title, icon: Icon, collection, media, paths, writable, che
     <fieldset className="min-w-0 border border-zinc-800 p-4">
       <legend className="px-2 font-mono text-sm text-zinc-300"><span className="inline-flex items-center gap-2"><Icon className="h-4 w-4" />{title}</span></legend>
       <div className="flex gap-2">
-        <Input value={value} onChange={(event) => setValue(event.target.value)} placeholder={collection === 'watch' ? '/watch/tv' : '/library/tv'} />
+        <Input value={value} onChange={(event) => setValue(event.target.value)} placeholder={`/${collection === 'watch' ? 'watch' : 'library'}/${media}`} />
         <Button type="button" size="icon" aria-label={`Add ${title.toLowerCase()} path`} disabled={!value.trim() || checking !== null} onClick={async () => { const path = value.trim(); if (await verify(path)) { onChange([...paths, path]); setValue(''); } }}>
           {checking === value.trim() ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
         </Button>
@@ -338,7 +338,7 @@ function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest,
                 <Button variant="outline" disabled={testing !== null || !value.url || !value.api_key} onClick={() => onTest(name)}>{testing === name ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Test</Button>
               </div>
             )}
-            {report && report.issues.length > 0 && (
+            {report && (report.issues?.length ?? 0) > 0 && (
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-l-2 border-amber-500 bg-amber-950/10 px-4 py-3 text-sm">
                 <span className="text-amber-200">{report.issues.length} compatibility setting{report.issues.length === 1 ? '' : 's'} need attention.</span>
                 <Button size="sm" variant="outline" onClick={() => onFix(name as 'sonarr' | 'radarr')}><Wrench className="h-4 w-4" />Review fix</Button>
@@ -415,9 +415,10 @@ function AIStep({ draft, setDraft, checks, setChecks }: {
   );
 }
 
-function RuntimeStep({ draft, setDraft, runtime, uid, gid }: {
+function RuntimeStep({ draft, setDraft, setChecks, runtime, uid, gid }: {
   draft: SetupDraft;
   setDraft: React.Dispatch<React.SetStateAction<SetupDraft>>;
+  setChecks: React.Dispatch<React.SetStateAction<WizardChecks>>;
   runtime: RuntimeKind;
   uid: number;
   gid: number;
@@ -430,7 +431,12 @@ function RuntimeStep({ draft, setDraft, runtime, uid, gid }: {
       <div className="grid gap-5 md:grid-cols-2">
         <label className="space-y-2 text-sm"><span className="text-zinc-400">Scan frequency</span><select className="h-10 w-full border border-zinc-800 bg-zinc-950 px-3 text-sm focus:border-amber-500 focus:outline-none" value={draft.runtime.scan_frequency} onChange={(event) => updateRuntime({ scan_frequency: event.target.value })}>{!frequencies.includes(draft.runtime.scan_frequency) && <option value={draft.runtime.scan_frequency}>{draft.runtime.scan_frequency}</option>}{frequencies.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         <div className="space-y-3">
-          <ToggleRow label="Move source after transfer" checked={draft.runtime.delete_source} onChange={(delete_source) => updateRuntime({ delete_source })} />
+          <ToggleRow label="Move source after transfer" checked={draft.runtime.delete_source} onChange={(delete_source) => {
+            if (delete_source && !draft.runtime.delete_source) {
+              setChecks((state) => ({ ...state, paths: Object.fromEntries(Object.entries(state.paths).filter(([key]) => !key.startsWith('watch:'))) }));
+            }
+            updateRuntime({ delete_source });
+          }} />
           <ToggleRow label="Verify checksums" checked={draft.runtime.verify_checksums} onChange={(verify_checksums) => updateRuntime({ verify_checksums })} />
         </div>
       </div>

@@ -12,12 +12,13 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { auth, isLoading } = useAuth();
 	const router = useRouter();
 	const pathname = usePathname();
+	const route = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
 	const authenticated = Boolean(auth?.enabled && auth.authenticated);
 	const setup = useSetupStatus(authenticated);
 	const redirectTo = authenticated && setup.data
-		? setup.data.required && pathname !== '/setup'
+		? setup.data.required && route !== '/setup'
 			? '/setup'
-			: !setup.data.required && pathname === '/setup'
+			: !setup.data.required && route === '/setup'
 				? '/'
 				: null
 		: null;

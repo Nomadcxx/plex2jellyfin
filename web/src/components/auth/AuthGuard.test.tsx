@@ -59,6 +59,14 @@ describe('AuthGuard setup routing', () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it('treats the static-export trailing slash as the setup route', () => {
+    pathname = '/setup/';
+    setupState.data = { required: true, complete: false };
+    render(<AuthGuard><div>setup wizard</div></AuthGuard>);
+    expect(screen.getByText('setup wizard')).toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it('renders configured application pages', () => {
     render(<AuthGuard><div>dashboard</div></AuthGuard>);
     expect(screen.getByText('dashboard')).toBeInTheDocument();

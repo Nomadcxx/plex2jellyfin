@@ -75,6 +75,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if !cfg.Daemon.Enabled {
 		return errors.New("daemon is disabled in config")
 	}
+	healthAddr = resolveHealthAddr(cfg.Daemon.HealthAddr, healthAddr, cmd.Flags().Changed("health-addr"))
 	var currentConfigMu sync.RWMutex
 	currentConfig := cfg
 	getCurrentConfig := func() *config.Config {
@@ -362,9 +363,6 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "Initial scan completed successfully")
 	}
 
-	if cfg.Daemon.HealthAddr != "" {
-		healthAddr = cfg.Daemon.HealthAddr
-	}
 	logger.Info("daemon", "Plex2Jellyfin daemon started",
 		logging.F("watch_dirs", len(watchPaths)),
 		logging.F("tv_libs", cfg.Libraries.TV),
@@ -797,6 +795,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		shutdownServices()
 		return nil
 	}
+}
+
+func resolveHealthAddr(configured, flagValue string, flagChanged bool) string {
+	if flagChanged || configured == "" {
+		return flagValue
+	}
+	return configured
 }
 
 func configureControlSocketAccess(s *daemonipc.Server) error {
