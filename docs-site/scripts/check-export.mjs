@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 
 const output = new URL('../out/', import.meta.url);
+const rootHtml = readFileSync(new URL('index.html', output), 'utf8');
 const docsHtml = readFileSync(new URL('docs/index.html', output), 'utf8');
+const articleHtml = readFileSync(new URL('docs/reference/configuration/index.html', output), 'utf8');
 const searchPath = new URL('api/search', output);
 
 assert.match(docsHtml, /brand\/p2j-mark\.png/, 'exported header is missing the P2J mark');
@@ -13,10 +15,25 @@ assert.match(
   'exported header is missing the repository link',
 );
 assert.match(
-  docsHtml,
-  /blob\/main\/docs-site\/content\/docs\/index\.md/,
+  articleHtml,
+  /blob\/main\/docs-site\/content\/docs\/reference\/configuration\.md/,
   'article source link does not target the migrated content',
 );
 assert.ok(statSync(searchPath).size > 100, 'static search payload is empty');
+assert.match(docsHtml, /brand\/plex2jellyfin-wordmark\.png/, 'docs home is missing the full wordmark');
+assert.match(docsHtml, /curl -fsSL/, 'docs home is missing the quick-start install command');
+for (const stage of ['scan', 'duplicates', 'consolidate', 'audit', 'daemon']) {
+  assert.match(docsHtml, new RegExp(`data-migration-stage="${stage}"`), `docs home is missing ${stage}`);
+}
+for (const route of [
+  '/docs/getting-started/installation/',
+  '/docs/getting-started/docker/',
+  '/docs/reference/configuration/',
+  '/docs/reference/cli/',
+  '/docs/troubleshooting/',
+]) {
+  assert.ok(docsHtml.includes(`href="${route}"`), `docs home is missing ${route}`);
+}
+assert.match(rootHtml, /url=\/docs\//, 'site root does not redirect to the documentation home');
 
 console.log('export check passed');

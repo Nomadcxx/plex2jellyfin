@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../content/docs/', import.meta.url));
 const expectedPages = [
-  'index.md',
+  'index.mdx',
   'getting-started/docker.md',
   'getting-started/installation.md',
   'getting-started/migration-guide.md',
