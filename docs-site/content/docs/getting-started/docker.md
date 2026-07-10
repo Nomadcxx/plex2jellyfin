@@ -1,4 +1,7 @@
-# Docker
+---
+title: Docker
+description: Run the daemon, dashboard, and CLI in one container image.
+---
 
 One image, three binaries. `plex2jellyfin-daemon` and `plex2jellyfin-web` run together under the container's entrypoint; the `plex2jellyfin` CLI is available inside the same image for one-off commands.
 
@@ -6,8 +9,9 @@ One image, three binaries. `plex2jellyfin-daemon` and `plex2jellyfin-web` run to
 docker run --rm ghcr.io/nomadcxx/plex2jellyfin:latest plex2jellyfin version
 ```
 
-!!! info "Permissions are the #1 source of Docker pain here"
-    Read the [PUID/PGID](#puidpgid-and-file-ownership) and [`[permissions]` chown feature](#the-permissions-chown-feature-is-unavailable-in-container) sections below before you file a "files end up owned by root" issue — it's almost always a PUID/PGID mismatch, not a bug.
+> **Permissions are the #1 source of Docker pain here**
+>
+> Read the [PUID/PGID](#puidpgid-and-file-ownership) and [`[permissions]` chown feature](#the-permissions-chown-feature-is-unavailable-in-container) sections below before you file a "files end up owned by root" issue — it's almost always a PUID/PGID mismatch, not a bug.
 
 ## Quick start
 
@@ -33,7 +37,7 @@ docker run -d \
 
 The container declares all three as `VOLUME` in the image, so even without explicit `-v` flags Docker creates anonymous volumes for them — always bind-mount all three explicitly or you'll lose data between container recreations.
 
-If your host layout uses more than one watch or library directory (multi-drive setups are common with this tool), bind-mount each one to its own path under `/watch` or `/library` and mirror that layout in `config.toml`'s `[watch]` and `[libraries]` arrays. Path mappings inside the container must match what you write into the config — see [Configuration](../reference/configuration.md).
+If your host layout uses more than one watch or library directory (multi-drive setups are common with this tool), bind-mount each one to its own path under `/watch` or `/library` and mirror that layout in `config.toml`'s `[watch]` and `[libraries]` arrays. Path mappings inside the container must match what you write into the config — see [Configuration](/docs/reference/configuration).
 
 ## PUID/PGID and file ownership
 
@@ -132,7 +136,7 @@ services:
    ```
 
 2. Set `PUID`/`PGID` to match the UID/GID your Jellyfin instance runs as (see [above](#puidpgid-and-file-ownership)).
-3. If your Jellyfin also runs in a container with bind mounts whose paths differ from this container's `/library`, add `[[jellyfin.path_mappings]]` entries to `config.toml` so the post-organize feedback loop can correlate Jellyfin items with daemon paths — see [Configuration](../reference/configuration.md#jellyfin-path-mappings).
+3. If your Jellyfin also runs in a container with bind mounts whose paths differ from this container's `/library`, add `[[jellyfin.path_mappings]]` entries to `config.toml` so the post-organize feedback loop can correlate Jellyfin items with daemon paths — see [Configuration](/docs/reference/configuration#jellyfin-path-mappings).
 4. Bring it up:
 
    ```bash
@@ -153,7 +157,7 @@ services:
    docker logs -f plex2jellyfin
    ```
 
-7. Reach the dashboard at `http://<host>:5522/` (see [note](../index.md) — the dashboard is a work in progress; prefer the CLI, run via `docker exec`, for anything destructive).
+7. Reach the dashboard at `http://<host>:5522/` (see [note](/docs) — the dashboard is a work in progress; prefer the CLI, run via `docker exec`, for anything destructive).
 
 ## Where config lives in the container
 

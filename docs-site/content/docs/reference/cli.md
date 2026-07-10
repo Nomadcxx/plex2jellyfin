@@ -1,10 +1,13 @@
-# CLI Reference
+---
+title: CLI Reference
+description: Commands for migration, repair, audit, and daemon control.
+---
 
 `plex2jellyfin --help` shows the primary workflows. Several maintenance and integration commands exist but stay hidden from the root `--help` output to keep it short — they're documented here. Every command also accepts `--help` for its own flag list.
 
 ## Primary
 
-The core one-shot migration workflow. See the [Migration Guide](../getting-started/migration-guide.md) for the recommended run order.
+The core one-shot migration workflow. See the [Migration Guide](/docs/getting-started/migration-guide) for the recommended run order.
 
 | Command | Description |
 |---|---|
@@ -33,7 +36,7 @@ The core one-shot migration workflow. See the [Migration Guide](../getting-start
 
 ## AI audit
 
-Reviews files with low parse confidence and proposes renames via the configured LLM (see [`[ai]`](configuration.md#ai)):
+Reviews files with low parse confidence and proposes renames via the configured LLM (see [`[ai]`](/docs/reference/configuration#ai)):
 
 ```bash
 plex2jellyfin audit --generate            # identify low-confidence files
@@ -58,7 +61,7 @@ plex2jellyfin organize /downloads/file.mkv   # Organize a single file
 plex2jellyfin organize-folder /downloads/X   # Organize a directory tree
 plex2jellyfin watch /downloads               # Foreground watcher
 plex2jellyfin validate <path>                # Check library against Jellyfin naming rules
-plex2jellyfin cleanup                        # Remove cruft files / empty dirs
+plex2jellyfin cleanup {cruft|empty}          # Remove cruft files or empty dirs
 plex2jellyfin monitor                        # Tail daemon activity log
 plex2jellyfin daemon {status|reload|stop}    # Control the systemd-managed daemon
 plex2jellyfin repair series-dedupe           # Repair duplicate series rows
@@ -84,7 +87,7 @@ plex2jellyfin serve                          # Start the API server (used intern
 
 ### daemon
 
-Controls the running daemon over its control socket rather than starting/stopping it directly — use `systemctl` for that (see [Daemon & Services](daemon-services.md)).
+Controls the running daemon over its control socket rather than starting/stopping it directly — use `systemctl` for that (see [Daemon & Services](/docs/reference/daemon-services)).
 
 | Subcommand | Description |
 |---|---|
@@ -114,7 +117,7 @@ Controls the running daemon over its control socket rather than starting/stoppin
 plex2jellyfin postmortem collect --since 96h
 ```
 
-Generates an evidence bundle (parse decisions, repair events, housekeeping state, suspicious items) for manual review or handing to an LLM. Runs automatically every 4 days via the `plex2jellyfin-postmortem.timer` user unit — see [Daemon & Services](daemon-services.md#postmortem-timer).
+Generates an evidence bundle (parse decisions, repair events, housekeeping state, suspicious items) for manual review or handing to an LLM. Runs automatically every 4 days via the `plex2jellyfin-postmortem.timer` user unit — see [Daemon & Services](/docs/reference/daemon-services#postmortem-timer).
 
 ## Sonarr / Radarr integration
 
@@ -131,7 +134,7 @@ plex2jellyfin radarr import <path>           # Trigger Radarr import scan for a 
 plex2jellyfin radarr movies                  # List movies in Radarr library
 ```
 
-Requires `[sonarr]`/`[radarr]` configured with a valid `url` and `api_key` — see [Configuration](configuration.md#sonarr-radarr).
+Requires `[sonarr]`/`[radarr]` configured with a valid `url` and `api_key` — see [Configuration](/docs/reference/configuration#sonarr-radarr).
 
 ## config
 

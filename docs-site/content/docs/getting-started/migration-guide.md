@@ -1,6 +1,9 @@
-# Migration Guide
+---
+title: Migration Guide
+description: Run the one-shot workflow for an existing Plex-organized library.
+---
 
-This is the one-shot workflow for turning an existing Plex-organized library into a Jellyfin-compliant one. Run it once after installing, then hand the library to the [daemon](../reference/daemon-services.md) to keep it clean as new downloads arrive.
+This is the one-shot workflow for turning an existing Plex-organized library into a Jellyfin-compliant one. Run it once after installing, then hand the library to the [daemon](/docs/reference/daemon-services) to keep it clean as new downloads arrive.
 
 Every destructive stage in this workflow follows the same **generate &rarr; dry-run &rarr; execute** pattern: `generate` computes a plan and stores it, `dry-run` prints what the plan would do without touching anything, `execute` applies it. Always read the dry-run output before executing.
 
@@ -70,13 +73,13 @@ Useful flags:
 - `--threshold <float>` — confidence cutoff below which a file is considered "low confidence" and sent to the AI (default `0.8`)
 - `--limit <n>` — cap how many files are audited in one run (`0` = uncapped)
 
-The audit sends the library kind (Movies vs TV), folder path, and current parse to the configured LLM (Ollama, local or cloud — see [`[ai]`](../reference/configuration.md#ai) in the configuration reference) as context, never raw file contents. Review the generated suggestions before executing; AI proposals can be wrong, especially for shows with unusual titling.
+The audit sends the library kind (Movies vs TV), folder path, and current parse to the configured LLM (Ollama, local or cloud — see [`[ai]`](/docs/reference/configuration#ai) in the configuration reference) as context, never raw file contents. Review the generated suggestions before executing; AI proposals can be wrong, especially for shows with unusual titling.
 
 ## After migration: hand off to the daemon
 
-Once the library is clean, start `plex2jellyfin-daemon` (see [Daemon & Services](../reference/daemon-services.md)) so it watches your download directories going forward. New files land, get parsed and renamed automatically, and a periodic convergence scan catches anything that drifts — no need to re-run the full migration workflow manually.
+Once the library is clean, start `plex2jellyfin-daemon` (see [Daemon & Services](/docs/reference/daemon-services)) so it watches your download directories going forward. New files land, get parsed and renamed automatically, and a periodic convergence scan catches anything that drifts — no need to re-run the full migration workflow manually.
 
-If you skip AI review during migration and files still land under "Season Unknown" or with release-tag titles, `plex2jellyfin repair series-dedupe` and `plex2jellyfin orphans` are targeted follow-up commands — see the [CLI Reference](../reference/cli.md).
+If you skip AI review during migration and files still land under "Season Unknown" or with release-tag titles, `plex2jellyfin repair series-dedupe` and `plex2jellyfin orphans` are targeted follow-up commands — see the [CLI Reference](/docs/reference/cli).
 
 ## Recap
 

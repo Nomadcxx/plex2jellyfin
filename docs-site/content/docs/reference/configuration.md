@@ -1,6 +1,9 @@
-# Configuration
+---
+title: Configuration
+description: Complete config.toml reference for local and container deployments.
+---
 
-Config file: `~/.config/plex2jellyfin/config.toml` on bare metal, `/config/.config/plex2jellyfin/config.toml` in Docker (see [Docker](../getting-started/docker.md#where-config-lives-in-the-container)).
+Config file: `~/.config/plex2jellyfin/config.toml` on bare metal, `/config/.config/plex2jellyfin/config.toml` in Docker (see [Docker](/docs/getting-started/docker#where-config-lives-in-the-container)).
 
 A fully annotated template ships as [`config.toml.example`](https://github.com/Nomadcxx/plex2jellyfin/blob/main/config.toml.example) in the repo root and is installed to `/usr/share/doc/plex2jellyfin/config.toml.example` by the deb/rpm packages. Generate a starting point with:
 
@@ -117,10 +120,11 @@ dir_mode  = "0755"          # Directory permissions (rwxr-xr-x)
 
 Leave `user`/`group` empty (or omit the section) to preserve source ownership.
 
-!!! warning "Requires root on bare metal; unavailable in Docker"
-    `plex2jellyfin-daemon` must run as root to chown files to a different user. The bundled systemd unit runs it as root with a minimal capability set (`CAP_CHOWN`, `CAP_FOWNER`, `CAP_DAC_OVERRIDE`) rather than full root privileges.
-
-    **This feature has no effect inside the Docker image** — the container always runs the daemon as the `PUID`/`PGID` user with no elevated process left to chown to something else. Use `PUID`/`PGID` instead. Full explanation on the [Docker page](../getting-started/docker.md#the-permissions-chown-feature-is-unavailable-in-container).
+> **Requires root on bare metal; unavailable in Docker**
+>
+> `plex2jellyfin-daemon` must run as root to chown files to a different user. The bundled systemd unit runs it as root with a minimal capability set (`CAP_CHOWN`, `CAP_FOWNER`, `CAP_DAC_OVERRIDE`) rather than full root privileges.
+>
+> **This feature has no effect inside the Docker image** — the container always runs the daemon as the `PUID`/`PGID` user with no elevated process left to chown to something else. Use `PUID`/`PGID` instead. Full explanation on the [Docker page](/docs/getting-started/docker#the-permissions-chown-feature-is-unavailable-in-container).
 
 ## `[jellyfin]`
 

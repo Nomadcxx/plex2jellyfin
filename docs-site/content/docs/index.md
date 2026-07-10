@@ -1,9 +1,13 @@
-# Plex2Jellyfin
+---
+title: plex2jellyfin
+description: Migrate a Plex-organized media library to Jellyfin and keep it clean.
+---
 
 **Migrate your Plex library to Jellyfin. Keep it clean forever.**
 
-!!! warning "Beta"
-    Every destructive operation runs as generate &rarr; dry-run &rarr; execute, so you can preview each change before it touches a file. Still: back up anything you can't re-download.
+> **Beta**
+>
+> Every destructive operation runs as generate &rarr; dry-run &rarr; execute, so you can preview each change before it touches a file. Still: back up anything you can't re-download.
 
 ## Why this exists
 
@@ -72,13 +76,13 @@ The parser strips release-group noise (`1080p`, `x264`, `WEB-DL`, `RARBG`, `-YTS
 
 ## Where to go next
 
-- [Installation](getting-started/installation.md) — script, manual build, or deb/rpm packages
-- [Docker](getting-started/docker.md) — container deployment, volumes, and permissions (read this if you're running in Docker)
-- [Migration Guide](getting-started/migration-guide.md) — the scan &rarr; status &rarr; duplicates &rarr; consolidate &rarr; audit workflow
-- [CLI Reference](reference/cli.md) — every command
-- [Configuration](reference/configuration.md) — `config.toml` reference
-- [Daemon & Services](reference/daemon-services.md) — systemd units and the postmortem timer
-- [Troubleshooting](troubleshooting.md)
+- [Installation](/docs/getting-started/installation) — script, manual build, or deb/rpm packages
+- [Docker](/docs/getting-started/docker) — container deployment, volumes, and permissions (read this if you're running in Docker)
+- [Migration Guide](/docs/getting-started/migration-guide) — the scan &rarr; status &rarr; duplicates &rarr; consolidate &rarr; audit workflow
+- [CLI Reference](/docs/reference/cli) — every command
+- [Configuration](/docs/reference/configuration) — `config.toml` reference
+- [Daemon & Services](/docs/reference/daemon-services) — systemd units and the postmortem timer
+- [Troubleshooting](/docs/troubleshooting)
 
 ## License
 

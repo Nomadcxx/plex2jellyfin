@@ -1,4 +1,7 @@
-# Troubleshooting
+---
+title: Troubleshooting
+description: Diagnose permissions, path mappings, parsing, and service failures.
+---
 
 ## Permissions
 
@@ -15,7 +18,7 @@ The most common category of issue. Your media stack typically runs several appli
 
 If files are owned by the wrong user or have restrictive permissions, some of these can't read, write, or delete them.
 
-Running in Docker? See [Docker &rarr; PUID/PGID and file ownership](getting-started/docker.md#puidpgid-and-file-ownership) first — most container permission issues are a PUID/PGID mismatch, and the `[permissions]` config below has no effect in-container.
+Running in Docker? See [Docker &rarr; PUID/PGID and file ownership](/docs/getting-started/docker#puidpgid-and-file-ownership) first — most container permission issues are a PUID/PGID mismatch, and the `[permissions]` config below has no effect in-container.
 
 ### "Permission denied" running the CLI
 
@@ -39,11 +42,11 @@ Running in Docker? See [Docker &rarr; PUID/PGID and file ownership](getting-star
 
 1. Verify the daemon runs as root: `ps aux | grep plex2jellyfin-daemon`
 2. Check the systemd unit: `systemctl cat plex2jellyfin-daemon | grep User`
-3. Confirm `[permissions]` in `config.toml` — see [Configuration &rarr; `[permissions]`](reference/configuration.md#permissions)
+3. Confirm `[permissions]` in `config.toml` — see [Configuration &rarr; `[permissions]`](/docs/reference/configuration#permissions)
 
 ### Files created with the wrong ownership (Docker)
 
-`[permissions]` has no effect in Docker — see [why](getting-started/docker.md#the-permissions-chown-feature-is-unavailable-in-container). Set `PUID`/`PGID` to match the UID/GID that should own the files instead, and confirm the mapping with `docker exec plex2jellyfin id`.
+`[permissions]` has no effect in Docker — see [why](/docs/getting-started/docker#the-permissions-chown-feature-is-unavailable-in-container). Set `PUID`/`PGID` to match the UID/GID that should own the files instead, and confirm the mapping with `docker exec plex2jellyfin id`.
 
 ### Jellyfin can't see new files
 
@@ -73,7 +76,7 @@ Adjust the owner/group and modes to whatever `[permissions]` you've configured.
 
 **Cause:** the post-organize feedback loop (sweeper + Jellyfin webhook) can't correlate a Jellyfin library item's path with the daemon's own path for that file. This happens whenever Jellyfin runs in a container with bind mounts whose paths differ from what the daemon sees — for example Jellyfin sees `/tv/Show/...` but the daemon organized the file to `/mnt/storage1/TVSHOWS/Show/...`.
 
-**Fix:** add `[[jellyfin.path_mappings]]` entries to `config.toml` covering every root where the two views diverge. See [Configuration &rarr; Jellyfin path mappings](reference/configuration.md#jellyfin-path-mappings). Without them, every row eventually gets auto-labeled FAIL as the sweeper runs.
+**Fix:** add `[[jellyfin.path_mappings]]` entries to `config.toml` covering every root where the two views diverge. See [Configuration &rarr; Jellyfin path mappings](/docs/reference/configuration#jellyfin-path-mappings). Without them, every row eventually gets auto-labeled FAIL as the sweeper runs.
 
 ## AI audit issues
 
@@ -87,7 +90,7 @@ Adjust the owner/group and modes to whatever `[permissions]` you've configured.
 
 1. Set `DEBUG_AI=1` in the daemon/CLI environment and re-run to see exactly what context (library type, folder path, current parse) was sent in the prompt.
 2. Verify the file sits under a sensibly named folder — the AI uses the parent directory name as a hint when the filename itself is ambiguous.
-3. Raise `confidence_threshold` in `[ai]` (see [Configuration](reference/configuration.md#ai)) so borderline suggestions get rejected instead of applied.
+3. Raise `confidence_threshold` in `[ai]` (see [Configuration](/docs/reference/configuration#ai)) so borderline suggestions get rejected instead of applied.
 
 ### AI suggests the wrong media type (movie vs. TV)
 
@@ -157,7 +160,7 @@ plex2jellyfin repair series-dedupe
 plex2jellyfin repair unknown-seasons
 ```
 
-Targeted repair commands for these specific, known failure modes — see [CLI Reference &rarr; repair](reference/cli.md#repair).
+Targeted repair commands for these specific, known failure modes — see [CLI Reference &rarr; repair](/docs/reference/cli#repair).
 
 ## Still stuck?
 
@@ -167,4 +170,4 @@ Run a postmortem bundle and review the evidence yourself, or hand it to an LLM:
 plex2jellyfin postmortem collect --since 96h
 ```
 
-See [Daemon & Services &rarr; Postmortem timer](reference/daemon-services.md#postmortem-timer) and the [CLI Reference](reference/cli.md#postmortem).
+See [Daemon & Services &rarr; Postmortem timer](/docs/reference/daemon-services#postmortem-timer) and the [CLI Reference](/docs/reference/cli#postmortem).

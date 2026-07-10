@@ -7,7 +7,7 @@
     "dev": "next dev",
     "start": "serve out",
     "typecheck": "fumadocs-mdx && next typegen && tsc --noEmit",
-    "check": "npm run typecheck && npm run build",
+    "check": "node scripts/check-content.mjs && npm run typecheck && npm run build",
     "postinstall": "fumadocs-mdx"
   },
   "dependencies": {
