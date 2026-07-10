@@ -485,6 +485,31 @@ paths:
         '401':
           description: Current password incorrect
 
+  /files/trace:
+    get:
+      operationId: getFileTrace
+      summary: Per-file pipeline traces
+      description: >-
+        Recent parse decisions rendered as per-file journeys (detected,
+        parsed, moved, Jellyfin-resolved), newest first. Mounted manually;
+        response items mirror internal/api.TraceItem.
+      tags: [Files]
+      parameters:
+        - name: q
+          in: query
+          description: Substring filter on the source path
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+            maximum: 200
+      responses:
+        '200':
+          description: Trace items
+
   # ============ JELLYFIN VERIFICATION ============
   /jellyfin/verify:
     get:

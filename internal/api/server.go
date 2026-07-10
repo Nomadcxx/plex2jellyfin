@@ -256,6 +256,9 @@ func (s *Server) apiRouter() *chi.Mux {
 	r.Post("/auth/setup", s.SetupAuth)
 	r.Post("/auth/password", s.ChangePassword)
 
+	// Per-file pipeline traces (spec'd in openapi.yaml, mounted manually).
+	r.Get("/files/trace", s.GetFileTrace)
+
 	// Mount generated API routes
 	api.HandlerFromMux(s, r)
 
