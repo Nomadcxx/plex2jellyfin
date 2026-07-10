@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import type { components } from '@/types/api';
 import { api } from '@/lib/api/client';
 
@@ -20,9 +20,7 @@ export function useSetupStatus(enabled = true) {
 }
 
 export function useApplySetup() {
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (draft: SetupDraft) => api.post<{ applied: boolean; complete: boolean; daemon_state: string }>('/setup/apply', draft),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: setupKeys.status }),
   });
 }

@@ -34,7 +34,7 @@ async function apiRequest<T>(
       throw new APIError(
         response.status,
         data.code || 'UNKNOWN_ERROR',
-        data.message || `HTTP ${response.status}`
+        data.error || data.message || `HTTP ${response.status}`
       );
     }
 
@@ -115,6 +115,22 @@ export type ConnectionTestResult = {
   error?: string;
 };
 
+export type CompatibilityIssue = {
+  service: string;
+  setting: string;
+  current: string;
+  expected: string;
+  severity: 'critical' | 'warning';
+};
+
+export type CompatibilityResult = {
+  ok: boolean;
+  healthy: boolean;
+  issues: CompatibilityIssue[];
+  fixed?: number;
+  error?: string;
+};
+
 export async function getSettingsSection<T extends Record<string, unknown>>(section: SettingsSection) {
   return api.get<T>(`/settings/${section}`);
 }
@@ -141,6 +157,10 @@ export async function preflightPath(path: string, kind: 'watch' | 'library') {
 
 export async function testSettingsConnection(service: 'sonarr' | 'radarr' | 'jellyfin' | 'jellystat', payload: Record<string, unknown>) {
   return api.post<ConnectionTestResult>(`/settings/${service}/test`, payload);
+}
+
+export async function checkArrCompatibility(service: 'sonarr' | 'radarr', payload: Record<string, unknown>, fix = false) {
+  return api.post<CompatibilityResult>(`/settings/${service}/compatibility${fix ? '/fix' : ''}`, payload);
 }
 
 export type OperationAcceptedResponse = {
