@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const output = new URL('../out/', import.meta.url);
 const basePath = process.env.GITHUB_ACTIONS === 'true' ? '/plex2jellyfin' : '';
@@ -7,6 +9,14 @@ const rootHtml = readFileSync(new URL('index.html', output), 'utf8');
 const docsHtml = readFileSync(new URL('docs/index.html', output), 'utf8');
 const articleHtml = readFileSync(new URL('docs/reference/configuration/index.html', output), 'utf8');
 const searchPath = new URL('api/search', output);
+const chunkRoot = fileURLToPath(new URL('_next/static/chunks/', output));
+
+function files(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? files(path) : [path];
+  });
+}
 
 assert.match(docsHtml, /brand\/p2j-mark\.png/, 'exported header is missing the P2J mark');
 assert.ok(
@@ -25,6 +35,12 @@ assert.match(
   'article source link does not target the migrated content',
 );
 assert.ok(statSync(searchPath).size > 100, 'static search payload is empty');
+assert.ok(
+  files(chunkRoot).some(
+    (path) => path.endsWith('.js') && readFileSync(path, 'utf8').includes(`${basePath}/api/search`),
+  ),
+  'search client is missing the deployment base path',
+);
 assert.match(docsHtml, /brand\/plex2jellyfin-wordmark\.png/, 'docs home is missing the full wordmark');
 assert.match(docsHtml, /curl -fsSL/, 'docs home is missing the quick-start install command');
 for (const stage of ['scan', 'duplicates', 'consolidate', 'audit', 'daemon']) {

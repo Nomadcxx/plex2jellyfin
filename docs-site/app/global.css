@@ -204,6 +204,13 @@ pre,
 }
 
 @media (max-width: 767px) {
+  #nd-docs-layout.docs-shell {
+    grid-template:
+      'header' var(--fd-header-height)
+      'toc-popover'
+      'main' 1fr / minmax(0, 1fr) !important;
+  }
+
   .operator-header {
     gap: 10px;
     padding: 0 10px 0 12px;

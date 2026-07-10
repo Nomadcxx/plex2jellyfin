@@ -23,7 +23,12 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
   const isHome = page.slugs.length === 0;
 
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full} className={isHome ? 'docs-home-page' : undefined}>
+    <DocsPage
+      toc={page.data.toc}
+      full={page.data.full}
+      footer={{ enabled: !isHome }}
+      className={isHome ? 'docs-home-page' : undefined}
+    >
       {!isHome && (
         <>
           <DocsTitle>{page.data.title}</DocsTitle>
