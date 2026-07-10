@@ -266,11 +266,12 @@ pre,
 }
 
 .docs-home-intro {
-  min-height: calc(100dvh - 112px);
+  /* No full-viewport hero: the wordmark + quick start are compact, and a
+     100dvh min-height reads as a broken page of dead space. */
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding-block: clamp(44px, 8vh, 92px) 56px;
+  padding-block: clamp(56px, 10vh, 120px) 72px;
 }
 
 .docs-wordmark {
