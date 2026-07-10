@@ -26,6 +26,7 @@ type PermissionsConfig struct {
 }
 
 type Config struct {
+	Setup            SetupConfig            `mapstructure:"setup"`
 	Watch            WatchConfig            `mapstructure:"watch"`
 	Libraries        LibrariesConfig        `mapstructure:"libraries"`
 	Daemon           DaemonConfig           `mapstructure:"daemon"`
@@ -43,6 +44,11 @@ type Config struct {
 	Password         string                 `mapstructure:"password" secret:"true"`
 	PasswordHash     string                 `mapstructure:"password_hash" secret:"true"`
 	SecureCookies    bool                   `mapstructure:"secure_cookies"`
+}
+
+type SetupConfig struct {
+	Version   int  `mapstructure:"version"`
+	Completed bool `mapstructure:"completed"`
 }
 
 // APIConfig holds HTTP-server-only concerns (CORS, etc.). CORS origins
@@ -542,6 +548,14 @@ tv = %s
 movies = %s
 
 # ============================================================================
+# SETUP STATE
+# Managed by the Web/CLI setup wizards.
+# ============================================================================
+[setup]
+version = %d
+completed = %v
+
+# ============================================================================
 # JELLYFIN LIBRARY DIRECTORIES
 # Where organized media files should be moved to
 # ============================================================================
@@ -686,6 +700,8 @@ allowed_origins = %s
 `,
 		formatStringSlice(c.Watch.TV),
 		formatStringSlice(c.Watch.Movies),
+		c.Setup.Version,
+		c.Setup.Completed,
 		formatStringSlice(c.Libraries.TV),
 		formatStringSlice(c.Libraries.Movies),
 		c.Sonarr.Enabled,
@@ -743,6 +759,10 @@ allowed_origins = %s
 		c.Logging.Compress,
 		formatStringSlice(c.API.AllowedOrigins),
 	)
+
+	for _, mapping := range c.Jellyfin.PathMappings {
+		base += fmt.Sprintf("\n[[jellyfin.path_mappings]]\njellyfin = %q\ndaemon = %q\n", mapping.Jellyfin, mapping.Daemon)
+	}
 
 	// Append permissions if configured
 	if c.Permissions.WantsOwnership() || c.Permissions.WantsMode() {

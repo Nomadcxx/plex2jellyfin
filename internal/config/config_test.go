@@ -215,3 +215,34 @@ func TestConfigToTOMLIncludesJellyfinSection(t *testing.T) {
 		t.Fatal("expected webhook_secret key in TOML output")
 	}
 }
+
+func TestConfigToTOMLRoundTripsSetupMetadataAndPathMappings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SUDO_USER", "")
+
+	cfg := DefaultConfig()
+	cfg.Setup.Version = 1
+	cfg.Setup.Completed = true
+	cfg.Jellyfin.PathMappings = []JellyfinPathMapping{
+		{Jellyfin: "/media/tv", Daemon: "/library/tv"},
+		{Jellyfin: "/media/movies", Daemon: "/library/movies"},
+	}
+
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Setup.Version != 1 || !loaded.Setup.Completed {
+		t.Fatalf("setup metadata did not round-trip: %+v", loaded.Setup)
+	}
+	if len(loaded.Jellyfin.PathMappings) != 2 {
+		t.Fatalf("path mappings did not round-trip: %+v", loaded.Jellyfin.PathMappings)
+	}
+	if got := loaded.Jellyfin.PathMappings[0]; got.Jellyfin != "/media/tv" || got.Daemon != "/library/tv" {
+		t.Fatalf("unexpected first path mapping: %+v", got)
+	}
+}
