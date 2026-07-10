@@ -10,32 +10,6 @@ Your Plex library, renamed the way Jellyfin wants it. Migrate the whole thing on
 
 - [Full Documentation](https://nomadcxx.github.io/plex2jellyfin/docs/) - Install guides, Docker walkthrough, migration guide, CLI and config reference
 
-## Why
-
-I moved my Plex libraries to Jellyfin and watched Jellyfin shred them. Usenet and torrent releases name the same show a dozen ways; Plex papered over the chaos with fuzzy matching, and Jellyfin takes your folder names at face value. One show splits into four entries. Seasons land under "Season Unknown". Movies show up titled `1080p.BluRay.x265`. I wrote this to fix my own migration and kept building until it ran my library daily. It's written in Go because mass-renaming tens of thousands of files shouldn't take all night.
-
-## What It Does
-
-**Migrate.** Point the CLI at the library Plex left behind:
-
-```bash
-plex2jellyfin scan                       # index everything into a local SQLite db
-plex2jellyfin status                     # see what you have and what's broken
-plex2jellyfin duplicates generate        # find the same content stored twice
-plex2jellyfin duplicates dry-run         # preview which copies would go
-plex2jellyfin duplicates execute         # keep the best copy, delete the rest
-plex2jellyfin consolidate generate       # find series scattered across drives
-plex2jellyfin consolidate execute        # merge each series onto one drive
-plex2jellyfin audit --generate           # AI rename proposals for the stragglers
-plex2jellyfin audit --execute            # apply approved fixes
-```
-
-Jellyfin then scans a library it understands on the first pass: no duplicate show entries, no Season Unknown, no release-tag titles.
-
-**Guard.** After migration, `plex2jellyfin-daemon` watches your download directories. Sonarr drops `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv`; the daemon parses it, renames it to `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv`, moves it to the right drive, and tells Jellyfin. A convergence loop re-checks the library on a schedule and queues anything drifting back toward chaos. Ambiguous filenames go to an optional local LLM (Ollama) behind a confidence threshold, a cache, and a circuit breaker; the regex parser handles the bulk without it.
-
-**Out of scope:** Plex server metadata. User accounts, watch states, ratings, and playlists stay behind. This tool migrates the files.
-
 ## Installation
 
 ### Quick Install
@@ -77,13 +51,39 @@ docker compose -f docker-compose.example.yml up -d
 
 ### Pre-built Packages (Debian/Ubuntu/Fedora)
 
-Download `.deb` or `.rpm` packages from [GitHub Releases](https://github.com/Nomadcxx/plex2jellyfin/releases/latest), then:
+Download the `.deb` or `.rpm` from [GitHub Releases](https://github.com/Nomadcxx/plex2jellyfin/releases/latest):
 
 ```bash
 sudo apt install ./plex2jellyfin_*_amd64.deb      # Debian/Ubuntu
 sudo dnf install ./plex2jellyfin-*.x86_64.rpm     # Fedora
+```
+
+The package installs the binaries and systemd units but no configuration — the daemon exits (and restart-loops) until it has a config with watch directories. Configure before enabling anything:
+
+```bash
+# 1. Create the config as your normal user, then edit it
+plex2jellyfin config init
+$EDITOR ~/.config/plex2jellyfin/config.toml       # watch paths, library paths, *arr keys
+
+# 2. Verify paths and connections
+plex2jellyfin config test
+
+# 3. Tell the services which user's config to read
+sudo systemctl edit plex2jellyfin-daemon          # opens a drop-in; add the two lines below
+sudo systemctl edit plex2jellyfin-web
+```
+
+```ini
+[Service]
+Environment=SUDO_USER=<your username>
+```
+
+```bash
+# 4. Enable
 sudo systemctl enable --now plex2jellyfin-daemon plex2jellyfin-web
 ```
+
+The services run as root (the `[permissions]` chown feature needs `CAP_CHOWN`) and locate your config through `SUDO_USER`. The Quick Install script generates units with this set automatically; package installs set it once via the drop-in above.
 
 ### Build from Source
 
@@ -95,6 +95,28 @@ cd plex2jellyfin
 go build -o installer ./cmd/installer
 sudo ./installer
 ```
+
+## What It Does
+
+Plex papers over messy release names with fuzzy matching; Jellyfin takes your folders at face value. Point it at a Plex-era library and shows split into duplicate entries, seasons land under "Season Unknown", and movies show up titled `1080p.BluRay.x265`.
+
+**Migrate.** Point the CLI at the library Plex left behind:
+
+```bash
+plex2jellyfin scan                       # index everything into a local SQLite db
+plex2jellyfin status                     # see what you have and what's broken
+plex2jellyfin duplicates generate        # find the same content stored twice
+plex2jellyfin duplicates dry-run         # preview which copies would go
+plex2jellyfin duplicates execute         # keep the best copy, delete the rest
+plex2jellyfin consolidate generate       # find series scattered across drives
+plex2jellyfin consolidate execute        # merge each series onto one drive
+plex2jellyfin audit --generate           # AI rename proposals for the stragglers
+plex2jellyfin audit --execute            # apply approved fixes
+```
+
+**Guard.** After migration, `plex2jellyfin-daemon` watches your download directories: it parses `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv`, renames it to `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv`, moves it to the right drive, and notifies Jellyfin. A convergence loop re-checks the library on a schedule. Ambiguous filenames can go to an optional local LLM (Ollama) behind a confidence threshold; the regex parser handles the bulk without it.
+
+**Out of scope:** Plex server metadata. User accounts, watch states, ratings, and playlists stay behind. This tool migrates the files.
 
 ## CLI
 
