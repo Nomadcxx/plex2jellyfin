@@ -17,7 +17,6 @@ dist/
 vendor/
 
 # MkDocs build output
-site/
 
 # IDE
 .vscode/
@@ -34,7 +33,6 @@ Thumbs.db
 !config.example.toml
 !docker-compose.example.yml
 !.goreleaser.yaml
-!mkdocs.yml
 !.github/workflows/*.yml
 
 # Development documentation

@@ -8,7 +8,7 @@ Your Plex library, renamed the way Jellyfin wants it. Migrate the whole thing on
 
 ## Quick Links
 
-- [Full Documentation](https://nomadcxx.github.io/plex2jellyfin/) - Install guides, Docker walkthrough, migration guide, CLI and config reference
+- [Full Documentation](https://nomadcxx.github.io/plex2jellyfin/docs/) - Install guides, Docker walkthrough, migration guide, CLI and config reference
 
 ## Why
 
@@ -73,7 +73,7 @@ docker compose -f docker-compose.example.yml up -d
 
 `PUID`/`PGID` (linuxserver.io-style, default `1000:1000`) set the user everything runs as inside the container; `/config` is chowned to match on start. Set them to the UID/GID that should own files under `/library`.
 
-> The container runs as that non-root user, so the `[permissions]` chown feature has nothing to elevate to and is unavailable in-container. `PUID`/`PGID` replace it. Full details, including SELinux and rootless notes, in the [Docker guide](https://nomadcxx.github.io/plex2jellyfin/docker/).
+> The container runs as that non-root user, so the `[permissions]` chown feature has nothing to elevate to and is unavailable in-container. `PUID`/`PGID` replace it. The [Docker guide](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/docker/) covers SELinux and rootless setups.
 
 ### Pre-built Packages (Debian/Ubuntu/Fedora)
 
@@ -98,7 +98,7 @@ sudo ./installer
 
 ## CLI
 
-`plex2jellyfin --help` shows the primary workflows: `scan`, `status`, `duplicates`, `consolidate`, `audit`, `config`. The audit sends library kind (Movies vs TV), folder path, and current parse to your configured LLM; see [`docs/ai-context.md`](docs/ai-context.md).
+`plex2jellyfin --help` shows `scan`, `status`, `duplicates`, `consolidate`, `config`, and `version`. The hidden `audit` command sends library kind (Movies vs TV), folder path, and current parse to your configured LLM; see [`docs/ai-context.md`](docs/ai-context.md).
 
 <details>
 <summary><b>Advanced commands</b> (hidden from root help)</summary>
@@ -108,9 +108,9 @@ plex2jellyfin organize /downloads/file.mkv   # Organize a single file
 plex2jellyfin organize-folder /downloads/X   # Organize a directory tree
 plex2jellyfin watch /downloads               # Foreground watcher
 plex2jellyfin validate <path>                # Check library against Jellyfin naming rules
-plex2jellyfin cleanup                        # Remove cruft files / empty dirs
+plex2jellyfin cleanup {cruft|empty}          # Remove cruft files or empty dirs
 plex2jellyfin monitor                        # Tail daemon activity log
-plex2jellyfin daemon {start|stop|restart}    # Control the systemd service
+plex2jellyfin daemon {status|reload|stop}    # Control the running daemon
 plex2jellyfin repair series-dedupe           # Repair duplicate series rows
 plex2jellyfin postmortem collect --since 96h # Generate evidence bundle for review
 plex2jellyfin sonarr ...                     # Sonarr integration commands
@@ -155,7 +155,7 @@ The parser strips release-group noise (`1080p`, `x264`, `WEB-DL`, `RARBG`, `-YTS
 
 ## Configuration
 
-Config lives at `~/.config/plex2jellyfin/config.toml`. Annotated template: [`config.toml.example`](config.toml.example). Full reference in the [docs](https://nomadcxx.github.io/plex2jellyfin/configuration/).
+Config lives at `~/.config/plex2jellyfin/config.toml`. Annotated template: [`config.toml.example`](config.toml.example). See the [configuration reference](https://nomadcxx.github.io/plex2jellyfin/docs/reference/configuration/).
 
 ```toml
 [watch]

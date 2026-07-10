@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 
 const output = new URL('../out/', import.meta.url);
+const basePath = process.env.GITHUB_ACTIONS === 'true' ? '/plex2jellyfin' : '';
 const rootHtml = readFileSync(new URL('index.html', output), 'utf8');
 const docsHtml = readFileSync(new URL('docs/index.html', output), 'utf8');
 const articleHtml = readFileSync(new URL('docs/reference/configuration/index.html', output), 'utf8');
 const searchPath = new URL('api/search', output);
 
 assert.match(docsHtml, /brand\/p2j-mark\.png/, 'exported header is missing the P2J mark');
+assert.ok(
+  docsHtml.includes(`src="${basePath}/brand/p2j-mark.png"`),
+  'exported P2J mark is missing the deployment base path',
+);
 assert.doesNotMatch(docsHtml, /Toggle Theme|light theme/i, 'dark-only export contains a theme toggle');
 assert.match(
   docsHtml,
@@ -32,8 +37,11 @@ for (const route of [
   '/docs/reference/cli/',
   '/docs/troubleshooting/',
 ]) {
-  assert.ok(docsHtml.includes(`href="${route}"`), `docs home is missing ${route}`);
+  assert.ok(docsHtml.includes(`href="${basePath}${route}"`), `docs home is missing ${route}`);
 }
-assert.match(rootHtml, /url=\/docs\//, 'site root does not redirect to the documentation home');
+assert.ok(
+  rootHtml.includes(`url=${basePath}/docs/`),
+  'site root does not redirect to the documentation home',
+);
 
 console.log('export check passed');
