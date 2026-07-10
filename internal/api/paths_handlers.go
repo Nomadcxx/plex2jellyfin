@@ -13,13 +13,15 @@ import (
 )
 
 type PathsHandlers struct {
-	mu  sync.Mutex
+	mu  sync.RWMutex
+	Mu  *sync.RWMutex
 	Cfg *config.Config
 	IPC IPCCaller
 }
 
 type LibrariesHandlers struct {
-	mu  sync.Mutex
+	mu  sync.RWMutex
+	Mu  *sync.RWMutex
 	Cfg *config.Config
 	IPC IPCCaller
 }
@@ -33,24 +35,30 @@ type replacePathsBody struct {
 }
 
 func (h *PathsHandlers) Get(w http.ResponseWriter, r *http.Request) {
+	mu := h.mutex()
+	mu.RLock()
+	defer mu.RUnlock()
 	pathsHandlerGet(w, r, h.read)
 }
 
 func (h *PathsHandlers) Add(w http.ResponseWriter, r *http.Request) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.mutex()
+	mu.Lock()
+	defer mu.Unlock()
 	pathsHandlerAdd(w, r, h.read, h.write, h.persist)
 }
 
 func (h *PathsHandlers) Remove(w http.ResponseWriter, r *http.Request) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.mutex()
+	mu.Lock()
+	defer mu.Unlock()
 	pathsHandlerRemove(w, r, h.read, h.write, h.persist)
 }
 
 func (h *PathsHandlers) Replace(w http.ResponseWriter, r *http.Request) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.mutex()
+	mu.Lock()
+	defer mu.Unlock()
 	pathsHandlerReplace(w, r, h.write, h.persist)
 }
 
@@ -83,24 +91,30 @@ func (h *PathsHandlers) persist(ctx context.Context) error {
 }
 
 func (h *LibrariesHandlers) Get(w http.ResponseWriter, r *http.Request) {
+	mu := h.mutex()
+	mu.RLock()
+	defer mu.RUnlock()
 	pathsHandlerGet(w, r, h.read)
 }
 
 func (h *LibrariesHandlers) Add(w http.ResponseWriter, r *http.Request) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.mutex()
+	mu.Lock()
+	defer mu.Unlock()
 	pathsHandlerAdd(w, r, h.read, h.write, h.persist)
 }
 
 func (h *LibrariesHandlers) Remove(w http.ResponseWriter, r *http.Request) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.mutex()
+	mu.Lock()
+	defer mu.Unlock()
 	pathsHandlerRemove(w, r, h.read, h.write, h.persist)
 }
 
 func (h *LibrariesHandlers) Replace(w http.ResponseWriter, r *http.Request) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.mutex()
+	mu.Lock()
+	defer mu.Unlock()
 	pathsHandlerReplace(w, r, h.write, h.persist)
 }
 
@@ -237,3 +251,17 @@ func persistConfigAndReload(ctx context.Context, cfg *config.Config, ipcClient I
 }
 
 var errKindUnknown = errors.New("unknown kind (must be tv or movies)")
+
+func (h *PathsHandlers) mutex() *sync.RWMutex {
+	if h.Mu != nil {
+		return h.Mu
+	}
+	return &h.mu
+}
+
+func (h *LibrariesHandlers) mutex() *sync.RWMutex {
+	if h.Mu != nil {
+		return h.Mu
+	}
+	return &h.mu
+}

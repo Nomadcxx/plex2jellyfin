@@ -11,7 +11,8 @@ import (
 )
 
 type SettingsHandlers struct {
-	mu  sync.Mutex
+	mu  sync.RWMutex
+	Mu  *sync.RWMutex
 	Cfg *config.Config
 	IPC IPCCaller
 }
@@ -19,8 +20,9 @@ type SettingsHandlers struct {
 func (h *SettingsHandlers) Get(w http.ResponseWriter, r *http.Request) {
 	section := chi.URLParam(r, "section")
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.mutex()
+	mu.RLock()
+	defer mu.RUnlock()
 
 	raw, err := config.GetSection(h.Cfg, section)
 	if err != nil {
@@ -45,8 +47,9 @@ func (h *SettingsHandlers) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.mutex()
+	mu.Lock()
+	defer mu.Unlock()
 
 	current, err := config.Load()
 	if err != nil {
@@ -73,11 +76,26 @@ func (h *SettingsHandlers) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if resp.Reload.OK {
-		h.Cfg = current
+		h.replaceConfig(current)
 	} else if restored, err := config.Load(); err == nil {
-		h.Cfg = restored
+		h.replaceConfig(restored)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *SettingsHandlers) mutex() *sync.RWMutex {
+	if h.Mu != nil {
+		return h.Mu
+	}
+	return &h.mu
+}
+
+func (h *SettingsHandlers) replaceConfig(cfg *config.Config) {
+	if h.Cfg == nil {
+		h.Cfg = cfg
+		return
+	}
+	*h.Cfg = *cfg
 }
 
 func (h *SettingsHandlers) ValidRevealToken(token string) bool {

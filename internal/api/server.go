@@ -25,6 +25,7 @@ import (
 type Server struct {
 	db               *database.MediaDB
 	cfg              *config.Config
+	configMu         sync.RWMutex
 	service          *service.CleanupService
 	activityLogger   *activity.Logger
 	sessions         *SessionStore
@@ -229,9 +230,9 @@ func (s *Server) apiRouter() *chi.Mux {
 			r.Post("/verify-flagged", hkH.VerifyFlagged)
 		})
 
-		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc}
-		pathsH := &PathsHandlers{Cfg: s.cfg, IPC: s.ipc}
-		libsH := &LibrariesHandlers{Cfg: s.cfg, IPC: s.ipc}
+		settingsH := &SettingsHandlers{Cfg: s.cfg, IPC: s.ipc, Mu: &s.configMu}
+		pathsH := &PathsHandlers{Cfg: s.cfg, IPC: s.ipc, Mu: &s.configMu}
+		libsH := &LibrariesHandlers{Cfg: s.cfg, IPC: s.ipc, Mu: &s.configMu}
 		r.Route("/settings", func(r chi.Router) {
 			r.Get("/{section}", settingsH.Get)
 			r.Put("/{section}", settingsH.Put)

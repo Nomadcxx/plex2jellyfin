@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
@@ -26,6 +27,45 @@ func newPathsRouter(t *testing.T, cfg *config.Config) *chi.Mux {
 	r.Delete("/settings/paths/{kind}/{index}", h.Remove)
 	r.Put("/settings/paths/{kind}", h.Replace)
 	return r
+}
+
+func TestPathWritePreservesLatestSettingsChange(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SUDO_USER", "")
+	cfg := config.DefaultConfig()
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.RWMutex
+	ipcStub := &stubIPC{}
+	settings := &SettingsHandlers{Cfg: cfg, IPC: ipcStub, Mu: &mu}
+	paths := &PathsHandlers{Cfg: cfg, IPC: ipcStub, Mu: &mu}
+
+	r := chi.NewRouter()
+	r.Put("/settings/{section}", settings.Put)
+	r.Put("/settings/paths/{kind}", paths.Replace)
+
+	settingsBody := []byte(`{"level":"debug","file":"","max_size_mb":10,"max_backups":5,"max_age_days":0,"compress":false}`)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("PUT", "/settings/logging", bytes.NewReader(settingsBody)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("settings status %d body %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("PUT", "/settings/paths/tv", bytes.NewBufferString(`{"paths":["/watch/tv"]}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("paths status %d body %s", w.Code, w.Body.String())
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Logging.Level != "debug" || len(loaded.Watch.TV) != 1 || loaded.Watch.TV[0] != "/watch/tv" {
+		t.Fatalf("later path write lost settings change: logging=%q paths=%v", loaded.Logging.Level, loaded.Watch.TV)
+	}
 }
 
 func newLibrariesRouter(t *testing.T, cfg *config.Config) *chi.Mux {
