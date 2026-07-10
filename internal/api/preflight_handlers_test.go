@@ -27,6 +27,9 @@ func TestPreflightReportsExisting(t *testing.T) {
 	if !got.Readable {
 		t.Errorf("expected readable, got %+v", got)
 	}
+	if !got.Writable {
+		t.Errorf("expected writable watch directory, got %+v", got)
+	}
 }
 
 func TestPreflightReportsMissing(t *testing.T) {

@@ -5,12 +5,15 @@ import (
 	"net/http"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
-	"github.com/Nomadcxx/plex2jellyfin/internal/daemonctl"
 )
 
 type DaemonHandlers struct {
 	IPC      IPCCaller
-	Launcher *daemonctl.Launcher
+	Launcher DaemonLauncher
+}
+
+type DaemonLauncher interface {
+	Start() error
 }
 
 func (h *DaemonHandlers) Status(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +46,10 @@ func (h *DaemonHandlers) Reload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DaemonHandlers) Start(w http.ResponseWriter, r *http.Request) {
+	if h.Launcher == nil {
+		http.Error(w, "daemon launcher is unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if err := h.Launcher.Start(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -52,6 +59,10 @@ func (h *DaemonHandlers) Start(w http.ResponseWriter, r *http.Request) {
 
 func (h *DaemonHandlers) Restart(w http.ResponseWriter, r *http.Request) {
 	_, _ = h.IPC.Call(r.Context(), ipc.CmdStop, nil)
+	if h.Launcher == nil {
+		http.Error(w, "daemon launcher is unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if err := h.Launcher.Start(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

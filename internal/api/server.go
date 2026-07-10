@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/api"
 	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
-	"github.com/Nomadcxx/plex2jellyfin/internal/daemonctl"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
@@ -23,20 +23,22 @@ import (
 
 // Server implements the API
 type Server struct {
-	db               *database.MediaDB
-	cfg              *config.Config
-	configMu         sync.RWMutex
-	service          *service.CleanupService
-	activityLogger   *activity.Logger
-	sessions         *SessionStore
-	sessionOnce      sync.Once
-	loginLimiter     *loginRateLimiter
-	loginLimiterOnce sync.Once
-	playbackLocks    *jellyfin.PlaybackLockManager
-	deferredQueue    *jellyfin.DeferredQueue
-	pathTranslator   *jellyfin.PathTranslator
-	ipc              IPCCaller
-	launcher         *daemonctl.Launcher
+	db                *database.MediaDB
+	cfg               *config.Config
+	configMu          sync.RWMutex
+	service           *service.CleanupService
+	activityLogger    *activity.Logger
+	sessions          *SessionStore
+	sessionOnce       sync.Once
+	loginLimiter      *loginRateLimiter
+	loginLimiterOnce  sync.Once
+	playbackLocks     *jellyfin.PlaybackLockManager
+	deferredQueue     *jellyfin.DeferredQueue
+	pathTranslator    *jellyfin.PathTranslator
+	ipc               IPCCaller
+	launcher          DaemonLauncher
+	setupPollInterval time.Duration
+	setupTimeout      time.Duration
 }
 
 // NewServer creates a new API server
@@ -55,13 +57,15 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 	}
 
 	s := &Server{
-		db:             db,
-		cfg:            cfg,
-		service:        service.NewCleanupService(db),
-		activityLogger: activityLogger,
-		sessions:       sessions,
-		playbackLocks:  jellyfin.NewPlaybackLockManager(),
-		deferredQueue:  jellyfin.NewDeferredQueue(),
+		db:                db,
+		cfg:               cfg,
+		service:           service.NewCleanupService(db),
+		activityLogger:    activityLogger,
+		sessions:          sessions,
+		playbackLocks:     jellyfin.NewPlaybackLockManager(),
+		deferredQueue:     jellyfin.NewDeferredQueue(),
+		setupPollInterval: 100 * time.Millisecond,
+		setupTimeout:      5 * time.Second,
 	}
 	if cfg != nil {
 		mappings := make([]jellyfin.PathMapping, 0, len(cfg.Jellyfin.PathMappings))
@@ -77,7 +81,7 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 }
 
 // SetLauncher attaches a daemon Launcher used by /daemon/{start,restart} routes.
-func (s *Server) SetLauncher(l *daemonctl.Launcher) {
+func (s *Server) SetLauncher(l DaemonLauncher) {
 	s.launcher = l
 }
 
@@ -156,6 +160,8 @@ func (s *Server) apiRouter() *chi.Mux {
 	r.Post("/ai/test-prompt", s.TestAIPrompt)
 	r.Get("/ai/models", s.ListAIModels)
 	r.Put("/ai/settings", s.UpdateAISettings)
+	r.Get("/setup/status", s.GetSetupStatus)
+	r.Post("/setup/apply", s.ApplySetup)
 
 	if s.ipc != nil {
 		daemonH := &DaemonHandlers{IPC: s.ipc, Launcher: s.launcher}

@@ -95,6 +95,35 @@ export interface paths {
     /** Clear session cookie */
     post: operations["logout"];
   };
+  "/auth/setup": {
+    /**
+     * First-run setup - create the admin password
+     * @description Only permitted while no password is configured. Creates the password and logs the caller in.
+     */
+    post: operations["setupAuth"];
+  };
+  "/auth/password": {
+    /**
+     * Change the admin password
+     * @description Requires an authenticated session. Invalidates all other sessions.
+     */
+    post: operations["changePassword"];
+  };
+  "/setup/status": {
+    /** Get first-run setup state and masked draft */
+    get: operations["getSetupStatus"];
+  };
+  "/setup/apply": {
+    /** Validate and atomically apply first-run configuration */
+    post: operations["applySetup"];
+  };
+  "/files/trace": {
+    /**
+     * Per-file pipeline traces
+     * @description Recent parse decisions rendered as per-file journeys (detected, parsed, moved, Jellyfin-resolved), newest first. Mounted manually; response items mirror internal/api.TraceItem.
+     */
+    get: operations["getFileTrace"];
+  };
   "/jellyfin/verify": {
     /** Get Jellyfin verification status */
     get: operations["getJellyfinVerification"];
@@ -221,6 +250,62 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    SetupStatus: {
+      required: boolean;
+      complete: boolean;
+      daemon_state: string;
+      runtime: components["schemas"]["SetupRuntimeInfo"];
+      draft: components["schemas"]["SetupDraft"];
+    };
+    SetupRuntimeInfo: {
+      /** @enum {string} */
+      kind: "native" | "container";
+      uid: number;
+      gid: number;
+    };
+    SetupDraft: {
+      watch: components["schemas"]["SetupPaths"];
+      libraries: components["schemas"]["SetupPaths"];
+      sonarr: components["schemas"]["SetupService"];
+      radarr: components["schemas"]["SetupService"];
+      jellyfin: components["schemas"]["SetupJellyfin"];
+      ai: components["schemas"]["SetupAI"];
+      runtime: components["schemas"]["SetupRuntime"];
+    };
+    SetupPaths: {
+      tv: string[];
+      movies: string[];
+    };
+    SetupService: {
+      enabled: boolean;
+      url: string;
+      api_key: string;
+    };
+    SetupJellyfin: components["schemas"]["SetupService"] & {
+      path_mappings: components["schemas"]["SetupPathMapping"][];
+    };
+    SetupPathMapping: {
+      jellyfin: string;
+      daemon: string;
+    };
+    SetupAI: {
+      enabled: boolean;
+      endpoint: string;
+      primary_model: string;
+      fallback_model: string;
+    };
+    SetupRuntime: {
+      scan_frequency: string;
+      delete_source: boolean;
+      verify_checksums: boolean;
+      permissions: components["schemas"]["SetupPermissions"];
+    };
+    SetupPermissions: {
+      user: string;
+      group: string;
+      file_mode: string;
+      dir_mode: string;
+    };
     DashboardData: {
       libraryStats?: components["schemas"]["LibraryStats"];
       mediaManagers?: components["schemas"]["MediaManagerSummary"][];
@@ -826,6 +911,119 @@ export interface operations {
   logout: {
     responses: {
       /** @description Logged out */
+      200: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * First-run setup - create the admin password
+   * @description Only permitted while no password is configured. Creates the password and logs the caller in.
+   */
+  setupAuth: {
+    requestBody?: {
+      content: {
+        "application/json": {
+          password: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Password created, session issued */
+      200: {
+        content: never;
+      };
+      /** @description Password too short */
+      400: {
+        content: never;
+      };
+      /** @description Auth already configured */
+      409: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Change the admin password
+   * @description Requires an authenticated session. Invalidates all other sessions.
+   */
+  changePassword: {
+    requestBody?: {
+      content: {
+        "application/json": {
+          current_password: string;
+          new_password: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Password changed, fresh session issued */
+      200: {
+        content: never;
+      };
+      /** @description New password too short */
+      400: {
+        content: never;
+      };
+      /** @description Current password incorrect */
+      401: {
+        content: never;
+      };
+    };
+  };
+  /** Get first-run setup state and masked draft */
+  getSetupStatus: {
+    responses: {
+      /** @description Current setup state */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SetupStatus"];
+        };
+      };
+    };
+  };
+  /** Validate and atomically apply first-run configuration */
+  applySetup: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetupDraft"];
+      };
+    };
+    responses: {
+      /** @description Configuration applied and daemon ready */
+      200: {
+        content: {
+          "application/json": {
+            applied: boolean;
+            complete: boolean;
+            daemon_state: string;
+          };
+        };
+      };
+      /** @description Draft validation or path preflight failed */
+      422: {
+        content: never;
+      };
+      /** @description Configuration saved but daemon activation failed */
+      502: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Per-file pipeline traces
+   * @description Recent parse decisions rendered as per-file journeys (detected, parsed, moved, Jellyfin-resolved), newest first. Mounted manually; response items mirror internal/api.TraceItem.
+   */
+  getFileTrace: {
+    parameters: {
+      query?: {
+        /** @description Substring filter on the source path */
+        q?: string;
+        limit?: number;
+      };
+    };
+    responses: {
+      /** @description Trace items */
       200: {
         content: never;
       };

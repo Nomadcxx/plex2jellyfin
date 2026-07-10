@@ -485,6 +485,51 @@ paths:
         '401':
           description: Current password incorrect
 
+  # ============ FIRST-RUN SETUP ============
+  /setup/status:
+    get:
+      operationId: getSetupStatus
+      summary: Get first-run setup state and masked draft
+      tags: [Setup]
+      responses:
+        '200':
+          description: Current setup state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupStatus'
+
+  /setup/apply:
+    post:
+      operationId: applySetup
+      summary: Validate and atomically apply first-run configuration
+      tags: [Setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetupDraft'
+      responses:
+        '200':
+          description: Configuration applied and daemon ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [applied, complete, daemon_state]
+                properties:
+                  applied:
+                    type: boolean
+                  complete:
+                    type: boolean
+                  daemon_state:
+                    type: string
+        '422':
+          description: Draft validation or path preflight failed
+        '502':
+          description: Configuration saved but daemon activation failed
+
   /files/trace:
     get:
       operationId: getFileTrace
@@ -1024,6 +1069,135 @@ paths:
 
 components:
   schemas:
+    SetupStatus:
+      type: object
+      required: [required, complete, daemon_state, runtime, draft]
+      properties:
+        required:
+          type: boolean
+        complete:
+          type: boolean
+        daemon_state:
+          type: string
+        runtime:
+          $ref: '#/components/schemas/SetupRuntimeInfo'
+        draft:
+          $ref: '#/components/schemas/SetupDraft'
+
+    SetupRuntimeInfo:
+      type: object
+      required: [kind, uid, gid]
+      properties:
+        kind:
+          type: string
+          enum: [native, container]
+        uid:
+          type: integer
+        gid:
+          type: integer
+
+    SetupDraft:
+      type: object
+      required: [watch, libraries, sonarr, radarr, jellyfin, ai, runtime]
+      properties:
+        watch:
+          $ref: '#/components/schemas/SetupPaths'
+        libraries:
+          $ref: '#/components/schemas/SetupPaths'
+        sonarr:
+          $ref: '#/components/schemas/SetupService'
+        radarr:
+          $ref: '#/components/schemas/SetupService'
+        jellyfin:
+          $ref: '#/components/schemas/SetupJellyfin'
+        ai:
+          $ref: '#/components/schemas/SetupAI'
+        runtime:
+          $ref: '#/components/schemas/SetupRuntime'
+
+    SetupPaths:
+      type: object
+      required: [tv, movies]
+      properties:
+        tv:
+          type: array
+          items:
+            type: string
+        movies:
+          type: array
+          items:
+            type: string
+
+    SetupService:
+      type: object
+      required: [enabled, url, api_key]
+      properties:
+        enabled:
+          type: boolean
+        url:
+          type: string
+        api_key:
+          type: string
+
+    SetupJellyfin:
+      allOf:
+        - $ref: '#/components/schemas/SetupService'
+        - type: object
+          required: [path_mappings]
+          properties:
+            path_mappings:
+              type: array
+              items:
+                $ref: '#/components/schemas/SetupPathMapping'
+
+    SetupPathMapping:
+      type: object
+      required: [jellyfin, daemon]
+      properties:
+        jellyfin:
+          type: string
+        daemon:
+          type: string
+
+    SetupAI:
+      type: object
+      required: [enabled, endpoint, primary_model, fallback_model]
+      properties:
+        enabled:
+          type: boolean
+        endpoint:
+          type: string
+        primary_model:
+          type: string
+        fallback_model:
+          type: string
+
+    SetupRuntime:
+      type: object
+      required: [scan_frequency, delete_source, verify_checksums, permissions]
+      properties:
+        scan_frequency:
+          type: string
+        delete_source:
+          type: boolean
+        verify_checksums:
+          type: boolean
+        permissions:
+          $ref: '#/components/schemas/SetupPermissions'
+
+    SetupPermissions:
+      type: object
+      required: [user, group, file_mode, dir_mode]
+      properties:
+        user:
+          type: string
+        group:
+          type: string
+        file_mode:
+          type: string
+        dir_mode:
+          type: string
+
     # Dashboard
     DashboardData:
       type: object
