@@ -68,6 +68,38 @@ func TestPathWritePreservesLatestSettingsChange(t *testing.T) {
 	}
 }
 
+func TestPathWritePreservesLatestAIApply(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SUDO_USER", "")
+	cfg := config.DefaultConfig()
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(nil, cfg)
+	s.ipc = &stubIPC{}
+	r := s.Handler()
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("PUT", "/api/v1/ai/settings", bytes.NewBufferString(`{"primaryModel":"qwen:14b"}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("AI status %d body %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("PUT", "/api/v1/settings/paths/tv", bytes.NewBufferString(`{"paths":["/watch/tv"]}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("paths status %d body %s", w.Code, w.Body.String())
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.AI.Model != "qwen:14b" || len(loaded.Watch.TV) != 1 {
+		t.Fatalf("later path write lost AI change: model=%q paths=%v", loaded.AI.Model, loaded.Watch.TV)
+	}
+}
+
 func newLibrariesRouter(t *testing.T, cfg *config.Config) *chi.Mux {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())

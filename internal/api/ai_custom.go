@@ -37,6 +37,9 @@ func (s *Server) UpdateAISettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+
 	cfg, err := config.Load()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "config_load_error", fmt.Sprintf("Failed to load config: %v", err))
@@ -64,7 +67,7 @@ func (s *Server) UpdateAISettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.cfg = cfg
+	s.replaceConfigLocked(cfg)
 	writeJSON(w, http.StatusOK, currentAISettingsPayload(cfg))
 }
 
