@@ -153,7 +153,11 @@ func (s *Server) apiRouter() *chi.Mux {
 	r.Post("/paths/preflight", PreflightHandler{}.ServeHTTP)
 	testH := &TestHandlers{Cfg: s.cfg}
 	r.Post("/settings/sonarr/test", testH.Sonarr)
+	r.Post("/settings/sonarr/compatibility", testH.SonarrCompatibility)
+	r.Post("/settings/sonarr/compatibility/fix", testH.FixSonarrCompatibility)
 	r.Post("/settings/radarr/test", testH.Radarr)
+	r.Post("/settings/radarr/compatibility", testH.RadarrCompatibility)
+	r.Post("/settings/radarr/compatibility/fix", testH.FixRadarrCompatibility)
 	r.Post("/settings/jellyfin/test", testH.Jellyfin)
 	r.Post("/settings/jellystat/test", testH.Jellystat)
 	r.Post("/ai/test-connection", s.TestAIConnection)

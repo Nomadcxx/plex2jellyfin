@@ -117,6 +117,22 @@ export interface paths {
     /** Validate and atomically apply first-run configuration */
     post: operations["applySetup"];
   };
+  "/settings/sonarr/compatibility": {
+    /** Check Sonarr settings using unsaved credentials */
+    post: operations["checkSonarrCompatibility"];
+  };
+  "/settings/sonarr/compatibility/fix": {
+    /** Apply confirmed Sonarr compatibility fixes */
+    post: operations["fixSonarrCompatibility"];
+  };
+  "/settings/radarr/compatibility": {
+    /** Check Radarr settings using unsaved credentials */
+    post: operations["checkRadarrCompatibility"];
+  };
+  "/settings/radarr/compatibility/fix": {
+    /** Apply confirmed Radarr compatibility fixes */
+    post: operations["fixRadarrCompatibility"];
+  };
   "/files/trace": {
     /**
      * Per-file pipeline traces
@@ -305,6 +321,26 @@ export interface components {
       group: string;
       file_mode: string;
       dir_mode: string;
+    };
+    ConnectionTestRequest: {
+      url: string;
+      api_key: string;
+    };
+    CompatibilityResult: {
+      ok: boolean;
+      healthy: boolean;
+      issues: components["schemas"]["CompatibilityIssue"][];
+      fixed?: number;
+      error?: string;
+    };
+    CompatibilityIssue: {
+      service: string;
+      setting: string;
+      current: string;
+      expected: string;
+      /** @enum {string} */
+      severity: "critical" | "warning";
+      fix_cmd?: string;
     };
     DashboardData: {
       libraryStats?: components["schemas"]["LibraryStats"];
@@ -1007,6 +1043,70 @@ export interface operations {
       /** @description Configuration saved but daemon activation failed */
       502: {
         content: never;
+      };
+    };
+  };
+  /** Check Sonarr settings using unsaved credentials */
+  checkSonarrCompatibility: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionTestRequest"];
+      };
+    };
+    responses: {
+      /** @description Compatibility findings */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompatibilityResult"];
+        };
+      };
+    };
+  };
+  /** Apply confirmed Sonarr compatibility fixes */
+  fixSonarrCompatibility: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionTestRequest"];
+      };
+    };
+    responses: {
+      /** @description Fix result and remaining findings */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompatibilityResult"];
+        };
+      };
+    };
+  };
+  /** Check Radarr settings using unsaved credentials */
+  checkRadarrCompatibility: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionTestRequest"];
+      };
+    };
+    responses: {
+      /** @description Compatibility findings */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompatibilityResult"];
+        };
+      };
+    };
+  };
+  /** Apply confirmed Radarr compatibility fixes */
+  fixRadarrCompatibility: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionTestRequest"];
+      };
+    };
+    responses: {
+      /** @description Fix result and remaining findings */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompatibilityResult"];
+        };
       };
     };
   };

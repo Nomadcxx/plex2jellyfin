@@ -530,6 +530,82 @@ paths:
         '502':
           description: Configuration saved but daemon activation failed
 
+  /settings/sonarr/compatibility:
+    post:
+      operationId: checkSonarrCompatibility
+      summary: Check Sonarr settings using unsaved credentials
+      tags: [Setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionTestRequest'
+      responses:
+        '200':
+          description: Compatibility findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompatibilityResult'
+
+  /settings/sonarr/compatibility/fix:
+    post:
+      operationId: fixSonarrCompatibility
+      summary: Apply confirmed Sonarr compatibility fixes
+      tags: [Setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionTestRequest'
+      responses:
+        '200':
+          description: Fix result and remaining findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompatibilityResult'
+
+  /settings/radarr/compatibility:
+    post:
+      operationId: checkRadarrCompatibility
+      summary: Check Radarr settings using unsaved credentials
+      tags: [Setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionTestRequest'
+      responses:
+        '200':
+          description: Compatibility findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompatibilityResult'
+
+  /settings/radarr/compatibility/fix:
+    post:
+      operationId: fixRadarrCompatibility
+      summary: Apply confirmed Radarr compatibility fixes
+      tags: [Setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionTestRequest'
+      responses:
+        '200':
+          description: Fix result and remaining findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompatibilityResult'
+
   /files/trace:
     get:
       operationId: getFileTrace
@@ -1196,6 +1272,50 @@ components:
         file_mode:
           type: string
         dir_mode:
+          type: string
+
+    ConnectionTestRequest:
+      type: object
+      required: [url, api_key]
+      properties:
+        url:
+          type: string
+        api_key:
+          type: string
+
+    CompatibilityResult:
+      type: object
+      required: [ok, healthy, issues]
+      properties:
+        ok:
+          type: boolean
+        healthy:
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompatibilityIssue'
+        fixed:
+          type: integer
+        error:
+          type: string
+
+    CompatibilityIssue:
+      type: object
+      required: [service, setting, current, expected, severity]
+      properties:
+        service:
+          type: string
+        setting:
+          type: string
+        current:
+          type: string
+        expected:
+          type: string
+        severity:
+          type: string
+          enum: [critical, warning]
+        fix_cmd:
           type: string
 
     # Dashboard

@@ -10,12 +10,12 @@ import (
 
 // HealthIssue represents a detected configuration issue.
 type HealthIssue struct {
-	Service  string // "sonarr", "radarr"
-	Setting  string // "enableCompletedDownloadHandling", "renameEpisodes", etc.
-	Current  string // current value
-	Expected string // expected value
-	Severity string // "critical", "warning"
-	FixCmd   string // suggested fix command or empty
+	Service  string `json:"service"`  // "sonarr", "radarr"
+	Setting  string `json:"setting"`  // "enableCompletedDownloadHandling", "renameEpisodes", etc.
+	Current  string `json:"current"`  // current value
+	Expected string `json:"expected"` // expected value
+	Severity string `json:"severity"` // "critical", "warning"
+	FixCmd   string `json:"fix_cmd"`  // suggested fix command or empty
 }
 
 // HealthReport contains all detected health issues.

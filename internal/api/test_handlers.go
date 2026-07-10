@@ -7,8 +7,9 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
-	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellystat"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
@@ -20,6 +21,14 @@ type testResult struct {
 	OK      bool   `json:"ok"`
 	Version string `json:"version,omitempty"`
 	Error   string `json:"error,omitempty"`
+}
+
+type compatibilityResult struct {
+	OK      bool                  `json:"ok"`
+	Healthy bool                  `json:"healthy"`
+	Issues  []service.HealthIssue `json:"issues"`
+	Fixed   int                   `json:"fixed,omitempty"`
+	Error   string                `json:"error,omitempty"`
 }
 
 // connectionTestPayload mirrors the JSON the UI sends. Config structs use
@@ -113,4 +122,84 @@ func (h *TestHandlers) Jellystat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, testResult{OK: true})
+}
+
+func (h *TestHandlers) SonarrCompatibility(w http.ResponseWriter, r *http.Request) {
+	h.sonarrCompatibility(w, r, false)
+}
+
+func (h *TestHandlers) FixSonarrCompatibility(w http.ResponseWriter, r *http.Request) {
+	h.sonarrCompatibility(w, r, true)
+}
+
+func (h *TestHandlers) RadarrCompatibility(w http.ResponseWriter, r *http.Request) {
+	h.radarrCompatibility(w, r, false)
+}
+
+func (h *TestHandlers) FixRadarrCompatibility(w http.ResponseWriter, r *http.Request) {
+	h.radarrCompatibility(w, r, true)
+}
+
+func (h *TestHandlers) sonarrCompatibility(w http.ResponseWriter, r *http.Request, fix bool) {
+	p, err := decodeTestPayload(r)
+	if err != nil {
+		writeJSON(w, http.StatusOK, compatibilityResult{Error: err.Error()})
+		return
+	}
+	if h.Cfg != nil {
+		p.APIKey = h.resolveSecret(p.APIKey, h.Cfg.Sonarr.APIKey)
+	}
+	client := sonarr.NewClient(sonarr.Config{URL: p.URL, APIKey: p.APIKey, Timeout: 5 * time.Second})
+	issues, err := service.CheckSonarrConfig(client)
+	if err != nil {
+		writeJSON(w, http.StatusOK, compatibilityResult{Error: err.Error()})
+		return
+	}
+	fixed := 0
+	if fix && len(issues) > 0 {
+		changes, err := service.FixSonarrIssues(client, issues, false)
+		if err != nil {
+			writeJSON(w, http.StatusOK, compatibilityResult{Issues: issues, Fixed: len(changes), Error: err.Error()})
+			return
+		}
+		fixed = len(changes)
+		issues, err = service.CheckSonarrConfig(client)
+		if err != nil {
+			writeJSON(w, http.StatusOK, compatibilityResult{Fixed: fixed, Error: err.Error()})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, compatibilityResult{OK: true, Healthy: len(issues) == 0, Issues: issues, Fixed: fixed})
+}
+
+func (h *TestHandlers) radarrCompatibility(w http.ResponseWriter, r *http.Request, fix bool) {
+	p, err := decodeTestPayload(r)
+	if err != nil {
+		writeJSON(w, http.StatusOK, compatibilityResult{Error: err.Error()})
+		return
+	}
+	if h.Cfg != nil {
+		p.APIKey = h.resolveSecret(p.APIKey, h.Cfg.Radarr.APIKey)
+	}
+	client := radarr.NewClient(radarr.Config{URL: p.URL, APIKey: p.APIKey, Timeout: 5 * time.Second})
+	issues, err := service.CheckRadarrConfig(client)
+	if err != nil {
+		writeJSON(w, http.StatusOK, compatibilityResult{Error: err.Error()})
+		return
+	}
+	fixed := 0
+	if fix && len(issues) > 0 {
+		changes, err := service.FixRadarrIssues(client, issues, false)
+		if err != nil {
+			writeJSON(w, http.StatusOK, compatibilityResult{Issues: issues, Fixed: len(changes), Error: err.Error()})
+			return
+		}
+		fixed = len(changes)
+		issues, err = service.CheckRadarrConfig(client)
+		if err != nil {
+			writeJSON(w, http.StatusOK, compatibilityResult{Fixed: fixed, Error: err.Error()})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, compatibilityResult{OK: true, Healthy: len(issues) == 0, Issues: issues, Fixed: fixed})
 }
