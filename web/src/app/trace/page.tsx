@@ -149,7 +149,7 @@ export default function TracePage() {
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-3">
-              <div className="p-2.5 bg-sky-500/10 text-sky-400 rounded-xl">
+              <div className="p-2.5 bg-terminal-cyan/10 text-terminal-cyan rounded-md">
                 <Route className="h-6 w-6" />
               </div>
               File Trace
@@ -173,10 +173,10 @@ export default function TracePage() {
 
         {isLoading ? (
           <div className="space-y-4">
-            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-40 w-full rounded-xl" />)}
+            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-40 w-full rounded-md" />)}
           </div>
         ) : items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 bg-zinc-900/30 rounded-2xl border border-zinc-800/50 text-center">
+          <div className="flex flex-col items-center justify-center p-12 bg-zinc-900/30 rounded-lg border border-zinc-800/50 text-center">
             <h3 className="text-xl font-bold text-zinc-300">
               {query ? 'No files match that filter' : 'No pipeline activity yet'}
             </h3>

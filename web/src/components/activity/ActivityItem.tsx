@@ -38,7 +38,7 @@ const severityColors: Record<string, string> = {
   FILE_ORGANIZED: 'bg-green-500/10 text-green-400 border-green-500/30',
   FILE_DELETED: 'bg-red-500/10 text-red-400 border-red-500/30',
   DUPLICATE_FOUND: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
-  SYNC_COMPLETED: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+  SYNC_COMPLETED: 'bg-terminal-cyan/10 text-terminal-cyan border-terminal-cyan/30',
   ERROR: 'bg-red-500/10 text-red-400 border-red-500/30',
   AI_AUDIT: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30',
 };

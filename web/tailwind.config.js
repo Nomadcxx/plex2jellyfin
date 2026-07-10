@@ -16,7 +16,31 @@ module.exports = {
   		}
   	},
   	extend: {
-  		colors: {
+      fontFamily: {
+        mono: ['var(--font-plex-mono)', 'ui-monospace', 'SFMono-Regular', 'monospace']
+      },
+      colors: {
+        // Blue-graphite ramp shared with the docs site; overrides the
+        // neutral zinc scale so every existing zinc-* class re-tints.
+        zinc: {
+          950: '#0b0d0e',
+          900: '#12181a',
+          800: '#1f272a',
+          700: '#2a3236',
+          600: '#3f4b4f',
+          500: '#5c6b6f',
+          400: '#9aa4a6',
+          300: '#c2cbcd',
+          200: '#dfe4e4',
+          100: '#f2f4f3',
+          50: '#f7f9f9'
+        },
+        terminal: {
+          cyan: '#6fcfe0',
+          amber: '#d9a84e',
+          green: '#76b99f',
+          red: '#d47b72'
+        },
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))',
@@ -89,4 +113,3 @@ module.exports = {
   },
   plugins: [require("tailwindcss-animate")],
 }
-

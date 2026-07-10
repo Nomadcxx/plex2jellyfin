@@ -73,7 +73,7 @@ export default function QueuePage() {
                   className={
                     'px-3 py-1.5 rounded-md text-sm font-medium transition ' +
                     (isActive
-                      ? 'bg-fuchsia-500/15 text-fuchsia-300'
+                      ? 'bg-terminal-cyan/10 text-terminal-cyan'
                       : 'text-zinc-400 hover:text-zinc-200')
                   }
                 >

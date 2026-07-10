@@ -118,7 +118,7 @@ export default function OnboardingPage() {
       <div className="w-full max-w-3xl relative z-10 flex flex-col items-center">
         {/* Header */}
         <div className="text-center mb-12 animate-in slide-in-from-bottom-4 fade-in duration-500">
-          <div className="inline-flex items-center justify-center p-2 mb-4 rounded-xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700/50 shadow-xl">
+          <div className="inline-flex items-center justify-center p-2 mb-4 rounded-md bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700/50 shadow-xl">
             <Sparkles className="w-6 h-6 text-violet-400" />
           </div>
           <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-br from-white to-zinc-400 mb-3">
@@ -147,7 +147,7 @@ export default function OnboardingPage() {
                 <div key={step.id} className="relative z-10 flex flex-col items-center group">
                   <div
                     className={cn(
-                      "flex items-center justify-center w-12 h-12 rounded-xl border-2 transition-all duration-500 ease-in-out shadow-sm",
+                      "flex items-center justify-center w-12 h-12 rounded-md border-2 transition-all duration-500 ease-in-out shadow-sm",
                       isPast 
                         ? "bg-violet-500 border-violet-500 text-white shadow-violet-500/20" 
                         : isActive 
@@ -198,7 +198,7 @@ export default function OnboardingPage() {
                     step.accentColor.split(' ')[1]
                   )}>
                     <div className={cn(
-                      "p-6 rounded-2xl bg-zinc-950/50 shadow-inner backdrop-blur-sm border border-white/5",
+                      "p-6 rounded-lg bg-zinc-950/50 shadow-inner backdrop-blur-sm border border-white/5",
                       step.accentColor.split(' ')[2]
                     )}>
                       {step.icon}
@@ -224,7 +224,7 @@ export default function OnboardingPage() {
                           ) : (
                             <>
                               {scanComplete && (
-                                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-5 animate-in fade-in zoom-in-95 duration-300">
+                                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-md p-5 animate-in fade-in zoom-in-95 duration-300">
                                   <div className="flex items-center gap-3 text-emerald-400 mb-4">
                                     <CheckCircle2 className="h-6 w-6" />
                                     <span className="font-semibold">Library scan complete!</span>
@@ -253,7 +253,7 @@ export default function OnboardingPage() {
                               )}
 
                               {isScanning && (
-                                <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-5 space-y-4">
+                                <div className="bg-blue-500/5 border border-blue-500/10 rounded-md p-5 space-y-4">
                                   <div className="flex items-center justify-between text-blue-400">
                                     <div className="flex items-center gap-3">
                                       <RefreshCw className="h-5 w-5 animate-spin" />
@@ -267,7 +267,7 @@ export default function OnboardingPage() {
                               )}
 
                               {!scanComplete && !isScanning && (
-                                <div className="text-center py-6 bg-zinc-950/50 rounded-xl border border-zinc-800/50">
+                                <div className="text-center py-6 bg-zinc-950/50 rounded-md border border-zinc-800/50">
                                   <HardDrive className="h-10 w-10 text-zinc-600 mx-auto mb-4" />
                                   <p className="text-zinc-400 mb-6 max-w-xs mx-auto text-sm">
                                     Click the button below to start scanning your configured media libraries.
@@ -299,7 +299,7 @@ export default function OnboardingPage() {
                       
                       {step.id === 2 && (
                         <div className="space-y-6">
-                          <div className="bg-gradient-to-br from-zinc-800/50 to-zinc-900 rounded-xl p-6 border border-zinc-800">
+                          <div className="bg-gradient-to-br from-zinc-800/50 to-zinc-900 rounded-md p-6 border border-zinc-800">
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-zinc-400 font-medium">Duplicate Groups Found</span>
                               <span className="text-4xl font-bold text-white tracking-tight">
@@ -332,7 +332,7 @@ export default function OnboardingPage() {
                       
                       {step.id === 3 && (
                         <div className="space-y-6">
-                          <div className="bg-gradient-to-br from-zinc-800/50 to-zinc-900 rounded-xl p-6 border border-zinc-800">
+                          <div className="bg-gradient-to-br from-zinc-800/50 to-zinc-900 rounded-md p-6 border border-zinc-800">
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-zinc-400 font-medium">Scattered Series</span>
                               <span className="text-4xl font-bold text-white tracking-tight">

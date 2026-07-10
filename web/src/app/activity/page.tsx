@@ -65,7 +65,7 @@ export default function ActivityPage() {
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-3">
-              <div className="p-2.5 bg-fuchsia-500/10 text-fuchsia-400 rounded-xl">
+              <div className="p-2.5 bg-terminal-cyan/10 text-terminal-cyan rounded-md">
                 <Activity className="h-6 w-6" />
               </div>
               Activity Feed
@@ -86,7 +86,7 @@ export default function ActivityPage() {
 
         {/* Content Section */}
         {events.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 bg-zinc-900/30 rounded-2xl border border-zinc-800/50 text-center min-h-[400px]">
+          <div className="flex flex-col items-center justify-center p-12 bg-zinc-900/30 rounded-lg border border-zinc-800/50 text-center min-h-[400px]">
             <div className="h-48 w-48 mb-6 relative">
               <Image
                 src="/illustrations/empty-activity.svg"

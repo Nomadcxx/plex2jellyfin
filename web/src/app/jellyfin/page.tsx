@@ -103,7 +103,7 @@ const METADATA_STATE_STYLES: Record<MetadataState, string> = {
   jellyfin_item_missing: 'border-red-800 bg-red-950/40 text-red-300',
   path_mismatch: 'border-red-800 bg-red-950/40 text-red-300',
   recent_import_waiting: 'border-sky-800 bg-sky-950/40 text-sky-300',
-  needs_review: 'border-fuchsia-800 bg-fuchsia-950/40 text-fuchsia-300',
+  needs_review: 'border-terminal-cyan/40 bg-terminal-cyan/5 text-terminal-cyan',
 };
 
 function formatDateTime(value?: string) {

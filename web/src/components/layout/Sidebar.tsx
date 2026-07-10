@@ -23,26 +23,28 @@ export function Sidebar() {
     href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/');
 
   return (
-    <aside className="hidden w-64 bg-zinc-900 border-r border-zinc-800 h-screen p-4 md:block">
-      <div className="mb-8 flex items-center gap-3">
+    <aside className="hidden w-60 bg-zinc-950 border-r border-zinc-800 h-screen p-4 md:flex md:flex-col">
+      <div className="mb-8 flex items-center gap-3 px-1">
         <Image
-          src="/jellywooch.png"
-          alt="Plex2Jellyfin"
-          width={36}
-          height={36}
+          src="/plex2jellyfin_brand.png"
+          alt=""
+          width={32}
+          height={32}
           className="rounded"
         />
-        <h1 className="text-xl font-bold">Plex2Jellyfin</h1>
+        <h1 className="font-mono text-sm font-semibold tracking-tight text-zinc-100">
+          plex2jellyfin
+        </h1>
       </div>
-      <nav className="space-y-2">
+      <nav className="space-y-1">
         {navigation.map((item) => (
           <Link
             key={item.name}
             href={item.href}
             className={
               isActive(item.href)
-                ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-fuchsia-500/15 text-fuchsia-300 font-medium'
-                : 'flex items-center gap-3 px-3 py-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                ? 'flex items-center gap-3 border-l-2 border-terminal-cyan bg-zinc-900 px-3 py-2 font-mono text-[13px] text-terminal-cyan'
+                : 'flex items-center gap-3 border-l-2 border-transparent px-3 py-2 font-mono text-[13px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'
             }
             aria-current={isActive(item.href) ? 'page' : undefined}
           >
@@ -51,6 +53,9 @@ export function Sidebar() {
           </Link>
         ))}
       </nav>
+      <div className="mt-auto px-1 pb-1">
+        <p className="term-eyebrow">beta</p>
+      </div>
     </aside>
   );
 }
@@ -73,7 +78,7 @@ export function MobileNav() {
             href={item.href}
             className={
               isActive(item.href)
-                ? 'flex min-w-16 flex-col items-center gap-1 rounded-md bg-fuchsia-500/15 px-2 py-1.5 text-xs font-medium text-fuchsia-300'
+                ? 'flex min-w-16 flex-col items-center gap-1 rounded-md bg-zinc-900 px-2 py-1.5 text-xs font-medium text-terminal-cyan'
                 : 'flex min-w-16 flex-col items-center gap-1 rounded-md px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'
             }
             aria-current={isActive(item.href) ? 'page' : undefined}

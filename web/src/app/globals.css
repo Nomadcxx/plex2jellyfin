@@ -2,11 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Dark-only terminal theme shared with the docs site.
+   Base: #0b0d0e blue-graphite. Primary: #6fcfe0 cyan.
+   Eyebrow/accent: #d9a84e amber. */
 :root {
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
+  --background: 200 12% 5%;
+  --foreground: 165 8% 95%;
+  --card: 195 18% 9%;
+  --card-foreground: 165 8% 95%;
+  --popover: 195 18% 9%;
+  --popover-foreground: 165 8% 95%;
+  --primary: 189 65% 66%;
+  --primary-foreground: 200 12% 5%;
+  --secondary: 196 14% 12%;
+  --secondary-foreground: 165 8% 95%;
+  --muted: 196 14% 12%;
+  --muted-foreground: 190 6% 63%;
+  --accent: 196 14% 15%;
+  --accent-foreground: 165 8% 95%;
+  --destructive: 6 53% 64%;
+  --destructive-foreground: 200 12% 5%;
+  --border: 200 13% 19%;
+  --input: 200 13% 19%;
+  --ring: 189 65% 66%;
+  --radius: 0.375rem;
 }
 
 body {
   @apply bg-zinc-950 text-zinc-100;
+}
+
+/* Monospace micro-label, same voice as the docs site's QUICK START /
+   OPERATOR FLOW eyebrows. */
+.term-eyebrow {
+  @apply font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-terminal-amber;
+}
+
+::selection {
+  background: rgba(111, 207, 224, 0.28);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3236 transparent;
 }

@@ -202,7 +202,7 @@ function TaskProgress({ taskId, startedAt }: { taskId: number; startedAt?: strin
         <span className="font-mono w-10 text-right text-zinc-500">{pct}%</span>
       </div>
       <div className="flex items-center gap-2 text-[10px] text-zinc-500">
-        {phase && <span className="text-fuchsia-400">{phase}</span>}
+        {phase && <span className="text-terminal-cyan">{phase}</span>}
         {total > 0 && (
           <span>
             {current}/{total} MB
@@ -474,7 +474,7 @@ export default function SchedulerPage() {
     <AppShell>
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <Calendar className="h-6 w-6 text-fuchsia-300" />
+          <Calendar className="h-6 w-6 text-terminal-cyan" />
           <h1 className="text-2xl font-bold">Scheduler</h1>
         </div>
 
@@ -488,7 +488,7 @@ export default function SchedulerPage() {
                 key={s}
                 onClick={() => setStatusFilter(active ? '' : s)}
                 className={`cursor-pointer transition-colors ${
-                  active ? 'border-fuchsia-500/60 bg-fuchsia-950/20' : 'hover:border-zinc-700'
+                  active ? 'border-terminal-cyan/60 bg-terminal-cyan/5' : 'hover:border-zinc-700'
                 }`}
               >
                 <CardContent className="p-4">
@@ -652,8 +652,8 @@ export default function SchedulerPage() {
 
             {/* Bulk action bar (only when selection) */}
             {selectedIds.length > 0 && (
-              <div className="flex items-center gap-2 bg-zinc-900 border border-fuchsia-800/40 rounded px-3 py-2 text-sm">
-                <span className="text-fuchsia-300 font-medium">{selectedIds.length} selected</span>
+              <div className="flex items-center gap-2 bg-zinc-900 border border-terminal-cyan/30 rounded px-3 py-2 text-sm">
+                <span className="text-terminal-cyan font-medium">{selectedIds.length} selected</span>
                 <div className="flex-1" />
                 <Button
                   size="sm"
@@ -699,7 +699,7 @@ export default function SchedulerPage() {
                             filteredTasks.length > 0 && selected.size === filteredTasks.length
                           }
                           onChange={toggleAll}
-                          className="accent-fuchsia-500"
+                          className="accent-terminal-cyan"
                         />
                       </th>
                       <th className="p-2 text-left">ID</th>
@@ -740,7 +740,7 @@ export default function SchedulerPage() {
                         <tr
                           key={t.id}
                           className={`border-b border-zinc-900 hover:bg-zinc-900/40 ${
-                            isSelected ? 'bg-fuchsia-950/30' : ''
+                            isSelected ? 'bg-terminal-cyan/10' : ''
                           }`}
                         >
                           <td className="p-2">
@@ -748,12 +748,12 @@ export default function SchedulerPage() {
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => toggleOne(t.id)}
-                              className="accent-fuchsia-500"
+                              className="accent-terminal-cyan"
                             />
                           </td>
                           <td className="p-2 font-mono text-zinc-500">
                             <button
-                              className="hover:text-fuchsia-300"
+                              className="hover:text-terminal-cyan"
                               onClick={() => openDetail(t.id)}
                               title="View details"
                             >
@@ -773,7 +773,7 @@ export default function SchedulerPage() {
                             ) : (
                               <>
                                 {verification?.source && (
-                                  <span className="text-fuchsia-400">[{verification.source}] </span>
+                                  <span className="text-terminal-cyan">[{verification.source}] </span>
                                 )}
                                 {note}
                               </>
@@ -799,7 +799,7 @@ export default function SchedulerPage() {
                                 onClick={() => verifyTask(t.id)}
                                 title="Re-verify with TMDB"
                               >
-                                <Sparkles className="h-3 w-3 text-fuchsia-300" />
+                                <Sparkles className="h-3 w-3 text-terminal-cyan" />
                               </Button>
                             )}
                             {t.status === 'flagged' && (

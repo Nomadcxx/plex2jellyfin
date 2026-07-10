@@ -100,8 +100,8 @@ export default function ConsolidationPage() {
             <div className="h-8 w-48 bg-zinc-900 rounded animate-pulse" />
           </div>
           <div className="space-y-6">
-            <div className="h-64 bg-zinc-900/50 rounded-xl animate-pulse" />
-            <div className="h-64 bg-zinc-900/50 rounded-xl animate-pulse" />
+            <div className="h-64 bg-zinc-900/50 rounded-md animate-pulse" />
+            <div className="h-64 bg-zinc-900/50 rounded-md animate-pulse" />
           </div>
         </div>
       </AppShell>
@@ -111,7 +111,7 @@ export default function ConsolidationPage() {
   if (error) {
     return (
       <AppShell>
-        <div className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-xl max-w-5xl mx-auto">
+        <div className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-md max-w-5xl mx-auto">
           <h3 className="text-lg font-medium text-rose-400">Failed to load scattered series</h3>
           <p className="text-zinc-400 mt-1">Please try again later or check the server connection.</p>
         </div>
@@ -140,7 +140,7 @@ export default function ConsolidationPage() {
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-3">
-              <div className="p-2.5 bg-sky-500/10 text-sky-400 rounded-xl">
+              <div className="p-2.5 bg-terminal-cyan/10 text-terminal-cyan rounded-md">
                 <FolderSync className="h-6 w-6" />
               </div>
               Library Consolidation
@@ -166,7 +166,7 @@ export default function ConsolidationPage() {
         </div>
 
         {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 bg-zinc-900/30 rounded-2xl border border-zinc-800/50 text-center min-h-[400px]">
+          <div className="flex flex-col items-center justify-center p-12 bg-zinc-900/30 rounded-lg border border-zinc-800/50 text-center min-h-[400px]">
             <div className="h-48 w-48 mb-6 relative">
               <Image
                 src="/illustrations/empty-consolidation.svg"
