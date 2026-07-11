@@ -101,6 +101,7 @@ The primary CLI workflows are:
 	rootCmd.AddCommand(newPostmortemCmd())
 	rootCmd.AddCommand(newTraceCmd())
 	rootCmd.AddCommand(newSetupCmd())
+	rootCmd.AddCommand(newPluginCmd())
 	hideRootCommands(rootCmd,
 		"audit",
 		"cleanup",
