@@ -246,8 +246,8 @@ func TestGenerateConfigString_IncludesSetupMarker(t *testing.T) {
 	if !strings.Contains(configStr, fmt.Sprintf("version = %d", setuppkg.CurrentVersion)) {
 		t.Fatalf("expected setup version %d, got:\n%s", setuppkg.CurrentVersion, configStr)
 	}
-	if !strings.Contains(configStr, "completed = true") {
-		t.Fatalf("expected completed = true, got:\n%s", configStr)
+	if !strings.Contains(configStr, "completed = false") {
+		t.Fatalf("expected completed = false on initial write, got:\n%s", configStr)
 	}
 }
 
@@ -311,8 +311,8 @@ func TestGenerateConfigString_RoundTripsThroughConfigLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load() on generated config: %v", err)
 	}
-	if cfg.Setup.Version != setuppkg.CurrentVersion || !cfg.Setup.Completed {
-		t.Errorf("setup marker did not round-trip: %+v", cfg.Setup)
+	if cfg.Setup.Version != setuppkg.CurrentVersion || cfg.Setup.Completed {
+		t.Errorf("setup marker did not round-trip incomplete: %+v", cfg.Setup)
 	}
 	if !cfg.Jellyfin.PluginEnabled {
 		t.Error("plugin_enabled did not round-trip")

@@ -160,12 +160,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// After scan, run post-scan tasks (systemd setup, start service)
 		if len(m.postScanTasks) > 0 {
-			m.tasks = m.postScanTasks
-			m.postScanTasks = nil
-			m.currentTaskIndex = 0
-			m.tasks[0].status = statusRunning
-			m.step = stepInstalling
-			return m, executeTaskCmd(0, &m)
+			return m.beginPostScanTasks()
 		}
 
 		m.step = stepComplete
@@ -288,6 +283,12 @@ func (m model) handlePathsKeys(key string) (tea.Model, tea.Cmd) {
 		return m.removeWatchFolder()
 	case "enter":
 		m.savePathsInputs()
+		if err := m.mediaPathsError(); err != "" {
+			m.pathsError = err
+			m.pathOverlapWarning = ""
+			return m, nil
+		}
+		m.pathsError = ""
 		// Warn if watch paths overlap with library paths (allow override on second press)
 		if overlap := m.detectPathOverlap(); overlap != "" && m.pathOverlapWarning == "" {
 			m.pathOverlapWarning = overlap
@@ -299,6 +300,16 @@ func (m model) handlePathsKeys(key string) (tea.Model, tea.Cmd) {
 		return m.prevStep()
 	}
 	return m, nil
+}
+
+// beginPostScanTasks promotes systemd/listener tasks into the active queue.
+func (m model) beginPostScanTasks() (tea.Model, tea.Cmd) {
+	m.tasks = m.postScanTasks
+	m.postScanTasks = nil
+	m.currentTaskIndex = 0
+	m.tasks[0].status = statusRunning
+	m.step = stepInstalling
+	return m, executeTaskCmd(0, &m)
 }
 
 func (m model) handleSonarrKeys(key string) (tea.Model, tea.Cmd) {

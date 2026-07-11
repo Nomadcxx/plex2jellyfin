@@ -144,6 +144,11 @@ func (m model) renderPaths() string {
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Press Enter again to proceed anyway, or fix the paths above."))
 	}
+	if m.pathsError != "" {
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ff5555")).Render("⚠ "))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5555")).Render(m.pathsError))
+	}
 
 	return b.String()
 }
@@ -852,7 +857,15 @@ func (m model) renderComplete() string {
 		b.WriteString(border.Render("└─────────────────────────────────────────────────┘"))
 		b.WriteString("\n\n")
 	} else {
-		b.WriteString(muted.Render("Plex2Jellyfin is ready. The daemon is running and watching your configured directories."))
+		st := m.serviceState
+		switch {
+		case st != nil && st.daemonStarted:
+			b.WriteString(muted.Render("Plex2Jellyfin daemon started. It is watching your configured directories."))
+		case st != nil && st.daemonUnitWritten:
+			b.WriteString(muted.Render("Daemon unit installed but not started yet. Start it with the command below."))
+		default:
+			b.WriteString(muted.Render("Config written. Systemd units were not installed — check warnings below."))
+		}
 		b.WriteString("\n\n")
 	}
 
@@ -882,19 +895,32 @@ func (m model) renderComplete() string {
 
 	b.WriteString("\n")
 
-	// ── Web UI ────────────────────────────────────────────────────────────
-	b.WriteString(bold.Render("Web UI") + "\n\n")
-	b.WriteString("  " + cmd.Render("sudo systemctl start plex2jellyfin-web") + "  " + muted.Render("start the web interface") + "\n")
-	b.WriteString("  " + muted.Render("Then open ") + cmd.Render("http://localhost:5522") + muted.Render(" in your browser") + "\n")
-	b.WriteString("\n")
-	b.WriteString(muted.Render("  💡 Set a password in config.toml to enable authentication") + "\n")
+	// ── Services (only advertise units that were actually written) ────────
+	st := m.serviceState
+	b.WriteString(bold.Render("Services") + "\n\n")
+	if st != nil && st.daemonUnitWritten && !st.daemonStarted {
+		b.WriteString("  " + cmd.Render("sudo systemctl start plex2jellyfin-daemon") + "  " + muted.Render("start the daemon") + "\n")
+	}
+	if st != nil && st.webUnitWritten {
+		if !st.webStarted {
+			b.WriteString("  " + cmd.Render("sudo systemctl start plex2jellyfin-web") + "  " + muted.Render("start the web interface") + "\n")
+		}
+		port := normalizedWebPort(m.webPort)
+		b.WriteString("  " + muted.Render("Then open ") + cmd.Render("http://localhost:"+port) + muted.Render(" in your browser") + "\n")
+		b.WriteString("\n")
+		b.WriteString(muted.Render("  💡 Set a password in config.toml to enable authentication") + "\n")
+	} else if m.webEnabled {
+		b.WriteString(muted.Render("  Web UI was selected but the systemd unit was not installed.") + "\n")
+	}
 	b.WriteString("\n")
 
 	// ── Config paths ──────────────────────────────────────────────────────
 	pathStyle := muted.Italic(true)
 	b.WriteString(muted.Render("Config:   ") + pathStyle.Render("~/.config/plex2jellyfin/config.toml") + "\n")
 	b.WriteString(muted.Render("Database: ") + pathStyle.Render("~/.config/plex2jellyfin/media.db") + "\n")
-	b.WriteString(muted.Render("Logs:     ") + pathStyle.Render("journalctl -u plex2jellyfin-daemon -f") + "\n")
+	if st != nil && st.daemonUnitWritten {
+		b.WriteString(muted.Render("Logs:     ") + pathStyle.Render("journalctl -u plex2jellyfin-daemon -f") + "\n")
+	}
 	b.WriteString("\n")
 
 	if len(m.errors) > 0 {

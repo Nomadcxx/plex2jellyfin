@@ -176,6 +176,12 @@ type model struct {
 	callbackURLEdited bool   // user manually edited the callback URL field
 	pluginState       *pluginRunState
 
+	// Shared across bubbletea model copies (same rationale as pluginState).
+	serviceState *serviceRunState
+
+	// Paths-step validation message (media pair / overlap).
+	pathsError string
+
 	// Installation detection
 	existingDBDetected bool
 	existingDBPath     string
@@ -211,6 +217,16 @@ type pluginRunState struct {
 	loaded        bool   // plugin responded after install/restart
 	listenerReady bool   // selected local callback listener started successfully
 	outcome       string // "skipped", "needs-restart", "unverified", "failed", "verified"
+}
+
+// serviceRunState tracks what the install pipeline actually wrote/started so
+// the complete screen does not advertise units that were never installed.
+type serviceRunState struct {
+	daemonUnitWritten bool
+	webUnitWritten    bool
+	daemonStarted     bool
+	webStarted        bool
+	setupCompleted    bool
 }
 
 // ArrIssue represents a configuration issue found in Sonarr/Radarr.
