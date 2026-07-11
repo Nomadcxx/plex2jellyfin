@@ -314,6 +314,29 @@ func (m model) renderJellyfin() string {
 				b.WriteString(fmt.Sprintf("  %s Failed - %s\n", failMark.String(), m.jellyfinVersion))
 			}
 		}
+
+		if m.jellyfinPluginTogglesVisible() {
+			b.WriteString("\n")
+			installPrefix := "  "
+			if m.focusedInput == len(m.inputs)+1 {
+				installPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			}
+			b.WriteString(fmt.Sprintf("%sInstall companion plugin: %s\n", installPrefix, boolToYesNo(m.pluginInstall)))
+
+			restartPrefix := "  "
+			if m.focusedInput == len(m.inputs)+2 {
+				restartPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			}
+			b.WriteString(fmt.Sprintf("%sRestart Jellyfin after install: %s   %s\n",
+				restartPrefix, boolToYesNo(m.pluginRestart),
+				lipgloss.NewStyle().Foreground(FgMuted).Render("(recommended)")))
+
+			b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
+				"  The companion plugin closes the feedback loop: it confirms organized\n"+
+					"  files against real Jellyfin items and powers orphan detection. It only\n"+
+					"  loads after Jellyfin restarts - without a restart the daemon runs\n"+
+					"  degraded until you restart Jellyfin yourself.") + "\n")
+		}
 	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("[T] Test connection  [S] Skip"))

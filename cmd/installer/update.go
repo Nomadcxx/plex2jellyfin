@@ -348,19 +348,26 @@ func (m model) handleRadarrKeys(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// jellyfinPluginTogglesVisible reports whether the plugin consent rows render.
+// Consent is only meaningful against a server we actually reached.
+func (m model) jellyfinPluginTogglesVisible() bool {
+	return m.jellyfinEnabled && m.jellyfinTested
+}
+
 func (m model) handleJellyfinKeys(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "tab":
 		return m.nextJellyfinInput()
 	case "shift+tab":
 		return m.prevJellyfinInput()
-	case "up", "k":
-		if m.focusedInput == 0 {
+	case "up", "k", "down", "j":
+		switch {
+		case m.focusedInput == 0:
 			m.jellyfinEnabled = !m.jellyfinEnabled
-		}
-	case "down", "j":
-		if m.focusedInput == 0 {
-			m.jellyfinEnabled = !m.jellyfinEnabled
+		case m.jellyfinPluginTogglesVisible() && m.focusedInput == len(m.inputs)+1:
+			m.pluginInstall = !m.pluginInstall
+		case m.jellyfinPluginTogglesVisible() && m.focusedInput == len(m.inputs)+2:
+			m.pluginRestart = !m.pluginRestart
 		}
 	case "t", "T":
 		if m.jellyfinEnabled {
@@ -629,7 +636,10 @@ func (m model) prevInput() (tea.Model, tea.Cmd) {
 }
 
 func (m model) nextJellyfinInput() (tea.Model, tea.Cmd) {
-	total := len(m.inputs) + 1 // include "Enable" as focusable row 0
+	total := len(m.inputs) + 1 // "Enable" is focusable row 0
+	if m.jellyfinPluginTogglesVisible() {
+		total += 2 // install + restart toggle rows
+	}
 	if total <= 1 {
 		return m, nil
 	}
@@ -646,7 +656,10 @@ func (m model) nextJellyfinInput() (tea.Model, tea.Cmd) {
 }
 
 func (m model) prevJellyfinInput() (tea.Model, tea.Cmd) {
-	total := len(m.inputs) + 1 // include "Enable" as focusable row 0
+	total := len(m.inputs) + 1 // "Enable" is focusable row 0
+	if m.jellyfinPluginTogglesVisible() {
+		total += 2 // install + restart toggle rows
+	}
 	if total <= 1 {
 		return m, nil
 	}
