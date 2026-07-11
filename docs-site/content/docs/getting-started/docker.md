@@ -143,21 +143,31 @@ services:
    docker compose -f docker-compose.example.yml up -d
    ```
 
-5. On first start, `/config/.config/plex2jellyfin/config.toml` won't exist yet. Either bind-mount a pre-written `config.toml` into `/config/.config/plex2jellyfin/` before starting, or exec in and run `plex2jellyfin config init`:
+5. Open `http://<host>:5522/` and finish setup in the browser. On a fresh
+   `/config` volume the web UI walks you through everything — no exec, no
+   hand-written TOML:
 
-   ```bash
-   docker exec -it plex2jellyfin plex2jellyfin config init
-   docker exec -it plex2jellyfin vi /config/.config/plex2jellyfin/config.toml
-   docker restart plex2jellyfin
-   ```
+   1. create the admin password (first visit forces this);
+   2. the **setup wizard** at `/setup` collects watch and library paths
+      (use the *container* paths: `/watch/...`, `/library/...`), optional
+      Sonarr/Radarr/Jellyfin connections, optional Ollama, and runtime
+      behavior — every path is validated before you can continue;
+   3. **Review & activate** writes the config atomically and starts the
+      daemon; you land on the dashboard and can optionally kick off the
+      initial scan.
+
+   The wizard only appears while the install is unconfigured. Existing
+   configs (including ones written by hand on older releases) skip it.
+
+   > On releases older than the setup wizard, configure manually instead:
+   > `docker exec -it plex2jellyfin plex2jellyfin config init`, edit
+   > `/config/.config/plex2jellyfin/config.toml`, then restart.
 
 6. Check logs:
 
    ```bash
    docker logs -f plex2jellyfin
    ```
-
-7. Reach the dashboard at `http://<host>:5522/` (see [note](/docs) — the dashboard is a work in progress; prefer the CLI, run via `docker exec`, for anything destructive).
 
 ## Where config lives in the container
 

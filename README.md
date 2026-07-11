@@ -58,17 +58,10 @@ sudo apt install ./plex2jellyfin_*_amd64.deb      # Debian/Ubuntu
 sudo dnf install ./plex2jellyfin-*.x86_64.rpm     # Fedora
 ```
 
-The package installs the binaries and systemd units but no configuration — the daemon exits (and restart-loops) until it has a config with watch directories. Configure before enabling anything:
+The package installs binaries and systemd units but no configuration — the web UI's **setup wizard** handles that. Two steps on the host, the rest in the browser:
 
 ```bash
-# 1. Create the config as your normal user, then edit it
-plex2jellyfin config init
-$EDITOR ~/.config/plex2jellyfin/config.toml       # watch paths, library paths, *arr keys
-
-# 2. Verify paths and connections
-plex2jellyfin config test
-
-# 3. Tell the services which user's config to read
+# 1. Tell the services which user's config to read
 sudo systemctl edit plex2jellyfin-daemon          # opens a drop-in; add the two lines below
 sudo systemctl edit plex2jellyfin-web
 ```
@@ -79,9 +72,11 @@ Environment=SUDO_USER=<your username>
 ```
 
 ```bash
-# 4. Enable
+# 2. Enable (the daemon restart-loops until the wizard writes a config — expected)
 sudo systemctl enable --now plex2jellyfin-daemon plex2jellyfin-web
 ```
+
+Then open `http://<host>:5522/`: create the admin password, and the setup wizard collects watch/library paths, optional *arr / Jellyfin / Ollama connections, validates everything, writes the config atomically, and activates the daemon. Headless setups can still configure manually with `plex2jellyfin config init` + `config test` — see the [package walkthrough](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/packages/).
 
 The services run as root (the `[permissions]` chown feature needs `CAP_CHOWN`) and locate your config through `SUDO_USER`. The Quick Install script generates units with this set automatically; package installs set it once via the drop-in above.
 
