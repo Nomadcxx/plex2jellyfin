@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemonctl"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin/plugininstall"
 	"github.com/Nomadcxx/plex2jellyfin/internal/llm"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
@@ -44,6 +46,9 @@ type setupDeps struct {
 	activate      func(ctx context.Context) error
 	generateToken func() (string, error)
 	runtime       setupdomain.RuntimeInfo
+	pluginEngine  func(url, apiKey string) pluginEngine
+	advertiseIP   func() string
+	saveConfig    func(*config.Config) error
 }
 
 func defaultSetupDeps() setupDeps {
@@ -93,6 +98,11 @@ func defaultSetupDeps() setupDeps {
 		activate:      activateDaemonCLI,
 		generateToken: newSetupSecret,
 		runtime:       setupdomain.DetectRuntime(),
+		pluginEngine: func(url, apiKey string) pluginEngine {
+			return plugininstall.New(url, apiKey, &http.Client{Timeout: 15 * time.Second})
+		},
+		advertiseIP: setupdomain.DetectAdvertiseIP,
+		saveConfig:  func(c *config.Config) error { return c.Save() },
 	}
 }
 
@@ -297,6 +307,8 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 	draft.Jellyfin.URL = jellyfinDraft.URL
 	draft.Jellyfin.APIKey = jellyfinDraft.APIKey
 
+	pluginState := wizardPluginStep(ctx, p, stdout, deps, jellyfinDraft)
+
 	fmt.Fprintln(stdout, "\n— AI matching (optional) —")
 	if draft.AI.Enabled, err = p.askBool("Use a local Ollama instance for ambiguous filenames?", draft.AI.Enabled); err != nil {
 		return err
@@ -402,9 +414,106 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		return fmt.Errorf("mark setup complete: %w", err)
 	}
 
+	if pluginState.loaded {
+		fmt.Fprintln(stdout, "\n— Feedback loop —")
+		if deps.runtime.Kind == setupdomain.RuntimeContainer {
+			fmt.Fprintln(stdout, "plex2jellyfin runs in a container: Jellyfin most likely reaches it via")
+			fmt.Fprintln(stdout, "the Docker gateway IP (often 172.17.0.1) or a compose service name,")
+			fmt.Fprintln(stdout, "not the LAN IP suggested below.")
+		}
+		engine := deps.pluginEngine(candidate.Jellyfin.URL, candidate.Jellyfin.APIKey)
+		pd := pluginDeps{
+			loadConfig:  deps.loadConfig,
+			saveConfig:  deps.saveConfig,
+			newEngine:   func(string, string) pluginEngine { return engine },
+			advertiseIP: deps.advertiseIP,
+		}
+		if err := configureAndVerify(ctx, pd, candidate, engine, p, stdout); err != nil {
+			fmt.Fprintf(stdout, "  feedback-loop setup incomplete: %v\n", err)
+			fmt.Fprintln(stdout, "  finish it later with: plex2jellyfin plugin verify")
+		}
+	} else if pluginState.attempted {
+		fmt.Fprintln(stdout, "\nCompanion plugin: restart Jellyfin, then run: plex2jellyfin plugin verify")
+	} else if candidate.Jellyfin.Enabled && pluginState.skipped != "" && pluginState.skipped != "jellyfin disabled" {
+		fmt.Fprintln(stdout, "\nCompanion plugin not installed - run: plex2jellyfin plugin install")
+	}
+
 	fmt.Fprintln(stdout, "\nSetup complete. The daemon is running.")
 	fmt.Fprintln(stdout, "Next: open the web UI on :5522, or run 'plex2jellyfin scan' to index an existing library.")
 	return nil
+}
+
+// wizardPluginState carries what the Jellyfin-step plugin actions
+// accomplished into the post-activation feedback-loop step.
+type wizardPluginState struct {
+	attempted bool   // user said yes to installing
+	loaded    bool   // plugin responded after install(+restart)
+	skipped   string // non-empty: reason the step was skipped, for the summary
+}
+
+// wizardPluginStep runs install/restart (engine stages 1-4) inside the
+// Jellyfin step. Every failure degrades to a printed recovery command;
+// nothing here can abort the wizard.
+func wizardPluginStep(ctx context.Context, p *prompter, out io.Writer, deps setupDeps, jf setupdomain.ServiceDraft) wizardPluginState {
+	if !jf.Enabled {
+		return wizardPluginState{skipped: "jellyfin disabled"}
+	}
+	engine := deps.pluginEngine(jf.URL, jf.APIKey)
+	insp, err := engine.Inspect(ctx)
+	if err != nil {
+		fmt.Fprintf(out, "  skipping the companion plugin step (%v)\n", err)
+		fmt.Fprintln(out, "  install it later with: plex2jellyfin plugin install")
+		return wizardPluginState{skipped: "jellyfin unreachable"}
+	}
+	if !insp.ABISupported {
+		fmt.Fprintf(out, "  Jellyfin %s cannot load the companion plugin (needs 10.11.x); see the docs for manual options\n", insp.ServerVersion)
+		return wizardPluginState{skipped: "unsupported server"}
+	}
+	if insp.InstalledVersion != "" && insp.PluginResponding {
+		fmt.Fprintf(out, "  companion plugin %s already installed\n", insp.InstalledVersion)
+		return wizardPluginState{attempted: true, loaded: true}
+	}
+
+	fmt.Fprintln(out, "\nThe companion plugin is required for the feedback loop: it confirms")
+	fmt.Fprintln(out, "organized files against real Jellyfin items and powers orphan detection.")
+	install, err := p.askBool("Install it through Jellyfin's plugin system now?", true)
+	if err != nil || !install {
+		fmt.Fprintln(out, "  install it later with: plex2jellyfin plugin install")
+		return wizardPluginState{skipped: "declined"}
+	}
+
+	if added, err := engine.RegisterRepo(ctx); err != nil {
+		fmt.Fprintf(out, "  registering the plugin repository failed: %v\n", err)
+		fmt.Fprintln(out, "  retry later with: plex2jellyfin plugin install")
+		return wizardPluginState{skipped: "repository registration failed"}
+	} else if added {
+		fmt.Fprintln(out, "  plugin repository registered (existing repositories kept)")
+	}
+	if err := engine.Install(ctx); err != nil {
+		fmt.Fprintf(out, "  plugin install failed: %v\n", err)
+		fmt.Fprintln(out, "  retry later with: plex2jellyfin plugin install")
+		return wizardPluginState{skipped: "install failed"}
+	}
+	fmt.Fprintln(out, "  Jellyfin downloaded the plugin; a restart is needed before it loads")
+
+	restart, err := p.askBool("Restart Jellyfin now?", false)
+	if err != nil || !restart {
+		fmt.Fprintln(out, "  after restarting Jellyfin, run: plex2jellyfin plugin verify")
+		return wizardPluginState{attempted: true}
+	}
+	if err := engine.Restart(ctx); err != nil {
+		fmt.Fprintf(out, "  restart request failed: %v\n", err)
+		fmt.Fprintln(out, "  restart Jellyfin manually, then run: plex2jellyfin plugin verify")
+		return wizardPluginState{attempted: true}
+	}
+	fmt.Fprintln(out, "  restart requested, waiting for the plugin to come back…")
+	if err := engine.WaitReady(ctx, restartWaitTimeout); err != nil {
+		fmt.Fprintf(out, "  Jellyfin did not come back in time (%v)\n", err)
+		fmt.Fprintln(out, "  once it is up, run: plex2jellyfin plugin verify")
+		return wizardPluginState{attempted: true}
+	}
+	fmt.Fprintln(out, "  plugin loaded")
+	return wizardPluginState{attempted: true, loaded: true}
 }
 
 func promptService(p *prompter, name, defaultURL string, svc *setupdomain.ServiceDraft, test func(url, apiKey string) error) error {

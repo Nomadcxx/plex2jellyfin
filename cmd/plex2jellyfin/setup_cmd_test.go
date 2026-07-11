@@ -8,24 +8,30 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin/plugininstall"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 )
 
-func wizardTestDeps(t *testing.T) (setupDeps, *struct {
-	activated   bool
-	sonarrFixed bool
-}) {
+// wizardState is the mutable record scripted fakes write into so tests can
+// assert on what the wizard actually did.
+type wizardState struct {
+	activated        bool
+	sonarrFixed      bool
+	pluginInstalled  bool
+	pluginRestarted  bool
+	pluginConfigured []string
+}
+
+func wizardTestDeps(t *testing.T) (setupDeps, *wizardState) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("SUDO_USER", "")
 
-	state := &struct {
-		activated   bool
-		sonarrFixed bool
-	}{}
+	state := &wizardState{}
 
 	deps := setupDeps{
 		loadConfig: config.Load,
@@ -54,8 +60,63 @@ func wizardTestDeps(t *testing.T) (setupDeps, *struct {
 		},
 		generateToken: func() (string, error) { return "generated-secret", nil },
 		runtime:       setupdomain.RuntimeInfo{Kind: setupdomain.RuntimeNative, UID: 1000, GID: 1000},
+		pluginEngine: func(url, apiKey string) pluginEngine {
+			return &wizardFakeEngine{state: state}
+		},
+		advertiseIP: func() string { return "10.0.0.5" },
+		saveConfig:  func(c *config.Config) error { return c.Save() },
 	}
 	return deps, state
+}
+
+// wizardFakeEngine scripts the companion-plugin engine for wizard tests: it
+// records install/restart/configure calls into the shared wizardState.
+type wizardFakeEngine struct {
+	state *wizardState
+}
+
+func (w *wizardFakeEngine) Inspect(ctx context.Context) (*plugininstall.Inspection, error) {
+	return &plugininstall.Inspection{
+		ServerVersion:    "10.11.6",
+		ABISupported:     true,
+		InstalledVersion: "",
+		PluginResponding: w.state.pluginRestarted,
+	}, nil
+}
+func (w *wizardFakeEngine) RegisterRepo(ctx context.Context) (bool, error) { return true, nil }
+func (w *wizardFakeEngine) Install(ctx context.Context) error {
+	w.state.pluginInstalled = true
+	return nil
+}
+func (w *wizardFakeEngine) Restart(ctx context.Context) error {
+	w.state.pluginRestarted = true
+	return nil
+}
+func (w *wizardFakeEngine) WaitReady(ctx context.Context, d time.Duration) error { return nil }
+func (w *wizardFakeEngine) Configure(ctx context.Context, daemonURL, secret string) error {
+	w.state.pluginConfigured = []string{daemonURL, secret}
+	return nil
+}
+func (w *wizardFakeEngine) Verify(ctx context.Context) (*plugininstall.VerifyResult, error) {
+	return &plugininstall.VerifyResult{Sent: true, DaemonStatusCode: 200, Authenticated: true}, nil
+}
+
+// failingEngine makes every companion-plugin engine call fail, to prove the
+// wizard degrades to a printed recovery command instead of aborting setup.
+type failingEngine struct{}
+
+func (f *failingEngine) Inspect(ctx context.Context) (*plugininstall.Inspection, error) {
+	return nil, errors.New("jellyfin exploded")
+}
+func (f *failingEngine) RegisterRepo(ctx context.Context) (bool, error) { return false, errors.New("no") }
+func (f *failingEngine) Install(ctx context.Context) error              { return errors.New("no") }
+func (f *failingEngine) Restart(ctx context.Context) error              { return errors.New("no") }
+func (f *failingEngine) WaitReady(ctx context.Context, d time.Duration) error {
+	return errors.New("no")
+}
+func (f *failingEngine) Configure(ctx context.Context, u, s string) error { return errors.New("no") }
+func (f *failingEngine) Verify(ctx context.Context) (*plugininstall.VerifyResult, error) {
+	return nil, errors.New("no")
 }
 
 func runWizard(t *testing.T, deps setupDeps, answers []string) (string, error) {
@@ -81,12 +142,15 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 		"y",              // connect Jellyfin?
 		"",               // Jellyfin URL (default)
 		"jf-key",         // Jellyfin API key
+		"y",              // install companion plugin?
+		"y",              // restart Jellyfin?
 		"n",              // use Ollama?
 		"10m",            // scan frequency
 		"y",              // move files?
 		"n",              // verify checksums?
 		"",               // chown user (skip)
 		"y",              // confirm write
+		"",               // webhook URL (accept detected default)
 	}
 	out, err := runWizard(t, deps, answers)
 	if err != nil {
@@ -98,6 +162,14 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 	}
 	if !state.sonarrFixed {
 		t.Error("sonarr fix was confirmed but not applied")
+	}
+	if !state.pluginInstalled || !state.pluginRestarted {
+		t.Error("plugin was not installed+restarted during the Jellyfin step")
+	}
+	if len(state.pluginConfigured) != 2 ||
+		state.pluginConfigured[0] != "http://10.0.0.5:5522" ||
+		state.pluginConfigured[1] != "generated-secret" {
+		t.Errorf("plugin configure args: %v", state.pluginConfigured)
 	}
 
 	saved, err := config.Load()
@@ -118,6 +190,9 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 	}
 	if !saved.Jellyfin.Enabled || saved.Jellyfin.WebhookSecret != "generated-secret" {
 		t.Errorf("jellyfin webhook secret not generated: %+v", saved.Jellyfin)
+	}
+	if saved.Jellyfin.PluginDaemonURL != "http://10.0.0.5:5522" || !saved.Jellyfin.PluginEnabled {
+		t.Errorf("plugin daemon URL not persisted: %+v", saved.Jellyfin)
 	}
 	if saved.Daemon.ScanFrequency != "10m" || !saved.Options.DeleteSource {
 		t.Errorf("runtime settings not saved: %+v %+v", saved.Daemon, saved.Options)
@@ -200,5 +275,70 @@ func TestSetupWizardRejectsHalfConfiguredMedia(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".config", "plex2jellyfin", "config.toml")); !os.IsNotExist(err) {
 		t.Error("config was written despite invalid draft")
+	}
+}
+
+func TestSetupWizardDeclinedPluginRestartStillCompletesSetup(t *testing.T) {
+	deps, state := wizardTestDeps(t)
+
+	answers := []string{
+		"/downloads/tv", "/media/tv", "", "",
+		"n", "n", // sonarr, radarr off
+		"y", "", "jf-key", // jellyfin
+		"y",            // install plugin?
+		"n",            // restart Jellyfin? (declined)
+		"n",            // no ollama
+		"5m", "n", "n", // runtime
+		"",  // chown skip
+		"y", // confirm
+	}
+	out, err := runWizard(t, deps, answers)
+	if err != nil {
+		t.Fatalf("wizard error: %v\n---\n%s", err, out)
+	}
+	if state.pluginRestarted {
+		t.Error("restarted Jellyfin without consent")
+	}
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !saved.Setup.Completed {
+		t.Error("setup must complete regardless of the plugin step")
+	}
+	if !strings.Contains(out, "plex2jellyfin plugin verify") {
+		t.Errorf("expected recovery pointer in output:\n%s", out)
+	}
+}
+
+func TestSetupWizardPluginFailureDoesNotFailSetup(t *testing.T) {
+	deps, state := wizardTestDeps(t)
+	deps.pluginEngine = func(url, apiKey string) pluginEngine {
+		return &failingEngine{}
+	}
+
+	answers := []string{
+		"/downloads/tv", "/media/tv", "", "",
+		"n", "n",
+		"y", "", "jf-key",
+		"n",            // no ollama
+		"5m", "n", "n", // runtime
+		"",
+		"y",
+	}
+	out, err := runWizard(t, deps, answers)
+	if err != nil {
+		t.Fatalf("plugin failure must not fail setup: %v\n%s", err, out)
+	}
+	_ = state
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !saved.Setup.Completed {
+		t.Error("setup must complete when the plugin step errors")
+	}
+	if !strings.Contains(out, "plex2jellyfin plugin install") {
+		t.Errorf("expected install recovery pointer:\n%s", out)
 	}
 }
