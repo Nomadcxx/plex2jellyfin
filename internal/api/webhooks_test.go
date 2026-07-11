@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
@@ -323,6 +324,49 @@ func TestWebhookNestedPayload(t *testing.T) {
 	}
 	if event.ItemType != "Movie" {
 		t.Errorf("expected ItemType=Movie, got %s", event.ItemType)
+	}
+}
+
+func TestWebhookTestNotificationIsLoggedAndAccepted(t *testing.T) {
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	if err != nil {
+		t.Fatalf("activity.NewLogger() failed: %v", err)
+	}
+	defer activityLogger.Close()
+
+	s := &Server{
+		cfg: &config.Config{
+			Jellyfin: config.JellyfinConfig{WebhookSecret: "test-secret"},
+		},
+		activityLogger: activityLogger,
+		playbackLocks:  jellyfin.NewPlaybackLockManager(),
+		deferredQueue:  jellyfin.NewDeferredQueue(),
+	}
+
+	body := `{"NotificationType":"TestNotification","Timestamp":"2026-07-11T00:00:00Z"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(body))
+	req.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "test-secret")
+	w := httptest.NewRecorder()
+
+	s.HandleJellyfinWebhook(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	entries, err := activityLogger.GetRecentEntries(10)
+	if err != nil {
+		t.Fatalf("GetRecentEntries() failed: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.Action == "jellyfin_test_event" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a jellyfin_test_event activity entry, got entries: %+v", entries)
 	}
 }
 

@@ -43,6 +43,8 @@ func (s *Server) HandleJellyfinWebhook(w http.ResponseWriter, r *http.Request) {
 		s.handleTaskCompleted(event)
 	case jellyfin.EventLibraryChanged:
 		s.handleLibraryChanged(event)
+	case jellyfin.EventTestNotification:
+		s.logJellyfinActivity("jellyfin_test_event", "companion plugin", "", true, "")
 	default:
 		// Unknown events are intentionally accepted to avoid plugin retries.
 	}

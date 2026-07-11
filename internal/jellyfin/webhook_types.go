@@ -33,13 +33,14 @@ type WebhookEvent struct {
 }
 
 const (
-	EventItemAdded      = "ItemAdded"
-	EventItemUpdated    = "ItemUpdated"
-	EventItemRemoved    = "ItemRemoved"
-	EventPlaybackStart  = "PlaybackStart"
-	EventPlaybackStop   = "PlaybackStop"
-	EventLibraryChanged = "LibraryChanged"
-	EventTaskCompleted  = "TaskCompleted"
+	EventItemAdded        = "ItemAdded"
+	EventItemUpdated      = "ItemUpdated"
+	EventItemRemoved      = "ItemRemoved"
+	EventPlaybackStart    = "PlaybackStart"
+	EventPlaybackStop     = "PlaybackStop"
+	EventLibraryChanged   = "LibraryChanged"
+	EventTaskCompleted    = "TaskCompleted"
+	EventTestNotification = "TestNotification"
 )
 
 // UnmarshalJSON normalizes both the flat Jellyfin Webhook plugin format and the
