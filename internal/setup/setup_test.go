@@ -30,6 +30,83 @@ func TestNeedsSetupState(t *testing.T) {
 	}
 }
 
+func TestAdoptLegacyCompletion(t *testing.T) {
+	tests := []struct {
+		name        string
+		cfg         *config.Config
+		wantAdopted bool
+	}{
+		{name: "legacy complete adopts", cfg: configWithPaths([]string{"/watch/tv"}, []string{"/library/tv"}, nil, nil), wantAdopted: true},
+		{name: "legacy incomplete untouched", cfg: configWithPaths([]string{"/watch/tv"}, nil, nil, nil), wantAdopted: false},
+		{name: "blank untouched", cfg: config.DefaultConfig(), wantAdopted: false},
+		{name: "versioned complete untouched", cfg: versionedConfig(true), wantAdopted: false},
+		{name: "versioned incomplete untouched", cfg: versionedConfig(false), wantAdopted: false},
+		{name: "nil untouched", cfg: nil, wantAdopted: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var beforeVersion int
+			var beforeCompleted bool
+			if tt.cfg != nil {
+				beforeVersion = tt.cfg.Setup.Version
+				beforeCompleted = tt.cfg.Setup.Completed
+			}
+
+			if got := AdoptLegacyCompletion(tt.cfg); got != tt.wantAdopted {
+				t.Fatalf("AdoptLegacyCompletion() = %v, want %v", got, tt.wantAdopted)
+			}
+
+			if tt.cfg == nil {
+				return
+			}
+			if tt.wantAdopted {
+				if tt.cfg.Setup.Version != CurrentVersion || !tt.cfg.Setup.Completed {
+					t.Fatalf("adopted config not stamped: %+v", tt.cfg.Setup)
+				}
+				if NeedsSetup(tt.cfg) {
+					t.Fatal("adopted config must not need setup")
+				}
+			} else if tt.cfg.Setup.Version != beforeVersion || tt.cfg.Setup.Completed != beforeCompleted {
+				t.Fatalf("non-adopted config was mutated: %+v", tt.cfg.Setup)
+			}
+		})
+	}
+}
+
+// The stamp must survive a real Save/Load cycle - this is what protects a
+// legacy user whose config paths are later hand-edited (the heuristic would
+// flip, the explicit marker must not).
+func TestAdoptLegacyCompletionPersistsThroughSaveLoad(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", tmp+"/.config")
+	t.Setenv("SUDO_USER", "")
+
+	cfg := configWithPaths([]string{"/watch/tv"}, []string{"/library/tv"}, nil, nil)
+	if !AdoptLegacyCompletion(cfg) {
+		t.Fatal("expected adoption")
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save adopted config: %v", err)
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("reload adopted config: %v", err)
+	}
+	if loaded.Setup.Version != CurrentVersion || !loaded.Setup.Completed {
+		t.Fatalf("marker did not survive round-trip: %+v", loaded.Setup)
+	}
+
+	// The heuristic-breaking edit: wipe the media pair. Explicit marker wins.
+	loaded.Watch.TV = nil
+	loaded.Libraries.TV = nil
+	if NeedsSetup(loaded) {
+		t.Fatal("explicit marker must keep setup complete after path edits")
+	}
+}
+
 func TestValidateDraftAllowsEitherCompleteMediaType(t *testing.T) {
 	for _, draft := range []Draft{
 		validDraft([]string{"/watch/tv"}, []string{"/library/tv"}, nil, nil),
