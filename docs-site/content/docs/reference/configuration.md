@@ -11,6 +11,23 @@ A fully annotated template ships as [`config.toml.example`](https://github.com/N
 plex2jellyfin config init
 ```
 
+## `[setup]`
+
+Setup completion state. Wizards write this block; you normally do not edit it.
+
+| Key | Type | Description |
+|---|---|---|
+| `version` | int | Setup schema version written by the completing wizard. |
+| `completed` | bool | `true` after the CLI wizard, web wizard, or TUI installer finishes. The web UI then skips guided setup and only asks you to create a password. |
+
+Completing setup through any wizard completes it for every surface. The web
+server adopts older configured installs that predate this block and saves the
+marker on startup.
+
+To run the web guided setup again, set `completed = false` and restart
+`plex2jellyfin-web`. The CLI wizard asks for confirmation before it re-runs on
+a configured install.
+
 ## `[watch]`
 
 Directories to watch for new media files — typically where Sonarr/Radarr/download clients drop completed downloads.
@@ -159,26 +176,6 @@ daemon   = "/mnt/STORAGE2/MOVIES"
 ```
 
 Mappings apply longest-prefix first. **Without these, the sweeper labels parse-decision rows for organized files as FAIL** once it can no longer correlate a Jellyfin item with a daemon-known path — this is the single most common misconfiguration when both Jellyfin and Plex2Jellyfin run in containers with different mount layouts.
-
-## `[setup]`
-
-Written by the web setup wizard; you normally never edit it.
-
-```toml
-[setup]
-version   = 1
-completed = true
-```
-
-| Key | Meaning |
-|---|---|
-| `version = 1, completed = true` | Setup finished; the dashboard is available. |
-| `version = 1, completed = false` | A wizard activation was interrupted or failed — the web UI returns to the wizard's Review step. |
-| absent (`version 0`) | A config written before the wizard existed. Treated as configured when it contains at least one complete incoming/library pair, so upgrades never force existing installs through setup. |
-
-Deleting the whole `[setup]` block (and keeping a valid config) is safe;
-deleting your `[watch]`/`[libraries]` sections as well sends the next web
-visit back through the wizard.
 
 ## Full example
 
