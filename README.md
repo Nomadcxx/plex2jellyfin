@@ -93,16 +93,19 @@ sudo ./installer
 
 ### Jellyfin Plugin — install this too
 
-The companion plugin ([`plugin/`](plugin/)) is **not optional** if you want
-the feedback loop: it forwards item-added/updated/removed and playback
-events from Jellyfin back to plex2jellyfin, which is how organized files
-get confirmed against real Jellyfin items (and how orphan detection
-works). Without it, plex2jellyfin can move files but never sees whether
-Jellyfin actually recognized them.
+The companion plugin ([Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcxx/plex2jellyfin-plugin))
+is **not optional** if you want the feedback loop: it forwards
+item-added/updated/removed and playback events from Jellyfin back to
+plex2jellyfin, which is how organized files get confirmed against real
+Jellyfin items (and how orphan detection works). Without it,
+plex2jellyfin can move files but never sees whether Jellyfin actually
+recognized them.
 
 ```bash
-./plugin/build.sh
-./plugin/install.sh /var/lib/jellyfin/plugins/Plex2Jellyfin   # path varies by install
+git clone https://github.com/Nomadcxx/plex2jellyfin-plugin.git
+cd plex2jellyfin-plugin
+./build.sh
+./install.sh /var/lib/jellyfin/plugins/Plex2Jellyfin   # path varies by install
 sudo systemctl restart jellyfin
 ```
 

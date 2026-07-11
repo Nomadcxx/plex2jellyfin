@@ -3,7 +3,9 @@ title: Jellyfin Plugin
 description: The companion plugin is required for the feedback loop - install it into Jellyfin.
 ---
 
-Plex2Jellyfin ships a companion Jellyfin plugin, and it is **not optional**
+Plex2Jellyfin has a companion Jellyfin plugin, developed in its own
+repository at [Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcxx/plex2jellyfin-plugin),
+and it is **not optional**
 if you want the full pipeline: the plugin forwards item-added / updated /
 removed and playback events from Jellyfin back to plex2jellyfin. That's how
 an organized file gets *confirmed* against a real Jellyfin item (with its
@@ -19,11 +21,11 @@ learns whether Jellyfin recognized them.
 
 ## Build and install
 
-From the plex2jellyfin repo root:
-
 ```bash
-./plugin/build.sh
-./plugin/install.sh /var/lib/jellyfin/plugins/Plex2Jellyfin
+git clone https://github.com/Nomadcxx/plex2jellyfin-plugin.git
+cd plex2jellyfin-plugin
+./build.sh
+./install.sh /var/lib/jellyfin/plugins/Plex2Jellyfin
 sudo systemctl restart jellyfin
 ```
 
