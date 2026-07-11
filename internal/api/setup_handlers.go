@@ -192,3 +192,9 @@ func cloneConfig(cfg *config.Config) *config.Config {
 	copy := *cfg
 	return &copy
 }
+
+// ValidateSetupPaths exposes the setup path preflight for reuse outside the
+// HTTP layer (the CLI wizard shares it).
+func ValidateSetupPaths(draft setupdomain.Draft) []setupdomain.FieldError {
+	return validateSetupPaths(draft)
+}
