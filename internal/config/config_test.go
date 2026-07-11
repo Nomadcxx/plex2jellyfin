@@ -246,3 +246,23 @@ func TestConfigToTOMLRoundTripsSetupMetadataAndPathMappings(t *testing.T) {
 		t.Fatalf("unexpected first path mapping: %+v", got)
 	}
 }
+
+func TestPluginDaemonURLSurvivesRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SUDO_USER", "")
+
+	cfg := DefaultConfig()
+	cfg.Jellyfin.Enabled = true
+	cfg.Jellyfin.PluginDaemonURL = "http://192.168.1.20:5522"
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Jellyfin.PluginDaemonURL != "http://192.168.1.20:5522" {
+		t.Fatalf("plugin_daemon_url lost on reload: %q", loaded.Jellyfin.PluginDaemonURL)
+	}
+}

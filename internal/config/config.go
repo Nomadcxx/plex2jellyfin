@@ -270,6 +270,11 @@ type JellyfinConfig struct {
 	PluginAutoScan        bool   `mapstructure:"plugin_auto_scan"`
 	PluginVerifyOnStartup bool   `mapstructure:"plugin_verify_on_startup"`
 	PluginVerifyInterval  int    `mapstructure:"plugin_verify_interval"`
+	// PluginDaemonURL is the base URL Jellyfin's companion plugin calls
+	// back to (the plugin appends /api/v1/webhooks/jellyfin). From
+	// Jellyfin's point of view, so never localhost when either side is
+	// containerized.
+	PluginDaemonURL string `mapstructure:"plugin_daemon_url"`
 	// PathMappings translates between Jellyfin's view of a media file
 	// (as seen inside its container/bind mount) and the daemon's view
 	// (host filesystem). Without these, the sweeper and webhook handler
@@ -622,6 +627,10 @@ plugin_auto_scan = %v
 plugin_verify_on_startup = %v
 # Hours between automatic verifications (0 = disabled)
 plugin_verify_interval = %d
+# Base URL Jellyfin's companion plugin calls back to (the plugin appends
+# /api/v1/webhooks/jellyfin). From Jellyfin's point of view, so never
+# localhost when either side is containerized.
+plugin_daemon_url = "%s"
 
 # ============================================================================
 # METADATA RECOVERY
@@ -724,6 +733,7 @@ allowed_origins = %s
 		c.Jellyfin.PluginAutoScan,
 		c.Jellyfin.PluginVerifyOnStartup,
 		c.Jellyfin.PluginVerifyInterval,
+		c.Jellyfin.PluginDaemonURL,
 		c.MetadataRecovery.PassiveEnabled,
 		c.MetadataRecovery.RepairEnabled,
 		c.MetadataRecovery.PassiveIntervalMinutes,
