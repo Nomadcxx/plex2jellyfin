@@ -548,6 +548,17 @@ func (m model) renderWebService() string {
 	}
 	b.WriteString(fmt.Sprintf("%sPort:          %s\n", portPrefix, portValue))
 
+	if len(m.inputs) >= 2 {
+		urlPrefix := "  "
+		if m.focusedInput == 3 {
+			urlPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		b.WriteString(fmt.Sprintf("%sPlugin callback URL: %s\n", urlPrefix, m.inputs[1].View()))
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
+			"  Where Jellyfin's companion plugin posts events back to this machine.\n"+
+				"  Never localhost when Jellyfin runs in a container.") + "\n")
+	}
+
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
 		"If enabled, installs plex2jellyfin-web systemd service and listens on the selected port"))
 

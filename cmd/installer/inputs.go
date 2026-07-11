@@ -1,6 +1,9 @@
 package main
 
 import (
+	"strings"
+
+	setuppkg "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -217,6 +220,21 @@ func (m *model) savePermissionsInputs() {
 	}
 }
 
+// defaultCallbackURL derives where Jellyfin's companion plugin posts events:
+// the web UI when it will exist, otherwise the daemon's health endpoint
+// (which mounts the same /api/v1/webhooks/jellyfin route).
+func (m *model) defaultCallbackURL() string {
+	host := setuppkg.DetectAdvertiseIP()
+	if host == "" {
+		host = "localhost"
+	}
+	port := normalizedWebPort(m.webPort)
+	if !m.webEnabled {
+		port = "8686"
+	}
+	return "http://" + host + ":" + port
+}
+
 func (m *model) initWebInputs() {
 	m.inputs = make([]textinput.Model, 1)
 
@@ -226,11 +244,28 @@ func (m *model) initWebInputs() {
 	m.inputs[0].CharLimit = 5
 	m.inputs[0].SetValue(m.webPort)
 	styleTextInput(&m.inputs[0])
+
+	if m.jellyfinEnabled && m.pluginInstall {
+		ti := textinput.New()
+		ti.Placeholder = "http://<lan-ip>:<port>"
+		ti.Width = 40
+		ti.CharLimit = 200
+		if m.pluginDaemonURL != "" {
+			ti.SetValue(m.pluginDaemonURL)
+		} else {
+			ti.SetValue(m.defaultCallbackURL())
+		}
+		styleTextInput(&ti)
+		m.inputs = append(m.inputs, ti)
+	}
 }
 
 func (m *model) saveWebInputs() {
 	if len(m.inputs) >= 1 {
 		m.webPort = m.inputs[0].Value()
+	}
+	if len(m.inputs) >= 2 {
+		m.pluginDaemonURL = strings.TrimSpace(m.inputs[1].Value())
 	}
 }
 
