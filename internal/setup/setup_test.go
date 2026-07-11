@@ -1,8 +1,11 @@
 package setup
 
 import (
+	"os"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
@@ -41,6 +44,7 @@ func TestAdoptLegacyCompletion(t *testing.T) {
 		{name: "blank untouched", cfg: config.DefaultConfig(), wantAdopted: false},
 		{name: "versioned complete untouched", cfg: versionedConfig(true), wantAdopted: false},
 		{name: "versioned incomplete untouched", cfg: versionedConfig(false), wantAdopted: false},
+		{name: "negative version untouched", cfg: configWithSetupVersion(-1), wantAdopted: false},
 		{name: "nil untouched", cfg: nil, wantAdopted: false},
 	}
 
@@ -71,6 +75,68 @@ func TestAdoptLegacyCompletion(t *testing.T) {
 				t.Fatalf("non-adopted config was mutated: %+v", tt.cfg.Setup)
 			}
 		})
+	}
+}
+
+func TestAdoptLegacyCompletionPreservesConcurrentConfigChange(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", tmp+"/.config")
+	t.Setenv("SUDO_USER", "")
+
+	legacy := configWithPaths([]string{"/watch/tv"}, []string{"/library/tv"}, nil, nil)
+	if err := legacy.Save(); err != nil {
+		t.Fatal(err)
+	}
+	path, err := config.ConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		close(started)
+		_, err := config.UpdateWithLock(AdoptLegacyCompletion)
+		done <- err
+	}()
+	<-started
+	select {
+	case err := <-done:
+		t.Fatalf("update completed while another writer held the lock: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	newer := configWithPaths([]string{"/watch/tv"}, []string{"/library/tv"}, nil, nil)
+	newer.Logging.Level = "debug"
+	if err := os.WriteFile(path, []byte(newer.ToTOML()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Logging.Level != "debug" {
+		t.Fatalf("concurrent config change was lost: logging.level = %q", loaded.Logging.Level)
+	}
+	if loaded.Setup.Version != CurrentVersion || !loaded.Setup.Completed {
+		t.Fatalf("setup marker missing after locked update: %+v", loaded.Setup)
 	}
 }
 
@@ -195,6 +261,12 @@ func versionedConfig(completed bool) *config.Config {
 	cfg := configWithPaths([]string{"/watch/tv"}, []string{"/library/tv"}, nil, nil)
 	cfg.Setup.Version = CurrentVersion
 	cfg.Setup.Completed = completed
+	return cfg
+}
+
+func configWithSetupVersion(version int) *config.Config {
+	cfg := configWithPaths([]string{"/watch/tv"}, []string{"/library/tv"}, nil, nil)
+	cfg.Setup.Version = version
 	return cfg
 }
 

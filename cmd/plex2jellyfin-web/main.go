@@ -62,8 +62,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// configured only by heuristic. Stamp them explicitly once so the web
 	// wizard can never re-trigger for an already-configured install.
 	if setupdomain.AdoptLegacyCompletion(cfg) {
-		if err := cfg.Save(); err != nil {
+		latest, err := config.UpdateWithLock(setupdomain.AdoptLegacyCompletion)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not persist setup completion marker: %v\n", err)
+		} else {
+			cfg = latest
 		}
 	}
 

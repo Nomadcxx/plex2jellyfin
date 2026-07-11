@@ -95,7 +95,7 @@ func HasMediaPair(cfg *config.Config) bool {
 // hand-edits to paths can never re-trigger a wizard for a configured install.
 // Returns true when the config was mutated; the caller persists it.
 func AdoptLegacyCompletion(cfg *config.Config) bool {
-	if cfg == nil || cfg.Setup.Version > 0 {
+	if cfg == nil || cfg.Setup.Version != 0 {
 		return false
 	}
 	if !HasMediaPair(cfg) {

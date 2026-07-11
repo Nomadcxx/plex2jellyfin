@@ -9,6 +9,12 @@ import (
 )
 
 func AtomicWriteWithLock(path string, content []byte, mode os.FileMode) error {
+	return withFileLock(path, func() error {
+		return atomicWrite(path, content, mode)
+	})
+}
+
+func withFileLock(path string, fn func() error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
@@ -28,7 +34,11 @@ func AtomicWriteWithLock(path string, content []byte, mode os.FileMode) error {
 		return err
 	}
 	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	return fn()
+}
 
+func atomicWrite(path string, content []byte, mode os.FileMode) error {
+	uid, gid, haveOwner := writeOwner(path)
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
