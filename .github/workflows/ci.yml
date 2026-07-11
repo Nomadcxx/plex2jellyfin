@@ -2,17 +2,8 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-    paths-ignore:
-      - 'docs-site/**'
-      - 'docs/**'
-      - '**.md'
-  pull_request:
-    paths-ignore:
-      - 'docs-site/**'
-      - 'docs/**'
-      - '**.md'
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
