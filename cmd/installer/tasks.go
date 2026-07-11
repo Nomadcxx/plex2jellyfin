@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	configpkg "github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin/plugininstall"
 	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
@@ -85,11 +87,158 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 				installTask{name: "Start web service", description: "Starting plex2jellyfin-web", execute: startWebService, optional: true, status: statusPending},
 			)
 		}
+
+		// Companion plugin: resolve everything the async pipeline reads up
+		// front, in this goroutine, before model copies diverge (see the
+		// pluginRunState comment in types.go).
+		m.pluginState = &pluginRunState{outcome: "skipped"}
+		if m.jellyfinEnabled && m.pluginInstall {
+			m.pluginState.outcome = "needs-restart" // upgraded as tasks succeed
+			if strings.TrimSpace(m.webhookSecret) == "" {
+				if generated, err := configpkg.GenerateWebhookSecret(); err == nil {
+					m.webhookSecret = generated
+				}
+			}
+			if strings.TrimSpace(m.pluginDaemonURL) == "" {
+				m.pluginDaemonURL = m.defaultCallbackURL()
+			}
+
+			m.tasks = append(m.tasks, installTask{
+				name:        "Install Jellyfin plugin",
+				description: "Registering the plugin repository and installing the companion plugin",
+				execute:     installJellyfinPlugin,
+				optional:    true,
+				status:      statusPending,
+			})
+			if m.pluginRestart {
+				m.tasks = append(m.tasks, installTask{
+					name:        "Restart Jellyfin",
+					description: "Restarting Jellyfin and waiting for the plugin to load (up to 60s)",
+					execute:     restartJellyfinForPlugin,
+					optional:    true,
+					status:      statusPending,
+				})
+				listenerStarts := (m.serviceEnabled && m.serviceStartNow) || (m.webEnabled && m.webStartNow)
+				if listenerStarts {
+					m.postScanTasks = append(m.postScanTasks, installTask{
+						name:        "Configure plugin feedback loop",
+						description: "Pushing the callback URL and secret to the plugin, then verifying a signed test event",
+						execute:     configurePluginFeedback,
+						optional:    true,
+						status:      statusPending,
+					})
+				}
+			}
+		}
 	}
 
 	m.currentTaskIndex = 0
 	m.tasks[0].status = statusRunning
 	return m, tea.Batch(m.spinner.Tick, executeTaskCmd(0, &m))
+}
+
+const pluginRestartWaitTimeout = 60 * time.Second
+
+func newPluginEngine(m *model) *plugininstall.Engine {
+	return plugininstall.New(m.jellyfinURL, m.jellyfinAPIKey, &http.Client{Timeout: 15 * time.Second})
+}
+
+func pluginTaskContext(m *model) context.Context {
+	if m.ctx != nil {
+		return m.ctx
+	}
+	return context.Background()
+}
+
+func installJellyfinPlugin(m *model) error {
+	st := m.pluginState
+	if st == nil {
+		return fmt.Errorf("plugin state missing")
+	}
+	engine := newPluginEngine(m)
+	ctx := pluginTaskContext(m)
+
+	insp, err := engine.Inspect(ctx)
+	if err != nil {
+		st.outcome = "failed"
+		return fmt.Errorf("inspect jellyfin: %w", err)
+	}
+	if !insp.ABISupported {
+		st.outcome = "failed"
+		return fmt.Errorf("jellyfin %s does not support the plugin (needs 10.11.x)", insp.ServerVersion)
+	}
+	if insp.InstalledVersion != "" && insp.PluginResponding {
+		st.loaded = true
+		st.outcome = "unverified"
+		return nil
+	}
+	if _, err := engine.RegisterRepo(ctx); err != nil {
+		st.outcome = "failed"
+		return fmt.Errorf("register plugin repository: %w", err)
+	}
+	if insp.InstalledVersion == "" {
+		if err := engine.Install(ctx); err != nil {
+			st.outcome = "failed"
+			return fmt.Errorf("install plugin: %w", err)
+		}
+	}
+	return nil
+}
+
+func restartJellyfinForPlugin(m *model) error {
+	st := m.pluginState
+	if st == nil {
+		return fmt.Errorf("plugin state missing")
+	}
+	if st.outcome == "failed" {
+		return fmt.Errorf("skipping restart: plugin install did not succeed")
+	}
+	if st.loaded {
+		return nil
+	}
+	engine := newPluginEngine(m)
+	ctx := pluginTaskContext(m)
+
+	if err := engine.Restart(ctx); err != nil {
+		st.outcome = "failed"
+		return fmt.Errorf("restart jellyfin: %w", err)
+	}
+	if err := engine.WaitReady(ctx, pluginRestartWaitTimeout); err != nil {
+		st.outcome = "failed"
+		return fmt.Errorf("plugin did not come back after restart: %w", err)
+	}
+	st.loaded = true
+	st.outcome = "unverified"
+	return nil
+}
+
+func configurePluginFeedback(m *model) error {
+	st := m.pluginState
+	if st == nil || !st.loaded {
+		return fmt.Errorf("plugin not loaded; restart Jellyfin, then run: plex2jellyfin plugin verify")
+	}
+	engine := newPluginEngine(m)
+	ctx := pluginTaskContext(m)
+
+	if err := engine.Configure(ctx, m.pluginDaemonURL, m.webhookSecret); err != nil {
+		st.outcome = "failed"
+		return fmt.Errorf("configure plugin: %w", err)
+	}
+	res, err := engine.Verify(ctx)
+	if err != nil {
+		st.outcome = "failed"
+		return fmt.Errorf("verify feedback loop: %w", err)
+	}
+	if !res.Sent || !res.Authenticated {
+		st.outcome = "failed"
+		detail := res.Error
+		if detail == "" {
+			detail = fmt.Sprintf("daemon responded %d", res.DaemonStatusCode)
+		}
+		return fmt.Errorf("test event did not round-trip: %s", detail)
+	}
+	st.outcome = "verified"
+	return nil
 }
 
 func checkPrivileges(m *model) error {

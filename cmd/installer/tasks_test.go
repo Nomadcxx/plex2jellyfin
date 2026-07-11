@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +13,129 @@ import (
 	configpkg "github.com/Nomadcxx/plex2jellyfin/internal/config"
 	setuppkg "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 )
+
+func taskNames(tasks []installTask) []string {
+	names := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		names = append(names, task.name)
+	}
+	return names
+}
+
+func hasTask(tasks []installTask, name string) bool {
+	for _, task := range tasks {
+		if task.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func TestStartInstallation_PluginTasksGatedByConsent(t *testing.T) {
+	cases := []struct {
+		name            string
+		jellyfin        bool
+		install         bool
+		restart         bool
+		serviceStartNow bool
+		wantInstall     bool
+		wantRestart     bool
+		wantConfigure   bool
+	}{
+		{"full consent", true, true, true, true, true, true, true},
+		{"jellyfin disabled", false, true, true, true, false, false, false},
+		{"install declined", true, false, true, true, false, false, false},
+		{"restart declined", true, true, false, true, true, false, false},
+		{"no listener started", true, true, true, false, true, true, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := model{
+				serviceEnabled:  true,
+				serviceStartNow: tc.serviceStartNow,
+				webEnabled:      false,
+				jellyfinEnabled: tc.jellyfin,
+				jellyfinURL:     "http://localhost:8096",
+				jellyfinAPIKey:  "k",
+				webhookSecret:   "s",
+				pluginInstall:   tc.install,
+				pluginRestart:   tc.restart,
+				pluginDaemonURL: "http://10.0.0.5:5522",
+			}
+
+			next, _ := m.startInstallation()
+			got := next.(model)
+
+			if hasTask(got.tasks, "Install Jellyfin plugin") != tc.wantInstall {
+				t.Errorf("install task presence = %v, want %v (tasks: %v)",
+					!tc.wantInstall, tc.wantInstall, taskNames(got.tasks))
+			}
+			if hasTask(got.tasks, "Restart Jellyfin") != tc.wantRestart {
+				t.Errorf("restart task presence = %v, want %v", !tc.wantRestart, tc.wantRestart)
+			}
+			if hasTask(got.postScanTasks, "Configure plugin feedback loop") != tc.wantConfigure {
+				t.Errorf("configure task presence = %v, want %v (postScan: %v)",
+					!tc.wantConfigure, tc.wantConfigure, taskNames(got.postScanTasks))
+			}
+			if got.pluginState == nil {
+				t.Fatal("pluginState must always be initialized on fresh install")
+			}
+		})
+	}
+}
+
+func TestStartInstallation_ResolvesPluginPrerequisitesUpFront(t *testing.T) {
+	m := model{
+		serviceEnabled:  true,
+		jellyfinEnabled: true,
+		jellyfinURL:     "http://localhost:8096",
+		jellyfinAPIKey:  "k",
+		pluginInstall:   true,
+		pluginRestart:   true,
+	}
+
+	next, _ := m.startInstallation()
+	got := next.(model)
+
+	if got.webhookSecret == "" {
+		t.Error("webhook secret must be generated before the pipeline forks goroutines")
+	}
+	if got.pluginDaemonURL == "" {
+		t.Error("pluginDaemonURL must be derived before the pipeline forks goroutines")
+	}
+	if got.pluginState.outcome != "needs-restart" {
+		t.Errorf("initial outcome = %q, want needs-restart", got.pluginState.outcome)
+	}
+}
+
+func TestStartInstallation_PluginSkippedOutcomeWhenDeclined(t *testing.T) {
+	m := model{serviceEnabled: true, jellyfinEnabled: true, pluginInstall: false}
+	next, _ := m.startInstallation()
+	if got := next.(model); got.pluginState.outcome != "skipped" {
+		t.Errorf("outcome = %q, want skipped", got.pluginState.outcome)
+	}
+}
+
+func TestInstallJellyfinPlugin_ServerErrorMarksFailed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	m := &model{
+		jellyfinURL:    srv.URL,
+		jellyfinAPIKey: "k",
+		pluginState:    &pluginRunState{outcome: "needs-restart"},
+	}
+
+	if err := installJellyfinPlugin(m); err == nil {
+		t.Fatal("expected error from erroring server")
+	}
+	if m.pluginState.outcome != "failed" {
+		t.Errorf("outcome = %q, want failed", m.pluginState.outcome)
+	}
+}
 
 func TestGenerateConfigString_IncludesSetupMarker(t *testing.T) {
 	m := &model{
