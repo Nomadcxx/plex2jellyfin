@@ -102,10 +102,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("👤 Runtime user: %s\n", paths.ActualUser())
 		}
-		if cfg.Password != "" {
+		if cfg.Password != "" || cfg.PasswordHash != "" {
 			fmt.Println("🔐 Authentication enabled - login required")
 		} else {
-			fmt.Println("⚠️  No password set - authentication disabled")
+			fmt.Println("⚠️  No password set - the web UI will ask you to create one")
 		}
 		fmt.Println()
 
