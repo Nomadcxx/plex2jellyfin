@@ -33,6 +33,17 @@ type setupApplyResponse struct {
 }
 
 func (s *Server) GetSetupStatus(w http.ResponseWriter, r *http.Request) {
+	// TUI/CLI stamp [setup].completed after web boot (writeConfig leaves
+	// completed=false, markSetupComplete flips it). Prefer the on-disk marker
+	// so AuthGuard does not force /setup on an already-finished install.
+	if disk, err := config.Load(); err == nil {
+		s.configMu.Lock()
+		if s.cfg != nil {
+			s.cfg.Setup = disk.Setup
+		}
+		s.configMu.Unlock()
+	}
+
 	s.configMu.RLock()
 	cfg := cloneConfig(s.cfg)
 	s.configMu.RUnlock()

@@ -51,8 +51,12 @@ func (l *setupTestLauncher) Start() error {
 }
 
 func TestSetupStatusMasksSecretsAndDetectsFreshInstall(t *testing.T) {
+	setupTestHome(t)
 	cfg := config.DefaultConfig()
 	cfg.Sonarr.APIKey = "abcdef123456"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
 	s := NewServer(nil, cfg)
 	s.ipc = &setupTestIPC{alwaysFail: true}
 
@@ -80,9 +84,13 @@ func TestSetupStatusMasksSecretsAndDetectsFreshInstall(t *testing.T) {
 }
 
 func TestSetupStatusBypassesLegacyConfiguredInstall(t *testing.T) {
+	setupTestHome(t)
 	cfg := config.DefaultConfig()
 	cfg.Watch.Movies = []string{"/watch/movies"}
 	cfg.Libraries.Movies = []string{"/library/movies"}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
 	s := NewServer(nil, cfg)
 	s.ipc = &setupTestIPC{}
 
@@ -94,6 +102,41 @@ func TestSetupStatusBypassesLegacyConfiguredInstall(t *testing.T) {
 	}
 	if got.Required || !got.Complete {
 		t.Fatalf("legacy configured install should bypass setup: %+v", got)
+	}
+}
+
+func TestSetupStatusPicksUpExternalCompletedStamp(t *testing.T) {
+	setupTestHome(t)
+	cfg := config.DefaultConfig()
+	cfg.Setup.Version = setupdomain.CurrentVersion
+	cfg.Setup.Completed = false
+	cfg.Watch.TV = []string{t.TempDir()}
+	cfg.Libraries.TV = []string{t.TempDir()}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Web booted from writeConfig (completed=false) before markSetupComplete.
+	mem := *cfg
+	s := NewServer(nil, &mem)
+	s.ipc = &setupTestIPC{}
+
+	_, err := config.UpdateWithLock(func(c *config.Config) bool {
+		c.Setup.Completed = true
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	s.GetSetupStatus(w, httptest.NewRequest(http.MethodGet, "/api/v1/setup/status", nil))
+	var got SetupStatusResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Required || !got.Complete {
+		t.Fatalf("disk completed=true must bypass setup after TUI stamp: %+v mem=%+v", got, s.cfg.Setup)
 	}
 }
 

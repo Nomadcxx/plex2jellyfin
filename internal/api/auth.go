@@ -391,6 +391,8 @@ func (s *Server) persistPasswordHash(hash string) error {
 	}
 	s.cfg.PasswordHash = hash
 	s.cfg.Password = ""
+	// Heal setup marker if TUI/CLI stamped completed on disk since boot.
+	s.cfg.Setup = cfg.Setup
 	return nil
 }
 
