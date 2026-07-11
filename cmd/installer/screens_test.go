@@ -77,3 +77,30 @@ func TestNextJellyfinInput_CyclesThroughToggleRows(t *testing.T) {
 		t.Errorf("expected focus to wrap 3 -> 0 when toggles hidden, got %d", got.focusedInput)
 	}
 }
+
+func TestRenderComplete_PluginOutcomeLines(t *testing.T) {
+	cases := []struct {
+		outcome string
+		want    string
+	}{
+		{"verified", "feedback loop active"},
+		{"needs-restart", "restart Jellyfin to load it"},
+		{"unverified", "plex2jellyfin plugin verify"},
+		{"failed", "plex2jellyfin plugin install"},
+	}
+	for _, tc := range cases {
+		m := model{pluginState: &pluginRunState{outcome: tc.outcome}}
+		if out := m.renderComplete(); !strings.Contains(out, tc.want) {
+			t.Errorf("outcome %q: expected %q in Complete screen, got:\n%s", tc.outcome, tc.want, out)
+		}
+	}
+}
+
+func TestRenderComplete_NoPluginLineWhenSkipped(t *testing.T) {
+	for _, st := range []*pluginRunState{nil, {outcome: "skipped"}} {
+		m := model{pluginState: st}
+		if out := m.renderComplete(); strings.Contains(out, "Companion plugin") {
+			t.Errorf("expected no plugin line for state %+v, got:\n%s", st, out)
+		}
+	}
+}

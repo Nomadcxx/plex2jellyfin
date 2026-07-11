@@ -853,6 +853,23 @@ func (m model) renderComplete() string {
 		b.WriteString("\n\n")
 	}
 
+	// ── Companion plugin ──────────────────────────────────────────────────
+	if m.pluginState != nil {
+		switch m.pluginState.outcome {
+		case "verified":
+			b.WriteString(checkMark.String() + " " + muted.Render("Companion plugin verified - feedback loop active") + "\n\n")
+		case "needs-restart":
+			b.WriteString(skipMark.String() + " " + muted.Render("Companion plugin downloaded; restart Jellyfin to load it, then run: ") +
+				cmd.Render("plex2jellyfin plugin verify") + "\n\n")
+		case "unverified":
+			b.WriteString(skipMark.String() + " " + muted.Render("Companion plugin loaded but unverified (services not started) - run: ") +
+				cmd.Render("plex2jellyfin plugin verify") + "\n\n")
+		case "failed":
+			b.WriteString(failMark.String() + " " + muted.Render("Companion plugin step failed - run: ") +
+				cmd.Render("plex2jellyfin plugin install") + "\n\n")
+		}
+	}
+
 	// ── What's Next ───────────────────────────────────────────────────────
 	b.WriteString(bold.Render("What's Next?") + "\n\n")
 	b.WriteString("  " + cmd.Render("plex2jellyfin scan") + "  " + muted.Render("analyze your library for issues") + "\n")
