@@ -15,6 +15,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
+	setuppkg "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -209,7 +210,13 @@ func (m *model) generateConfigString() (string, error) {
 		}
 	}
 
-	configStr := fmt.Sprintf(`[watch]
+	configStr := fmt.Sprintf(`[setup]
+# Managed by the setup wizards. completed = true tells the web UI to skip
+# its guided setup and only ask for a password.
+version = %d
+completed = true
+
+[watch]
 movies = [%s]
 tv = [%s]
 
@@ -243,6 +250,7 @@ repair_batch_size = 5
 repair_cooldown_hours = 6
 needs_review_after = 4
 `,
+		setuppkg.CurrentVersion,
 		formatPathList(watchMovies),
 		formatPathList(watchTV),
 		formatPathList(splitPaths(m.movieLibraryPaths)),
@@ -284,6 +292,11 @@ api_key = "%s"
 webhook_secret = "%s"
 # Companion plugin shared secret; keep this the same value used for X-Plex2Jellyfin-Webhook-Secret.
 plugin_shared_secret = "%s"
+plugin_enabled = %t
+# Base URL the companion plugin calls back to (the plugin appends
+# /api/v1/webhooks/jellyfin). From Jellyfin's point of view - never
+# localhost when Jellyfin runs in a container.
+plugin_daemon_url = "%s"
 notify_on_import = true
 playback_safety = true
 verify_after_refresh = false
@@ -298,7 +311,7 @@ verify_after_refresh = false
 # [[jellyfin.path_mappings]]
 # jellyfin = "/another/jellyfin/root"
 # daemon = "/another/plex2jellyfin/root"
-`, m.jellyfinURL, m.jellyfinAPIKey, webhookSecret, webhookSecret)
+`, m.jellyfinURL, m.jellyfinAPIKey, webhookSecret, webhookSecret, m.pluginInstall, m.pluginDaemonURL)
 	}
 
 	if m.aiEnabled && m.aiModel != "" {

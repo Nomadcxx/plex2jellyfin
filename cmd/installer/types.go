@@ -169,6 +169,12 @@ type model struct {
 	webStartNow     bool
 	webPort         string
 
+	// Companion plugin (fresh install)
+	pluginInstall     bool   // consent: install the plugin via Jellyfin's package API
+	pluginRestart     bool   // consent: restart Jellyfin so the plugin loads
+	pluginDaemonURL   string // callback URL pushed to the plugin
+	callbackURLEdited bool   // user manually edited the callback URL field
+
 	// Installation detection
 	existingDBDetected bool
 	existingDBPath     string

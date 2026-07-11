@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -8,7 +9,106 @@ import (
 	"testing"
 
 	configpkg "github.com/Nomadcxx/plex2jellyfin/internal/config"
+	setuppkg "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 )
+
+func TestGenerateConfigString_IncludesSetupMarker(t *testing.T) {
+	m := &model{
+		watchFolders: []WatchFolder{
+			{Type: "movies", Paths: "/watch/movies"},
+			{Type: "tv", Paths: "/watch/tv"},
+		},
+		movieLibraryPaths: "/lib/movies",
+		tvLibraryPaths:    "/lib/tv",
+		serviceEnabled:    true,
+	}
+
+	configStr, err := m.generateConfigString()
+	if err != nil {
+		t.Fatalf("generateConfigString() error = %v", err)
+	}
+
+	if !strings.Contains(configStr, "[setup]") {
+		t.Fatalf("expected [setup] block, got:\n%s", configStr)
+	}
+	if !strings.Contains(configStr, fmt.Sprintf("version = %d", setuppkg.CurrentVersion)) {
+		t.Fatalf("expected setup version %d, got:\n%s", setuppkg.CurrentVersion, configStr)
+	}
+	if !strings.Contains(configStr, "completed = true") {
+		t.Fatalf("expected completed = true, got:\n%s", configStr)
+	}
+}
+
+func TestGenerateConfigString_IncludesPluginFields(t *testing.T) {
+	m := &model{
+		watchFolders:    []WatchFolder{{Type: "tv", Paths: "/watch/tv"}},
+		tvLibraryPaths:  "/lib/tv",
+		jellyfinEnabled: true,
+		jellyfinURL:     "http://localhost:8096",
+		jellyfinAPIKey:  "jf-api",
+		webhookSecret:   "secret-1",
+		pluginInstall:   true,
+		pluginDaemonURL: "http://192.168.0.10:5522",
+	}
+
+	configStr, err := m.generateConfigString()
+	if err != nil {
+		t.Fatalf("generateConfigString() error = %v", err)
+	}
+
+	if !strings.Contains(configStr, "plugin_enabled = true") {
+		t.Fatalf("expected plugin_enabled = true, got:\n%s", configStr)
+	}
+	if !strings.Contains(configStr, `plugin_daemon_url = "http://192.168.0.10:5522"`) {
+		t.Fatalf("expected plugin_daemon_url, got:\n%s", configStr)
+	}
+}
+
+// The TUI writes TOML by hand; this guards the silent-field-loss trap by
+// parsing the emitted string through the real config loader.
+func TestGenerateConfigString_RoundTripsThroughConfigLoad(t *testing.T) {
+	m := &model{
+		watchFolders:    []WatchFolder{{Type: "tv", Paths: "/watch/tv"}},
+		tvLibraryPaths:  "/lib/tv",
+		jellyfinEnabled: true,
+		jellyfinURL:     "http://localhost:8096",
+		jellyfinAPIKey:  "jf-api",
+		webhookSecret:   "secret-1",
+		pluginInstall:   true,
+		pluginDaemonURL: "http://192.168.0.10:5522",
+	}
+
+	configStr, err := m.generateConfigString()
+	if err != nil {
+		t.Fatalf("generateConfigString() error = %v", err)
+	}
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	t.Setenv("SUDO_USER", "")
+	dir := filepath.Join(tmp, ".config", "plex2jellyfin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(configStr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := configpkg.Load()
+	if err != nil {
+		t.Fatalf("config.Load() on generated config: %v", err)
+	}
+	if cfg.Setup.Version != setuppkg.CurrentVersion || !cfg.Setup.Completed {
+		t.Errorf("setup marker did not round-trip: %+v", cfg.Setup)
+	}
+	if !cfg.Jellyfin.PluginEnabled {
+		t.Error("plugin_enabled did not round-trip")
+	}
+	if cfg.Jellyfin.PluginDaemonURL != "http://192.168.0.10:5522" {
+		t.Errorf("plugin_daemon_url did not round-trip: %q", cfg.Jellyfin.PluginDaemonURL)
+	}
+}
 
 func TestStartInstallation_WebUIDisabledSkipsWebTasks(t *testing.T) {
 	m := model{

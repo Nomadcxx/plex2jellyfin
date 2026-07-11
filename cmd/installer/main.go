@@ -82,6 +82,10 @@ func newModel(debugMode bool, logFile *os.File) model {
 		webEnabled:      true,
 		webStartNow:     true,
 		webPort:         "5522",
+		// Companion plugin defaults: the full install+restart path unless
+		// the user opts out on the Jellyfin screen.
+		pluginInstall: true,
+		pluginRestart: true,
 
 		// Existing install detection
 		existingDBDetected: existingDB,
