@@ -643,9 +643,9 @@ git commit -m "feat(installer): plugin callback URL field on the web step"
 
 Outcome semantics (Task 5 renders from these):
 - `skipped` — Jellyfin disabled or install consent off; no Complete line.
-- `needs-restart` — install ran (or will run) but the plugin never loaded (restart declined or failed).
+- `needs-restart` — install ran (or will run) but the plugin never loaded because restart was declined.
 - `unverified` — plugin loaded but configure/verify could not run (no listener started).
-- `failed` — a plugin task errored.
+- `failed` — a plugin task errored, including restart or readiness failure.
 - `verified` — signed test event round-tripped.
 
 - [ ] **Step 1: Write the failing tests**

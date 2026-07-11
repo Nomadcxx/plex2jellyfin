@@ -169,6 +169,13 @@ type model struct {
 	webStartNow     bool
 	webPort         string
 
+	// Companion plugin (fresh install)
+	pluginInstall     bool   // consent: install the plugin via Jellyfin's package API
+	pluginRestart     bool   // consent: restart Jellyfin so the plugin loads
+	pluginDaemonURL   string // callback URL pushed to the plugin
+	callbackURLEdited bool   // user manually edited the callback URL field
+	pluginState       *pluginRunState
+
 	// Installation detection
 	existingDBDetected bool
 	existingDBPath     string
@@ -193,6 +200,17 @@ type model struct {
 
 	// Timing config
 	inputDelay time.Duration
+}
+
+// pluginRunState is shared by pointer across bubbletea model copies so async
+// task goroutines and later Update calls see one source of truth. Do NOT move
+// these onto plain model fields: writes from executeTaskCmd goroutines to
+// value-copied fields are lost (see stopRunningServices/daemonWasRunning for
+// the failure mode this avoids).
+type pluginRunState struct {
+	loaded        bool   // plugin responded after install/restart
+	listenerReady bool   // selected local callback listener started successfully
+	outcome       string // "skipped", "needs-restart", "unverified", "failed", "verified"
 }
 
 // ArrIssue represents a configuration issue found in Sonarr/Radarr.

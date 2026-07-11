@@ -314,6 +314,29 @@ func (m model) renderJellyfin() string {
 				b.WriteString(fmt.Sprintf("  %s Failed - %s\n", failMark.String(), m.jellyfinVersion))
 			}
 		}
+
+		if m.jellyfinPluginTogglesVisible() {
+			b.WriteString("\n")
+			installPrefix := "  "
+			if m.focusedInput == len(m.inputs)+1 {
+				installPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			}
+			b.WriteString(fmt.Sprintf("%sInstall companion plugin: %s\n", installPrefix, boolToYesNo(m.pluginInstall)))
+
+			restartPrefix := "  "
+			if m.focusedInput == len(m.inputs)+2 {
+				restartPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			}
+			b.WriteString(fmt.Sprintf("%sRestart Jellyfin after install: %s   %s\n",
+				restartPrefix, boolToYesNo(m.pluginRestart),
+				lipgloss.NewStyle().Foreground(FgMuted).Render("(recommended)")))
+
+			b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
+				"  The companion plugin closes the feedback loop: it confirms organized\n"+
+					"  files against real Jellyfin items and powers orphan detection. It only\n"+
+					"  loads after Jellyfin restarts - without a restart the daemon runs\n"+
+					"  degraded until you restart Jellyfin yourself.") + "\n")
+		}
 	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("[T] Test connection  [S] Skip"))
@@ -524,6 +547,20 @@ func (m model) renderWebService() string {
 		portValue = m.inputs[0].View()
 	}
 	b.WriteString(fmt.Sprintf("%sPort:          %s\n", portPrefix, portValue))
+
+	if len(m.inputs) >= 2 {
+		urlPrefix := "  "
+		if m.focusedInput == 3 {
+			urlPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		b.WriteString(fmt.Sprintf("%sPlugin callback URL: %s\n", urlPrefix, m.inputs[1].View()))
+		if m.inputs[1].Err != nil {
+			b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("  "+m.inputs[1].Err.Error()) + "\n")
+		}
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
+			"  Where Jellyfin's companion plugin posts events back to this machine.\n"+
+				"  Never localhost when Jellyfin runs in a container.") + "\n")
+	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
 		"If enabled, installs plex2jellyfin-web systemd service and listens on the selected port"))
@@ -817,6 +854,23 @@ func (m model) renderComplete() string {
 	} else {
 		b.WriteString(muted.Render("Plex2Jellyfin is ready. The daemon is running and watching your configured directories."))
 		b.WriteString("\n\n")
+	}
+
+	// ── Companion plugin ──────────────────────────────────────────────────
+	if m.pluginState != nil {
+		switch m.pluginState.outcome {
+		case "verified":
+			b.WriteString(checkMark.String() + " " + muted.Render("Companion plugin verified - feedback loop active") + "\n\n")
+		case "needs-restart":
+			b.WriteString(skipMark.String() + " " + muted.Render("Companion plugin downloaded; restart Jellyfin to load it, then run: ") +
+				cmd.Render("plex2jellyfin plugin verify") + "\n\n")
+		case "unverified":
+			b.WriteString(skipMark.String() + " " + muted.Render("Companion plugin loaded but unverified (services not started) - run: ") +
+				cmd.Render("plex2jellyfin plugin verify") + "\n\n")
+		case "failed":
+			b.WriteString(failMark.String() + " " + muted.Render("Companion plugin step failed - run: ") +
+				cmd.Render("plex2jellyfin plugin install") + "\n\n")
+		}
 	}
 
 	// ── What's Next ───────────────────────────────────────────────────────

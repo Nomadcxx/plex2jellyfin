@@ -90,6 +90,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if mdl.step == stepSystemWeb && mdl.focusedInput == 2 {
 					var inputCmd tea.Cmd
 					mdl.inputs[0], inputCmd = mdl.inputs[0].Update(msg)
+					// Port edits re-derive an untouched callback URL live.
+					if len(mdl.inputs) >= 2 && !mdl.callbackURLEdited {
+						mdl.webPort = mdl.inputs[0].Value()
+						mdl.inputs[1].SetValue(mdl.defaultCallbackURL())
+					}
+					return mdl, inputCmd
+				}
+				if mdl.step == stepSystemWeb && mdl.focusedInput == 3 && len(mdl.inputs) >= 2 {
+					var inputCmd tea.Cmd
+					mdl.inputs[1], inputCmd = mdl.inputs[1].Update(msg)
+					mdl.callbackURLEdited = true
 					return mdl, inputCmd
 				}
 				if mdl.step == stepIntegrationsJellyfin {
@@ -348,19 +359,26 @@ func (m model) handleRadarrKeys(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// jellyfinPluginTogglesVisible reports whether the plugin consent rows render.
+// Consent is only meaningful against a server we actually reached.
+func (m model) jellyfinPluginTogglesVisible() bool {
+	return m.jellyfinEnabled && m.jellyfinTested
+}
+
 func (m model) handleJellyfinKeys(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "tab":
 		return m.nextJellyfinInput()
 	case "shift+tab":
 		return m.prevJellyfinInput()
-	case "up", "k":
-		if m.focusedInput == 0 {
+	case "up", "k", "down", "j":
+		switch {
+		case m.focusedInput == 0:
 			m.jellyfinEnabled = !m.jellyfinEnabled
-		}
-	case "down", "j":
-		if m.focusedInput == 0 {
-			m.jellyfinEnabled = !m.jellyfinEnabled
+		case m.jellyfinPluginTogglesVisible() && m.focusedInput == len(m.inputs)+1:
+			m.pluginInstall = !m.pluginInstall
+		case m.jellyfinPluginTogglesVisible() && m.focusedInput == len(m.inputs)+2:
+			m.pluginRestart = !m.pluginRestart
 		}
 	case "t", "T":
 		if m.jellyfinEnabled {
@@ -500,28 +518,34 @@ func (m model) handleServiceKeys(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleWebServiceKeys(key string) (tea.Model, tea.Cmd) {
+	rows := 3
+	if len(m.inputs) >= 2 {
+		rows = 4
+	}
 	switch key {
 	case "tab":
-		m.focusedInput = (m.focusedInput + 1) % 3
+		m.focusedInput = (m.focusedInput + 1) % rows
 	case "shift+tab":
-		m.focusedInput = (m.focusedInput + 2) % 3
-	case "up", "k":
+		m.focusedInput = (m.focusedInput + rows - 1) % rows
+	case "up", "k", "down", "j":
 		switch m.focusedInput {
 		case 0:
 			m.webEnabled = !m.webEnabled
-		case 1:
-			m.webStartNow = !m.webStartNow
-		}
-	case "down", "j":
-		switch m.focusedInput {
-		case 0:
-			m.webEnabled = !m.webEnabled
+			if len(m.inputs) >= 2 && !m.callbackURLEdited {
+				m.inputs[1].SetValue(m.defaultCallbackURL())
+			}
 		case 1:
 			m.webStartNow = !m.webStartNow
 		}
 	case "e", "E":
 		m.webEnabled = !m.webEnabled
+		if len(m.inputs) >= 2 && !m.callbackURLEdited {
+			m.inputs[1].SetValue(m.defaultCallbackURL())
+		}
 	case "enter":
+		if len(m.inputs) >= 2 && m.inputs[1].Err != nil {
+			return m, nil
+		}
 		m.saveWebInputs()
 		return m.nextStep()
 	case "esc":
@@ -629,7 +653,10 @@ func (m model) prevInput() (tea.Model, tea.Cmd) {
 }
 
 func (m model) nextJellyfinInput() (tea.Model, tea.Cmd) {
-	total := len(m.inputs) + 1 // include "Enable" as focusable row 0
+	total := len(m.inputs) + 1 // "Enable" is focusable row 0
+	if m.jellyfinPluginTogglesVisible() {
+		total += 2 // install + restart toggle rows
+	}
 	if total <= 1 {
 		return m, nil
 	}
@@ -646,7 +673,10 @@ func (m model) nextJellyfinInput() (tea.Model, tea.Cmd) {
 }
 
 func (m model) prevJellyfinInput() (tea.Model, tea.Cmd) {
-	total := len(m.inputs) + 1 // include "Enable" as focusable row 0
+	total := len(m.inputs) + 1 // "Enable" is focusable row 0
+	if m.jellyfinPluginTogglesVisible() {
+		total += 2 // install + restart toggle rows
+	}
 	if total <= 1 {
 		return m, nil
 	}

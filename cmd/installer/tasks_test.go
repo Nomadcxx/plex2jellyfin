@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -8,7 +11,316 @@ import (
 	"testing"
 
 	configpkg "github.com/Nomadcxx/plex2jellyfin/internal/config"
+	setuppkg "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 )
+
+func taskNames(tasks []installTask) []string {
+	names := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		names = append(names, task.name)
+	}
+	return names
+}
+
+func hasTask(tasks []installTask, name string) bool {
+	for _, task := range tasks {
+		if task.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func TestStartInstallation_PluginTasksGatedByConsent(t *testing.T) {
+	cases := []struct {
+		name            string
+		jellyfin        bool
+		install         bool
+		restart         bool
+		serviceStartNow bool
+		wantInstall     bool
+		wantRestart     bool
+		wantConfigure   bool
+	}{
+		{"full consent", true, true, true, true, true, true, true},
+		{"jellyfin disabled", false, true, true, true, false, false, false},
+		{"install declined", true, false, true, true, false, false, false},
+		{"restart declined", true, true, false, true, true, false, false},
+		{"no listener started", true, true, true, false, true, true, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := model{
+				serviceEnabled:  true,
+				serviceStartNow: tc.serviceStartNow,
+				webEnabled:      false,
+				jellyfinEnabled: tc.jellyfin,
+				jellyfinURL:     "http://localhost:8096",
+				jellyfinAPIKey:  "k",
+				webhookSecret:   "s",
+				pluginInstall:   tc.install,
+				pluginRestart:   tc.restart,
+				pluginDaemonURL: "http://10.0.0.5:5522",
+			}
+
+			next, _ := m.startInstallation()
+			got := next.(model)
+
+			if hasTask(got.tasks, "Install Jellyfin plugin") != tc.wantInstall {
+				t.Errorf("install task presence = %v, want %v (tasks: %v)",
+					!tc.wantInstall, tc.wantInstall, taskNames(got.tasks))
+			}
+			if hasTask(got.tasks, "Restart Jellyfin") != tc.wantRestart {
+				t.Errorf("restart task presence = %v, want %v", !tc.wantRestart, tc.wantRestart)
+			}
+			if hasTask(got.postScanTasks, "Configure plugin feedback loop") != tc.wantConfigure {
+				t.Errorf("configure task presence = %v, want %v (postScan: %v)",
+					!tc.wantConfigure, tc.wantConfigure, taskNames(got.postScanTasks))
+			}
+			if got.pluginState == nil {
+				t.Fatal("pluginState must always be initialized on fresh install")
+			}
+		})
+	}
+}
+
+func TestStartInstallation_ConfigureRequiresSelectedListener(t *testing.T) {
+	cases := []struct {
+		name            string
+		serviceEnabled  bool
+		serviceStartNow bool
+		webEnabled      bool
+		webStartNow     bool
+		wantConfigure   bool
+	}{
+		{"daemon selected and starting", true, true, false, false, true},
+		{"daemon selected but stopped", true, false, false, false, false},
+		{"web selected and starting", true, false, true, true, true},
+		{"web selected but stopped", true, true, true, false, false},
+		{"web cannot start without services", false, false, true, true, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := model{
+				serviceEnabled:  tc.serviceEnabled,
+				serviceStartNow: tc.serviceStartNow,
+				webEnabled:      tc.webEnabled,
+				webStartNow:     tc.webStartNow,
+				jellyfinEnabled: true,
+				pluginInstall:   true,
+				pluginRestart:   true,
+				webhookSecret:   "s",
+				pluginDaemonURL: "http://10.0.0.5:5522",
+			}
+
+			next, _ := m.startInstallation()
+			got := next.(model)
+			if hasTask(got.postScanTasks, "Configure plugin feedback loop") != tc.wantConfigure {
+				t.Errorf("configure task presence = %v, want %v (postScan: %v)",
+					hasTask(got.postScanTasks, "Configure plugin feedback loop"), tc.wantConfigure, taskNames(got.postScanTasks))
+			}
+		})
+	}
+}
+
+func TestStartInstallation_ResolvesPluginPrerequisitesUpFront(t *testing.T) {
+	m := model{
+		serviceEnabled:  true,
+		jellyfinEnabled: true,
+		jellyfinURL:     "http://localhost:8096",
+		jellyfinAPIKey:  "k",
+		pluginInstall:   true,
+		pluginRestart:   true,
+	}
+
+	next, _ := m.startInstallation()
+	got := next.(model)
+
+	if got.webhookSecret == "" {
+		t.Error("webhook secret must be generated before the pipeline forks goroutines")
+	}
+	if got.pluginDaemonURL == "" {
+		t.Error("pluginDaemonURL must be derived before the pipeline forks goroutines")
+	}
+	if got.pluginState.outcome != "needs-restart" {
+		t.Errorf("initial outcome = %q, want needs-restart", got.pluginState.outcome)
+	}
+}
+
+func TestStartInstallation_PluginSkippedOutcomeWhenDeclined(t *testing.T) {
+	m := model{serviceEnabled: true, jellyfinEnabled: true, pluginInstall: false}
+	next, _ := m.startInstallation()
+	if got := next.(model); got.pluginState.outcome != "skipped" {
+		t.Errorf("outcome = %q, want skipped", got.pluginState.outcome)
+	}
+}
+
+func TestInstallJellyfinPlugin_ServerErrorMarksFailed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	m := &model{
+		jellyfinURL:    srv.URL,
+		jellyfinAPIKey: "k",
+		pluginState:    &pluginRunState{outcome: "needs-restart"},
+	}
+
+	if err := installJellyfinPlugin(m); err == nil {
+		t.Fatal("expected error from erroring server")
+	}
+	if m.pluginState.outcome != "failed" {
+		t.Errorf("outcome = %q, want failed", m.pluginState.outcome)
+	}
+}
+
+func TestConfigurePluginFeedback_SkipsWhenListenerDidNotStart(t *testing.T) {
+	m := &model{pluginState: &pluginRunState{loaded: true, outcome: "unverified"}}
+
+	if err := configurePluginFeedback(m); err != nil {
+		t.Fatalf("configurePluginFeedback() error = %v, want quiet skip", err)
+	}
+	if m.pluginState.outcome != "unverified" {
+		t.Errorf("outcome = %q, want unverified", m.pluginState.outcome)
+	}
+}
+
+func TestGenerateConfigString_EscapesPluginDaemonURL(t *testing.T) {
+	m := &model{
+		watchFolders:    []WatchFolder{{Type: "tv", Paths: "/watch/tv"}},
+		tvLibraryPaths:  "/lib/tv",
+		jellyfinEnabled: true,
+		webhookSecret:   "secret-1",
+		pluginInstall:   true,
+		pluginDaemonURL: `http://host/path"oops`,
+	}
+
+	configStr, err := m.generateConfigString()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	t.Setenv("SUDO_USER", "")
+	dir := filepath.Join(tmp, ".config", "plex2jellyfin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(configStr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := configpkg.Load()
+	if err != nil {
+		t.Fatalf("config.Load() on generated config: %v", err)
+	}
+	if cfg.Jellyfin.PluginDaemonURL != m.pluginDaemonURL {
+		t.Errorf("plugin_daemon_url = %q, want %q", cfg.Jellyfin.PluginDaemonURL, m.pluginDaemonURL)
+	}
+}
+
+func TestGenerateConfigString_IncludesSetupMarker(t *testing.T) {
+	m := &model{
+		watchFolders: []WatchFolder{
+			{Type: "movies", Paths: "/watch/movies"},
+			{Type: "tv", Paths: "/watch/tv"},
+		},
+		movieLibraryPaths: "/lib/movies",
+		tvLibraryPaths:    "/lib/tv",
+		serviceEnabled:    true,
+	}
+
+	configStr, err := m.generateConfigString()
+	if err != nil {
+		t.Fatalf("generateConfigString() error = %v", err)
+	}
+
+	if !strings.Contains(configStr, "[setup]") {
+		t.Fatalf("expected [setup] block, got:\n%s", configStr)
+	}
+	if !strings.Contains(configStr, fmt.Sprintf("version = %d", setuppkg.CurrentVersion)) {
+		t.Fatalf("expected setup version %d, got:\n%s", setuppkg.CurrentVersion, configStr)
+	}
+	if !strings.Contains(configStr, "completed = true") {
+		t.Fatalf("expected completed = true, got:\n%s", configStr)
+	}
+}
+
+func TestGenerateConfigString_IncludesPluginFields(t *testing.T) {
+	m := &model{
+		watchFolders:    []WatchFolder{{Type: "tv", Paths: "/watch/tv"}},
+		tvLibraryPaths:  "/lib/tv",
+		jellyfinEnabled: true,
+		jellyfinURL:     "http://localhost:8096",
+		jellyfinAPIKey:  "jf-api",
+		webhookSecret:   "secret-1",
+		pluginInstall:   true,
+		pluginDaemonURL: "http://192.168.0.10:5522",
+	}
+
+	configStr, err := m.generateConfigString()
+	if err != nil {
+		t.Fatalf("generateConfigString() error = %v", err)
+	}
+
+	if !strings.Contains(configStr, "plugin_enabled = true") {
+		t.Fatalf("expected plugin_enabled = true, got:\n%s", configStr)
+	}
+	if !strings.Contains(configStr, `plugin_daemon_url = "http://192.168.0.10:5522"`) {
+		t.Fatalf("expected plugin_daemon_url, got:\n%s", configStr)
+	}
+}
+
+// The TUI writes TOML by hand; this guards the silent-field-loss trap by
+// parsing the emitted string through the real config loader.
+func TestGenerateConfigString_RoundTripsThroughConfigLoad(t *testing.T) {
+	m := &model{
+		watchFolders:    []WatchFolder{{Type: "tv", Paths: "/watch/tv"}},
+		tvLibraryPaths:  "/lib/tv",
+		jellyfinEnabled: true,
+		jellyfinURL:     "http://localhost:8096",
+		jellyfinAPIKey:  "jf-api",
+		webhookSecret:   "secret-1",
+		pluginInstall:   true,
+		pluginDaemonURL: "http://192.168.0.10:5522",
+	}
+
+	configStr, err := m.generateConfigString()
+	if err != nil {
+		t.Fatalf("generateConfigString() error = %v", err)
+	}
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	t.Setenv("SUDO_USER", "")
+	dir := filepath.Join(tmp, ".config", "plex2jellyfin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(configStr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := configpkg.Load()
+	if err != nil {
+		t.Fatalf("config.Load() on generated config: %v", err)
+	}
+	if cfg.Setup.Version != setuppkg.CurrentVersion || !cfg.Setup.Completed {
+		t.Errorf("setup marker did not round-trip: %+v", cfg.Setup)
+	}
+	if !cfg.Jellyfin.PluginEnabled {
+		t.Error("plugin_enabled did not round-trip")
+	}
+	if cfg.Jellyfin.PluginDaemonURL != "http://192.168.0.10:5522" {
+		t.Errorf("plugin_daemon_url did not round-trip: %q", cfg.Jellyfin.PluginDaemonURL)
+	}
+}
 
 func TestStartInstallation_WebUIDisabledSkipsWebTasks(t *testing.T) {
 	m := model{
