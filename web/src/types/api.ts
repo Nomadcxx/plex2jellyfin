@@ -272,6 +272,8 @@ export interface components {
       daemon_state: string;
       runtime: components["schemas"]["SetupRuntimeInfo"];
       draft: components["schemas"]["SetupDraft"];
+      advertise_ip?: string;
+      default_callback_url?: string;
     };
     SetupRuntimeInfo: {
       /** @enum {string} */
@@ -299,6 +301,9 @@ export interface components {
     };
     SetupJellyfin: components["schemas"]["SetupService"] & {
       path_mappings: components["schemas"]["SetupPathMapping"][];
+      plugin_install?: boolean;
+      plugin_restart?: boolean;
+      plugin_daemon_url?: string;
     };
     SetupPathMapping: {
       jellyfin: string;

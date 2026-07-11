@@ -35,10 +35,13 @@ type ServiceDraft struct {
 }
 
 type JellyfinDraft struct {
-	Enabled      bool                         `json:"enabled"`
-	URL          string                       `json:"url"`
-	APIKey       string                       `json:"api_key"`
-	PathMappings []config.JellyfinPathMapping `json:"path_mappings"`
+	Enabled         bool                         `json:"enabled"`
+	URL             string                       `json:"url"`
+	APIKey          string                       `json:"api_key"`
+	PathMappings    []config.JellyfinPathMapping `json:"path_mappings"`
+	PluginInstall   bool                         `json:"plugin_install"`
+	PluginRestart   bool                         `json:"plugin_restart"`
+	PluginDaemonURL string                       `json:"plugin_daemon_url"`
 }
 
 type AIDraft struct {
@@ -117,7 +120,9 @@ func DraftFromConfig(cfg *config.Config) Draft {
 		Radarr:    ServiceDraft{Enabled: cfg.Radarr.Enabled, URL: cfg.Radarr.URL, APIKey: mask(cfg.Radarr.APIKey)},
 		Jellyfin: JellyfinDraft{
 			Enabled: cfg.Jellyfin.Enabled, URL: cfg.Jellyfin.URL, APIKey: mask(cfg.Jellyfin.APIKey),
-			PathMappings: append([]config.JellyfinPathMapping{}, cfg.Jellyfin.PathMappings...),
+			PathMappings:    append([]config.JellyfinPathMapping{}, cfg.Jellyfin.PathMappings...),
+			PluginInstall:   cfg.Jellyfin.PluginEnabled,
+			PluginDaemonURL: cfg.Jellyfin.PluginDaemonURL,
 		},
 		AI: AIDraft{
 			Enabled: cfg.AI.Enabled, Endpoint: cfg.AI.OllamaEndpoint,
@@ -166,6 +171,11 @@ func ValidateDraft(d Draft, runtime RuntimeInfo) []FieldError {
 		}
 		if strings.TrimSpace(d.Jellyfin.APIKey) == "" {
 			errs = append(errs, FieldError{Field: "jellyfin.api_key", Message: "is required when enabled"})
+		}
+		if d.Jellyfin.PluginInstall {
+			if !validHTTPURL(d.Jellyfin.PluginDaemonURL) {
+				errs = append(errs, FieldError{Field: "jellyfin.plugin_daemon_url", Message: "must be an absolute http or https URL when installing the companion plugin"})
+			}
 		}
 	}
 	for i, mapping := range d.Jellyfin.PathMappings {
@@ -225,6 +235,12 @@ func ApplyDraft(current *config.Config, d Draft) *config.Config {
 	next.Jellyfin.URL = strings.TrimRight(strings.TrimSpace(d.Jellyfin.URL), "/")
 	next.Jellyfin.APIKey = preserveSecret(d.Jellyfin.APIKey, current.Jellyfin.APIKey)
 	next.Jellyfin.PathMappings = append([]config.JellyfinPathMapping(nil), d.Jellyfin.PathMappings...)
+	if d.Jellyfin.Enabled {
+		next.Jellyfin.PluginEnabled = d.Jellyfin.PluginInstall
+		next.Jellyfin.PluginDaemonURL = strings.TrimRight(strings.TrimSpace(d.Jellyfin.PluginDaemonURL), "/")
+	} else {
+		next.Jellyfin.PluginEnabled = false
+	}
 
 	next.AI.Enabled = d.AI.Enabled
 	next.AI.OllamaEndpoint = strings.TrimRight(strings.TrimSpace(d.AI.Endpoint), "/")

@@ -1159,6 +1159,10 @@ components:
           $ref: '#/components/schemas/SetupRuntimeInfo'
         draft:
           $ref: '#/components/schemas/SetupDraft'
+        advertise_ip:
+          type: string
+        default_callback_url:
+          type: string
 
     SetupRuntimeInfo:
       type: object
@@ -1225,6 +1229,15 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/SetupPathMapping'
+            plugin_install:
+              type: boolean
+              description: Install the companion plugin via Jellyfin's package API
+            plugin_restart:
+              type: boolean
+              description: Restart Jellyfin after install so the plugin loads
+            plugin_daemon_url:
+              type: string
+              description: Base URL the companion plugin calls back to
 
     SetupPathMapping:
       type: object

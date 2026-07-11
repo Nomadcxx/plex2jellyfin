@@ -63,7 +63,13 @@ const steps: Array<{ id: SetupStep; label: string; icon: typeof Tv }> = [
 
 export function SetupWizard({ status }: { status: SetupStatus }) {
   const runtime = status.runtime.kind as RuntimeKind;
-  const [draft, setDraft] = useState(() => hydrateDraft(status.draft, runtime));
+  const [draft, setDraft] = useState(() => {
+    const next = hydrateDraft(status.draft, runtime);
+    if (next.jellyfin.enabled && !next.jellyfin.plugin_daemon_url && status.default_callback_url) {
+      next.jellyfin.plugin_daemon_url = status.default_callback_url;
+    }
+    return next;
+  });
   const [checks, setChecks] = useState<WizardChecks>(() => emptyChecks());
   const [stepIndex, setStepIndex] = useState(0);
   const [visibleErrors, setVisibleErrors] = useState<string[]>([]);
@@ -183,6 +189,7 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
                   testing={testingService}
                   onTest={runServiceTest}
                   onFix={setFixTarget}
+                  defaultCallbackURL={status.default_callback_url ?? ''}
                 />
               )}
               {current.id === 'ai' && <AIStep draft={draft} setDraft={setDraft} checks={checks} setChecks={setChecks} />}
@@ -214,7 +221,14 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
                 onClick={() => {
                   const errors = stepErrors('review', draft, checks, runtime);
                   if (errors.length) return setVisibleErrors(errors);
-                  apply.mutate(draft, { onSuccess: () => setApplied(true) });
+                  apply.mutate(draft, {
+                    onSuccess: (result) => {
+                      setApplied(true);
+                      if (result.plugin_warning) {
+                        toast.warning(result.plugin_warning);
+                      }
+                    },
+                  });
                 }}
                 disabled={apply.isPending}
               >
@@ -309,7 +323,7 @@ function PathEditor({ title, icon: Icon, collection, media, paths, writable, che
   );
 }
 
-function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest, onFix }: {
+function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest, onFix, defaultCallbackURL }: {
   draft: SetupDraft;
   setDraft: React.Dispatch<React.SetStateAction<SetupDraft>>;
   checks: WizardChecks;
@@ -317,6 +331,7 @@ function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest,
   testing: ServiceName | null;
   onTest: (name: ServiceName) => void;
   onFix: (name: 'sonarr' | 'radarr') => void;
+  defaultCallbackURL: string;
 }) {
   const update = (name: ServiceName, patch: Record<string, unknown>) => setDraft((value) => ({ ...value, [name]: { ...value[name], ...patch } }));
   return (
@@ -344,7 +359,54 @@ function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest,
                 <Button size="sm" variant="outline" onClick={() => onFix(name as 'sonarr' | 'radarr')}><Wrench className="h-4 w-4" />Review fix</Button>
               </div>
             )}
-            {name === 'jellyfin' && value.enabled && <PathMappings draft={draft} setDraft={setDraft} />}
+            {name === 'jellyfin' && value.enabled && (
+              <>
+                <div className="mt-5 space-y-4 border-t border-zinc-900 pt-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="font-mono text-sm text-zinc-300">Install companion plugin</h3>
+                      <p className="mt-1 text-sm text-zinc-500">Closes the feedback loop with Jellyfin library events.</p>
+                    </div>
+                    <Switch
+                      checked={!!draft.jellyfin.plugin_install}
+                      onCheckedChange={(plugin_install) => {
+                        const patch: Record<string, unknown> = { plugin_install };
+                        if (plugin_install && !draft.jellyfin.plugin_daemon_url && defaultCallbackURL) {
+                          patch.plugin_daemon_url = defaultCallbackURL;
+                        }
+                        update('jellyfin', patch);
+                      }}
+                      aria-label="Install companion plugin"
+                    />
+                  </div>
+                  {draft.jellyfin.plugin_install && (
+                    <>
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <h3 className="font-mono text-sm text-zinc-300">Restart Jellyfin after install</h3>
+                          <p className="mt-1 text-sm text-zinc-500">Required for the plugin to load; otherwise verify later from the CLI.</p>
+                        </div>
+                        <Switch
+                          checked={!!draft.jellyfin.plugin_restart}
+                          onCheckedChange={(plugin_restart) => update('jellyfin', { plugin_restart })}
+                          aria-label="Restart Jellyfin after plugin install"
+                        />
+                      </div>
+                      <label className="block space-y-2 text-sm">
+                        <span className="text-zinc-400">Plugin callback URL</span>
+                        <Input
+                          value={draft.jellyfin.plugin_daemon_url ?? ''}
+                          onChange={(event) => update('jellyfin', { plugin_daemon_url: event.target.value })}
+                          placeholder={defaultCallbackURL || 'http://192.168.1.10:5522'}
+                        />
+                        <span className="block text-xs text-zinc-500">From Jellyfin&apos;s point of view — never localhost when Jellyfin is in a container.</span>
+                      </label>
+                    </>
+                  )}
+                </div>
+                <PathMappings draft={draft} setDraft={setDraft} />
+              </>
+            )}
           </section>
         );
       })}

@@ -94,7 +94,14 @@ func (e *Engine) do(ctx context.Context, method, path string, body, result any) 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 400 {
-		return resp.StatusCode, fmt.Errorf("%s %s: %s", method, path, resp.Status)
+		detail := strings.TrimSpace(string(data))
+		if detail == "" {
+			return resp.StatusCode, fmt.Errorf("%s %s: %s", method, path, resp.Status)
+		}
+		if len(detail) > 240 {
+			detail = detail[:240] + "…"
+		}
+		return resp.StatusCode, fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, detail)
 	}
 	if result != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, result); err != nil {
