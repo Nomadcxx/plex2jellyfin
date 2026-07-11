@@ -387,13 +387,33 @@ func DefaultConfig() *Config {
 
 // Load loads configuration from file or returns defaults
 func Load() (*Config, error) {
-	v := viper.New()
-
-	// Set config file location
 	configPath, err := paths.ConfigPath()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get config path: %w", err)
 	}
+	cfg, err := loadFromPath(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if cfg.Password != "" && cfg.PasswordHash == "" {
+		hash, hashErr := HashPassword(cfg.Password)
+		if hashErr == nil {
+			cfg.PasswordHash = hash
+			cfg.Password = ""
+			if saveErr := cfg.Save(); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "config warning: failed to migrate plaintext password to password_hash: %v\n", saveErr)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "config warning: failed to hash plaintext password: %v\n", hashErr)
+		}
+	}
+
+	return cfg, nil
+}
+
+func loadFromPath(configPath string) (*Config, error) {
+	v := viper.New()
 	v.SetConfigFile(configPath)
 
 	// Read config file if it exists
@@ -421,20 +441,33 @@ func Load() (*Config, error) {
 		fmt.Fprintf(os.Stderr, "config warning: %d unknown key(s) in %s: %v\n", len(unknown), configPath, unknown)
 	}
 
-	if cfg.Password != "" && cfg.PasswordHash == "" {
-		hash, hashErr := HashPassword(cfg.Password)
-		if hashErr == nil {
-			cfg.PasswordHash = hash
-			cfg.Password = ""
-			if saveErr := cfg.Save(); saveErr != nil {
-				fmt.Fprintf(os.Stderr, "config warning: failed to migrate plaintext password to password_hash: %v\n", saveErr)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "config warning: failed to hash plaintext password: %v\n", hashErr)
-		}
-	}
-
 	return cfg, nil
+}
+
+// UpdateWithLock reloads the latest config while holding its write lock, then
+// persists it only when update returns true. The returned config is always the
+// lock-scoped snapshot, including concurrent changes made before acquisition.
+func UpdateWithLock(update func(*Config) bool) (*Config, error) {
+	configPath, err := ConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	var cfg *Config
+	err = withFileLock(configPath, func() error {
+		var loadErr error
+		cfg, loadErr = loadFromPath(configPath)
+		if loadErr != nil {
+			return loadErr
+		}
+		if !update(cfg) {
+			return nil
+		}
+		if err := cfg.NormalizeSecrets(); err != nil {
+			return err
+		}
+		return atomicWrite(configPath, []byte(cfg.ToTOML()), 0o600)
+	})
+	return cfg, err
 }
 
 func ensureConfigFilePrivate(path string, mode os.FileMode) error {

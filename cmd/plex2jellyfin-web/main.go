@@ -16,6 +16,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemonctl"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
+	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 	"github.com/spf13/cobra"
 )
 
@@ -56,6 +57,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+	// Configs written before the [setup] marker existed are recognized as
+	// configured only by heuristic. Stamp them explicitly once so the web
+	// wizard can never re-trigger for an already-configured install.
+	if setupdomain.AdoptLegacyCompletion(cfg) {
+		latest, err := config.UpdateWithLock(setupdomain.AdoptLegacyCompletion)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not persist setup completion marker: %v\n", err)
+		} else {
+			cfg = latest
+		}
 	}
 
 	db, err := database.Open()

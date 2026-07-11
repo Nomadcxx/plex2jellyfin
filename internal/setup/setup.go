@@ -89,6 +89,23 @@ func HasMediaPair(cfg *config.Config) bool {
 	return tv || movies
 }
 
+// AdoptLegacyCompletion stamps the explicit setup marker onto configs that
+// predate it: version 0 but recognizably configured (a complete media pair).
+// This converts the HasMediaPair heuristic into durable state once, so later
+// hand-edits to paths can never re-trigger a wizard for a configured install.
+// Returns true when the config was mutated; the caller persists it.
+func AdoptLegacyCompletion(cfg *config.Config) bool {
+	if cfg == nil || cfg.Setup.Version != 0 {
+		return false
+	}
+	if !HasMediaPair(cfg) {
+		return false
+	}
+	cfg.Setup.Version = CurrentVersion
+	cfg.Setup.Completed = true
+	return true
+}
+
 func DraftFromConfig(cfg *config.Config) Draft {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
