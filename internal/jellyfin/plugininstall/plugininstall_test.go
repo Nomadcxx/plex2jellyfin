@@ -202,3 +202,18 @@ func TestVerifyParsesThePluginResponse(t *testing.T) {
 		t.Errorf("verify result wrong: %+v", res)
 	}
 }
+
+func TestDoIncludesResponseBodyOnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"callback unreachable"}`, http.StatusPreconditionFailed)
+	}))
+	t.Cleanup(srv.Close)
+	e := New(srv.URL, "k", srv.Client())
+	_, err := e.do(context.Background(), http.MethodPost, "/plex2jellyfin/test-webhook", nil, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "412") || !strings.Contains(err.Error(), "callback unreachable") {
+		t.Fatalf("error = %v, want status + body", err)
+	}
+}

@@ -6,25 +6,30 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin/plugininstall"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 )
 
 type SetupStatusResponse struct {
-	Required    bool                    `json:"required"`
-	Complete    bool                    `json:"complete"`
-	DaemonState string                  `json:"daemon_state"`
-	Runtime     setupdomain.RuntimeInfo `json:"runtime"`
-	Draft       setupdomain.Draft       `json:"draft"`
+	Required           bool                    `json:"required"`
+	Complete           bool                    `json:"complete"`
+	DaemonState        string                  `json:"daemon_state"`
+	Runtime            setupdomain.RuntimeInfo `json:"runtime"`
+	Draft              setupdomain.Draft       `json:"draft"`
+	AdvertiseIP        string                  `json:"advertise_ip,omitempty"`
+	DefaultCallbackURL string                  `json:"default_callback_url,omitempty"`
 }
 
 type setupApplyResponse struct {
-	Applied     bool   `json:"applied"`
-	Complete    bool   `json:"complete"`
-	DaemonState string `json:"daemon_state"`
+	Applied       bool   `json:"applied"`
+	Complete      bool   `json:"complete"`
+	DaemonState   string `json:"daemon_state"`
+	PluginWarning string `json:"plugin_warning,omitempty"`
 }
 
 func (s *Server) GetSetupStatus(w http.ResponseWriter, r *http.Request) {
@@ -33,10 +38,16 @@ func (s *Server) GetSetupStatus(w http.ResponseWriter, r *http.Request) {
 	s.configMu.RUnlock()
 
 	required := setupdomain.NeedsSetup(cfg)
+	advertise := setupdomain.DetectAdvertiseIP()
+	callback := ""
+	if advertise != "" {
+		callback = "http://" + advertise + ":5522"
+	}
 	writeJSON(w, http.StatusOK, SetupStatusResponse{
 		Required: required, Complete: !required,
 		DaemonState: s.currentDaemonState(r.Context()),
 		Runtime:     setupdomain.DetectRuntime(), Draft: setupdomain.DraftFromConfig(cfg),
+		AdvertiseIP: advertise, DefaultCallbackURL: callback,
 	})
 }
 
@@ -88,13 +99,22 @@ func (s *Server) ApplySetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pluginWarning := ""
+	if candidate.Jellyfin.Enabled && draft.Jellyfin.PluginInstall {
+		if warn := s.setupCompanionPlugin(r.Context(), candidate, draft); warn != "" {
+			pluginWarning = warn
+		}
+	}
+
 	candidate.Setup.Completed = true
 	if err := candidate.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, "config_save_error", err.Error())
 		return
 	}
 	s.replaceConfigLocked(candidate)
-	writeJSON(w, http.StatusOK, setupApplyResponse{Applied: true, Complete: true, DaemonState: "running"})
+	writeJSON(w, http.StatusOK, setupApplyResponse{
+		Applied: true, Complete: true, DaemonState: "running", PluginWarning: pluginWarning,
+	})
 }
 
 func validateSetupPaths(draft setupdomain.Draft) []setupdomain.FieldError {
@@ -191,6 +211,53 @@ func cloneConfig(cfg *config.Config) *config.Config {
 	}
 	copy := *cfg
 	return &copy
+}
+
+// setupCompanionPlugin installs/configures the Jellyfin plugin after the
+// daemon is up. Soft-fails: setup.completed is independent of plugin success.
+func (s *Server) setupCompanionPlugin(ctx context.Context, cfg *config.Config, draft setupdomain.Draft) string {
+	engine := plugininstall.New(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, &http.Client{Timeout: 15 * time.Second})
+	insp, err := engine.Inspect(ctx)
+	if err != nil {
+		return "companion plugin inspect failed: " + err.Error()
+	}
+	if !insp.ABISupported {
+		return "jellyfin " + insp.ServerVersion + " does not support the companion plugin"
+	}
+	if insp.InstalledVersion == "" {
+		if _, err := engine.RegisterRepo(ctx); err != nil {
+			return "register plugin repository: " + err.Error()
+		}
+		if err := engine.Install(ctx); err != nil {
+			return "install companion plugin: " + err.Error()
+		}
+	}
+	if draft.Jellyfin.PluginRestart {
+		if err := engine.Restart(ctx); err != nil {
+			return "restart jellyfin: " + err.Error() + "; run: plex2jellyfin plugin verify"
+		}
+		if err := engine.WaitReady(ctx, 60*time.Second); err != nil {
+			return "plugin did not load after restart: " + err.Error()
+		}
+	} else if !insp.PluginResponding {
+		return "plugin installed; restart Jellyfin, then run: plex2jellyfin plugin verify"
+	}
+
+	secret := cfg.Jellyfin.PluginSharedSecret
+	if secret == "" {
+		secret = cfg.Jellyfin.WebhookSecret
+	}
+	daemonURL := strings.TrimRight(cfg.Jellyfin.PluginDaemonURL, "/")
+	if secret == "" || daemonURL == "" {
+		return "plugin loaded but callback URL/secret missing; run: plex2jellyfin plugin verify"
+	}
+	if err := engine.Configure(ctx, daemonURL, secret); err != nil {
+		return "configure plugin: " + err.Error() + "; retry: plex2jellyfin plugin verify"
+	}
+	if _, err := engine.Verify(ctx); err != nil {
+		return "plugin verify: " + err.Error() + "; retry: plex2jellyfin plugin verify"
+	}
+	return ""
 }
 
 // ValidateSetupPaths exposes the setup path preflight for reuse outside the

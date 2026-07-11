@@ -37,19 +37,19 @@ func (m model) renderWelcome() string {
 	for i, opt := range options {
 		prefix := "  "
 		if i == m.selectedOption {
-			prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			prefix = fg(Primary).Render("▸ ")
 		}
 		b.WriteString(prefix + opt.label + "\n")
-		b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render(opt.desc) + "\n\n")
+		b.WriteString("    " + fg(FgMuted).Render(opt.desc) + "\n\n")
 	}
 
 	if m.existingDBDetected {
-		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
+		b.WriteString(fg(FgMuted).Render(
 			fmt.Sprintf("Existing installation detected: %s", m.existingDBPath)))
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("Requires root privileges (sudo)"))
+	b.WriteString("\n" + fg(FgMuted).Render("Requires root privileges (sudo)"))
 
 	return b.String()
 }
@@ -57,7 +57,7 @@ func (m model) renderWelcome() string {
 func (m model) renderUninstallConfirm() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Uninstall Plex2Jellyfin"))
+	b.WriteString(fgBold(Primary).Render("Uninstall Plex2Jellyfin"))
 	b.WriteString("\n\n")
 
 	b.WriteString("This will remove:\n")
@@ -66,21 +66,21 @@ func (m model) renderUninstallConfirm() string {
 
 	// Three options for config/database handling
 	prefixes := []string{"  ", "  ", "  "}
-	prefixes[m.selectedOption] = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	prefixes[m.selectedOption] = fg(Primary).Render("▸ ")
 
 	b.WriteString("Configuration and database:\n\n")
 
 	b.WriteString(prefixes[0] + "Keep configuration and database\n")
-	b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render("Preserve everything for future reinstall") + "\n\n")
+	b.WriteString("    " + fg(FgMuted).Render("Preserve everything for future reinstall") + "\n\n")
 
 	b.WriteString(prefixes[1] + "Keep configuration, delete database\n")
-	b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render("Keep settings but rebuild media.db on next install") + "\n\n")
+	b.WriteString("    " + fg(FgMuted).Render("Keep settings but rebuild media.db on next install") + "\n\n")
 
 	b.WriteString(prefixes[2] + "Delete configuration and database\n")
-	b.WriteString("    " + lipgloss.NewStyle().Foreground(FgMuted).Render("Remove all Plex2Jellyfin data permanently") + "\n\n")
+	b.WriteString("    " + fg(FgMuted).Render("Remove all Plex2Jellyfin data permanently") + "\n\n")
 
 	if m.existingDBDetected {
-		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
+		b.WriteString(fg(FgMuted).Render(
 			fmt.Sprintf("Database: %s", m.existingDBPath)))
 		b.WriteString("\n")
 	}
@@ -91,14 +91,14 @@ func (m model) renderUninstallConfirm() string {
 func (m model) renderPaths() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Watch Folders"))
+	b.WriteString(fgBold(Primary).Render("Watch Folders"))
 	b.WriteString("\n\n")
 
 	// Render watch folder inputs
 	for i, wf := range m.watchFolders {
 		prefix := "  "
 		if m.focusedInput == i {
-			prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			prefix = fg(Primary).Render("▸ ")
 		}
 		b.WriteString(fmt.Sprintf("%s%s (%s)\n", prefix, wf.Label, wf.Type))
 		// Render the actual text input widget
@@ -109,17 +109,17 @@ func (m model) renderPaths() string {
 		}
 	}
 
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("[+] Add folder  [-] Remove folder"))
+	b.WriteString(fg(FgMuted).Render("[+] Add folder  [-] Remove folder"))
 	b.WriteString("\n\n")
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Library Paths"))
+	b.WriteString(fgBold(Primary).Render("Library Paths"))
 	b.WriteString("\n\n")
 
 	// Render library path inputs
 	libraryStartIdx := len(m.watchFolders)
 	tvPrefix := "  "
 	if m.focusedInput == libraryStartIdx {
-		tvPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		tvPrefix = fg(Primary).Render("▸ ")
 	}
 	if libraryStartIdx < len(m.inputs) {
 		b.WriteString(fmt.Sprintf("%sTV Libraries:    %s\n", tvPrefix, m.inputs[libraryStartIdx].View()))
@@ -129,7 +129,7 @@ func (m model) renderPaths() string {
 
 	moviePrefix := "  "
 	if m.focusedInput == libraryStartIdx+1 {
-		moviePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		moviePrefix = fg(Primary).Render("▸ ")
 	}
 	if libraryStartIdx+1 < len(m.inputs) {
 		b.WriteString(fmt.Sprintf("%sMovie Libraries: %s\n", moviePrefix, m.inputs[libraryStartIdx+1].View()))
@@ -139,10 +139,15 @@ func (m model) renderPaths() string {
 
 	if m.pathOverlapWarning != "" {
 		b.WriteString("\n\n")
-		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ff5555")).Render("⚠ WARNING: "))
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5555")).Render(m.pathOverlapWarning))
+		b.WriteString(fgBold(lipgloss.Color("#ff5555")).Render("⚠ WARNING: "))
+		b.WriteString(fg(lipgloss.Color("#ff5555")).Render(m.pathOverlapWarning))
 		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Press Enter again to proceed anyway, or fix the paths above."))
+		b.WriteString(fg(FgMuted).Render("Press Enter again to proceed anyway, or fix the paths above."))
+	}
+	if m.pathsError != "" {
+		b.WriteString("\n\n")
+		b.WriteString(fgBold(lipgloss.Color("#ff5555")).Render("⚠ "))
+		b.WriteString(fg(lipgloss.Color("#ff5555")).Render(m.pathsError))
 	}
 
 	return b.String()
@@ -151,12 +156,12 @@ func (m model) renderPaths() string {
 func (m model) renderSonarr() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Sonarr Integration"))
+	b.WriteString(fgBold(Primary).Render("Sonarr Integration"))
 	b.WriteString("\n\n")
 
 	enablePrefix := "  "
 	if m.focusedInput == 0 {
-		enablePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		enablePrefix = fg(Primary).Render("▸ ")
 	}
 	enabledStr := "No"
 	if m.sonarrEnabled {
@@ -168,7 +173,7 @@ func (m model) renderSonarr() string {
 		// Render URL input
 		urlPrefix := "  "
 		if m.focusedInput == 1 && len(m.inputs) > 0 {
-			urlPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			urlPrefix = fg(Primary).Render("▸ ")
 		}
 		if len(m.inputs) > 0 {
 			b.WriteString(fmt.Sprintf("%sURL:     %s\n", urlPrefix, m.inputs[0].View()))
@@ -179,7 +184,7 @@ func (m model) renderSonarr() string {
 		// Render API Key input
 		keyPrefix := "  "
 		if m.focusedInput == 2 && len(m.inputs) > 1 {
-			keyPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			keyPrefix = fg(Primary).Render("▸ ")
 		}
 		if len(m.inputs) > 1 {
 			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n\n", keyPrefix, m.inputs[1].View()))
@@ -198,7 +203,7 @@ func (m model) renderSonarr() string {
 		}
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("[T] Test connection  [S] Skip"))
+	b.WriteString("\n" + fg(FgMuted).Render("[T] Test connection  [S] Skip"))
 
 	return b.String()
 }
@@ -206,12 +211,12 @@ func (m model) renderSonarr() string {
 func (m model) renderRadarr() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Radarr Integration"))
+	b.WriteString(fgBold(Primary).Render("Radarr Integration"))
 	b.WriteString("\n\n")
 
 	enablePrefix := "  "
 	if m.focusedInput == 0 {
-		enablePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		enablePrefix = fg(Primary).Render("▸ ")
 	}
 	enabledStr := "No"
 	if m.radarrEnabled {
@@ -223,7 +228,7 @@ func (m model) renderRadarr() string {
 		// Render URL input
 		urlPrefix := "  "
 		if m.focusedInput == 1 && len(m.inputs) > 0 {
-			urlPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			urlPrefix = fg(Primary).Render("▸ ")
 		}
 		if len(m.inputs) > 0 {
 			b.WriteString(fmt.Sprintf("%sURL:     %s\n", urlPrefix, m.inputs[0].View()))
@@ -234,7 +239,7 @@ func (m model) renderRadarr() string {
 		// Render API Key input
 		keyPrefix := "  "
 		if m.focusedInput == 2 && len(m.inputs) > 1 {
-			keyPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			keyPrefix = fg(Primary).Render("▸ ")
 		}
 		if len(m.inputs) > 1 {
 			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n\n", keyPrefix, m.inputs[1].View()))
@@ -253,7 +258,7 @@ func (m model) renderRadarr() string {
 		}
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("[T] Test connection  [S] Skip"))
+	b.WriteString("\n" + fg(FgMuted).Render("[T] Test connection  [S] Skip"))
 
 	return b.String()
 }
@@ -261,12 +266,12 @@ func (m model) renderRadarr() string {
 func (m model) renderJellyfin() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Jellyfin Integration"))
+	b.WriteString(fgBold(Primary).Render("Jellyfin Integration"))
 	b.WriteString("\n\n")
 
 	enablePrefix := "  "
 	if m.focusedInput == 0 {
-		enablePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		enablePrefix = fg(Primary).Render("▸ ")
 	}
 	enabledStr := "No"
 	if m.jellyfinEnabled {
@@ -277,7 +282,7 @@ func (m model) renderJellyfin() string {
 	if m.jellyfinEnabled {
 		urlPrefix := "  "
 		if m.focusedInput == 1 && len(m.inputs) > 0 {
-			urlPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			urlPrefix = fg(Primary).Render("▸ ")
 		}
 		if len(m.inputs) > 0 {
 			b.WriteString(fmt.Sprintf("%sURL:     %s\n", urlPrefix, m.inputs[0].View()))
@@ -287,7 +292,7 @@ func (m model) renderJellyfin() string {
 
 		keyPrefix := "  "
 		if m.focusedInput == 2 && len(m.inputs) > 1 {
-			keyPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			keyPrefix = fg(Primary).Render("▸ ")
 		}
 		if len(m.inputs) > 1 {
 			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n", keyPrefix, m.inputs[1].View()))
@@ -297,7 +302,7 @@ func (m model) renderJellyfin() string {
 
 		secretPrefix := "  "
 		if m.focusedInput == 3 && len(m.inputs) > 2 {
-			secretPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			secretPrefix = fg(Primary).Render("▸ ")
 		}
 		if len(m.inputs) > 2 {
 			b.WriteString(fmt.Sprintf("%sWebhook Secret: %s\n\n", secretPrefix, m.inputs[2].View()))
@@ -319,19 +324,19 @@ func (m model) renderJellyfin() string {
 			b.WriteString("\n")
 			installPrefix := "  "
 			if m.focusedInput == len(m.inputs)+1 {
-				installPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+				installPrefix = fg(Primary).Render("▸ ")
 			}
 			b.WriteString(fmt.Sprintf("%sInstall companion plugin: %s\n", installPrefix, boolToYesNo(m.pluginInstall)))
 
 			restartPrefix := "  "
 			if m.focusedInput == len(m.inputs)+2 {
-				restartPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+				restartPrefix = fg(Primary).Render("▸ ")
 			}
 			b.WriteString(fmt.Sprintf("%sRestart Jellyfin after install: %s   %s\n",
 				restartPrefix, boolToYesNo(m.pluginRestart),
-				lipgloss.NewStyle().Foreground(FgMuted).Render("(recommended)")))
+				fg(FgMuted).Render("(recommended)")))
 
-			b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
+			b.WriteString("\n" + fg(FgMuted).Render(
 				"  The companion plugin closes the feedback loop: it confirms organized\n"+
 					"  files against real Jellyfin items and powers orphan detection. It only\n"+
 					"  loads after Jellyfin restarts - without a restart the daemon runs\n"+
@@ -339,14 +344,14 @@ func (m model) renderJellyfin() string {
 		}
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("[T] Test connection  [S] Skip"))
+	b.WriteString("\n" + fg(FgMuted).Render("[T] Test connection  [S] Skip"))
 	return b.String()
 }
 
 func (m model) renderAI() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("AI / Ollama Integration"))
+	b.WriteString(fgBold(Primary).Render("AI / Ollama Integration"))
 	b.WriteString("\n\n")
 
 	enabledStr := "No"
@@ -356,50 +361,50 @@ func (m model) renderAI() string {
 	b.WriteString(fmt.Sprintf("  Enable: %s  [E] to toggle\n\n", enabledStr))
 
 	if !m.aiEnabled {
-		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  AI features disabled"))
+		b.WriteString(fg(FgMuted).Render("  AI features disabled"))
 		b.WriteString("\n\n[S] Skip")
 		return b.String()
 	}
 
 	switch m.aiState {
 	case aiStateNotInstalled:
-		b.WriteString(lipgloss.NewStyle().Foreground(WarningColor).Render("  ⚠ Ollama not detected"))
+		b.WriteString(fg(WarningColor).Render("  ⚠ Ollama not detected"))
 		b.WriteString("\n\n  Install Ollama with:\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(FgSecondary).Render("  curl -fsSL https://ollama.com/install.sh | sh"))
+		b.WriteString(fg(FgSecondary).Render("  curl -fsSL https://ollama.com/install.sh | sh"))
 		b.WriteString("\n\n  After installing, run: ollama serve")
 		b.WriteString("\n  Then pull a model:     ollama pull llama3.2")
 
 	case aiStateNotRunning:
-		b.WriteString(lipgloss.NewStyle().Foreground(WarningColor).Render("  ⚠ Ollama installed but not running"))
+		b.WriteString(fg(WarningColor).Render("  ⚠ Ollama installed but not running"))
 		b.WriteString("\n\n  Start Ollama with:\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(FgSecondary).Render("  ollama serve"))
+		b.WriteString(fg(FgSecondary).Render("  ollama serve"))
 		b.WriteString("\n\n  Or enable the systemd service:\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(FgSecondary).Render("  systemctl --user enable --now ollama"))
+		b.WriteString(fg(FgSecondary).Render("  systemctl --user enable --now ollama"))
 
 	case aiStateNoModels:
-		b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ● Connected"))
+		b.WriteString(fg(SuccessColor).Render("  ● Connected"))
 		b.WriteString(" - No models found\n\n")
 		b.WriteString("  Pull a model with:\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(FgSecondary).Render("  ollama pull llama3.2      # Recommended, 2GB"))
+		b.WriteString(fg(FgSecondary).Render("  ollama pull llama3.2      # Recommended, 2GB"))
 		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(FgSecondary).Render("  ollama pull mistral       # Alternative, 4GB"))
+		b.WriteString(fg(FgSecondary).Render("  ollama pull mistral       # Alternative, 4GB"))
 
 	case aiStateReady:
-		b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ● Connected"))
+		b.WriteString(fg(SuccessColor).Render("  ● Connected"))
 		b.WriteString(fmt.Sprintf(" - %d models available\n\n", len(m.aiModels)))
 
-		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  [Space] Select  (1st = Primary  2nd = Fallback)") + "\n\n")
+		b.WriteString(fg(FgMuted).Render("  [Space] Select  (1st = Primary  2nd = Fallback)") + "\n\n")
 
 		for i, mdl := range m.aiModels {
 			cursor := "   "
 			if i == m.aiModelIndex {
-				cursor = lipgloss.NewStyle().Foreground(Primary).Render(" ▸ ")
+				cursor = fg(Primary).Render(" ▸ ")
 			}
 			var badge string
 			if mdl == m.aiModel && m.aiModel != "" {
-				badge = lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("[P] ")
+				badge = fgBold(SuccessColor).Render("[P] ")
 			} else if mdl == m.aiFallbackModel && m.aiFallbackModel != "" {
-				badge = lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render("[F] ")
+				badge = fgBold(WarningColor).Render("[F] ")
 			} else {
 				badge = "    "
 			}
@@ -407,10 +412,10 @@ func (m model) renderAI() string {
 		}
 
 		if m.aiModel != "" {
-			b.WriteString(fmt.Sprintf("\n  Primary:  %s\n", lipgloss.NewStyle().Foreground(SuccessColor).Render(m.aiModel)))
+			b.WriteString(fmt.Sprintf("\n  Primary:  %s\n", fg(SuccessColor).Render(m.aiModel)))
 		}
 		if m.aiFallbackModel != "" {
-			b.WriteString(fmt.Sprintf("  Fallback: %s\n", lipgloss.NewStyle().Foreground(WarningColor).Render(m.aiFallbackModel)))
+			b.WriteString(fmt.Sprintf("  Fallback: %s\n", fg(WarningColor).Render(m.aiFallbackModel)))
 		}
 
 		if m.aiTestResult != "" {
@@ -426,7 +431,7 @@ func (m model) renderAI() string {
 		}
 	}
 
-	b.WriteString("\n\n" + lipgloss.NewStyle().Foreground(FgMuted).Render("[E] Toggle  [↑/↓] Navigate  [Space] Select  [T] Test  [P] Prompt  [R] Retry  [S] Skip"))
+	b.WriteString("\n\n" + fg(FgMuted).Render("[E] Toggle  [↑/↓] Navigate  [Space] Select  [T] Test  [P] Prompt  [R] Retry  [S] Skip"))
 
 	return b.String()
 }
@@ -434,7 +439,7 @@ func (m model) renderAI() string {
 func (m model) renderPermissions() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("File Permissions"))
+	b.WriteString(fgBold(Primary).Render("File Permissions"))
 	b.WriteString("\n\n")
 
 	fields := []struct {
@@ -450,7 +455,7 @@ func (m model) renderPermissions() string {
 	for _, f := range fields {
 		prefix := "  "
 		if m.focusedInput == f.idx {
-			prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			prefix = fg(Primary).Render("▸ ")
 		}
 		if f.idx < len(m.inputs) {
 			b.WriteString(fmt.Sprintf("%s%s %s\n", prefix, f.label, m.inputs[f.idx].View()))
@@ -459,8 +464,8 @@ func (m model) renderPermissions() string {
 
 	b.WriteString("\n")
 
-	tipStyle := lipgloss.NewStyle().Foreground(FgMuted)
-	warnStyle := lipgloss.NewStyle().Foreground(WarningColor)
+	tipStyle := fg(FgMuted)
+	warnStyle := fg(WarningColor)
 
 	if mediaServer := detectMediaServer(); mediaServer != nil {
 		b.WriteString(tipStyle.Render(fmt.Sprintf("  Detected: %s (user/group auto-filled)", mediaServer.Name)))
@@ -494,7 +499,7 @@ func (m model) renderPermissions() string {
 func (m model) renderService() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Systemd Service"))
+	b.WriteString(fgBold(Primary).Render("Systemd Service"))
 	b.WriteString("\n\n")
 
 	fields := []struct {
@@ -509,12 +514,12 @@ func (m model) renderService() string {
 	for i, f := range fields {
 		prefix := "  "
 		if i == m.focusedInput {
-			prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			prefix = fg(Primary).Render("▸ ")
 		}
 		b.WriteString(fmt.Sprintf("%s%-15s %s\n", prefix, f.label+":", f.value))
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
+	b.WriteString("\n" + fg(FgMuted).Render(
 		"The daemon monitors watch folders and runs periodic scans to catch missed files"))
 
 	return b.String()
@@ -523,24 +528,24 @@ func (m model) renderService() string {
 func (m model) renderWebService() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Web UI Service"))
+	b.WriteString(fgBold(Primary).Render("Web UI Service"))
 	b.WriteString("\n\n")
 
 	enablePrefix := "  "
 	if m.focusedInput == 0 {
-		enablePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		enablePrefix = fg(Primary).Render("▸ ")
 	}
 	b.WriteString(fmt.Sprintf("%sEnable Web UI: %s\n", enablePrefix, boolToYesNo(m.webEnabled)))
 
 	startPrefix := "  "
 	if m.focusedInput == 1 {
-		startPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		startPrefix = fg(Primary).Render("▸ ")
 	}
 	b.WriteString(fmt.Sprintf("%sStart now:     %s\n", startPrefix, boolToYesNo(m.webStartNow)))
 
 	portPrefix := "  "
 	if m.focusedInput == 2 {
-		portPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		portPrefix = fg(Primary).Render("▸ ")
 	}
 	portValue := m.webPort
 	if len(m.inputs) > 0 {
@@ -551,18 +556,18 @@ func (m model) renderWebService() string {
 	if len(m.inputs) >= 2 {
 		urlPrefix := "  "
 		if m.focusedInput == 3 {
-			urlPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+			urlPrefix = fg(Primary).Render("▸ ")
 		}
 		b.WriteString(fmt.Sprintf("%sPlugin callback URL: %s\n", urlPrefix, m.inputs[1].View()))
 		if m.inputs[1].Err != nil {
-			b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("  "+m.inputs[1].Err.Error()) + "\n")
+			b.WriteString(fg(ErrorColor).Render("  "+m.inputs[1].Err.Error()) + "\n")
 		}
-		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
+		b.WriteString(fg(FgMuted).Render(
 			"  Where Jellyfin's companion plugin posts events back to this machine.\n"+
 				"  Never localhost when Jellyfin runs in a container.") + "\n")
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
+	b.WriteString("\n" + fg(FgMuted).Render(
 		"If enabled, installs plex2jellyfin-web systemd service and listens on the selected port"))
 
 	return b.String()
@@ -571,7 +576,7 @@ func (m model) renderWebService() string {
 func (m model) renderConfirm() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Confirm Installation"))
+	b.WriteString(fgBold(Primary).Render("Confirm Installation"))
 	b.WriteString("\n\n")
 
 	b.WriteString("Watch Folders:\n")
@@ -611,7 +616,7 @@ func (m model) renderConfirm() string {
 		b.WriteString(fmt.Sprintf("  • Web UI start now: %s\n", boolToYesNo(m.webStartNow)))
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Press Enter to install"))
+	b.WriteString("\n" + fgBold(Primary).Render("Press Enter to install"))
 
 	return b.String()
 }
@@ -623,9 +628,9 @@ func (m model) renderInstalling() string {
 		var line string
 		switch task.status {
 		case statusPending:
-			line = lipgloss.NewStyle().Foreground(FgMuted).Render("  " + task.name)
+			line = fg(FgMuted).Render("  " + task.name)
 		case statusRunning:
-			line = m.spinner.View() + " " + lipgloss.NewStyle().Foreground(Secondary).Render(task.description)
+			line = m.spinner.View() + " " + fg(Secondary).Render(task.description)
 		case statusComplete:
 			line = checkMark.String() + " " + task.name
 		case statusFailed:
@@ -646,7 +651,7 @@ func (m model) renderInstalling() string {
 				var subLine string
 				switch subTask.status {
 				case statusPending:
-					subLine = lipgloss.NewStyle().Foreground(FgMuted).Render(subTask.name)
+					subLine = fg(FgMuted).Render(subTask.name)
 				case statusRunning:
 					subLine = m.spinner.View() + " " + subTask.name
 				case statusComplete:
@@ -663,7 +668,7 @@ func (m model) renderInstalling() string {
 
 		if task.status == statusFailed && task.errorDetails != nil {
 			if task.errorDetails.logFile != "" {
-				b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
+				b.WriteString(fg(FgMuted).Render(
 					fmt.Sprintf("     See log: %s\n", task.errorDetails.logFile)))
 			}
 		}
@@ -672,7 +677,7 @@ func (m model) renderInstalling() string {
 	if len(m.errors) > 0 {
 		b.WriteString("\n")
 		for _, err := range m.errors {
-			b.WriteString(lipgloss.NewStyle().Foreground(WarningColor).Render(err))
+			b.WriteString(fg(WarningColor).Render(err))
 			b.WriteString("\n")
 		}
 	}
@@ -683,7 +688,7 @@ func (m model) renderInstalling() string {
 func (m model) renderScanning() string {
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Scanning Libraries"))
+	b.WriteString(fgBold(Primary).Render("Scanning Libraries"))
 	b.WriteString("\n\n")
 
 	// Calculate percentage from files or libraries
@@ -700,8 +705,8 @@ func (m model) renderScanning() string {
 	}
 
 	// Build the progress bar with colors
-	barFilled := lipgloss.NewStyle().Foreground(Secondary).Render(strings.Repeat("█", filled))
-	barEmpty := lipgloss.NewStyle().Foreground(FgMuted).Render(strings.Repeat("░", barWidth-filled))
+	barFilled := fg(Secondary).Render(strings.Repeat("█", filled))
+	barEmpty := fg(FgMuted).Render(strings.Repeat("░", barWidth-filled))
 	progressBar := fmt.Sprintf("[%s%s]", barFilled, barEmpty)
 
 	b.WriteString(progressBar)
@@ -717,12 +722,12 @@ func (m model) renderScanning() string {
 	// Files scanned counter with spinner
 	b.WriteString(fmt.Sprintf("  %s Files scanned: %s\n",
 		m.spinner.View(),
-		lipgloss.NewStyle().Foreground(Secondary).Bold(true).Render(fmt.Sprintf("%d", m.scanProgress.FilesScanned))))
+		fgBold(Secondary).Render(fmt.Sprintf("%d", m.scanProgress.FilesScanned))))
 
 	// Show error count if any
 	if m.scanProgress.ErrorCount > 0 {
 		b.WriteString(fmt.Sprintf("  %s Errors: %d\n",
-			lipgloss.NewStyle().Foreground(WarningColor).Render("!"),
+			fg(WarningColor).Render("!"),
 			m.scanProgress.ErrorCount))
 	}
 
@@ -738,12 +743,12 @@ func (m model) renderScanning() string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Italic(true).Render(
+		b.WriteString(fg(FgMuted).Italic(true).Render(
 			fmt.Sprintf("  %s", displayPath)))
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
+	b.WriteString(fg(FgMuted).Render(
 		"Building media database from your libraries..."))
 
 	return b.String()
@@ -759,7 +764,7 @@ func (m model) renderComplete() string {
 	}
 
 	if hasCriticalFailure {
-		return lipgloss.NewStyle().Foreground(ErrorColor).Render(
+		return fg(ErrorColor).Render(
 			"Installation failed.\nCheck errors above.\n\nPress Enter to exit")
 	}
 
@@ -768,22 +773,22 @@ func (m model) renderComplete() string {
 		msg.WriteString("Uninstall complete.\nPlex2Jellyfin has been removed.\n\n")
 
 		if m.keepConfig && m.keepDatabase {
-			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config and database preserved: ~/.config/plex2jellyfin/"))
+			msg.WriteString(fg(FgMuted).Render("Config and database preserved: ~/.config/plex2jellyfin/"))
 			msg.WriteString("\n(Delete manually if no longer needed)")
 		} else if m.keepConfig && !m.keepDatabase {
-			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config preserved: ~/.config/plex2jellyfin/config.toml"))
+			msg.WriteString(fg(FgMuted).Render("Config preserved: ~/.config/plex2jellyfin/config.toml"))
 			msg.WriteString("\n")
-			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Database deleted."))
+			msg.WriteString(fg(FgMuted).Render("Database deleted."))
 			msg.WriteString("\n\n")
-			msg.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("To rebuild the database after reinstalling:"))
+			msg.WriteString(fgBold(Primary).Render("To rebuild the database after reinstalling:"))
 			msg.WriteString("\n")
 			msg.WriteString("  plex2jellyfin scan\n")
 			msg.WriteString("\n")
-			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Or with Sonarr/Radarr sync:"))
+			msg.WriteString(fg(FgMuted).Render("Or with Sonarr/Radarr sync:"))
 			msg.WriteString("\n")
 			msg.WriteString("  plex2jellyfin scan --sonarr --radarr\n")
 		} else {
-			msg.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Config and database deleted."))
+			msg.WriteString(fg(FgMuted).Render("Config and database deleted."))
 		}
 		msg.WriteString("\n\nPress Enter to exit")
 		return msg.String()
@@ -791,10 +796,10 @@ func (m model) renderComplete() string {
 
 	var b strings.Builder
 
-	bold := lipgloss.NewStyle().Bold(true).Foreground(Primary)
-	muted := lipgloss.NewStyle().Foreground(FgMuted)
-	cmd := lipgloss.NewStyle().Foreground(Secondary)
-	border := lipgloss.NewStyle().Foreground(FgMuted)
+	bold := fgBold(Primary)
+	muted := fg(FgMuted)
+	cmd := fg(Secondary)
+	border := fg(FgMuted)
 
 	if m.updateMode {
 		b.WriteString(bold.Render("Update complete"))
@@ -837,7 +842,7 @@ func (m model) renderComplete() string {
 		}
 		for _, row := range rows {
 			b.WriteString(border.Render("│ ") + muted.Render(fmt.Sprintf("%-19s", row.label)) + border.Render(" │ ") +
-				lipgloss.NewStyle().Foreground(Primary).Render(fmt.Sprintf("%-24s", row.value)) + border.Render(" │"))
+				fg(Primary).Render(fmt.Sprintf("%-24s", row.value)) + border.Render(" │"))
 			b.WriteString("\n")
 		}
 
@@ -845,14 +850,22 @@ func (m model) renderComplete() string {
 			b.WriteString(border.Render("├─────────────────────┴──────────────────────────┤"))
 			b.WriteString("\n")
 			warn := fmt.Sprintf("  ⚠  %d errors during indexing (check logs)", len(m.scanResult.Errors))
-			b.WriteString(border.Render("│") + lipgloss.NewStyle().Foreground(WarningColor).Render(fmt.Sprintf("%-48s", warn)) + border.Render("│"))
+			b.WriteString(border.Render("│") + fg(WarningColor).Render(fmt.Sprintf("%-48s", warn)) + border.Render("│"))
 			b.WriteString("\n")
 		}
 
 		b.WriteString(border.Render("└─────────────────────────────────────────────────┘"))
 		b.WriteString("\n\n")
 	} else {
-		b.WriteString(muted.Render("Plex2Jellyfin is ready. The daemon is running and watching your configured directories."))
+		st := m.serviceState
+		switch {
+		case st != nil && st.daemonStarted:
+			b.WriteString(muted.Render("Plex2Jellyfin daemon started. It is watching your configured directories."))
+		case st != nil && st.daemonUnitWritten:
+			b.WriteString(muted.Render("Daemon unit installed but not started yet. Start it with the command below."))
+		default:
+			b.WriteString(muted.Render("Config written. Systemd units were not installed — check warnings below."))
+		}
 		b.WriteString("\n\n")
 	}
 
@@ -882,25 +895,38 @@ func (m model) renderComplete() string {
 
 	b.WriteString("\n")
 
-	// ── Web UI ────────────────────────────────────────────────────────────
-	b.WriteString(bold.Render("Web UI") + "\n\n")
-	b.WriteString("  " + cmd.Render("sudo systemctl start plex2jellyfin-web") + "  " + muted.Render("start the web interface") + "\n")
-	b.WriteString("  " + muted.Render("Then open ") + cmd.Render("http://localhost:5522") + muted.Render(" in your browser") + "\n")
-	b.WriteString("\n")
-	b.WriteString(muted.Render("  💡 Set a password in config.toml to enable authentication") + "\n")
+	// ── Services (only advertise units that were actually written) ────────
+	st := m.serviceState
+	b.WriteString(bold.Render("Services") + "\n\n")
+	if st != nil && st.daemonUnitWritten && !st.daemonStarted {
+		b.WriteString("  " + cmd.Render("sudo systemctl start plex2jellyfin-daemon") + "  " + muted.Render("start the daemon") + "\n")
+	}
+	if st != nil && st.webUnitWritten {
+		if !st.webStarted {
+			b.WriteString("  " + cmd.Render("sudo systemctl start plex2jellyfin-web") + "  " + muted.Render("start the web interface") + "\n")
+		}
+		port := normalizedWebPort(m.webPort)
+		b.WriteString("  " + muted.Render("Then open ") + cmd.Render("http://localhost:"+port) + muted.Render(" in your browser") + "\n")
+		b.WriteString("\n")
+		b.WriteString(muted.Render("  💡 Set a password in config.toml to enable authentication") + "\n")
+	} else if m.webEnabled {
+		b.WriteString(muted.Render("  Web UI was selected but the systemd unit was not installed.") + "\n")
+	}
 	b.WriteString("\n")
 
 	// ── Config paths ──────────────────────────────────────────────────────
 	pathStyle := muted.Italic(true)
 	b.WriteString(muted.Render("Config:   ") + pathStyle.Render("~/.config/plex2jellyfin/config.toml") + "\n")
 	b.WriteString(muted.Render("Database: ") + pathStyle.Render("~/.config/plex2jellyfin/media.db") + "\n")
-	b.WriteString(muted.Render("Logs:     ") + pathStyle.Render("journalctl -u plex2jellyfin-daemon -f") + "\n")
+	if st != nil && st.daemonUnitWritten {
+		b.WriteString(muted.Render("Logs:     ") + pathStyle.Render("journalctl -u plex2jellyfin-daemon -f") + "\n")
+	}
 	b.WriteString("\n")
 
 	if len(m.errors) > 0 {
-		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(WarningColor).Render("Warnings") + "\n")
+		b.WriteString(fgBold(WarningColor).Render("Warnings") + "\n")
 		for _, err := range m.errors {
-			b.WriteString(lipgloss.NewStyle().Foreground(WarningColor).Render("  • "+err) + "\n")
+			b.WriteString(fg(WarningColor).Render("  • "+err) + "\n")
 		}
 		b.WriteString("\n")
 	}
@@ -915,9 +941,9 @@ func (m model) renderComplete() string {
 func (m model) renderArrIssues() string {
 	var b strings.Builder
 
-	bold := lipgloss.NewStyle().Bold(true).Foreground(Primary)
-	warn := lipgloss.NewStyle().Bold(true).Foreground(WarningColor)
-	muted := lipgloss.NewStyle().Foreground(FgMuted)
+	bold := fgBold(Primary)
+	warn := fgBold(WarningColor)
+	muted := fg(FgMuted)
 
 	b.WriteString(warn.Render("Sonarr/Radarr Configuration Issues"))
 	b.WriteString("\n\n")
@@ -932,8 +958,8 @@ func (m model) renderArrIssues() string {
 		}
 		b.WriteString(fmt.Sprintf("  %s [%s] %s\n", icon, issue.Service, issue.Setting))
 		b.WriteString(fmt.Sprintf("      Current: %s  →  Expected: %s\n\n",
-			lipgloss.NewStyle().Foreground(ErrorColor).Render(issue.Current),
-			lipgloss.NewStyle().Foreground(Primary).Render(issue.Expected)))
+			fg(ErrorColor).Render(issue.Current),
+			fg(Primary).Render(issue.Expected)))
 	}
 
 	b.WriteString("\n")
@@ -943,7 +969,7 @@ func (m model) renderArrIssues() string {
 	// Fix option
 	prefix := "  "
 	if m.arrIssuesChoice == 0 {
-		prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		prefix = fg(Primary).Render("▸ ")
 	}
 	b.WriteString(prefix + "Fix automatically\n")
 	b.WriteString("    " + muted.Render("Update settings via API to match Plex2Jellyfin requirements") + "\n\n")
@@ -951,7 +977,7 @@ func (m model) renderArrIssues() string {
 	// Skip option
 	prefix = "  "
 	if m.arrIssuesChoice == 1 {
-		prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		prefix = fg(Primary).Render("▸ ")
 	}
 	b.WriteString(prefix + "Skip and continue\n")
 	b.WriteString("    " + muted.Render("Proceed without changes (may cause import conflicts)") + "\n")

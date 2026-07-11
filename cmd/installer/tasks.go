@@ -88,6 +88,7 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 				installTask{name: "Start web service", description: "Starting plex2jellyfin-web", execute: startWebService, optional: true, status: statusPending},
 			)
 		}
+		m.serviceState = &serviceRunState{}
 
 		// Companion plugin: resolve everything the async pipeline reads up
 		// front, in this goroutine, before model copies diverge (see the
@@ -134,6 +135,14 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		// After listeners (and optional plugin configure): stamp setup.completed.
+		m.postScanTasks = append(m.postScanTasks, installTask{
+			name:        "Mark setup complete",
+			description: "Recording setup completion after services start",
+			execute:     markSetupComplete,
+			optional:    true,
+			status:      statusPending,
+		})
 	}
 
 	m.currentTaskIndex = 0
@@ -371,9 +380,10 @@ func (m *model) generateConfigString() (string, error) {
 
 	configStr := fmt.Sprintf(`[setup]
 # Managed by the setup wizards. completed = true tells the web UI to skip
-# its guided setup and only ask for a password.
+# its guided setup and only ask for a password. Written false until the
+# selected listeners start successfully (mirrors CLI/web two-phase setup).
 version = %d
-completed = true
+completed = false
 
 [watch]
 movies = [%s]
@@ -506,6 +516,9 @@ func setupSystemd(m *model) error {
 	if err := os.WriteFile(daemonServicePath, []byte(serviceContent), 0600); err != nil {
 		return err
 	}
+	if m.serviceState != nil {
+		m.serviceState.daemonUnitWritten = true
+	}
 
 	exec.Command("systemctl", "daemon-reload").Run()
 
@@ -550,6 +563,9 @@ func startService(m *model) error {
 	if err := exec.Command("systemctl", "start", "plex2jellyfin-daemon.service").Run(); err != nil {
 		return fmt.Errorf("failed to start service")
 	}
+	if m.serviceState != nil {
+		m.serviceState.daemonStarted = true
+	}
 	if m.pluginState != nil && !m.webEnabled {
 		m.pluginState.listenerReady = true
 	}
@@ -574,6 +590,9 @@ func setupWebSystemd(m *model) error {
 	if err := os.WriteFile(webServicePath, []byte(serviceContent), 0600); err != nil {
 		return err
 	}
+	if m.serviceState != nil {
+		m.serviceState.webUnitWritten = true
+	}
 
 	exec.Command("systemctl", "daemon-reload").Run()
 
@@ -592,9 +611,39 @@ func startWebService(m *model) error {
 	if err := exec.Command("systemctl", "start", "plex2jellyfin-web.service").Run(); err != nil {
 		return fmt.Errorf("failed to start web service")
 	}
+	if m.serviceState != nil {
+		m.serviceState.webStarted = true
+	}
 	if m.pluginState != nil {
 		m.pluginState.listenerReady = true
 	}
+	return nil
+}
+
+// markSetupComplete stamps [setup].completed after selected listeners started
+// (or were intentionally left stopped). Failure leaves completed=false so the
+// web wizard can recover.
+func markSetupComplete(m *model) error {
+	st := m.serviceState
+	if st == nil {
+		return fmt.Errorf("service state missing")
+	}
+	if m.serviceEnabled && m.serviceStartNow && !st.daemonStarted {
+		return fmt.Errorf("daemon did not start; leaving setup incomplete")
+	}
+	if m.serviceEnabled && m.webEnabled && m.webStartNow && !st.webStarted {
+		return fmt.Errorf("web service did not start; leaving setup incomplete")
+	}
+
+	_, err := configpkg.UpdateWithLock(func(cfg *configpkg.Config) bool {
+		cfg.Setup.Version = setuppkg.CurrentVersion
+		cfg.Setup.Completed = true
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	st.setupCompleted = true
 	return nil
 }
 

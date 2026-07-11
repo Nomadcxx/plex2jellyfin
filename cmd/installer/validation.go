@@ -46,6 +46,45 @@ func (m *model) detectPathOverlap() string {
 	return ""
 }
 
+// mediaPathsError requires at least one complete watch+library pair (TV or Movies),
+// matching setup.ValidateDraft's media rules without pulling in later wizard fields.
+func (m model) mediaPathsError() string {
+	var watchTV, watchMovies []string
+	for _, wf := range m.watchFolders {
+		paths := splitPaths(wf.Paths)
+		if wf.Type == "tv" {
+			watchTV = append(watchTV, paths...)
+		} else if wf.Type == "movies" {
+			watchMovies = append(watchMovies, paths...)
+		}
+	}
+	libTV := splitPaths(m.tvLibraryPaths)
+	libMovies := splitPaths(m.movieLibraryPaths)
+
+	nonEmpty := func(in []string) []string {
+		out := make([]string, 0, len(in))
+		for _, p := range in {
+			if strings.TrimSpace(p) != "" {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	watchTV, watchMovies = nonEmpty(watchTV), nonEmpty(watchMovies)
+	libTV, libMovies = nonEmpty(libTV), nonEmpty(libMovies)
+
+	if len(watchTV)+len(watchMovies)+len(libTV)+len(libMovies) == 0 {
+		return "configure at least one complete watch+library pair (TV or Movies)"
+	}
+	if (len(watchTV) == 0) != (len(libTV) == 0) {
+		return "TV watch and library paths must both be set"
+	}
+	if (len(watchMovies) == 0) != (len(libMovies) == 0) {
+		return "Movie watch and library paths must both be set"
+	}
+	return ""
+}
+
 func (m model) testSonarr() (tea.Model, tea.Cmd) {
 	m.sonarrTesting = true
 	// Get current values from inputs (not the saved model fields)
@@ -478,17 +517,19 @@ func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd) {
 
 	m.currentTaskIndex++
 	if m.currentTaskIndex >= len(m.tasks) {
-		// If install mode (not uninstall) and we have libraries, validate arr settings then scan
-		if !m.uninstallMode && !m.updateMode && (m.tvLibraryPaths != "" || m.movieLibraryPaths != "") && len(m.postScanTasks) > 0 {
-			// Check if Sonarr or Radarr is configured - validate their settings
-			if m.sonarrEnabled || m.radarrEnabled {
-				return m, m.validateArrSettings()
+		if !m.uninstallMode && !m.updateMode && len(m.postScanTasks) > 0 {
+			hasLibraries := m.tvLibraryPaths != "" || m.movieLibraryPaths != ""
+			if hasLibraries {
+				// Scan first when libraries exist; scanComplete then runs postScanTasks.
+				if m.sonarrEnabled || m.radarrEnabled {
+					return m, m.validateArrSettings()
+				}
+				m.step = stepScanning
+				return m, tea.Batch(m.spinner.Tick, m.runInitialScan())
 			}
-			// No arr services configured, proceed directly to scan
-			m.step = stepScanning
-			return m, tea.Batch(m.spinner.Tick, m.runInitialScan())
+			// No libraries to scan — still install/start systemd units.
+			return m.beginPostScanTasks()
 		}
-		// No scan needed or uninstall - go to complete
 		m.step = stepComplete
 		return m, nil
 	}

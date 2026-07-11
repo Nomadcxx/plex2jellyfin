@@ -9,7 +9,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/privilege"
 )
@@ -19,7 +18,7 @@ var globalProgram *tea.Program
 
 func newModel(debugMode bool, logFile *os.File) model {
 	s := spinner.New()
-	s.Style = lipgloss.NewStyle().Foreground(Secondary)
+	s.Style = fg(Secondary)
 	s.Spinner = spinner.Dot
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -145,6 +144,7 @@ func main() {
 	}
 
 	m := newModel(debugMode, logFile)
+	ensureTrueColorHint()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	globalProgram = p
 

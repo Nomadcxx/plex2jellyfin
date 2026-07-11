@@ -46,6 +46,9 @@ export function hydrateDraft(input: DeepPartial<SetupDraft> = {}, runtime: Runti
         jellyfin: mapping.jellyfin ?? '',
         daemon: mapping.daemon ?? '',
       })),
+      plugin_install: source.jellyfin?.plugin_install ?? true,
+      plugin_restart: source.jellyfin?.plugin_restart ?? false,
+      plugin_daemon_url: source.jellyfin?.plugin_daemon_url ?? '',
     },
     ai: {
       enabled: source.ai?.enabled ?? false,
@@ -131,6 +134,12 @@ function serviceErrors(draft: SetupDraft, checks: WizardChecks): string[] {
   }
   for (const mapping of draft.jellyfin.path_mappings) {
     if (!mapping.jellyfin.trim() || !mapping.daemon.trim()) errors.push('Each Jellyfin path mapping needs both paths.');
+  }
+  if (draft.jellyfin.enabled && draft.jellyfin.plugin_install) {
+    const url = (draft.jellyfin.plugin_daemon_url ?? '').trim();
+    if (!/^https?:\/\//.test(url)) {
+      errors.push('Companion plugin needs a callback URL reachable from Jellyfin (not localhost in containers).');
+    }
   }
   return errors;
 }
