@@ -19,7 +19,28 @@ learns whether Jellyfin recognized them.
 - Jellyfin 10.11 moved to .NET 9, so the plugin targets `net9.0` and will
   not load on 10.10 or older. Building it needs the .NET 9 SDK (or newer).
 
-## Build and install
+## Automatic install (recommended)
+
+The setup wizard installs the plugin for you: when you connect Jellyfin
+during `plex2jellyfin setup`, the wizard registers the plugin
+repository, has Jellyfin download the plugin, asks before restarting
+Jellyfin, then pushes the webhook secret and URL into the plugin and
+verifies the loop with a signed test event.
+
+On an existing install:
+
+```bash
+plex2jellyfin plugin install   # install + configure + verify
+plex2jellyfin plugin verify    # re-check the feedback loop any time
+plex2jellyfin plugin status    # what Jellyfin reports about the plugin
+```
+
+This works for Jellyfin in Docker too — Jellyfin downloads the plugin
+itself, so no filesystem access is needed. The one URL you may need to
+adjust is the callback URL: it is *Jellyfin's* view of plex2jellyfin,
+so never `localhost` when either side runs in a container.
+
+## Manual build and install (fallback)
 
 ```bash
 git clone https://github.com/Nomadcxx/plex2jellyfin-plugin.git
@@ -35,8 +56,10 @@ for user installs, `/var/lib/jellyfin/plugins/` for distro packages,
 
 ## Configure the webhook secret
 
-The plugin authenticates its events with a shared secret. Set the same
-value on both sides:
+Only needed for a manual install — the wizard and `plugin install` push
+the secret and URL into the plugin automatically. The plugin
+authenticates its events with a shared secret. Set the same value on
+both sides:
 
 1. In `~/.config/plex2jellyfin/config.toml`:
 

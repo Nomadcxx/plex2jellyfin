@@ -130,13 +130,19 @@ Leave `user`/`group` empty (or omit the section) to preserve source ownership.
 
 ```toml
 [jellyfin]
-enabled        = true
-url            = "http://localhost:8096"
-api_key        = "..."
-webhook_secret = "..."
+enabled           = true
+url               = "http://localhost:8096"
+api_key           = "..."
+webhook_secret    = "..."
+plugin_daemon_url = "http://192.168.1.10:5522"
 ```
 
 Connects to Jellyfin's API so the daemon can query and correlate library items after organizing files.
+
+- `plugin_daemon_url` — base URL the companion plugin calls back to
+  (the plugin appends `/api/v1/webhooks/jellyfin`). Set by the wizard;
+  must be reachable *from Jellyfin's network*, so never `localhost`
+  when either side is containerized.
 
 ### Jellyfin path mappings
 
@@ -221,10 +227,11 @@ api_key          = "..."
 notify_on_import = true
 
 [jellyfin]
-enabled        = true
-url            = "http://localhost:8096"
-api_key        = "..."
-webhook_secret = "..."
+enabled           = true
+url               = "http://localhost:8096"
+api_key           = "..."
+webhook_secret    = "..."
+plugin_daemon_url = "http://192.168.1.10:5522"
 
 [[jellyfin.path_mappings]]
 jellyfin = "/tv"

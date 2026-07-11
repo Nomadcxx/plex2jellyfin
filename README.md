@@ -101,16 +101,10 @@ Jellyfin items (and how orphan detection works). Without it,
 plex2jellyfin can move files but never sees whether Jellyfin actually
 recognized them.
 
-```bash
-git clone https://github.com/Nomadcxx/plex2jellyfin-plugin.git
-cd plex2jellyfin-plugin
-./build.sh
-./install.sh /var/lib/jellyfin/plugins/Plex2Jellyfin   # path varies by install
-sudo systemctl restart jellyfin
-```
-
-Then set `webhook_secret` under `[jellyfin]` in your config so the events
-authenticate.
+The setup wizard installs and configures it automatically when you
+connect Jellyfin (or run `plex2jellyfin plugin install` on an existing
+setup). Manual build instructions live in the
+[plugin repository](https://github.com/Nomadcxx/plex2jellyfin-plugin).
 
 ## What It Does
 
