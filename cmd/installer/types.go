@@ -208,8 +208,9 @@ type model struct {
 // value-copied fields are lost (see stopRunningServices/daemonWasRunning for
 // the failure mode this avoids).
 type pluginRunState struct {
-	loaded  bool   // plugin responded after install/restart
-	outcome string // "skipped", "needs-restart", "unverified", "failed", "verified"
+	loaded        bool   // plugin responded after install/restart
+	listenerReady bool   // selected local callback listener started successfully
+	outcome       string // "skipped", "needs-restart", "unverified", "failed", "verified"
 }
 
 // ArrIssue represents a configuration issue found in Sonarr/Radarr.

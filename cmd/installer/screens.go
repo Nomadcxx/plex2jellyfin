@@ -554,6 +554,9 @@ func (m model) renderWebService() string {
 			urlPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
 		}
 		b.WriteString(fmt.Sprintf("%sPlugin callback URL: %s\n", urlPrefix, m.inputs[1].View()))
+		if m.inputs[1].Err != nil {
+			b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("  "+m.inputs[1].Err.Error()) + "\n")
+		}
 		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(
 			"  Where Jellyfin's companion plugin posts events back to this machine.\n"+
 				"  Never localhost when Jellyfin runs in a container.") + "\n")

@@ -543,6 +543,9 @@ func (m model) handleWebServiceKeys(key string) (tea.Model, tea.Cmd) {
 			m.inputs[1].SetValue(m.defaultCallbackURL())
 		}
 	case "enter":
+		if len(m.inputs) >= 2 && m.inputs[1].Err != nil {
+			return m, nil
+		}
 		m.saveWebInputs()
 		return m.nextStep()
 	case "esc":

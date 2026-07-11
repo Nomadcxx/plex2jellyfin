@@ -79,3 +79,47 @@ func TestSaveWebInputs_CapturesCallbackURL(t *testing.T) {
 		t.Errorf("pluginDaemonURL = %q, want trimmed URL", m.pluginDaemonURL)
 	}
 }
+
+func TestPluginCallbackURLValidation(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		valid bool
+	}{
+		{"http://10.0.0.5:5522", true},
+		{"https://jellyfin.example.test/callback", true},
+		{"localhost:5522", false},
+		{"ftp://host/path", false},
+		{"http:///missing-host", false},
+		{"http://host/\"quote", false},
+		{"http://host/\nnewline", false},
+	} {
+		err := validatePluginCallbackURL(tc.value)
+		if (err == nil) != tc.valid {
+			t.Errorf("validatePluginCallbackURL(%q) error = %v, valid = %v", tc.value, err, tc.valid)
+		}
+	}
+}
+
+func TestHandleWebServiceKeys_InvalidCallbackDoesNotAdvance(t *testing.T) {
+	m := model{
+		step:            stepSystemWeb,
+		webEnabled:      true,
+		webPort:         "5522",
+		jellyfinEnabled: true,
+		pluginInstall:   true,
+	}
+	m.initWebInputs()
+	m.inputs[1].SetValue("not-a-url")
+
+	next, _ := m.handleWebServiceKeys("enter")
+	got := next.(model)
+	if got.step != stepSystemWeb {
+		t.Errorf("step = %v, want stepSystemWeb", got.step)
+	}
+	if got.inputs[1].Err == nil {
+		t.Error("expected callback input validation error")
+	}
+	if out := got.renderWebService(); !strings.Contains(out, "absolute http:// or https:// URL") {
+		t.Errorf("expected callback validation guidance, got:\n%s", out)
+	}
+}

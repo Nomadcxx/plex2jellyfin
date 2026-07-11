@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -118,7 +119,10 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 					optional:    true,
 					status:      statusPending,
 				})
-				listenerStarts := (m.serviceEnabled && m.serviceStartNow) || (m.webEnabled && m.webStartNow)
+				// ponytail: custom callback URLs follow the selected web/daemon service;
+				// upgrade to probing arbitrary endpoints if external listeners are supported.
+				listenerStarts := m.serviceEnabled && ((m.webEnabled && m.webStartNow) ||
+					(!m.webEnabled && m.serviceStartNow))
 				if listenerStarts {
 					m.postScanTasks = append(m.postScanTasks, installTask{
 						name:        "Configure plugin feedback loop",
@@ -214,7 +218,13 @@ func restartJellyfinForPlugin(m *model) error {
 
 func configurePluginFeedback(m *model) error {
 	st := m.pluginState
-	if st == nil || !st.loaded {
+	if st == nil {
+		return fmt.Errorf("plugin state missing")
+	}
+	if !st.listenerReady {
+		return nil
+	}
+	if !st.loaded {
 		return fmt.Errorf("plugin not loaded; restart Jellyfin, then run: plex2jellyfin plugin verify")
 	}
 	engine := newPluginEngine(m)
@@ -445,7 +455,7 @@ plugin_enabled = %t
 # Base URL the companion plugin calls back to (the plugin appends
 # /api/v1/webhooks/jellyfin). From Jellyfin's point of view - never
 # localhost when Jellyfin runs in a container.
-plugin_daemon_url = "%s"
+plugin_daemon_url = %s
 notify_on_import = true
 playback_safety = true
 verify_after_refresh = false
@@ -460,7 +470,7 @@ verify_after_refresh = false
 # [[jellyfin.path_mappings]]
 # jellyfin = "/another/jellyfin/root"
 # daemon = "/another/plex2jellyfin/root"
-`, m.jellyfinURL, m.jellyfinAPIKey, webhookSecret, webhookSecret, m.pluginInstall, m.pluginDaemonURL)
+`, m.jellyfinURL, m.jellyfinAPIKey, webhookSecret, webhookSecret, m.pluginInstall, strconv.Quote(m.pluginDaemonURL))
 	}
 
 	if m.aiEnabled && m.aiModel != "" {
@@ -540,6 +550,9 @@ func startService(m *model) error {
 	if err := exec.Command("systemctl", "start", "plex2jellyfin-daemon.service").Run(); err != nil {
 		return fmt.Errorf("failed to start service")
 	}
+	if m.pluginState != nil && !m.webEnabled {
+		m.pluginState.listenerReady = true
+	}
 	return nil
 }
 
@@ -578,6 +591,9 @@ func startWebService(m *model) error {
 
 	if err := exec.Command("systemctl", "start", "plex2jellyfin-web.service").Run(); err != nil {
 		return fmt.Errorf("failed to start web service")
+	}
+	if m.pluginState != nil {
+		m.pluginState.listenerReady = true
 	}
 	return nil
 }

@@ -85,6 +85,46 @@ func TestStartInstallation_PluginTasksGatedByConsent(t *testing.T) {
 	}
 }
 
+func TestStartInstallation_ConfigureRequiresSelectedListener(t *testing.T) {
+	cases := []struct {
+		name            string
+		serviceEnabled  bool
+		serviceStartNow bool
+		webEnabled      bool
+		webStartNow     bool
+		wantConfigure   bool
+	}{
+		{"daemon selected and starting", true, true, false, false, true},
+		{"daemon selected but stopped", true, false, false, false, false},
+		{"web selected and starting", true, false, true, true, true},
+		{"web selected but stopped", true, true, true, false, false},
+		{"web cannot start without services", false, false, true, true, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := model{
+				serviceEnabled:  tc.serviceEnabled,
+				serviceStartNow: tc.serviceStartNow,
+				webEnabled:      tc.webEnabled,
+				webStartNow:     tc.webStartNow,
+				jellyfinEnabled: true,
+				pluginInstall:   true,
+				pluginRestart:   true,
+				webhookSecret:   "s",
+				pluginDaemonURL: "http://10.0.0.5:5522",
+			}
+
+			next, _ := m.startInstallation()
+			got := next.(model)
+			if hasTask(got.postScanTasks, "Configure plugin feedback loop") != tc.wantConfigure {
+				t.Errorf("configure task presence = %v, want %v (postScan: %v)",
+					hasTask(got.postScanTasks, "Configure plugin feedback loop"), tc.wantConfigure, taskNames(got.postScanTasks))
+			}
+		})
+	}
+}
+
 func TestStartInstallation_ResolvesPluginPrerequisitesUpFront(t *testing.T) {
 	m := model{
 		serviceEnabled:  true,
@@ -134,6 +174,53 @@ func TestInstallJellyfinPlugin_ServerErrorMarksFailed(t *testing.T) {
 	}
 	if m.pluginState.outcome != "failed" {
 		t.Errorf("outcome = %q, want failed", m.pluginState.outcome)
+	}
+}
+
+func TestConfigurePluginFeedback_SkipsWhenListenerDidNotStart(t *testing.T) {
+	m := &model{pluginState: &pluginRunState{loaded: true, outcome: "unverified"}}
+
+	if err := configurePluginFeedback(m); err != nil {
+		t.Fatalf("configurePluginFeedback() error = %v, want quiet skip", err)
+	}
+	if m.pluginState.outcome != "unverified" {
+		t.Errorf("outcome = %q, want unverified", m.pluginState.outcome)
+	}
+}
+
+func TestGenerateConfigString_EscapesPluginDaemonURL(t *testing.T) {
+	m := &model{
+		watchFolders:    []WatchFolder{{Type: "tv", Paths: "/watch/tv"}},
+		tvLibraryPaths:  "/lib/tv",
+		jellyfinEnabled: true,
+		webhookSecret:   "secret-1",
+		pluginInstall:   true,
+		pluginDaemonURL: `http://host/path"oops`,
+	}
+
+	configStr, err := m.generateConfigString()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	t.Setenv("SUDO_USER", "")
+	dir := filepath.Join(tmp, ".config", "plex2jellyfin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(configStr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := configpkg.Load()
+	if err != nil {
+		t.Fatalf("config.Load() on generated config: %v", err)
+	}
+	if cfg.Jellyfin.PluginDaemonURL != m.pluginDaemonURL {
+		t.Errorf("plugin_daemon_url = %q, want %q", cfg.Jellyfin.PluginDaemonURL, m.pluginDaemonURL)
 	}
 }
 
