@@ -152,11 +152,6 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
           }
           setPhase('complete');
         }}
-        onError={(msg) => {
-          setScanWarning(msg);
-          toast.error(msg);
-          setPhase('complete');
-        }}
       />
     );
   }
@@ -665,17 +660,22 @@ function libraryLabel(path: string): string {
 function SetupIndexing({
   libraries,
   onDone,
-  onError,
 }: {
   libraries: string[];
   onDone: (result: SetupIndexEvent) => void;
-  onError: (msg: string) => void;
 }) {
   const [rows, setRows] = useState<LibRow[]>(() => libraries.map((path) => ({ path, status: 'queued', files: 0 })));
   const [filesScanned, setFilesScanned] = useState(0);
   const [phase, setPhase] = useState('Starting index…');
+  const [streamError, setStreamError] = useState('');
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    setStreamError('');
+    setPhase('Starting index…');
+    setRows(libraries.map((path) => ({ path, status: 'queued', files: 0 })));
+    setFilesScanned(0);
+
     const es = new EventSource('/api/v1/setup/index/stream');
     let closed = false;
     let baseline = 0;
@@ -728,21 +728,22 @@ function SetupIndexing({
       if (frame.type === 'error') {
         closed = true;
         es.close();
-        onError(frame.msg || 'Indexing failed');
+        setStreamError(frame.msg || 'Indexing failed');
+        setPhase('Indexing failed');
       }
     };
     es.onerror = () => {
       if (closed) return;
       es.close();
-      onError('Lost connection to the indexing stream. Re-open setup or run: plex2jellyfin scan');
+      setStreamError('Lost connection to the indexing stream (often a server write timeout on long scans). Retry to resume, or run: plex2jellyfin scan');
+      setPhase('Connection lost');
     };
     return () => {
       closed = true;
       es.close();
     };
-    // Connect once when this screen mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-6 text-zinc-100">
@@ -753,6 +754,14 @@ function SetupIndexing({
           Indexing libraries the same way as the CLI/TUI installer. Daemon is already up.
         </p>
         <p className="mt-4 text-center font-mono text-xs uppercase text-amber-400">{phase}</p>
+        {streamError ? (
+          <div className="mx-auto mt-4 max-w-lg space-y-3 border border-amber-900/60 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
+            <p>{streamError}</p>
+            <div className="flex justify-center">
+              <Button type="button" onClick={() => setAttempt((n) => n + 1)}>Retry indexing</Button>
+            </div>
+          </div>
+        ) : null}
         <div className="mt-8 space-y-3">
           {rows.map((row) => {
             const pct = row.status === 'done' ? 100 : row.status === 'scanning' ? softPct(row.files) : 0;

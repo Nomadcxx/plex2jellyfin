@@ -95,10 +95,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	addr := net.JoinHostPort(host, port)
 	httpServer := &http.Server{
-		Addr:         addr,
-		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		Addr:        addr,
+		Handler:     handler,
+		ReadTimeout: 30 * time.Second,
+		// WriteTimeout must stay 0: SSE setup indexing and op streams can run for
+		// many minutes. Handlers that need a cap should set their own deadlines.
+		WriteTimeout: 0,
 		IdleTimeout:  120 * time.Second,
 	}
 

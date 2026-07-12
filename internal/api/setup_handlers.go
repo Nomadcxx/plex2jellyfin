@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
@@ -346,22 +348,57 @@ func (s *Server) SetupIndexStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	// Library indexes routinely take minutes; clear the 30s server WriteTimeout.
+	clearSSEWriteDeadline(w)
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	send := func(ev setupIndexEvent) {
-		b, _ := json.Marshal(ev)
-		fmt.Fprintf(w, "data: %s\n\n", b)
+	var writeMu sync.Mutex
+	send := func(ev setupIndexEvent) error {
+		b, err := json.Marshal(ev)
+		if err != nil {
+			return err
+		}
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
+			return err
+		}
 		flusher.Flush()
+		return nil
 	}
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+	go func() {
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-keepalive.C:
+				writeMu.Lock()
+				_, _ = fmt.Fprintf(w, ": keepalive\n\n")
+				flusher.Flush()
+				writeMu.Unlock()
+			}
+		}
+	}()
 
-	send(setupIndexEvent{Type: "status", Phase: "indexing", Msg: "Indexing libraries", LibrariesTotal: len(libs)})
+	log.Printf("setup index: starting (%d libraries)", len(libs))
+	if err := send(setupIndexEvent{Type: "status", Phase: "indexing", Msg: "Indexing libraries", LibrariesTotal: len(libs)}); err != nil {
+		log.Printf("setup index: client gone before start: %v", err)
+		return
+	}
 
 	var scanWarning string
 	var result *scanner.ScanResult
 	if len(libs) > 0 {
+		lastLib := ""
 		result, err = s.indexLibrariesAfterSetup(r.Context(), draft, func(p scanner.ScanProgress) {
-			send(setupIndexEvent{
+			if p.Library != "" && p.Library != lastLib {
+				log.Printf("setup index: library %s (%d/%d, %d files so far)", p.Library, p.LibrariesDone+1, p.LibrariesTotal, p.FilesScanned)
+				lastLib = p.Library
+			}
+			_ = send(setupIndexEvent{
 				Type:           "progress",
 				Phase:          "indexing",
 				Library:        p.Library,
@@ -371,11 +408,19 @@ func (s *Server) SetupIndexStream(w http.ResponseWriter, r *http.Request) {
 			})
 		})
 		if err != nil {
+			if r.Context().Err() != nil {
+				log.Printf("setup index: aborted (%v) — leaving setup incomplete so the UI can retry", err)
+				return
+			}
+			log.Printf("setup index: scan error: %v", err)
 			scanWarning = "initial library scan failed: " + err.Error()
 		}
 	}
 
-	send(setupIndexEvent{Type: "status", Phase: "chown", Msg: "Fixing config directory ownership"})
+	if err := send(setupIndexEvent{Type: "status", Phase: "chown", Msg: "Fixing config directory ownership"}); err != nil {
+		log.Printf("setup index: client gone before chown: %v", err)
+		return
+	}
 	if err := s.chownConfigAfterSetup(draft); err != nil {
 		if scanWarning == "" {
 			scanWarning = "config ownership fix failed: " + err.Error()
@@ -388,7 +433,8 @@ func (s *Server) SetupIndexStream(w http.ResponseWriter, r *http.Request) {
 	cfg.Setup.Completed = true
 	if err := cfg.Save(); err != nil {
 		s.configMu.Unlock()
-		send(setupIndexEvent{Type: "error", Msg: "mark setup complete: " + err.Error()})
+		log.Printf("setup index: mark complete failed: %v", err)
+		_ = send(setupIndexEvent{Type: "error", Msg: "mark setup complete: " + err.Error()})
 		return
 	}
 	s.replaceConfigLocked(cfg)
@@ -426,7 +472,11 @@ func (s *Server) SetupIndexStream(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = db.Close()
 	}
-	send(ev)
+	if err := send(ev); err != nil {
+		log.Printf("setup index: finished but failed to push done frame: %v", err)
+		return
+	}
+	log.Printf("setup index: complete files=%d added=%d warning=%q", ev.FilesScanned, ev.FilesAdded, scanWarning)
 }
 
 func (s *Server) indexLibrariesAfterSetup(ctx context.Context, draft setupdomain.Draft, onProgress func(scanner.ScanProgress)) (*scanner.ScanResult, error) {

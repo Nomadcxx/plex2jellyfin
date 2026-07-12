@@ -382,6 +382,56 @@ func TestSetupIndexStreamIndexesThenChowns(t *testing.T) {
 	}
 }
 
+func TestSetupIndexStreamAbortsWithoutCompletingOnCancel(t *testing.T) {
+	setupTestHome(t)
+	cfg := config.DefaultConfig()
+	cfg.Libraries.TV = []string{t.TempDir()}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(nil, cfg)
+
+	started := make(chan struct{})
+	s.setupIndexLibraries = func(ctx context.Context, _ setupdomain.Draft, _ func(scanner.ScanProgress)) (*scanner.ScanResult, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	s.setupChownConfig = func(string, string) error {
+		t.Fatal("chown must not run when the client cancels mid-index")
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/setup/index/stream", nil)
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.SetupIndexStream(w, req)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("index never started")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after cancel")
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Setup.Completed {
+		t.Fatal("cancelled index must leave setup incomplete")
+	}
+}
+
 func TestSetupIndexStreamChownsEvenWhenIndexFails(t *testing.T) {
 	setupTestHome(t)
 	cfg := config.DefaultConfig()
