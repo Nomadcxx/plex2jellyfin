@@ -140,6 +140,8 @@ The companion plugin ([Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcx
 
 ## Screenshots
 
+### Web
+
 <p align="center">
   <video src="assets/showcase.mp4" controls width="800" poster="assets/showcase-poster.png">
     <a href="assets/showcase.mp4">Watch the showcase video</a>
@@ -152,6 +154,18 @@ The companion plugin ([Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcx
 
 <p align="center">
   <img src="assets/screenshot-setup.png" alt="First-run setup" width="800" />
+</p>
+
+### TUI installer
+
+<p align="center">
+  <img src="assets/tui-installer.gif" alt="TUI installer" width="800" />
+</p>
+
+### CLI setup and scan
+
+<p align="center">
+  <img src="assets/cli-setup-scan.gif" alt="CLI setup and scan" width="800" />
 </p>
 
 ## Architecture
