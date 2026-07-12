@@ -2,9 +2,12 @@
   <img src="assets/plex2jellyfin-header.png" alt="plex2jellyfin" width="920" />
 
   <p>
+    <img src="https://img.shields.io/badge/status-alpha-orange?style=for-the-badge" alt="alpha" />
     <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux" />
     <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
   </p>
+
+  <p><b>Alpha.</b> Daily-driver on the author's boxes; expect rough edges and config churn between tags.</p>
 
   <p>Plex papers over messy release names; Jellyfin takes your folders at face value.</p>
 
