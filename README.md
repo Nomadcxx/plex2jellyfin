@@ -274,14 +274,6 @@ dir_mode  = "0755"
 ### Dashboard
 
 <p align="center">
-  <a href="assets/showcase.mp4">
-    <img src="assets/showcase-poster.png" alt="Dashboard showcase — click for MP4" width="800" />
-  </a>
-  <br />
-  <sub><a href="assets/showcase.mp4">Play showcase video (MP4)</a></sub>
-</p>
-
-<p align="center">
   <img src="assets/screenshot-dashboard.png" alt="Dashboard" width="800" />
 </p>
 
@@ -294,15 +286,13 @@ dir_mode  = "0755"
 ### TUI installer
 
 <p align="center">
-  <img src="assets/tui-installer.gif" alt="TUI installer" width="960" />
-  <br />
-  <sub><a href="assets/tui-installer.mp4">Higher-quality MP4</a></sub>
+  <img src="assets/tui-installer.gif" alt="TUI installer" width="720" />
 </p>
 
 ### CLI setup and scan
 
 <p align="center">
-  <img src="assets/cli-setup-scan.gif" alt="CLI setup and scan" width="960" />
+  <img src="assets/cli-setup-scan.gif" alt="CLI setup and scan" width="720" />
 </p>
 
 ## License

@@ -26,7 +26,7 @@ def answer(child: pexpect.spawn, label: str, value: str, timeout: float = 25) ->
     if value:
         for ch in value:
             child.send(ch)
-            time.sleep(0.045)
+            time.sleep(0.06)
         pause(0.2)
     child.send("\r")
     pause(0.55)

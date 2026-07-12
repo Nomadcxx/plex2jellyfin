@@ -17,7 +17,7 @@ def pause(s: float = 0.4) -> None:
     time.sleep(s)
 
 
-def type_slow(child: pexpect.spawn, text: str, delay: float = 0.05) -> None:
+def type_slow(child: pexpect.spawn, text: str, delay: float = 0.055) -> None:
     for ch in text:
         child.send(ch)
         time.sleep(delay)
