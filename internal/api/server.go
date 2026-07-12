@@ -16,6 +16,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 	"github.com/go-chi/chi/v5"
@@ -42,8 +43,9 @@ type Server struct {
 	setupPollInterval time.Duration
 	setupTimeout      time.Duration
 	// Optional hooks for tests; nil uses production index/chown helpers.
-	setupIndexLibraries func(ctx context.Context, draft setupdomain.Draft) error
+	setupIndexLibraries func(ctx context.Context, draft setupdomain.Draft, onProgress func(scanner.ScanProgress)) (*scanner.ScanResult, error)
 	setupChownConfig    func(user, group string) error
+	setupIndexMu        sync.Mutex
 }
 
 // NewServer creates a new API server
@@ -171,6 +173,7 @@ func (s *Server) apiRouter() *chi.Mux {
 	r.Put("/ai/settings", s.UpdateAISettings)
 	r.Get("/setup/status", s.GetSetupStatus)
 	r.Post("/setup/apply", s.ApplySetup)
+	r.Get("/setup/index/stream", s.SetupIndexStream)
 
 	if s.ipc != nil {
 		daemonH := &DaemonHandlers{IPC: s.ipc, Launcher: s.launcher}

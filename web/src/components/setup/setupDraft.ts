@@ -73,6 +73,20 @@ export function pathCheckKey(collection: 'watch' | 'libraries', media: 'tv' | 'm
   return `${collection}:${media}:${path.trim()}`;
 }
 
+/** Split a CLI-style path field into individual absolute paths.
+ * Accepts commas and newlines; trims whitespace; drops empties. */
+export function splitPathInput(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(/[,\n]+/)) {
+    const path = part.trim();
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    out.push(path);
+  }
+  return out;
+}
+
 export function serviceFingerprint(value: { url: string; api_key: string }): string {
   return `${value.url.trim()}\n${value.api_key.trim()}`;
 }

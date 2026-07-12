@@ -5,6 +5,7 @@ import {
   hydrateDraft,
   pathCheckKey,
   serviceFingerprint,
+  splitPathInput,
   stepErrors,
 } from './setupDraft';
 
@@ -52,6 +53,16 @@ describe('setup draft validation', () => {
     expect(stepErrors('media', value, emptyChecks(), 'native').join(' ')).toMatch(/TV library/i);
     value.libraries.tv = ['/library/tv'];
     expect(stepErrors('media', value, emptyChecks(), 'native').join(' ')).toMatch(/verify/i);
+  });
+
+  it('splits CLI-style comma and newline path lists', () => {
+    expect(splitPathInput('/mnt/STORAGE1/MOVIES, /mnt/STORAGE2/MOVIES, /mnt/STORAGE3/MOVIES')).toEqual([
+      '/mnt/STORAGE1/MOVIES',
+      '/mnt/STORAGE2/MOVIES',
+      '/mnt/STORAGE3/MOVIES',
+    ]);
+    expect(splitPathInput('/a\n/b\n/a, /c')).toEqual(['/a', '/b', '/c']);
+    expect(splitPathInput('  ,  \n')).toEqual([]);
   });
 
   it('requires enabled services to be tested after their latest edit', () => {

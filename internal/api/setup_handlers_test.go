@@ -15,6 +15,7 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 )
 
@@ -186,6 +187,10 @@ func TestApplySetupLaunchesStoppedDaemonAndMarksComplete(t *testing.T) {
 	s.launcher = launcher
 	s.setupPollInterval = time.Millisecond
 	s.setupTimeout = 50 * time.Millisecond
+	s.setupIndexLibraries = func(context.Context, setupdomain.Draft, func(scanner.ScanProgress)) (*scanner.ScanResult, error) {
+		return &scanner.ScanResult{}, nil
+	}
+	s.setupChownConfig = func(string, string) error { return nil }
 
 	w := applySetupRequest(t, s, validSetupDraft(t.TempDir(), t.TempDir()))
 	if w.Code != http.StatusOK {
@@ -194,6 +199,20 @@ func TestApplySetupLaunchesStoppedDaemonAndMarksComplete(t *testing.T) {
 	if !launcher.called {
 		t.Fatal("stopped daemon was not launched")
 	}
+	var resp setupApplyResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Indexing || resp.Complete {
+		t.Fatalf("apply with libraries should defer completion: %+v", resp)
+	}
+
+	sw := httptest.NewRecorder()
+	s.SetupIndexStream(sw, httptest.NewRequest(http.MethodGet, "/api/v1/setup/index/stream", nil))
+	if sw.Code != http.StatusOK {
+		t.Fatalf("index stream status %d body %s", sw.Code, sw.Body.String())
+	}
+
 	loaded, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +280,7 @@ func TestApplySetupActivationFailureLeavesIncompleteMarker(t *testing.T) {
 	}
 }
 
-func TestApplySetupIndexesLibrariesThenChowns(t *testing.T) {
+func TestApplySetupDefersIndexingWhenLibrariesConfigured(t *testing.T) {
 	setupTestHome(t)
 	cfg := config.DefaultConfig()
 	if err := cfg.Save(); err != nil {
@@ -273,14 +292,62 @@ func TestApplySetupIndexesLibrariesThenChowns(t *testing.T) {
 	s.setupPollInterval = time.Millisecond
 	s.setupTimeout = 50 * time.Millisecond
 
+	var indexed bool
+	s.setupIndexLibraries = func(context.Context, setupdomain.Draft, func(scanner.ScanProgress)) (*scanner.ScanResult, error) {
+		indexed = true
+		return &scanner.ScanResult{}, nil
+	}
+
+	w := applySetupRequest(t, s, validSetupDraft(t.TempDir(), t.TempDir()))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if indexed {
+		t.Fatal("apply must not index synchronously; that belongs to /setup/index/stream")
+	}
+	var resp setupApplyResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Applied || resp.Complete || !resp.Indexing {
+		t.Fatalf("response = %+v", resp)
+	}
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Setup.Completed {
+		t.Fatal("setup must stay incomplete until index stream finishes")
+	}
+}
+
+func TestSetupIndexStreamIndexesThenChowns(t *testing.T) {
+	setupTestHome(t)
+	cfg := config.DefaultConfig()
+	tv := t.TempDir()
+	movies := t.TempDir()
+	cfg.Libraries.TV = []string{tv}
+	cfg.Libraries.Movies = []string{movies}
+	cfg.Permissions.User = "nomadx"
+	cfg.Permissions.Group = "media"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(nil, cfg)
+
 	var indexed, chowned bool
 	var gotUser, gotGroup string
-	s.setupIndexLibraries = func(_ context.Context, d setupdomain.Draft) error {
+	var progressHits int
+	s.setupIndexLibraries = func(_ context.Context, d setupdomain.Draft, onProgress func(scanner.ScanProgress)) (*scanner.ScanResult, error) {
 		indexed = true
 		if len(d.Libraries.TV) == 0 {
 			t.Fatal("index called without library paths")
 		}
-		return nil
+		if onProgress != nil {
+			onProgress(scanner.ScanProgress{Library: tv, LibrariesDone: 0, LibrariesTotal: 2, FilesScanned: 3})
+			progressHits++
+		}
+		return &scanner.ScanResult{FilesScanned: 3, FilesAdded: 3, Duration: time.Second}, nil
 	}
 	s.setupChownConfig = func(user, group string) error {
 		chowned = true
@@ -288,66 +355,61 @@ func TestApplySetupIndexesLibrariesThenChowns(t *testing.T) {
 		return nil
 	}
 
-	draft := validSetupDraft(t.TempDir(), t.TempDir())
-	draft.Runtime.Permissions.User = "nomadx"
-	draft.Runtime.Permissions.Group = "media"
-
-	w := applySetupRequest(t, s, draft)
+	w := httptest.NewRecorder()
+	s.SetupIndexStream(w, httptest.NewRequest(http.MethodGet, "/api/v1/setup/index/stream", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
-	if !indexed {
-		t.Fatal("expected library index after daemon activate")
+	if !indexed || !chowned {
+		t.Fatalf("indexed=%v chowned=%v", indexed, chowned)
 	}
-	if !chowned {
-		t.Fatal("expected config-dir chown after index")
+	if progressHits == 0 {
+		t.Fatal("expected progress frames")
 	}
 	if gotUser != "nomadx" || gotGroup != "media" {
-		t.Fatalf("chown args = %q:%q, want nomadx:media", gotUser, gotGroup)
+		t.Fatalf("chown args = %q:%q", gotUser, gotGroup)
 	}
-	var resp setupApplyResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+	body := w.Body.String()
+	if !strings.Contains(body, `"type":"progress"`) || !strings.Contains(body, `"type":"done"`) {
+		t.Fatalf("stream body missing events:\n%s", body)
+	}
+	loaded, err := config.Load()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !resp.Complete || resp.ScanWarning != "" {
-		t.Fatalf("response = %+v", resp)
+	if !loaded.Setup.Completed {
+		t.Fatal("index stream must mark setup complete")
 	}
 }
 
-func TestApplySetupChownsEvenWhenIndexFails(t *testing.T) {
+func TestSetupIndexStreamChownsEvenWhenIndexFails(t *testing.T) {
 	setupTestHome(t)
 	cfg := config.DefaultConfig()
+	cfg.Libraries.TV = []string{t.TempDir()}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
 	s := NewServer(nil, cfg)
-	s.ipc = &setupTestIPC{}
-	s.launcher = &setupTestLauncher{}
-	s.setupPollInterval = time.Millisecond
-	s.setupTimeout = 50 * time.Millisecond
 
 	var chowned bool
-	s.setupIndexLibraries = func(context.Context, setupdomain.Draft) error {
-		return errors.New("scan boom")
+	s.setupIndexLibraries = func(context.Context, setupdomain.Draft, func(scanner.ScanProgress)) (*scanner.ScanResult, error) {
+		return nil, errors.New("scan boom")
 	}
 	s.setupChownConfig = func(string, string) error {
 		chowned = true
 		return nil
 	}
 
-	w := applySetupRequest(t, s, validSetupDraft(t.TempDir(), t.TempDir()))
+	w := httptest.NewRecorder()
+	s.SetupIndexStream(w, httptest.NewRequest(http.MethodGet, "/api/v1/setup/index/stream", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
 	if !chowned {
 		t.Fatal("chown must run even when index fails")
 	}
-	var resp setupApplyResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Complete || !strings.Contains(resp.ScanWarning, "scan boom") {
-		t.Fatalf("expected scan_warning, got %+v", resp)
+	if !strings.Contains(w.Body.String(), "scan boom") {
+		t.Fatalf("expected scan warning in stream:\n%s", w.Body.String())
 	}
 	loaded, err := config.Load()
 	if err != nil {

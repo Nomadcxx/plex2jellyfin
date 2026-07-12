@@ -25,9 +25,28 @@ export function useApplySetup() {
       api.post<{
         applied: boolean;
         complete: boolean;
+        indexing?: boolean;
         daemon_state: string;
         plugin_warning?: string;
         scan_warning?: string;
       }>('/setup/apply', draft),
   });
 }
+
+export type SetupIndexEvent = {
+  type: 'progress' | 'status' | 'done' | 'error';
+  phase?: string;
+  msg?: string;
+  library?: string;
+  libraries_done?: number;
+  libraries_total?: number;
+  files_scanned?: number;
+  files_added?: number;
+  files_updated?: number;
+  files_skipped?: number;
+  episode_rows?: number;
+  movie_rows?: number;
+  duration_ms?: number;
+  scan_warning?: string;
+  daemon_state?: string;
+};

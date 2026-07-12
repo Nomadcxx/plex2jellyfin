@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -28,6 +28,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
 import { ModelSelect } from '@/components/settings/ModelSelect';
 import { SecretField } from '@/components/settings/SecretField';
@@ -39,7 +40,7 @@ import {
   testSettingsConnection,
 } from '@/lib/api/client';
 import { useAIModels, useTestAIConnection, useTestAIPrompt } from '@/hooks/useSettings';
-import { SetupDraft, SetupStatus, setupKeys, useApplySetup } from '@/hooks/useSetup';
+import { SetupDraft, SetupIndexEvent, SetupStatus, setupKeys, useApplySetup } from '@/hooks/useSetup';
 import {
   emptyChecks,
   hydrateDraft,
@@ -48,6 +49,7 @@ import {
   ServiceName,
   serviceFingerprint,
   SetupStep,
+  splitPathInput,
   stepErrors,
   WizardChecks,
 } from './setupDraft';
@@ -75,12 +77,18 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
   const [compatibility, setCompatibility] = useState<Partial<Record<'sonarr' | 'radarr', CompatibilityResult>>>({});
   const [testingService, setTestingService] = useState<ServiceName | null>(null);
   const [fixTarget, setFixTarget] = useState<'sonarr' | 'radarr' | null>(null);
-  const [applied, setApplied] = useState(false);
+  const [phase, setPhase] = useState<'wizard' | 'indexing' | 'complete'>('wizard');
   const [scanWarning, setScanWarning] = useState('');
+  const [indexResult, setIndexResult] = useState<SetupIndexEvent | null>(null);
   const apply = useApplySetup();
   const router = useRouter();
   const queryClient = useQueryClient();
   const current = steps[stepIndex];
+
+  const libraryPaths = useMemo(
+    () => [...draft.libraries.tv, ...draft.libraries.movies],
+    [draft.libraries.tv, draft.libraries.movies],
+  );
 
   const setPath = (collection: 'watch' | 'libraries', media: 'tv' | 'movies', paths: string[]) => {
     setDraft((value) => ({ ...value, [collection]: { ...value[collection], [media]: paths } }));
@@ -132,8 +140,29 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
     result.healthy ? toast.success(`${label(fixTarget)} settings updated`) : toast.error(result.error || 'Compatibility repair failed');
   };
 
-  if (applied) {
-    return <SetupComplete scanWarning={scanWarning} onDashboard={finish} />;
+  if (phase === 'indexing') {
+    return (
+      <SetupIndexing
+        libraries={libraryPaths}
+        onDone={(result) => {
+          setIndexResult(result);
+          if (result.scan_warning) {
+            setScanWarning(result.scan_warning);
+            toast.warning(result.scan_warning);
+          }
+          setPhase('complete');
+        }}
+        onError={(msg) => {
+          setScanWarning(msg);
+          toast.error(msg);
+          setPhase('complete');
+        }}
+      />
+    );
+  }
+
+  if (phase === 'complete') {
+    return <SetupComplete scanWarning={scanWarning} result={indexResult} onDashboard={finish} />;
   }
 
   return (
@@ -175,6 +204,7 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
           <header className="border-b border-zinc-800 px-5 py-5 sm:px-8 lg:px-10">
             <p className="font-mono text-xs uppercase text-amber-400">setup::{current.id}</p>
             <h1 className="mt-1 text-2xl font-semibold">{stepTitle(current.id)}</h1>
+            <p className="mt-2 max-w-3xl text-sm text-zinc-400">{stepBlurb(current.id)}</p>
           </header>
           <div className="flex-1 px-5 py-6 sm:px-8 lg:px-10">
             <div className="w-full max-w-5xl">
@@ -222,21 +252,25 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
                   if (errors.length) return setVisibleErrors(errors);
                   apply.mutate(draft, {
                     onSuccess: (result) => {
-                      setApplied(true);
                       if (result.plugin_warning) {
                         toast.warning(result.plugin_warning);
+                      }
+                      if (result.indexing) {
+                        setPhase('indexing');
+                        return;
                       }
                       if (result.scan_warning) {
                         setScanWarning(result.scan_warning);
                         toast.warning(result.scan_warning);
                       }
+                      setPhase('complete');
                     },
                   });
                 }}
                 disabled={apply.isPending}
               >
                 {apply.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {apply.isPending ? 'Applying and indexing…' : 'Apply and start'}
+                {apply.isPending ? 'Starting daemon…' : 'Apply and start'}
               </Button>
             ) : (
               <Button onClick={next}>Continue<ArrowRight className="h-4 w-4" /></Button>
@@ -260,6 +294,12 @@ function MediaStep({ draft, checks, setChecks, setPath }: {
 }) {
   return (
     <div className="space-y-8">
+      <div className="space-y-2 border-l-2 border-amber-500/40 bg-amber-950/10 px-4 py-3 text-sm text-zinc-300">
+        <p>Configure TV, Movies, or both. Each configured type needs an incoming path and a library path.</p>
+        <p className="text-zinc-400">
+          Add one path at a time, or paste a comma-separated list (same as the CLI). Browser file pickers cannot see server mounts like <span className="font-mono text-zinc-300">/mnt/…</span>, so paths are entered as text and verified on the host.
+        </p>
+      </div>
       {([
         ['tv', 'TV', Tv],
         ['movies', 'Movies', Film],
@@ -267,8 +307,34 @@ function MediaStep({ draft, checks, setChecks, setPath }: {
         <section key={media} aria-labelledby={`${media}-paths`} className="border-t border-zinc-800 pt-5 first:border-t-0 first:pt-0">
           <div className="mb-4 flex items-center gap-2"><Icon className="h-5 w-5 text-amber-400" /><h2 id={`${media}-paths`} className="font-mono text-base font-semibold">{title}</h2><span className="text-xs text-zinc-600">optional</span></div>
           <div className="grid gap-5 xl:grid-cols-2">
-            <PathEditor title="Incoming" icon={FolderInput} collection="watch" media={media} paths={draft.watch[media]} writable={draft.runtime.delete_source} checks={checks} setChecks={setChecks} onChange={(paths) => setPath('watch', media, paths)} />
-            <PathEditor title="Library" icon={FolderOutput} collection="libraries" media={media} paths={draft.libraries[media]} writable checks={checks} setChecks={setChecks} onChange={(paths) => setPath('libraries', media, paths)} />
+            <PathEditor
+              title="Incoming"
+              hint="Downloader complete/watch folder (SABnzbd, qBittorrent, NZBGet, etc.)."
+              example={media === 'tv' ? '/mnt/NVME3/Sabnzbd/complete/tv' : '/mnt/NVME3/Sabnzbd/complete/movies'}
+              icon={FolderInput}
+              collection="watch"
+              media={media}
+              paths={draft.watch[media]}
+              writable={draft.runtime.delete_source}
+              checks={checks}
+              setChecks={setChecks}
+              onChange={(paths) => setPath('watch', media, paths)}
+            />
+            <PathEditor
+              title="Library"
+              hint="Final library roots Jellyfin/Sonarr/Radarr use. Paste one path or a comma-separated list across drives."
+              example={media === 'tv'
+                ? '/mnt/STORAGE1/TVSHOWS, /mnt/STORAGE2/TVSHOWS, /mnt/STORAGE3/TVSHOWS'
+                : '/mnt/STORAGE1/MOVIES, /mnt/STORAGE2/MOVIES, /mnt/STORAGE3/MOVIES'}
+              icon={FolderOutput}
+              collection="libraries"
+              media={media}
+              paths={draft.libraries[media]}
+              writable
+              checks={checks}
+              setChecks={setChecks}
+              onChange={(paths) => setPath('libraries', media, paths)}
+            />
           </div>
         </section>
       ))}
@@ -276,8 +342,10 @@ function MediaStep({ draft, checks, setChecks, setPath }: {
   );
 }
 
-function PathEditor({ title, icon: Icon, collection, media, paths, writable, checks, setChecks, onChange }: {
+function PathEditor({ title, hint, example, icon: Icon, collection, media, paths, writable, checks, setChecks, onChange }: {
   title: string;
+  hint: string;
+  example: string;
   icon: typeof FolderInput;
   collection: 'watch' | 'libraries';
   media: 'tv' | 'movies';
@@ -288,27 +356,60 @@ function PathEditor({ title, icon: Icon, collection, media, paths, writable, che
   onChange: (paths: string[]) => void;
 }) {
   const [value, setValue] = useState('');
-  const [checking, setChecking] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
 
   const verify = async (path: string) => {
-    setChecking(path);
     const result = await preflightPath(path, collection === 'watch' ? 'watch' : 'library');
     const ok = result.exists && result.is_dir && result.readable && (!writable || result.writable);
     setChecks((state) => ({ ...state, paths: { ...state.paths, [pathCheckKey(collection, media, path)]: ok } }));
-    setChecking(null);
-    ok ? toast.success(`${path} verified`) : toast.error(result.warnings?.join('; ') || `${path} is not accessible`);
-    return ok;
+    return { path, ok, warnings: result.warnings };
+  };
+
+  const addPaths = async () => {
+    const candidates = splitPathInput(value);
+    if (candidates.length === 0) return;
+    setChecking(true);
+    const accepted: string[] = [];
+    const failed: string[] = [];
+    for (const path of candidates) {
+      if (paths.includes(path)) continue;
+      const result = await verify(path);
+      if (result.ok) accepted.push(path);
+      else failed.push(path);
+    }
+    if (accepted.length > 0) {
+      onChange([...paths, ...accepted]);
+      setValue('');
+      toast.success(accepted.length === 1 ? `${accepted[0]} verified` : `Added ${accepted.length} paths`);
+    }
+    if (failed.length > 0) {
+      toast.error(failed.length === 1 ? `${failed[0]} is not accessible` : `${failed.length} paths failed verification`);
+    }
+    setChecking(false);
   };
 
   return (
     <fieldset className="min-w-0 border border-zinc-800 p-4">
       <legend className="px-2 font-mono text-sm text-zinc-300"><span className="inline-flex items-center gap-2"><Icon className="h-4 w-4" />{title}</span></legend>
+      <p className="mb-3 text-xs leading-relaxed text-zinc-500">{hint}</p>
       <div className="flex gap-2">
-        <Input value={value} onChange={(event) => setValue(event.target.value)} placeholder={`/${collection === 'watch' ? 'watch' : 'library'}/${media}`} />
-        <Button type="button" size="icon" aria-label={`Add ${title.toLowerCase()} path`} disabled={!value.trim() || checking !== null} onClick={async () => { const path = value.trim(); if (await verify(path)) { onChange([...paths, path]); setValue(''); } }}>
-          {checking === value.trim() ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+        <Input
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              void addPaths();
+            }
+          }}
+          placeholder={example}
+          aria-label={`Add ${title.toLowerCase()} path`}
+        />
+        <Button type="button" size="icon" aria-label={`Add ${title.toLowerCase()} path`} disabled={!value.trim() || checking} onClick={() => void addPaths()}>
+          {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
         </Button>
       </div>
+      <p className="mt-2 font-mono text-[11px] text-zinc-600">One path, or comma-separated like the CLI.</p>
       <div className="mt-3 min-h-10 space-y-2">
         {paths.length === 0 ? <p className="py-2 text-sm text-zinc-600">Not configured</p> : paths.map((path, index) => {
           const state = checks.paths[pathCheckKey(collection, media, path)];
@@ -316,7 +417,12 @@ function PathEditor({ title, icon: Icon, collection, media, paths, writable, che
             <div key={`${path}-${index}`} className="flex min-h-10 items-center gap-2 border-t border-zinc-900 pt-2">
               {state === true ? <CheckCircle2 className="h-4 w-4 shrink-0 text-green-400" /> : state === false ? <AlertTriangle className="h-4 w-4 shrink-0 text-red-400" /> : <Circle className="h-4 w-4 shrink-0 text-zinc-600" />}
               <span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-300" title={path}>{path}</span>
-              <Button type="button" variant="ghost" size="icon" aria-label={`Verify ${path}`} title="Verify path" disabled={checking !== null} onClick={() => verify(path)}>{checking === path ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}</Button>
+              <Button type="button" variant="ghost" size="icon" aria-label={`Verify ${path}`} title="Verify path" disabled={checking} onClick={async () => {
+                setChecking(true);
+                const result = await verify(path);
+                setChecking(false);
+                result.ok ? toast.success(`${path} verified`) : toast.error(result.warnings?.join('; ') || `${path} is not accessible`);
+              }}>{checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}</Button>
               <Button type="button" variant="ghost" size="icon" aria-label={`Remove ${path}`} title="Remove path" onClick={() => onChange(paths.filter((_, item) => item !== index))}><Trash2 className="h-4 w-4" /></Button>
             </div>
           );
@@ -339,6 +445,9 @@ function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest,
   const update = (name: ServiceName, patch: Record<string, unknown>) => setDraft((value) => ({ ...value, [name]: { ...value[name], ...patch } }));
   return (
     <div className="divide-y divide-zinc-800 border-y border-zinc-800">
+      <p className="pb-5 text-sm text-zinc-400">
+        Optional. Connect Sonarr/Radarr so completed downloads can be imported with the right quality profile behavior, and Jellyfin for library refresh plus the companion plugin feedback loop. Test each service before continuing.
+      </p>
       {(['sonarr', 'radarr', 'jellyfin'] as ServiceName[]).map((name) => {
         const value = draft[name];
         const verified = checks.services[name] === serviceFingerprint(value);
@@ -459,6 +568,9 @@ function AIStep({ draft, setDraft, checks, setChecks }: {
 
   return (
     <div className="space-y-6 border-y border-zinc-800 py-6">
+      <p className="text-sm text-zinc-400">
+        Most filenames parse without AI. Enable Ollama only for edge cases: low-confidence titles, missing years, or release tags the regex parser cannot fix.
+      </p>
       <div className="flex items-center justify-between gap-4"><div className="flex items-center gap-3"><Cpu className="h-5 w-5 text-amber-400" /><h2 className="font-mono font-semibold">Ollama</h2>{connected && <span className="font-mono text-xs text-green-400">verified</span>}</div><Switch checked={draft.ai.enabled} onCheckedChange={(enabled) => update({ enabled })} aria-label="Enable AI matching" /></div>
       {draft.ai.enabled && (
         <>
@@ -493,6 +605,10 @@ function RuntimeStep({ draft, setDraft, setChecks, runtime, uid, gid }: {
   const frequencies = ['1m', '5m', '15m', '30m', '1h'];
   return (
     <div className="space-y-7 border-y border-zinc-800 py-6">
+      <div className="space-y-2 text-sm text-zinc-400">
+        <p>Watch folders are monitored live. Scan frequency is a periodic catch-up for anything the watcher missed (default 5m is fine for most libraries).</p>
+        <p>Move deletes the download after a successful import; copy keeps the source. Checksums add an integrity check after each transfer (slower; off by default).</p>
+      </div>
       <div className="grid gap-5 md:grid-cols-2">
         <label className="space-y-2 text-sm"><span className="text-zinc-400">Scan frequency</span><select className="h-10 w-full border border-zinc-800 bg-zinc-950 px-3 text-sm focus:border-amber-500 focus:outline-none" value={draft.runtime.scan_frequency} onChange={(event) => updateRuntime({ scan_frequency: event.target.value })}>{!frequencies.includes(draft.runtime.scan_frequency) && <option value={draft.runtime.scan_frequency}>{draft.runtime.scan_frequency}</option>}{frequencies.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         <div className="space-y-3">
@@ -508,7 +624,13 @@ function RuntimeStep({ draft, setDraft, setChecks, runtime, uid, gid }: {
       {runtime === 'container' ? (
         <div className="border-l-2 border-cyan-700 bg-cyan-950/10 px-4 py-3"><p className="font-mono text-sm text-cyan-300">container runtime</p><p className="mt-1 text-sm text-zinc-400">Effective UID {uid}, GID {gid}. File ownership is controlled by PUID/PGID.</p></div>
       ) : (
-        <fieldset className="border border-zinc-800 p-4"><legend className="px-2 font-mono text-sm text-zinc-300">Transferred file ownership</legend><div className="grid gap-4 sm:grid-cols-2"><LabeledInput label="User" value={draft.runtime.permissions.user} onChange={(user) => updatePermissions({ user })} placeholder="jellyfin" /><LabeledInput label="Group" value={draft.runtime.permissions.group} onChange={(group) => updatePermissions({ group })} placeholder="jellyfin" /><LabeledInput label="File mode" value={draft.runtime.permissions.file_mode} onChange={(file_mode) => updatePermissions({ file_mode })} placeholder="0644" /><LabeledInput label="Directory mode" value={draft.runtime.permissions.dir_mode} onChange={(dir_mode) => updatePermissions({ dir_mode })} placeholder="0755" /></div></fieldset>
+        <fieldset className="border border-zinc-800 p-4">
+          <legend className="px-2 font-mono text-sm text-zinc-300">Transferred file ownership</legend>
+          <p className="mb-3 text-xs leading-relaxed text-zinc-500">
+            Group is the critical setting: Sonarr, Radarr, and Jellyfin need a shared group (and group-writable modes) to rename/upgrade/delete after import. Recommended: group=media (or jellyfin), file_mode=0664, dir_mode=0775.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2"><LabeledInput label="User" value={draft.runtime.permissions.user} onChange={(user) => updatePermissions({ user })} placeholder="jellyfin" /><LabeledInput label="Group" value={draft.runtime.permissions.group} onChange={(group) => updatePermissions({ group })} placeholder="media" /><LabeledInput label="File mode" value={draft.runtime.permissions.file_mode} onChange={(file_mode) => updatePermissions({ file_mode })} placeholder="0664" /><LabeledInput label="Directory mode" value={draft.runtime.permissions.dir_mode} onChange={(dir_mode) => updatePermissions({ dir_mode })} placeholder="0775" /></div>
+        </fieldset>
       )}
     </div>
   );
@@ -526,7 +648,147 @@ function ReviewStep({ draft, runtime }: { draft: SetupDraft; runtime: RuntimeKin
   return <dl className="divide-y divide-zinc-800 border-y border-zinc-800">{rows.map(([term, value]) => <div key={term} className="grid gap-1 py-4 sm:grid-cols-[12rem_1fr]"><dt className="font-mono text-sm text-zinc-500">{term}</dt><dd className="min-w-0 break-words text-sm text-zinc-200">{value}</dd></div>)}</dl>;
 }
 
-function SetupComplete({ scanWarning, onDashboard }: { scanWarning?: string; onDashboard: () => void }) {
+type LibRow = { path: string; status: 'queued' | 'scanning' | 'done'; files: number };
+
+function softPct(files: number): number {
+  if (files <= 0) return 2;
+  return Math.min(92, Math.round((1 - 1 / (files / 40 + 1.05)) * 100));
+}
+
+function libraryLabel(path: string): string {
+  const clean = path.replace(/\/+$/, '');
+  const parts = clean.split('/').filter(Boolean);
+  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+  return parts[parts.length - 1] || path;
+}
+
+function SetupIndexing({
+  libraries,
+  onDone,
+  onError,
+}: {
+  libraries: string[];
+  onDone: (result: SetupIndexEvent) => void;
+  onError: (msg: string) => void;
+}) {
+  const [rows, setRows] = useState<LibRow[]>(() => libraries.map((path) => ({ path, status: 'queued', files: 0 })));
+  const [filesScanned, setFilesScanned] = useState(0);
+  const [phase, setPhase] = useState('Starting index…');
+
+  useEffect(() => {
+    const es = new EventSource('/api/v1/setup/index/stream');
+    let closed = false;
+    let baseline = 0;
+    let lastDone = 0;
+    const fileCounts = libraries.map(() => 0);
+
+    es.onmessage = (ev) => {
+      let frame: SetupIndexEvent;
+      try {
+        frame = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      if (frame.type === 'status') {
+        setPhase(frame.msg || frame.phase || 'Working…');
+        return;
+      }
+      if (frame.type === 'progress') {
+        const done = frame.libraries_done ?? 0;
+        const totalFiles = frame.files_scanned ?? 0;
+        if (done > lastDone) {
+          for (let i = lastDone; i < done && i < fileCounts.length; i++) {
+            if (fileCounts[i] === 0) fileCounts[i] = Math.max(0, totalFiles - baseline);
+          }
+          baseline = totalFiles;
+          lastDone = done;
+        } else if (done < fileCounts.length) {
+          fileCounts[done] = Math.max(0, totalFiles - baseline);
+        }
+        setFilesScanned(totalFiles);
+        setRows(libraries.map((path, index) => ({
+          path,
+          status: index < done ? 'done' : index === done ? 'scanning' : 'queued',
+          files: fileCounts[index] ?? 0,
+        })));
+        return;
+      }
+      if (frame.type === 'done') {
+        closed = true;
+        es.close();
+        setPhase(frame.msg || 'Complete');
+        setRows(libraries.map((path, index) => ({
+          path,
+          status: 'done',
+          files: fileCounts[index] ?? 0,
+        })));
+        onDone(frame);
+        return;
+      }
+      if (frame.type === 'error') {
+        closed = true;
+        es.close();
+        onError(frame.msg || 'Indexing failed');
+      }
+    };
+    es.onerror = () => {
+      if (closed) return;
+      es.close();
+      onError('Lost connection to the indexing stream. Re-open setup or run: plex2jellyfin scan');
+    };
+    return () => {
+      closed = true;
+      es.close();
+    };
+    // Connect once when this screen mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-6 text-zinc-100">
+      <div className="w-full max-w-2xl border-y border-zinc-800 py-10">
+        <Image src="/p2j-mark.png" alt="P2J" width={150} height={58} className="mx-auto h-auto w-[140px]" />
+        <h1 className="mt-6 text-center text-2xl font-semibold">Initial library scan</h1>
+        <p className="mt-2 text-center text-sm text-zinc-400">
+          Indexing libraries the same way as the CLI/TUI installer. Daemon is already up.
+        </p>
+        <p className="mt-4 text-center font-mono text-xs uppercase text-amber-400">{phase}</p>
+        <div className="mt-8 space-y-3">
+          {rows.map((row) => {
+            const pct = row.status === 'done' ? 100 : row.status === 'scanning' ? softPct(row.files) : 0;
+            return (
+              <div key={row.path} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className={`min-w-0 truncate font-mono ${row.status === 'scanning' ? 'font-semibold text-amber-300' : row.status === 'done' ? 'text-green-400' : 'text-zinc-500'}`} title={row.path}>
+                    {libraryLabel(row.path)}
+                  </span>
+                  <span className="shrink-0 font-mono text-xs text-zinc-500">
+                    {row.status === 'done' ? `${row.files.toLocaleString()} files` : row.status === 'scanning' ? 'scanning' : 'queued'}
+                  </span>
+                </div>
+                <Progress value={pct} className="h-2 bg-zinc-900 [&>div]:bg-amber-400" />
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-6 text-center font-mono text-xs text-zinc-500">
+          total files indexed: {filesScanned.toLocaleString()}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SetupComplete({
+  scanWarning,
+  result,
+  onDashboard,
+}: {
+  scanWarning?: string;
+  result?: SetupIndexEvent | null;
+  onDashboard: () => void;
+}) {
+  const duration = result?.duration_ms ? `${(result.duration_ms / 1000).toFixed(1)}s` : null;
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-6 text-zinc-100">
       <div className="w-full max-w-xl border-y border-zinc-800 py-10 text-center">
@@ -534,8 +796,16 @@ function SetupComplete({ scanWarning, onDashboard }: { scanWarning?: string; onD
         <Image src="/p2j-mark.png" alt="P2J" width={150} height={58} className="mx-auto mt-6 h-auto w-[140px]" />
         <h1 className="mt-6 text-2xl font-semibold">Setup complete</h1>
         <p className="mt-2 text-sm text-zinc-400">
-          The daemon is running and libraries were indexed (same finish path as the CLI/TUI installer).
+          The daemon is running{result ? ' and libraries were indexed' : ''}. Open the dashboard when you are ready.
         </p>
+        {result && (
+          <div className="mx-auto mt-5 max-w-md space-y-1 text-left font-mono text-xs text-zinc-400">
+            {duration ? <p>Scan finished in {duration}</p> : null}
+            <p>files indexed: {(result.files_scanned ?? 0).toLocaleString()} (added {result.files_added ?? 0}, updated {result.files_updated ?? 0}, skipped {result.files_skipped ?? 0})</p>
+            <p>episode rows: {(result.episode_rows ?? 0).toLocaleString()} · movie rows: {(result.movie_rows ?? 0).toLocaleString()}</p>
+            <p className="pt-2 text-zinc-500">Services: plex2jellyfin-daemon + plex2jellyfin-web should stay enabled across reboots.</p>
+          </div>
+        )}
         {scanWarning ? (
           <p className="mx-auto mt-4 max-w-md text-sm text-amber-300/90">{scanWarning}</p>
         ) : null}
@@ -560,4 +830,15 @@ function LabeledInput({ label: text, value, onChange, placeholder }: { label: st
 
 function label(name: string) { return name[0].toUpperCase() + name.slice(1); }
 function serviceURL(name: ServiceName) { return name === 'sonarr' ? 'http://sonarr:8989' : name === 'radarr' ? 'http://radarr:7878' : 'http://jellyfin:8096'; }
-function stepTitle(step: SetupStep) { return ({ media: 'Media paths', services: 'Connected services', ai: 'AI matching', runtime: 'Runtime behavior', review: 'Review configuration' } as const)[step]; }
+function stepTitle(step: SetupStep) {
+  return ({ media: 'Media paths', services: 'Connected services', ai: 'AI matching', runtime: 'Runtime behavior', review: 'Review configuration' } as const)[step];
+}
+function stepBlurb(step: SetupStep) {
+  return ({
+    media: 'Incoming paths are where downloads land; library paths are where organized media lives.',
+    services: 'Wire up Sonarr, Radarr, and Jellyfin when you use them — skip anything you do not need.',
+    ai: 'Optional Ollama assist for ambiguous filenames the regex parser cannot fix.',
+    runtime: 'How often to catch up, whether to move or copy, and ownership for imported files.',
+    review: 'Confirm the draft, then apply. The daemon starts, libraries are indexed, and config ownership is fixed.',
+  } as const)[step];
+}

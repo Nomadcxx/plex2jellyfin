@@ -31,6 +31,7 @@ type SetupStatusResponse struct {
 type setupApplyResponse struct {
 	Applied       bool   `json:"applied"`
 	Complete      bool   `json:"complete"`
+	Indexing      bool   `json:"indexing,omitempty"`
 	DaemonState   string `json:"daemon_state"`
 	PluginWarning string `json:"plugin_warning,omitempty"`
 	ScanWarning   string `json:"scan_warning,omitempty"`
@@ -121,15 +122,23 @@ func (s *Server) ApplySetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// TUI/CLI parity: index libraries then chown config dir (chown even if scan fails).
-	scanWarning := ""
-	if err := s.indexLibrariesAfterSetup(r.Context(), draft); err != nil {
-		scanWarning = "initial library scan failed: " + err.Error()
+	needsIndex := len(draft.Libraries.TV)+len(draft.Libraries.Movies) > 0
+	if needsIndex {
+		// Indexing is a separate SSE step so the web wizard can show live bars.
+		writeJSON(w, http.StatusOK, setupApplyResponse{
+			Applied: true, Complete: false, Indexing: true, DaemonState: "running",
+			PluginWarning: pluginWarning,
+		})
+		return
 	}
-	if err := s.chownConfigAfterSetup(draft); err != nil && scanWarning == "" {
-		scanWarning = "config ownership fix failed: " + err.Error()
-	} else if err != nil {
-		scanWarning += "; config ownership fix failed: " + err.Error()
+
+	if err := s.chownConfigAfterSetup(draft); err != nil {
+		writeJSON(w, http.StatusOK, setupApplyResponse{
+			Applied: true, Complete: true, DaemonState: "running",
+			PluginWarning: pluginWarning,
+			ScanWarning:  "config ownership fix failed: " + err.Error(),
+		})
+		return
 	}
 
 	candidate.Setup.Completed = true
@@ -140,7 +149,7 @@ func (s *Server) ApplySetup(w http.ResponseWriter, r *http.Request) {
 	s.replaceConfigLocked(candidate)
 	writeJSON(w, http.StatusOK, setupApplyResponse{
 		Applied: true, Complete: true, DaemonState: "running",
-		PluginWarning: pluginWarning, ScanWarning: scanWarning,
+		PluginWarning: pluginWarning,
 	})
 }
 
@@ -293,11 +302,138 @@ func ValidateSetupPaths(draft setupdomain.Draft) []setupdomain.FieldError {
 	return validateSetupPaths(draft)
 }
 
-func (s *Server) indexLibrariesAfterSetup(ctx context.Context, draft setupdomain.Draft) error {
-	if s.setupIndexLibraries != nil {
-		return s.setupIndexLibraries(ctx, draft)
+type setupIndexEvent struct {
+	Type            string `json:"type"` // progress | status | done | error
+	Phase           string `json:"phase,omitempty"`
+	Msg             string `json:"msg,omitempty"`
+	Library         string `json:"library,omitempty"`
+	LibrariesDone   int    `json:"libraries_done,omitempty"`
+	LibrariesTotal  int    `json:"libraries_total,omitempty"`
+	FilesScanned    int    `json:"files_scanned,omitempty"`
+	FilesAdded      int    `json:"files_added,omitempty"`
+	FilesUpdated    int    `json:"files_updated,omitempty"`
+	FilesSkipped    int    `json:"files_skipped,omitempty"`
+	EpisodeRows     int    `json:"episode_rows,omitempty"`
+	MovieRows       int    `json:"movie_rows,omitempty"`
+	DurationMS      int64  `json:"duration_ms,omitempty"`
+	ScanWarning     string `json:"scan_warning,omitempty"`
+	DaemonState     string `json:"daemon_state,omitempty"`
+}
+
+// SetupIndexStream runs the post-apply library index over SSE so the web wizard
+// can render per-library progress (CLI/TUI parity). Marks setup complete when done.
+func (s *Server) SetupIndexStream(w http.ResponseWriter, r *http.Request) {
+	if !s.setupIndexMu.TryLock() {
+		writeError(w, http.StatusConflict, "index_busy", "initial library index is already running")
+		return
 	}
-	return defaultSetupIndexLibraries(ctx, draft)
+	defer s.setupIndexMu.Unlock()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming_unsupported", "response writer does not support flushing")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "config_load_error", err.Error())
+		return
+	}
+	draft := setupdomain.DraftFromConfig(cfg)
+	libs := append(append([]string{}, draft.Libraries.TV...), draft.Libraries.Movies...)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	send := func(ev setupIndexEvent) {
+		b, _ := json.Marshal(ev)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+
+	send(setupIndexEvent{Type: "status", Phase: "indexing", Msg: "Indexing libraries", LibrariesTotal: len(libs)})
+
+	var scanWarning string
+	var result *scanner.ScanResult
+	if len(libs) > 0 {
+		result, err = s.indexLibrariesAfterSetup(r.Context(), draft, func(p scanner.ScanProgress) {
+			send(setupIndexEvent{
+				Type:           "progress",
+				Phase:          "indexing",
+				Library:        p.Library,
+				LibrariesDone:  p.LibrariesDone,
+				LibrariesTotal: p.LibrariesTotal,
+				FilesScanned:   p.FilesScanned,
+			})
+		})
+		if err != nil {
+			scanWarning = "initial library scan failed: " + err.Error()
+		}
+	}
+
+	send(setupIndexEvent{Type: "status", Phase: "chown", Msg: "Fixing config directory ownership"})
+	if err := s.chownConfigAfterSetup(draft); err != nil {
+		if scanWarning == "" {
+			scanWarning = "config ownership fix failed: " + err.Error()
+		} else {
+			scanWarning += "; config ownership fix failed: " + err.Error()
+		}
+	}
+
+	s.configMu.Lock()
+	cfg.Setup.Completed = true
+	if err := cfg.Save(); err != nil {
+		s.configMu.Unlock()
+		send(setupIndexEvent{Type: "error", Msg: "mark setup complete: " + err.Error()})
+		return
+	}
+	s.replaceConfigLocked(cfg)
+	s.configMu.Unlock()
+
+	ev := setupIndexEvent{
+		Type:        "done",
+		Phase:       "complete",
+		Msg:         "Setup complete",
+		ScanWarning: scanWarning,
+		DaemonState: "running",
+	}
+	if result != nil {
+		ev.FilesScanned = result.FilesScanned
+		ev.FilesAdded = result.FilesAdded
+		ev.FilesUpdated = result.FilesUpdated
+		ev.FilesSkipped = result.FilesSkipped
+		ev.DurationMS = result.Duration.Milliseconds()
+		ev.LibrariesTotal = len(libs)
+		ev.LibrariesDone = len(libs)
+	}
+	if s.db != nil {
+		if n, err := s.db.CountMediaFilesByType("episode"); err == nil {
+			ev.EpisodeRows = n
+		}
+		if n, err := s.db.CountMediaFilesByType("movie"); err == nil {
+			ev.MovieRows = n
+		}
+	} else if db, err := database.Open(); err == nil {
+		if n, err := db.CountMediaFilesByType("episode"); err == nil {
+			ev.EpisodeRows = n
+		}
+		if n, err := db.CountMediaFilesByType("movie"); err == nil {
+			ev.MovieRows = n
+		}
+		_ = db.Close()
+	}
+	send(ev)
+}
+
+func (s *Server) indexLibrariesAfterSetup(ctx context.Context, draft setupdomain.Draft, onProgress func(scanner.ScanProgress)) (*scanner.ScanResult, error) {
+	if s.setupIndexLibraries != nil {
+		return s.setupIndexLibraries(ctx, draft, onProgress)
+	}
+	return defaultSetupIndexLibraries(ctx, draft, onProgress)
 }
 
 func (s *Server) chownConfigAfterSetup(draft setupdomain.Draft) error {
@@ -311,20 +447,20 @@ func (s *Server) chownConfigAfterSetup(draft setupdomain.Draft) error {
 
 // defaultSetupIndexLibraries walks configured library roots into media.db —
 // the same job as CLI/TUI initial scan (not the duplicates POST /scan).
-func defaultSetupIndexLibraries(ctx context.Context, draft setupdomain.Draft) error {
+func defaultSetupIndexLibraries(ctx context.Context, draft setupdomain.Draft, onProgress func(scanner.ScanProgress)) (*scanner.ScanResult, error) {
 	tv := draft.Libraries.TV
 	movies := draft.Libraries.Movies
 	if len(tv)+len(movies) == 0 {
-		return nil
+		return &scanner.ScanResult{}, nil
 	}
 	db, err := database.Open()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer db.Close()
-	_, err = scanner.NewFileScanner(db).ScanWithOptions(ctx, scanner.ScanOptions{
+	return scanner.NewFileScanner(db).ScanWithOptions(ctx, scanner.ScanOptions{
 		TVLibraries:    tv,
 		MovieLibraries: movies,
+		OnProgress:     onProgress,
 	})
-	return err
 }
