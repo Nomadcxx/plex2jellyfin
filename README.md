@@ -8,7 +8,7 @@
 
   <p>Plex papers over messy release names; Jellyfin takes your folders at face value.</p>
 
-  <p>This tool migrates the files once (scan, dedupe, consolidate, rename), then <code>plex2jellyfin-daemon</code> watches download dirs and organizes every new arrival into Jellyfin naming. Out of scope: Plex accounts, watch state, ratings, and playlists.</p>
+  <p>This tool migrates the files once (scan, dedupe, consolidate, rename), then <code>plex2jellyfin-daemon</code> watches download dirs and organizes every new arrival into Jellyfin naming.</p>
 
   <p>
     <a href="https://nomadcxx.github.io/plex2jellyfin/docs/">Documentation</a>
@@ -87,7 +87,19 @@ The container runs as that non-root user, so `[permissions]` chown has no effect
 </details>
 
 <details>
-<summary><b>Option E — Development</b></summary>
+<summary><b>Option E — AUR (Arch Linux)</b></summary>
+
+```bash
+yay -S plex2jellyfin
+# or: paru -S plex2jellyfin
+```
+
+Installs binaries and systemd units. Finish with the web or CLI setup wizard afterward. Package sources live in [`packaging/aur/`](packaging/aur/).
+
+</details>
+
+<details>
+<summary><b>Option F — Development</b></summary>
 
 Requires Go 1.24+, git, and npm (for the embedded web UI):
 
@@ -99,43 +111,6 @@ sudo ./installer
 ```
 
 Or build individual binaries with `go build -o plex2jellyfin ./cmd/plex2jellyfin` (and the matching `cmd/plex2jellyfin-daemon`, `cmd/plex2jellyfin-web` targets). For day-to-day UI work, see the docs [development](https://nomadcxx.github.io/plex2jellyfin/docs/) pages and `web/`.
-
-</details>
-
-<details>
-<summary><b>Option F — AUR (Arch Linux)</b></summary>
-
-Coming soon. Template package lives in [`packaging/aur/`](packaging/aur/) (`PKGBUILD` + `.install`); publish after the first `v0.x` tag.
-
-</details>
-
-<details>
-<summary><b>Option G — Deb / RPM</b></summary>
-
-Download the `.deb` or `.rpm` from [GitHub Releases](https://github.com/Nomadcxx/plex2jellyfin/releases/latest):
-
-```bash
-sudo apt install ./plex2jellyfin_*_amd64.deb      # Debian/Ubuntu
-sudo dnf install ./plex2jellyfin-*.x86_64.rpm     # Fedora
-```
-
-Packages install binaries and systemd units but no config — finish in the web setup wizard. Point services at your user config once:
-
-```bash
-sudo systemctl edit plex2jellyfin-daemon
-sudo systemctl edit plex2jellyfin-web
-```
-
-```ini
-[Service]
-Environment=SUDO_USER=<your username>
-```
-
-```bash
-sudo systemctl enable --now plex2jellyfin-daemon plex2jellyfin-web
-```
-
-Then open `http://<host>:5522/`. Full walkthrough: [packages](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/packages/).
 
 </details>
 

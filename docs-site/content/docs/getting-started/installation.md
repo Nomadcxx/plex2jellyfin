@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install plex2jellyfin via TUI, fresh-build scripts, Docker, packages, or source.
+description: Install plex2jellyfin via TUI, fresh-build scripts, Docker, AUR, or source.
 ---
 
 Every install path ships the same binaries:
@@ -45,7 +45,16 @@ Same build as Option B, then `systemctl enable --now plex2jellyfin-web` and prin
 
 See the [Docker guide](/docs/getting-started/docker).
 
-## Option E — Development (local tree)
+## Option E — AUR (Arch Linux)
+
+```bash
+yay -S plex2jellyfin
+# or: paru -S plex2jellyfin
+```
+
+Installs binaries and systemd units. Finish with the web or CLI setup wizard afterward.
+
+## Option F — Development (local tree)
 
 ```bash
 git clone https://github.com/Nomadcxx/plex2jellyfin.git
@@ -63,14 +72,6 @@ make                                                                   # fronten
 ```
 
 `plex2jellyfin-web` embeds `embedded/frontend` (built from `web/`). The Makefile and fresh-build scripts order that correctly.
-
-## Option F — AUR (Arch Linux)
-
-Coming soon. Planned package will install binaries and units; configure with CLI or web setup afterward.
-
-## Option G — Deb / RPM
-
-See [Pre-built packages](/docs/getting-started/packages).
 
 ## Requirements
 
