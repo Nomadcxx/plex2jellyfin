@@ -36,7 +36,7 @@ def create_ascii_png(output_path="assets/plex2jellyfin-header.png"):
     max_chars = max(len(line) for line in lines)
 
     # Try common monospace font locations (Arch, Debian, macOS)
-    font_size = 28
+    font_size = int(__import__("os").environ.get("P2J_WORDMARK_FONT_SIZE", "48"))
     font = None
     for font_name in [
         "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
@@ -59,7 +59,7 @@ def create_ascii_png(output_path="assets/plex2jellyfin-header.png"):
     char_height = ascent + descent
 
     # Image dimensions with padding
-    pad = 20
+    pad = max(20, font_size // 2)
     img_width = int(max_chars * char_width) + pad * 2
     img_height = int(len(lines) * char_height) + pad * 2
 
