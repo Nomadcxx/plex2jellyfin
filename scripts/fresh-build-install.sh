@@ -90,6 +90,5 @@ echo
 echo "Services are installed but not enabled/started."
 echo "Next:"
 echo "  plex2jellyfin setup"
-echo "Then (if setup does not enable them):"
-echo "  sudo systemctl enable --now plex2jellyfin-daemon plex2jellyfin-web"
+echo "Setup enables and starts both plex2jellyfin-daemon and plex2jellyfin-web."
 echo "  open http://localhost:5522/"

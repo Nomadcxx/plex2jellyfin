@@ -121,8 +121,9 @@ func defaultSetupDeps() setupDeps {
 	}
 }
 
-// activateDaemonCLI mirrors the web wizard's activation: reload a running
-// daemon over IPC, otherwise launch the daemon binary, then poll readiness.
+// activateDaemonCLI enables and starts the systemd daemon unit when present
+// (survives reboot, same as the web UI). Falls back to a direct binary launch
+// only when the unit is missing (dev / container without systemd units).
 func activateDaemonCLI(ctx context.Context) error {
 	dir, err := paths.Plex2JellyfinDir()
 	if err != nil {
@@ -130,7 +131,11 @@ func activateDaemonCLI(ctx context.Context) error {
 	}
 	client := ipc.NewClient(filepath.Join(dir, "control.sock"))
 
-	if _, err := client.Call(ctx, ipc.CmdStatus, nil); err == nil {
+	if daemonUnitInstalled() {
+		if err := systemctlEnableNow("plex2jellyfin-daemon.service"); err != nil {
+			return fmt.Errorf("enable daemon service: %w", err)
+		}
+	} else if _, err := client.Call(ctx, ipc.CmdStatus, nil); err == nil {
 		raw, err := client.Call(ctx, ipc.CmdReload, nil)
 		if err != nil {
 			return fmt.Errorf("reload daemon: %w", err)
@@ -167,14 +172,16 @@ func activateDaemonCLI(ctx context.Context) error {
 	}
 }
 
+func daemonUnitInstalled() bool {
+	return exec.Command("systemctl", "cat", "plex2jellyfin-daemon.service").Run() == nil
+}
+
 func webUnitInstalled() bool {
 	return exec.Command("systemctl", "cat", "plex2jellyfin-web.service").Run() == nil
 }
 
-// activateWebCLI enables and starts the system web unit (same as the TUI
-// installer). Uses sudo when not already root — systemctl needs privileges.
-func activateWebCLI() error {
-	args := []string{"systemctl", "enable", "--now", "plex2jellyfin-web.service"}
+func systemctlEnableNow(unit string) error {
+	args := []string{"systemctl", "enable", "--now", unit}
 	var cmd *exec.Cmd
 	if privilege.NeedsRoot() {
 		cmd = exec.Command("sudo", args...)
@@ -190,6 +197,12 @@ func activateWebCLI() error {
 		return err
 	}
 	return nil
+}
+
+// activateWebCLI enables and starts the system web unit (same as the TUI
+// installer). Uses sudo when not already root — systemctl needs privileges.
+func activateWebCLI() error {
+	return systemctlEnableNow("plex2jellyfin-web.service")
 }
 
 func printWebServiceSkipHints(stdout io.Writer) {

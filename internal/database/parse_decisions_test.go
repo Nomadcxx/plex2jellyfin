@@ -708,3 +708,17 @@ func TestGetUnresolvedDecisionByTargetPath_NotFound(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }
+
+func TestIdentificationStatsEmptyTable(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	stats, err := db.IdentificationStats()
+	require.NoError(t, err)
+	assert.Equal(t, 0, stats.Total)
+	assert.Equal(t, 0, stats.Resolved)
+	assert.Equal(t, 0, stats.Identified)
+	assert.Equal(t, 0, stats.Unidentified)
+	assert.Equal(t, 0, stats.PendingNoSeen)
+	assert.Equal(t, 0, stats.FailedAutoLabel)
+}

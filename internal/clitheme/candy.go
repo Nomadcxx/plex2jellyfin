@@ -26,7 +26,8 @@ func CandyBar(pct float64, width int) string {
 		pct = 1
 	}
 
-	trail := lipgloss.NewStyle().Foreground(mutedColor)
+	// Whole eaten run (----C) is Plex yellow; uneaten pellets stay dim.
+	trail := lipgloss.NewStyle().Foreground(PlexYellow)
 	pacman := lipgloss.NewStyle().Bold(true).Foreground(PlexYellow)
 	pellet := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	bracket := lipgloss.NewStyle().Foreground(PlexYellow)

@@ -20,7 +20,7 @@ export default function DashboardPage() {
   const liveDuplicateGroups = dupData?.groups?.length ?? 0;
   const dbDuplicateGroups = data?.libraryStats?.duplicateGroups ?? 0;
   const duplicateGroups = dbDuplicateGroups || liveDuplicateGroups;
-  const { data: jfId } = useJellyfinIdentification();
+  const { data: jfId, isLoading: jfLoading, isError: jfError } = useJellyfinIdentification();
 
   return (
     <AppShell>
@@ -101,6 +101,10 @@ export default function DashboardPage() {
 
         <div className="mt-8">
           <h2 className="text-xl font-semibold mb-4">Jellyfin Identification</h2>
+          <p className="mb-4 text-sm text-zinc-500">
+            Tracks files plex2jellyfin organized and whether Jellyfin resolved their metadata
+            (via the companion plugin). Not Jellystat playback stats.
+          </p>
           {jfId ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <Link href="/jellyfin?status=identified" className="block hover:opacity-80 transition-opacity">
@@ -132,8 +136,12 @@ export default function DashboardPage() {
                 />
               </Link>
             </div>
-          ) : (
+          ) : jfLoading ? (
             <p className="text-sm text-zinc-500">Loading identification stats…</p>
+          ) : jfError ? (
+            <p className="text-sm text-amber-400">Could not load identification stats.</p>
+          ) : (
+            <p className="text-sm text-zinc-500">No organized files yet — stats appear after imports.</p>
           )}
         </div>
 

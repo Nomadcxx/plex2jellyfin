@@ -973,11 +973,11 @@ func (m *MediaDB) IdentificationStats() (IdentificationCounts, error) {
 	row := m.db.QueryRow(`
 		SELECT
 			COUNT(*) AS total,
-			SUM(CASE WHEN jellyfin_resolved_at IS NOT NULL THEN 1 ELSE 0 END) AS resolved,
-			SUM(CASE WHEN jellyfin_identified = 1 THEN 1 ELSE 0 END) AS identified,
-			SUM(CASE WHEN jellyfin_identified = 0 THEN 1 ELSE 0 END) AS unidentified,
-			SUM(CASE WHEN jellyfin_resolved_at IS NULL THEN 1 ELSE 0 END) AS pending,
-			SUM(CASE WHEN auto_label = 'FAIL' THEN 1 ELSE 0 END) AS failed
+			COALESCE(SUM(CASE WHEN jellyfin_resolved_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS resolved,
+			COALESCE(SUM(CASE WHEN jellyfin_identified = 1 THEN 1 ELSE 0 END), 0) AS identified,
+			COALESCE(SUM(CASE WHEN jellyfin_identified = 0 THEN 1 ELSE 0 END), 0) AS unidentified,
+			COALESCE(SUM(CASE WHEN jellyfin_resolved_at IS NULL THEN 1 ELSE 0 END), 0) AS pending,
+			COALESCE(SUM(CASE WHEN auto_label = 'FAIL' THEN 1 ELSE 0 END), 0) AS failed
 		FROM parse_decisions
 		WHERE organize_outcome = 'success' AND target_path IS NOT NULL AND target_path != ''`)
 	if err := row.Scan(&c.Total, &c.Resolved, &c.Identified, &c.Unidentified,
