@@ -1,12 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import Link from 'next/link';
+import { Loader2, RefreshCw, Scan } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useDaemon } from '@/hooks/useDaemon';
 import { ConfirmReversible } from '@/components/settings/ConfirmReversible';
+import {
+  checkArrCompatibility,
+  CompatibilityResult,
+  getHealth,
+  getSettingsSection,
+} from '@/lib/api/client';
 
 function formatUptime(seconds: number | undefined): string {
   if (seconds == null) return '—';
@@ -28,9 +35,45 @@ function StatusDot({ state }: { state: string }) {
   return <span className={`inline-block h-2.5 w-2.5 rounded-full ${color}`} />;
 }
 
+type ArrSummary = Partial<Record<'sonarr' | 'radarr', CompatibilityResult | { error: string }>>;
+
 export default function DaemonPage() {
   const { status, action } = useDaemon(5000);
   const [confirmAction, setConfirmAction] = useState<'stop' | 'restart' | null>(null);
+  const [healthLine, setHealthLine] = useState<string | null>(null);
+  const [arrSummary, setArrSummary] = useState<ArrSummary | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const runHealthAndArr = async () => {
+    setChecking(true);
+    try {
+      const health = await getHealth();
+      setHealthLine(`${health.status}${health.version ? ` · ${health.version}` : ''}`);
+
+      const summary: ArrSummary = {};
+      for (const service of ['sonarr', 'radarr'] as const) {
+        try {
+          const section = await getSettingsSection(service);
+          if (section.enabled !== true || !section.url || !section.api_key) {
+            summary[service] = { error: 'not configured' };
+            continue;
+          }
+          summary[service] = await checkArrCompatibility(service, {
+            url: section.url,
+            api_key: section.api_key,
+          });
+        } catch (err) {
+          summary[service] = { error: err instanceof Error ? err.message : 'check failed' };
+        }
+      }
+      setArrSummary(summary);
+      toast.success('Health checks finished');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Health check failed');
+    } finally {
+      setChecking(false);
+    }
+  };
 
   if (!status) {
     return (
@@ -99,7 +142,7 @@ export default function DaemonPage() {
             <span className="text-zinc-400">Uptime:</span>{' '}
             <span className="font-mono">{formatUptime(status.uptime_seconds)}</span>
           </p>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={async () => {
               try {
                 await action('reload');
@@ -113,6 +156,77 @@ export default function DaemonPage() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="space-y-3 border border-zinc-800 bg-zinc-950/40 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-mono text-sm font-semibold text-zinc-200">Scan & health</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Library rescans live under Indexing; API and Arr health can be re-checked here.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Link
+              href="/settings/indexing"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-zinc-700 bg-transparent px-3 text-sm font-medium hover:bg-zinc-800"
+            >
+              <Scan className="h-4 w-4" />
+              Open indexing
+            </Link>
+            <Button type="button" variant="outline" size="sm" disabled={checking} onClick={runHealthAndArr}>
+              {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Check health
+            </Button>
+          </div>
+        </div>
+
+        {healthLine && (
+          <p className="text-sm">
+            <span className="text-zinc-400">API:</span>{' '}
+            <span className="font-mono text-emerald-300">{healthLine}</span>
+          </p>
+        )}
+
+        {arrSummary && (
+          <ul className="space-y-1 text-sm">
+            {(['sonarr', 'radarr'] as const).map((service) => {
+              const row = arrSummary[service];
+              if (!row) return null;
+              if ('error' in row && row.error && !('ok' in row)) {
+                return (
+                  <li key={service}>
+                    <span className="font-mono text-zinc-300">{service}</span>
+                    <span className="text-zinc-500"> — {row.error}</span>
+                  </li>
+                );
+              }
+              const result = row as CompatibilityResult;
+              if (result.error && !result.ok) {
+                return (
+                  <li key={service}>
+                    <span className="font-mono text-zinc-300">{service}</span>
+                    <span className="text-rose-300"> — {result.error}</span>
+                  </li>
+                );
+              }
+              const n = result.issues?.length ?? 0;
+              return (
+                <li key={service}>
+                  <span className="font-mono text-zinc-300">{service}</span>
+                  <span className={result.healthy ? 'text-emerald-300' : 'text-amber-200'}>
+                    {' '}— {result.healthy ? 'healthy' : `${n} issue${n === 1 ? '' : 's'}`}
+                  </span>
+                  {!result.healthy && n > 0 && (
+                    <Link href={`/settings/${service}`} className="ml-2 text-xs text-zinc-400 underline">
+                      review
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
 
       <ConfirmReversible
         open={confirmAction !== null}

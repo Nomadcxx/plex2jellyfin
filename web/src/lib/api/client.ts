@@ -163,6 +163,40 @@ export async function checkArrCompatibility(service: 'sonarr' | 'radarr', payloa
   return api.post<CompatibilityResult>(`/settings/${service}/compatibility${fix ? '/fix' : ''}`, payload);
 }
 
+export type JellyfinPluginStatus = {
+  healthy?: boolean;
+  installed?: boolean;
+  libraries?: number;
+  message?: string;
+  version?: string;
+};
+
+export type VerifyJellyfinPluginResult = {
+  ok: boolean;
+  sent?: boolean;
+  authenticated?: boolean;
+  daemon_url?: string;
+  daemon_status?: number;
+  error?: string;
+};
+
+export async function getJellyfinPluginStatus() {
+  return api.get<JellyfinPluginStatus>('/jellyfin/plugin/status');
+}
+
+export async function verifyJellyfinPlugin() {
+  return api.post<VerifyJellyfinPluginResult>('/jellyfin/plugin/verify', {});
+}
+
+export type HealthCheckResult = {
+  status: string;
+  version?: string;
+};
+
+export async function getHealth() {
+  return api.get<HealthCheckResult>('/health');
+}
+
 export type OperationAcceptedResponse = {
   op_id: string;
 };
