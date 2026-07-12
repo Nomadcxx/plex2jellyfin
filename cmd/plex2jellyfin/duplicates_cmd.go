@@ -45,7 +45,7 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 	}
 
 	if err := db.DeleteMediaFile(filePath); err != nil {
-		fmt.Printf("  ⚠️  Warning: File deleted but database cleanup failed: %v\n", err)
+		fmt.Printf("  [warn] Warning: File deleted but database cleanup failed: %v\n", err)
 	}
 
 	return nil
@@ -64,7 +64,7 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 	}
 
 	if issues := duplicatePlanRootIssues(plan, cfg); len(issues) > 0 {
-		fmt.Println("❌ Duplicate deletion plan failed safety validation; refusing to execute.")
+		fmt.Println("[error] Duplicate deletion plan failed safety validation; refusing to execute.")
 		printConsolidateSafetyIssues(issues)
 		fmt.Println("\nRegenerate after planner fixes, or inspect the plan file.")
 		return nil
@@ -75,7 +75,7 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 		return privilege.Escalate("delete files and modify ownership")
 	}
 
-	fmt.Printf("⚠️  WARNING: This will permanently DELETE %d files.\n", plan.Summary.FilesToDelete)
+	fmt.Printf("[warn] WARNING: This will permanently DELETE %d files.\n", plan.Summary.FilesToDelete)
 	fmt.Printf("Space to reclaim: %s\n", formatBytes(plan.Summary.SpaceReclaimable))
 	fmt.Println("This action CANNOT be undone!")
 	fmt.Print("\nContinue? [y/N]: ")
@@ -88,11 +88,11 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 
 	response = strings.TrimSpace(strings.ToLower(response))
 	if response != "y" && response != "yes" {
-		fmt.Println("❌ Execution cancelled.")
+		fmt.Println("[error] Execution cancelled.")
 		return nil
 	}
 
-	fmt.Println("\n🗑️ Deleting duplicate files...")
+	fmt.Println("\nDeleting duplicate files...")
 
 	deletedCount := 0
 	failedCount := 0
@@ -121,7 +121,7 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 		}
 
 		if err := deleteDuplicateFile(db, filePath, uid, gid); err != nil {
-			fmt.Printf("  ❌ Failed to delete %s: %v\n", filePath, err)
+			fmt.Printf("  [error] Failed to delete %s: %v\n", filePath, err)
 			failedCount++
 			continue
 		}
@@ -133,23 +133,23 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 	// Handle plan file on results
 	if failedCount == 0 && deletedCount == len(plan.Plans) {
 		if err := plans.DeleteDuplicatePlans(); err != nil {
-			fmt.Printf("⚠️  Failed to clean up plans file: %v\n", err)
+			fmt.Printf("[warn] Failed to clean up plans file: %v\n", err)
 		} else {
-			fmt.Printf("\n✅ Plan completed — %d files deleted\n", deletedCount)
+			fmt.Printf("\n[ok] Plan completed — %d files deleted\n", deletedCount)
 		}
 	} else {
 		if err := plans.ArchiveDuplicatePlans(); err != nil {
-			fmt.Printf("⚠️  Failed to archive plans file: %v\n", err)
+			fmt.Printf("[warn] Failed to archive plans file: %v\n", err)
 		}
-		fmt.Printf("\n⚠️  Plan archived to duplicates.json.old — %d files failed to delete\n", failedCount)
+		fmt.Printf("\n[warn] Plan archived to duplicates.json.old — %d files failed to delete\n", failedCount)
 	}
 
 	fmt.Println("\n=== Execution Complete ===")
-	fmt.Printf("✅ Successfully deleted: %d files\n", deletedCount)
+	fmt.Printf("[ok] Successfully deleted: %d files\n", deletedCount)
 	if failedCount > 0 {
-		fmt.Printf("❌ Failed to delete:     %d files\n", failedCount)
+		fmt.Printf("[error] Failed to delete:     %d files\n", failedCount)
 	}
-	fmt.Printf("📦 Space reclaimed:      %s\n", formatBytes(reclaimedBytes))
+	fmt.Printf("Space reclaimed:      %s\n", formatBytes(reclaimedBytes))
 
 	return nil
 }

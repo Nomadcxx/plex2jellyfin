@@ -27,7 +27,7 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 	}
 
 	if issues := append(consolidatePlanSafetyIssues(plan), consolidatePlanRootIssues(plan, cfg)...); len(issues) > 0 {
-		fmt.Println("❌ Consolidation plan failed safety validation; refusing to execute.")
+		fmt.Println("[error] Consolidation plan failed safety validation; refusing to execute.")
 		printConsolidateSafetyIssues(issues)
 		fmt.Println("\nRegenerate after planner fixes, or inspect with 'plex2jellyfin consolidate dry-run'.")
 		return nil
@@ -38,7 +38,7 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 		return privilege.Escalate("move files across filesystems and set ownership")
 	}
 
-	fmt.Printf("⚠️  This will move %d files (%s).\n", plan.Summary.TotalMoves, formatBytes(plan.Summary.TotalBytes))
+	fmt.Printf("[warn] This will move %d files (%s).\n", plan.Summary.TotalMoves, formatBytes(plan.Summary.TotalBytes))
 	fmt.Print("Continue? [y/N]: ")
 
 	reader := bufio.NewReader(os.Stdin)
@@ -49,11 +49,11 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 
 	response = strings.TrimSpace(strings.ToLower(response))
 	if response != "y" && response != "yes" {
-		fmt.Println("❌ Execution cancelled.")
+		fmt.Println("[error] Execution cancelled.")
 		return nil
 	}
 
-	fmt.Println("\n📦 Executing consolidation plans...")
+	fmt.Println("\nExecuting consolidation plans...")
 
 	allLibraryRoots := append(cfg.Libraries.TV, cfg.Libraries.Movies...)
 
@@ -81,7 +81,7 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 
 			// Check if source exists BEFORE attempting move
 			if _, err := os.Stat(op.SourcePath); os.IsNotExist(err) {
-				fmt.Printf("  ⏭️  Already moved: %s\n", filepath.Base(op.SourcePath))
+				fmt.Printf("  [skip] Already moved: %s\n", filepath.Base(op.SourcePath))
 				alreadyGoneCount++
 				continue
 			}
@@ -91,7 +91,7 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 			// Ensure target directory exists
 			targetDir := op.TargetPath[:strings.LastIndex(op.TargetPath, "/")]
 			if err := os.MkdirAll(targetDir, 0755); err != nil {
-				fmt.Printf("  ❌ Failed to create directory: %v\n", err)
+				fmt.Printf("  [error] Failed to create directory: %v\n", err)
 				failedCount++
 				continue
 			}
@@ -99,50 +99,50 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 			// Move file
 			result, err := transferer.Move(op.SourcePath, op.TargetPath, transfer.OptionsFromConfig(cfg))
 			if err != nil {
-				fmt.Printf("  ❌ Failed to move: %v\n", err)
+				fmt.Printf("  [error] Failed to move: %v\n", err)
 				failedCount++
 				continue
 			}
 
 			// Update database
 			if err := updateDatabaseAfterMove(db, op.SourcePath, op.TargetPath, op.Size); err != nil {
-				fmt.Printf("  ⚠️  Moved but database update issue: %v\n", err)
+				fmt.Printf("  [warn] Moved but database update issue: %v\n", err)
 			}
 
 			// Cleanup source directory (delete cruft and empty dirs)
 			sourceDir := filepath.Dir(op.SourcePath)
 			if err := cleanupSourceDir(sourceDir, allLibraryRoots); err != nil {
-				fmt.Printf("  ⚠️  Cleanup warning: %v\n", err)
+				fmt.Printf("  [warn] Cleanup warning: %v\n", err)
 			}
 
 			movedCount++
 			movedBytes += result.BytesCopied
-			fmt.Printf("  ✅ Moved (%s)\n", formatBytes(result.BytesCopied))
+			fmt.Printf("  [ok] Moved (%s)\n", formatBytes(result.BytesCopied))
 		}
 	}
 
 	// Handle plan file based on results
 	if failedCount == 0 {
 		if err := plans.DeleteConsolidatePlans(); err != nil {
-			fmt.Printf("⚠️  Failed to clean up plans file: %v\n", err)
+			fmt.Printf("[warn] Failed to clean up plans file: %v\n", err)
 		}
-		fmt.Println("\n✅ Plan completed and removed")
+		fmt.Println("\n[ok] Plan completed and removed")
 	} else {
 		if err := plans.ArchiveConsolidatePlans(); err != nil {
-			fmt.Printf("⚠️  Failed to archive plans file: %v\n", err)
+			fmt.Printf("[warn] Failed to archive plans file: %v\n", err)
 		}
-		fmt.Println("\n⚠️  Plan archived to consolidate.json.old due to failures")
+		fmt.Println("\n[warn] Plan archived to consolidate.json.old due to failures")
 	}
 
 	fmt.Println("\n=== Execution Complete ===")
-	fmt.Printf("✅ Successfully moved: %d files\n", movedCount)
+	fmt.Printf("[ok] Successfully moved: %d files\n", movedCount)
 	if alreadyGoneCount > 0 {
-		fmt.Printf("⏭️  Already moved:     %d files\n", alreadyGoneCount)
+		fmt.Printf("[skip] Already moved:     %d files\n", alreadyGoneCount)
 	}
 	if failedCount > 0 {
-		fmt.Printf("❌ Failed to move:     %d files\n", failedCount)
+		fmt.Printf("[error] Failed to move:     %d files\n", failedCount)
 	}
-	fmt.Printf("📦 Data relocated:     %s\n", formatBytes(movedBytes))
+	fmt.Printf("Data relocated:     %s\n", formatBytes(movedBytes))
 
 	return nil
 }
@@ -246,7 +246,7 @@ func updateDatabaseAfterMove(db *database.MediaDB, sourcePath, targetPath string
 	file, err := db.GetMediaFile(sourcePath)
 	if err != nil || file == nil {
 		// File not in DB - create new entry
-		fmt.Printf("  ℹ️  File not tracked, adding to database\n")
+		fmt.Printf("  File not tracked, adding to database\n")
 		return createMediaFileEntry(db, targetPath, size)
 	}
 

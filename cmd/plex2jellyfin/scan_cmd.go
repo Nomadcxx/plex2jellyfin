@@ -371,13 +371,13 @@ func renderPostScanAnalysis(dupAnalysis *service.DuplicateAnalysis, scatterAnaly
 	}
 
 	if hasDuplicates {
-		fmt.Printf("\n📁 DUPLICATES (same content, different quality): %d groups\n", dupAnalysis.TotalGroups)
-		fmt.Printf("   → These have inferior copies that can be DELETED to save %s\n", formatBytes(dupAnalysis.ReclaimableBytes))
+		fmt.Printf("\nDUPLICATES (same content, different quality): %d groups\n", dupAnalysis.TotalGroups)
+		fmt.Printf("   -> These have inferior copies that can be DELETED to save %s\n", formatBytes(dupAnalysis.ReclaimableBytes))
 	}
 
 	if hasScattered {
-		fmt.Printf("\n🔀 SCATTERED MEDIA (same title in multiple locations): %d items\n", scatterAnalysis.TotalItems)
-		fmt.Println("   → These need files MOVED to consolidate into one folder")
+		fmt.Printf("\nSCATTERED MEDIA (same title in multiple locations): %d items\n", scatterAnalysis.TotalItems)
+		fmt.Println("   -> These need files MOVED to consolidate into one folder")
 
 		for _, item := range scatterAnalysis.Items {
 			yearStr := ""
@@ -418,7 +418,7 @@ func renderPostScanAnalysis(dupAnalysis *service.DuplicateAnalysis, scatterAnaly
 		fmt.Println("\nOr use the interactive wizard:")
 		fmt.Println("   plex2jellyfin fix                   # Guided cleanup")
 	} else {
-		fmt.Println("\n✨ No issues detected - your library is clean!")
+		fmt.Println("\nNo issues detected - your library is clean!")
 	}
 }
 

@@ -58,7 +58,7 @@ Edit this file to set your watch directories, library paths, and API keys.`,
 			}
 
 			path, _ := config.ConfigPath()
-			fmt.Printf("✓ Created config file: %s\n", path)
+			fmt.Printf("[ok] Created config file: %s\n", path)
 			fmt.Println("\nNext steps:")
 			fmt.Println("  1. Edit the config file to set your paths and API keys")
 			fmt.Println("  2. Run 'plex2jellyfin config test' to verify connections")
@@ -154,44 +154,44 @@ Tests:
 			fmt.Println("=== Watch Directories ===")
 			if len(cfg.Watch.TV) == 0 && len(cfg.Watch.Movies) == 0 {
 				warnings = append(warnings, "No watch directories configured")
-				fmt.Println("⚠ No watch directories configured")
+				fmt.Println("[warn] No watch directories configured")
 			}
 			for _, dir := range cfg.Watch.TV {
 				if err := testReadable(dir); err != nil {
 					errors = append(errors, fmt.Sprintf("TV watch dir %s: %v", dir, err))
-					fmt.Printf("✗ TV: %s (%v)\n", dir, err)
+					fmt.Printf("[error] TV: %s (%v)\n", dir, err)
 				} else {
-					fmt.Printf("✓ TV: %s\n", dir)
+					fmt.Printf("[ok] TV: %s\n", dir)
 				}
 			}
 			for _, dir := range cfg.Watch.Movies {
 				if err := testReadable(dir); err != nil {
 					errors = append(errors, fmt.Sprintf("Movie watch dir %s: %v", dir, err))
-					fmt.Printf("✗ Movies: %s (%v)\n", dir, err)
+					fmt.Printf("[error] Movies: %s (%v)\n", dir, err)
 				} else {
-					fmt.Printf("✓ Movies: %s\n", dir)
+					fmt.Printf("[ok] Movies: %s\n", dir)
 				}
 			}
 
 			fmt.Println("\n=== Library Directories ===")
 			if len(cfg.Libraries.TV) == 0 && len(cfg.Libraries.Movies) == 0 {
 				warnings = append(warnings, "No library directories configured")
-				fmt.Println("⚠ No library directories configured")
+				fmt.Println("[warn] No library directories configured")
 			}
 			for _, dir := range cfg.Libraries.TV {
 				if err := testWritable(dir); err != nil {
 					errors = append(errors, fmt.Sprintf("TV library %s: %v", dir, err))
-					fmt.Printf("✗ TV: %s (%v)\n", dir, err)
+					fmt.Printf("[error] TV: %s (%v)\n", dir, err)
 				} else {
-					fmt.Printf("✓ TV: %s\n", dir)
+					fmt.Printf("[ok] TV: %s\n", dir)
 				}
 			}
 			for _, dir := range cfg.Libraries.Movies {
 				if err := testWritable(dir); err != nil {
 					errors = append(errors, fmt.Sprintf("Movie library %s: %v", dir, err))
-					fmt.Printf("✗ Movies: %s (%v)\n", dir, err)
+					fmt.Printf("[error] Movies: %s (%v)\n", dir, err)
 				} else {
-					fmt.Printf("✓ Movies: %s\n", dir)
+					fmt.Printf("[ok] Movies: %s\n", dir)
 				}
 			}
 
@@ -199,10 +199,10 @@ Tests:
 			if cfg.Sonarr.Enabled {
 				if cfg.Sonarr.URL == "" {
 					errors = append(errors, "Sonarr enabled but URL not set")
-					fmt.Println("✗ URL not configured")
+					fmt.Println("[error] URL not configured")
 				} else if cfg.Sonarr.APIKey == "" {
 					errors = append(errors, "Sonarr enabled but API key not set")
-					fmt.Println("✗ API key not configured")
+					fmt.Println("[error] API key not configured")
 				} else {
 					client := sonarr.NewClient(sonarr.Config{
 						URL:     cfg.Sonarr.URL,
@@ -212,23 +212,23 @@ Tests:
 					status, err := client.GetSystemStatus()
 					if err != nil {
 						errors = append(errors, fmt.Sprintf("Sonarr connection failed: %v", err))
-						fmt.Printf("✗ Connection failed: %v\n", err)
+						fmt.Printf("[error] Connection failed: %v\n", err)
 					} else {
-						fmt.Printf("✓ Connected to %s v%s\n", status.AppName, status.Version)
+						fmt.Printf("[ok] Connected to %s v%s\n", status.AppName, status.Version)
 					}
 				}
 			} else {
-				fmt.Println("○ Disabled")
+				fmt.Println("[ ] Disabled")
 			}
 
 			fmt.Println("\n=== Radarr ===")
 			if cfg.Radarr.Enabled {
 				if cfg.Radarr.URL == "" {
 					errors = append(errors, "Radarr enabled but URL not set")
-					fmt.Println("✗ URL not configured")
+					fmt.Println("[error] URL not configured")
 				} else if cfg.Radarr.APIKey == "" {
 					errors = append(errors, "Radarr enabled but API key not set")
-					fmt.Println("✗ API key not configured")
+					fmt.Println("[error] API key not configured")
 				} else {
 					client := radarr.NewClient(radarr.Config{
 						URL:     cfg.Radarr.URL,
@@ -238,18 +238,18 @@ Tests:
 					status, err := client.GetSystemStatus()
 					if err != nil {
 						errors = append(errors, fmt.Sprintf("Radarr connection failed: %v", err))
-						fmt.Printf("✗ Connection failed: %v\n", err)
+						fmt.Printf("[error] Connection failed: %v\n", err)
 					} else {
-						fmt.Printf("✓ Connected to Radarr v%s\n", status.Version)
+						fmt.Printf("[ok] Connected to Radarr v%s\n", status.Version)
 					}
 				}
 			} else {
-				fmt.Println("○ Disabled")
+				fmt.Println("[ ] Disabled")
 			}
 
 			fmt.Println("\n" + separator(40))
 			if len(errors) > 0 {
-				fmt.Printf("\n✗ %d error(s) found:\n", len(errors))
+				fmt.Printf("\n[error] %d error(s) found:\n", len(errors))
 				for _, e := range errors {
 					fmt.Printf("  - %s\n", e)
 				}
@@ -257,13 +257,13 @@ Tests:
 			}
 
 			if len(warnings) > 0 {
-				fmt.Printf("\n⚠ %d warning(s):\n", len(warnings))
+				fmt.Printf("\n[warn] %d warning(s):\n", len(warnings))
 				for _, w := range warnings {
 					fmt.Printf("  - %s\n", w)
 				}
 			}
 
-			fmt.Println("\n✓ Configuration is valid")
+			fmt.Println("\n[ok] Configuration is valid")
 			return nil
 		},
 	}

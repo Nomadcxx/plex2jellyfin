@@ -95,15 +95,15 @@ func (c *Client) GetNamingConfig() (*NamingConfig, error) {
 	return &config, nil
 }
 
-// UpdateNamingConfig updates Radarr's naming configuration
+// UpdateNamingConfig updates Radarr's naming configuration.
+// Round-trips the full server payload so newer required fields are not dropped.
 func (c *Client) UpdateNamingConfig(cfg *NamingConfig) error {
-	current, err := c.GetNamingConfig()
-	if err != nil {
+	var raw map[string]any
+	if err := c.get("/api/v3/config/naming", &raw); err != nil {
 		return err
 	}
-
-	cfg.ID = current.ID
-	return c.put("/api/v3/config/naming", cfg, nil)
+	raw["renameMovies"] = cfg.RenameMovies
+	return c.put("/api/v3/config/naming", raw, nil)
 }
 
 // GetRootFolders retrieves all root folders from Radarr

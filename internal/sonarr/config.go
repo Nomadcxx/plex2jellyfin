@@ -99,15 +99,17 @@ func (c *Client) GetNamingConfig() (*NamingConfig, error) {
 	return &config, nil
 }
 
-// UpdateNamingConfig updates Sonarr's naming configuration
+// UpdateNamingConfig updates Sonarr's naming configuration.
+// Round-trips the full server payload so newer required fields
+// (e.g. specialsFolderFormat) are not dropped — a typed PUT of our
+// older NamingConfig struct caused Sonarr 400s on renameEpisodes fixes.
 func (c *Client) UpdateNamingConfig(cfg *NamingConfig) error {
-	current, err := c.GetNamingConfig()
-	if err != nil {
+	var raw map[string]any
+	if err := c.get("/api/v3/config/naming", &raw); err != nil {
 		return err
 	}
-
-	cfg.ID = current.ID
-	return c.put("/api/v3/config/naming", cfg, nil)
+	raw["renameEpisodes"] = cfg.RenameEpisodes
+	return c.put("/api/v3/config/naming", raw, nil)
 }
 
 // GetRootFolders retrieves all root folders from Sonarr

@@ -126,6 +126,34 @@ func runWizard(t *testing.T, deps setupDeps, answers []string) (string, error) {
 	return out.String(), err
 }
 
+func TestSetupWizardShowsBannerAndIntro(t *testing.T) {
+	deps, _ := wizardTestDeps(t)
+	answers := []string{
+		"/downloads/tv", "/media/tv", "", "",
+		"n", "n", "n",
+		"n",
+		"5m", "n", "n",
+		"",
+		"y",
+	}
+	out, err := runWizard(t, deps, answers)
+	if err != nil {
+		t.Fatalf("setup: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "▄▄▄▄▄") {
+		t.Fatalf("expected ASCII banner in setup output:\n%s", out)
+	}
+	if !strings.Contains(out, "Interactive first-run setup") {
+		t.Fatalf("expected intro blurb in setup output:\n%s", out)
+	}
+	if !strings.Contains(out, "Media paths") {
+		t.Fatalf("expected Media paths section:\n%s", out)
+	}
+	if strings.Contains(out, "💡") || strings.Contains(out, "✅") {
+		t.Fatalf("emoji leaked into setup output:\n%s", out)
+	}
+}
+
 func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 	deps, state := wizardTestDeps(t)
 

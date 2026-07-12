@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/clitheme"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
@@ -41,7 +43,7 @@ var (
 
 func main() {
 	rootCmd := newRootCmd()
-	if err := rootCmd.Execute(); err != nil {
+	if err := clitheme.Execute(context.Background(), rootCmd, version); err != nil {
 		os.Exit(1)
 	}
 }
@@ -59,15 +61,6 @@ The primary CLI workflows are:
   - Scan or inspect the Plex2Jellyfin media database`,
 	}
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-
-	// Add custom help function to show ASCII header
-	originalHelpFunc := rootCmd.HelpFunc()
-	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		if cmd.Name() == "plex2jellyfin" {
-			printHeader(version)
-		}
-		originalHelpFunc(cmd, args)
-	})
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/plex2jellyfin/config.toml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
@@ -263,7 +256,7 @@ func organizeDirectory(org *organizer.Organizer, source, target string) error {
 		result, err := organizeFile(org, path, target)
 		if err != nil {
 			failed++
-			fmt.Fprintf(os.Stderr, "✗ %s: %v\n", filepath.Base(path), err)
+			fmt.Fprintf(os.Stderr, "[error] %s: %v\n", filepath.Base(path), err)
 		} else if result.Skipped {
 			skipped++
 		} else if result.Success {
@@ -364,7 +357,7 @@ Examples:
 
 func printFolderResult(result *organizer.FolderOrganizationResult, keepExtras bool) {
 	if result.Analysis != nil {
-		fmt.Printf("📁 Analyzed: %s\n", result.Analysis.Path)
+		fmt.Printf("Analyzed: %s\n", result.Analysis.Path)
 		fmt.Printf("   Type: %s\n", result.Analysis.MediaType.String())
 		if result.Analysis.MainMediaFile != nil {
 			fmt.Printf("   Main: %s\n", result.Analysis.MainMediaFile.Name)
@@ -381,7 +374,7 @@ func printFolderResult(result *organizer.FolderOrganizationResult, keepExtras bo
 	}
 
 	if len(result.SubtitlesCopied) > 0 {
-		fmt.Printf("📝 Subtitles copied: %d\n", len(result.SubtitlesCopied))
+		fmt.Printf("Subtitles copied: %d\n", len(result.SubtitlesCopied))
 		if verbose {
 			for _, s := range result.SubtitlesCopied {
 				fmt.Printf("   - %s\n", s)
@@ -390,7 +383,7 @@ func printFolderResult(result *organizer.FolderOrganizationResult, keepExtras bo
 	}
 
 	if len(result.JunkRemoved) > 0 {
-		fmt.Printf("🗑  Junk removed: %d\n", len(result.JunkRemoved))
+		fmt.Printf("Junk removed: %d\n", len(result.JunkRemoved))
 		if verbose {
 			for _, j := range result.JunkRemoved {
 				fmt.Printf("   - %s\n", j)
@@ -399,11 +392,11 @@ func printFolderResult(result *organizer.FolderOrganizationResult, keepExtras bo
 	}
 
 	if len(result.SamplesRemoved) > 0 {
-		fmt.Printf("🗑  Samples removed: %d\n", len(result.SamplesRemoved))
+		fmt.Printf("Samples removed: %d\n", len(result.SamplesRemoved))
 	}
 
 	if len(result.ExtrasSkipped) > 0 && !keepExtras {
-		fmt.Printf("⏭  Extras skipped: %d\n", len(result.ExtrasSkipped))
+		fmt.Printf("[skip] Extras skipped: %d\n", len(result.ExtrasSkipped))
 		if verbose {
 			for _, e := range result.ExtrasSkipped {
 				fmt.Printf("   - %s\n", e)
@@ -412,13 +405,13 @@ func printFolderResult(result *organizer.FolderOrganizationResult, keepExtras bo
 	}
 
 	if result.Error != nil {
-		fmt.Printf("✗ Error: %v\n", result.Error)
+		fmt.Printf("[error] Error: %v\n", result.Error)
 	}
 }
 
 func printResult(result *organizer.OrganizationResult) {
 	if result.Skipped {
-		fmt.Printf("⊘ skipped %s\n", filepath.Base(result.SourcePath))
+		fmt.Printf("[skip] skipped %s\n", filepath.Base(result.SourcePath))
 		if verbose {
 			fmt.Printf("  Reason: %s\n", result.SkipReason)
 		}
@@ -433,9 +426,9 @@ func printResult(result *organizer.OrganizationResult) {
 		if dryRun {
 			action = "would " + action[:len(action)-1]
 		}
-		fmt.Printf("✓ %s %s\n", action, filepath.Base(result.SourcePath))
+		fmt.Printf("[ok] %s %s\n", action, filepath.Base(result.SourcePath))
 		if verbose {
-			fmt.Printf("  → %s\n", result.TargetPath)
+			fmt.Printf("  -> %s\n", result.TargetPath)
 			if result.BytesCopied > 0 {
 				fmt.Printf("  %s in %s\n", formatBytes(result.BytesCopied), result.Duration)
 			}
@@ -444,7 +437,7 @@ func printResult(result *organizer.OrganizationResult) {
 			}
 		}
 	} else {
-		fmt.Printf("✗ %s: %v\n", filepath.Base(result.SourcePath), result.Error)
+		fmt.Printf("[error] %s: %v\n", filepath.Base(result.SourcePath), result.Error)
 	}
 }
 
@@ -493,11 +486,11 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		if result.Valid {
 			valid++
 			if verbose {
-				fmt.Printf("✓ %s\n", filepath.Base(filePath))
+				fmt.Printf("[ok] %s\n", filepath.Base(filePath))
 			}
 		} else {
 			invalid++
-			fmt.Printf("✗ %s\n", filepath.Base(filePath))
+			fmt.Printf("[error] %s\n", filepath.Base(filePath))
 			for _, issue := range result.Issues {
 				fmt.Printf("  - %s\n", issue)
 			}
@@ -584,7 +577,7 @@ func newSonarrStatusCmd() *cobra.Command {
 				return fmt.Errorf("cannot connect to Sonarr: %w", err)
 			}
 
-			fmt.Printf("✓ Connected to %s\n", status.AppName)
+			fmt.Printf("[ok] Connected to %s\n", status.AppName)
 			fmt.Printf("  Version: %s\n", status.Version)
 			fmt.Printf("  Branch: %s\n", status.Branch)
 			fmt.Printf("  URL: %s\n", sonarrURL)
@@ -620,11 +613,11 @@ func newSonarrQueueCmd() *cobra.Command {
 					status = item.TrackedDownloadStatus
 				}
 
-				icon := "○"
+				icon := "[ ]"
 				if status == "completed" || status == "ok" {
-					icon = "✓"
+					icon = "[ok]"
 				} else if status == "warning" || status == "error" {
-					icon = "✗"
+					icon = "[error]"
 				}
 
 				fmt.Printf("%s [%d] %s (%s)\n", icon, item.ID, item.Title, status)
@@ -684,7 +677,7 @@ disk issues, or other problems that Plex2Jellyfin can handle.`,
 				return err
 			}
 
-			fmt.Printf("\n✓ Cleared %d items from queue\n", count)
+			fmt.Printf("\n[ok] Cleared %d items from queue\n", count)
 			return nil
 		},
 	}
@@ -713,14 +706,14 @@ func newSonarrImportCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("✓ Command queued (ID: %d)\n", resp.ID)
+			fmt.Printf("[ok] Command queued (ID: %d)\n", resp.ID)
 
 			if verbose {
 				fmt.Println("Waiting for completion...")
 				if err := client.WaitForCommand(resp.ID, 5*time.Minute); err != nil {
 					return fmt.Errorf("import failed: %w", err)
 				}
-				fmt.Println("✓ Import completed")
+				fmt.Println("[ok] Import completed")
 			}
 
 			return nil
@@ -781,7 +774,7 @@ func newRadarrStatusCmd() *cobra.Command {
 				return fmt.Errorf("cannot connect to Radarr: %w", err)
 			}
 
-			fmt.Printf("✓ Connected to Radarr\n")
+			fmt.Printf("[ok] Connected to Radarr\n")
 			fmt.Printf("  Version: %s\n", status.Version)
 			fmt.Printf("  Branch: %s\n", status.Branch)
 			fmt.Printf("  URL: %s\n", radarrURL)
@@ -817,11 +810,11 @@ func newRadarrQueueCmd() *cobra.Command {
 					status = item.TrackedDownloadStatus
 				}
 
-				icon := "○"
+				icon := "[ ]"
 				if status == "completed" || status == "ok" {
-					icon = "✓"
+					icon = "[ok]"
 				} else if status == "warning" || status == "error" {
-					icon = "✗"
+					icon = "[error]"
 				}
 
 				fmt.Printf("%s [%d] %s (%s)\n", icon, item.ID, item.Title, status)
@@ -881,7 +874,7 @@ disk issues, or other problems that Plex2Jellyfin can handle.`,
 				return err
 			}
 
-			fmt.Printf("\n✓ Cleared %d items from queue\n", count)
+			fmt.Printf("\n[ok] Cleared %d items from queue\n", count)
 			return nil
 		},
 	}
@@ -910,14 +903,14 @@ func newRadarrImportCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("✓ Command queued (ID: %d)\n", resp.ID)
+			fmt.Printf("[ok] Command queued (ID: %d)\n", resp.ID)
 
 			if verbose {
 				fmt.Println("Waiting for completion...")
 				if err := client.WaitForCommand(resp.ID, 5*time.Minute); err != nil {
 					return fmt.Errorf("import failed: %w", err)
 				}
-				fmt.Println("✓ Import completed")
+				fmt.Println("[ok] Import completed")
 			}
 
 			return nil
@@ -943,9 +936,9 @@ func newRadarrMoviesCmd() *cobra.Command {
 			fmt.Printf("Movies: %d total\n\n", len(movies))
 
 			for _, movie := range movies {
-				icon := "○"
+				icon := "[ ]"
 				if movie.HasFile {
-					icon = "✓"
+					icon = "[ok]"
 				}
 				fmt.Printf("%s %s (%d)\n", icon, movie.Title, movie.Year)
 				if verbose {

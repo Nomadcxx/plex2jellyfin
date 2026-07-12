@@ -65,7 +65,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	fmt.Println("🔍 Scanning for path mismatches...")
+	fmt.Println("Scanning for path mismatches...")
 
 	var allMismatches []migration.PathMismatch
 
@@ -92,11 +92,11 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(allMismatches) == 0 {
-		fmt.Println("\n✅ No path mismatches found! Database and Sonarr/Radarr are in sync.")
+		fmt.Println("\n[ok] No path mismatches found! Database and Sonarr/Radarr are in sync.")
 		return nil
 	}
 
-	fmt.Printf("\n📋 Found %d total path mismatches\n\n", len(allMismatches))
+	fmt.Printf("\nFound %d total path mismatches\n\n", len(allMismatches))
 
 	if dryRun {
 		printMismatchesDryRun(allMismatches)
@@ -154,25 +154,25 @@ func runInteractiveMigration(db *database.MediaDB, sonarrClient *sonarr.Client, 
 		case "j", "plex2jellyfin":
 			err := fixMismatch(db, sonarrClient, radarrClient, m, migration.FixChoiceKeepPlex2Jellyfin)
 			if err != nil {
-				fmt.Printf("  ✗ Error: %v\n", err)
+				fmt.Printf("  [error] Error: %v\n", err)
 				failed++
 			} else {
-				fmt.Println("  ✓ Updated Sonarr/Radarr to match database")
+				fmt.Println("  [ok] Updated Sonarr/Radarr to match database")
 				fixed++
 			}
 
 		case "a", "arr":
 			err := fixMismatch(db, sonarrClient, radarrClient, m, migration.FixChoiceKeepSonarrRadarr)
 			if err != nil {
-				fmt.Printf("  ✗ Error: %v\n", err)
+				fmt.Printf("  [error] Error: %v\n", err)
 				failed++
 			} else {
-				fmt.Println("  ✓ Updated database to match Sonarr/Radarr")
+				fmt.Println("  [ok] Updated database to match Sonarr/Radarr")
 				fixed++
 			}
 
 		case "s", "skip":
-			fmt.Println("  ⊘ Skipped")
+			fmt.Println("  [skip] Skipped")
 			skipped++
 
 		case "q", "quit":
@@ -204,10 +204,10 @@ func fixMismatch(db *database.MediaDB, sonarrClient *sonarr.Client, radarrClient
 }
 
 func printSummary(fixed, skipped, failed int) {
-	fmt.Println("\n📊 Migration Summary:")
-	fmt.Printf("  ✓ Fixed:   %d\n", fixed)
-	fmt.Printf("  ⊘ Skipped: %d\n", skipped)
+	fmt.Println("\nMigration Summary:")
+	fmt.Printf("  [ok] Fixed:   %d\n", fixed)
+	fmt.Printf("  [skip] Skipped: %d\n", skipped)
 	if failed > 0 {
-		fmt.Printf("  ✗ Failed:  %d\n", failed)
+		fmt.Printf("  [error] Failed:  %d\n", failed)
 	}
 }

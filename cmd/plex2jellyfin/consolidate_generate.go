@@ -28,7 +28,7 @@ func runConsolidateGenerate() error {
 	}
 	defer db.Close()
 
-	fmt.Println("🔍 Analyzing library for scattered content...")
+	fmt.Println("Analyzing library for scattered content...")
 
 	svc := service.NewCleanupService(db)
 	analysis, err := svc.AnalyzeScattered()
@@ -37,7 +37,7 @@ func runConsolidateGenerate() error {
 	}
 
 	if analysis.TotalItems == 0 {
-		fmt.Println("✅ No scattered content found!")
+		fmt.Println("[ok] No scattered content found!")
 		return nil
 	}
 
@@ -110,15 +110,15 @@ func runConsolidateGenerate() error {
 	}
 
 	if len(plan.Plans) == 0 {
-		fmt.Println("✅ No consolidation needed (all files already in place)")
+		fmt.Println("[ok] No consolidation needed (all files already in place)")
 		if len(skippedItems) > 0 {
-			fmt.Printf("\n⚠️  %d conflicts were skipped:\n", len(skippedItems))
+			fmt.Printf("\n[warn] %d conflicts were skipped:\n", len(skippedItems))
 			for _, item := range skippedItems {
 				yearStr := ""
 				if item.year != nil {
 					yearStr = fmt.Sprintf(" (%d)", *item.year)
 				}
-				fmt.Printf("  • %s%s\n", item.title, yearStr)
+				fmt.Printf("  - %s%s\n", item.title, yearStr)
 				for _, reason := range item.reasons {
 					fmt.Printf("    - %s\n", reason)
 				}
@@ -132,19 +132,19 @@ func runConsolidateGenerate() error {
 		return fmt.Errorf("failed to save plan: %w", err)
 	}
 
-	fmt.Println("✅ Consolidation plan generated")
+	fmt.Println("[ok] Consolidation plan generated")
 	fmt.Printf("   Conflicts to consolidate: %d\n", len(plan.Plans))
 	fmt.Printf("   Files to move: %d\n", plan.Summary.TotalMoves)
 	fmt.Printf("   Data to relocate: %s\n", formatBytes(plan.Summary.TotalBytes))
 
 	if len(skippedItems) > 0 {
-		fmt.Printf("\n⚠️  %d conflicts were skipped (could not proceed):\n", len(skippedItems))
+		fmt.Printf("\n[warn] %d conflicts were skipped (could not proceed):\n", len(skippedItems))
 		for _, item := range skippedItems {
 			yearStr := ""
 			if item.year != nil {
 				yearStr = fmt.Sprintf(" (%d)", *item.year)
 			}
-			fmt.Printf("  • %s%s\n", item.title, yearStr)
+			fmt.Printf("  - %s%s\n", item.title, yearStr)
 			for _, reason := range item.reasons {
 				fmt.Printf("    - %s\n", reason)
 			}
@@ -175,7 +175,7 @@ func runConsolidateDryRun() error {
 		return nil
 	}
 
-	fmt.Println("📋 Consolidation Plan (DRY RUN)")
+	fmt.Println("Consolidation Plan (DRY RUN)")
 	fmt.Println()
 	fmt.Printf("Conflicts to consolidate: %d\n", len(plan.Plans))
 	fmt.Printf("Files to move: %d\n", plan.Summary.TotalMoves)
@@ -183,7 +183,7 @@ func runConsolidateDryRun() error {
 	hasSafetyIssues := false
 	if issues := consolidatePlanSafetyIssues(plan); len(issues) > 0 {
 		hasSafetyIssues = true
-		fmt.Println("⚠️  Safety issues detected; this plan will not execute until fixed:")
+		fmt.Println("[warn] Safety issues detected; this plan will not execute until fixed:")
 		printConsolidateSafetyIssues(issues)
 		fmt.Println()
 	}
@@ -211,7 +211,7 @@ func runConsolidateDryRun() error {
 
 			fmt.Printf("    %s\n", sourceFile)
 			fmt.Printf("      %s\n", sourceDir)
-			fmt.Printf("      → %s\n", targetDir)
+			fmt.Printf("      -> %s\n", targetDir)
 			fmt.Printf("      Size: %s\n", formatBytes(op.Size))
 		}
 

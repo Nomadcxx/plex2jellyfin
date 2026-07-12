@@ -66,7 +66,7 @@ func TestTraceCmdRendersJourney(t *testing.T) {
 		"via regex",
 		`"Show Name" (2019) S01E01`,
 		"stripped: 1080p WEB-DL",
-		"moved      → /media/TV Shows/Show Name (2019)/Season 01/",
+		"moved      -> /media/TV Shows/Show Name (2019)/Season 01/",
 		"matched item abc123",
 		"tvdb 78901",
 		"outcome    SUCCESS",

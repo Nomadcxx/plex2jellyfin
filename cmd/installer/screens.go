@@ -951,6 +951,14 @@ func (m model) renderArrIssues() string {
 	b.WriteString(muted.Render("The following settings may conflict with Plex2Jellyfin operation:"))
 	b.WriteString("\n\n")
 
+	if len(m.errors) > 0 {
+		for _, err := range m.errors {
+			b.WriteString(fg(ErrorColor).Render("  " + err))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
 	for _, issue := range m.arrIssues {
 		icon := "!"
 		if issue.Severity == "critical" {

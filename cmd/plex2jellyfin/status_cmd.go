@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/clitheme"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
@@ -80,14 +81,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Display
-	fmt.Println("Plex2Jellyfin Database Status")
-	fmt.Println("==========================")
+	clitheme.Section(cmd.OutOrStdout(), "Database status")
 	fmt.Printf("Database: %s\n", dbPath)
 	fmt.Printf("Size:    %s\n", formatBytes(info.Size()))
-	fmt.Printf("Modified: %s\n\n", info.ModTime().Format("2006-01-02 15:04:05"))
+	fmt.Printf("Modified: %s\n", info.ModTime().Format("2006-01-02 15:04:05"))
 
-	fmt.Println("Statistics")
-	fmt.Println("----------")
+	clitheme.Section(cmd.OutOrStdout(), "Statistics")
 	fmt.Printf("Total Files:          %d\n", stats.TotalFiles)
 	fmt.Printf("TV Episodes:          %d\n", episodeCount)
 	fmt.Printf("Movies:               %d\n", movieCount)
@@ -119,8 +118,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		spaceReclaimable += group.ReclaimableBytes
 	}
 
-	fmt.Println("Duplicates (same content exists multiple times)")
-	fmt.Println("------------------------------------------------")
+	clitheme.Section(cmd.OutOrStdout(), "Duplicates")
 	fmt.Printf("Movie duplicates:     %d groups\n", safeMovieDups)
 	fmt.Printf("Episode duplicates:   %d groups\n", safeEpisodeDups)
 	if skippedUnsafeMovieDups > 0 {
@@ -130,7 +128,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Space reclaimable:    %s\n", formatBytes(spaceReclaimable))
 	}
 	if safeMovieDups+safeEpisodeDups > 0 {
-		fmt.Println("→ Run 'plex2jellyfin duplicates generate' to review")
+		clitheme.Muted(cmd.OutOrStdout(), "Run 'plex2jellyfin duplicates generate' to review")
 	}
 	fmt.Println()
 
@@ -145,14 +143,13 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("Scattered TV Series (same show across storage drives)")
-	fmt.Println("-----------------------------------------------------")
+	clitheme.Section(cmd.OutOrStdout(), "Scattered TV series")
 	fmt.Printf("Series in multiple locations:  %d\n", seriesConflicts)
 	if movieConflicts > 0 {
 		fmt.Printf("Movies in multiple locations:   %d (tracked, not handled by consolidate)\n", movieConflicts)
 	}
 	if seriesConflicts > 0 {
-		fmt.Println("→ Run 'plex2jellyfin consolidate generate' to review")
+		clitheme.Muted(cmd.OutOrStdout(), "Run 'plex2jellyfin consolidate generate' to review")
 	}
 
 	if seriesConflicts > 0 {
@@ -176,15 +173,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
-	fmt.Println("Sync History")
-	fmt.Println("------------")
+	clitheme.Section(cmd.OutOrStdout(), "Sync history")
 	if len(syncLogs) == 0 {
 		fmt.Println("No sync history")
 	} else {
 		for _, log := range syncLogs {
-			status := "✓"
+			status := "[ok]"
 			if log.Status == "failed" {
-				status = "✗"
+				status = "[error]"
 			}
 			completedTime := "running"
 			if log.CompletedAt != nil {
@@ -216,7 +212,7 @@ func printHousekeepingSummary(w io.Writer, db *database.MediaDB) {
 	fmt.Fprintf(w, "Failed:               %d\n", counts[database.TaskStatusFailed])
 	if duplicateManualReview > 0 {
 		fmt.Fprintf(w, "Duplicate failures:   %d manual-review rows can be collapsed\n", duplicateManualReview)
-		fmt.Fprintln(w, "→ Run 'plex2jellyfin database cleanup-housekeeping --execute'")
+		fmt.Fprintln(w, "-> Run 'plex2jellyfin database cleanup-housekeeping --execute'")
 	}
 	fmt.Fprintln(w)
 }
@@ -277,7 +273,7 @@ func printDeploymentDrift(w io.Writer) {
 	for _, warning := range warnings {
 		fmt.Fprintf(w, "  - %s\n", warning)
 	}
-	fmt.Fprintln(w, "→ Run: sudo systemctl stop plex2jellyfin-daemon plex2jellyfin-web && sudo cp /tmp/plex2jellyfin /tmp/plex2jellyfin-daemon /tmp/plex2jellyfin-web /usr/local/bin/ && sudo systemctl start plex2jellyfin-daemon plex2jellyfin-web")
+	fmt.Fprintln(w, "-> Run: sudo systemctl stop plex2jellyfin-daemon plex2jellyfin-web && sudo cp /tmp/plex2jellyfin /tmp/plex2jellyfin-daemon /tmp/plex2jellyfin-web /usr/local/bin/ && sudo systemctl start plex2jellyfin-daemon plex2jellyfin-web")
 	fmt.Fprintln(w)
 }
 

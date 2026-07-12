@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/api"
+	"github.com/Nomadcxx/plex2jellyfin/internal/clitheme"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemonctl"
@@ -248,6 +249,10 @@ activates the daemon — the same flow as the web UI's /setup wizard.`,
 func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout io.Writer) error {
 	p := &prompter{in: bufio.NewScanner(stdin), out: stdout}
 
+	clitheme.PrintBanner(stdout, version)
+	clitheme.Muted(stdout, "Interactive first-run setup: watch and library paths, optional Sonarr/Radarr/Jellyfin/AI,")
+	clitheme.Muted(stdout, "then save config and activate the daemon. Empty answers keep defaults; Ctrl+C aborts.")
+
 	current, err := deps.loadConfig()
 	if err != nil {
 		current = config.DefaultConfig()
@@ -265,9 +270,9 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 
 	draft := setupdomain.DraftFromConfig(current)
 
-	fmt.Fprintln(stdout, "\n— Media paths —")
-	fmt.Fprintln(stdout, "Configure TV, Movies, or both. Each configured type needs an")
-	fmt.Fprintln(stdout, "incoming (download) path and a library path.")
+	clitheme.Section(stdout, "Media paths")
+	clitheme.Muted(stdout, "Configure TV, Movies, or both. Each configured type needs an")
+	clitheme.Muted(stdout, "incoming (download) path and a library path.")
 	if draft.Watch.TV, err = p.askPaths("TV incoming paths", draft.Watch.TV); err != nil {
 		return err
 	}
@@ -281,7 +286,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		return err
 	}
 
-	fmt.Fprintln(stdout, "\n— Connected services (optional) —")
+	clitheme.Section(stdout, "Connected services (optional)")
 	if err := promptService(p, "Sonarr", "http://localhost:8989", &draft.Sonarr, deps.testSonarr); err != nil {
 		return err
 	}
@@ -309,7 +314,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 
 	pluginState := wizardPluginStep(ctx, p, stdout, deps, jellyfinDraft)
 
-	fmt.Fprintln(stdout, "\n— AI matching (optional) —")
+	clitheme.Section(stdout, "AI matching (optional)")
 	if draft.AI.Enabled, err = p.askBool("Use a local Ollama instance for ambiguous filenames?", draft.AI.Enabled); err != nil {
 		return err
 	}
@@ -319,9 +324,9 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		}
 		models, err := deps.listModels(draft.AI.Endpoint)
 		if err != nil {
-			fmt.Fprintf(stdout, "  could not list models: %v\n", err)
+			clitheme.Warn(stdout, fmt.Sprintf("could not list models: %v", err))
 		} else if len(models) > 0 {
-			fmt.Fprintf(stdout, "  installed models: %s\n", strings.Join(models, ", "))
+			clitheme.Muted(stdout, "installed models: "+strings.Join(models, ", "))
 		}
 		if draft.AI.PrimaryModel, err = p.ask("Primary model", draft.AI.PrimaryModel); err != nil {
 			return err
@@ -331,7 +336,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		}
 	}
 
-	fmt.Fprintln(stdout, "\n— Runtime behavior —")
+	clitheme.Section(stdout, "Runtime behavior")
 	if draft.Runtime.ScanFrequency, err = p.ask("Library scan frequency", firstNonEmpty(draft.Runtime.ScanFrequency, "5m")); err != nil {
 		return err
 	}
@@ -342,7 +347,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		return err
 	}
 	if deps.runtime.Kind == setupdomain.RuntimeContainer {
-		fmt.Fprintf(stdout, "Container runtime detected (uid %d, gid %d): ownership is controlled by PUID/PGID.\n", deps.runtime.UID, deps.runtime.GID)
+		clitheme.Muted(stdout, fmt.Sprintf("Container runtime detected (uid %d, gid %d): ownership is controlled by PUID/PGID.", deps.runtime.UID, deps.runtime.GID))
 		draft.Runtime.Permissions = config.PermissionsConfig{}
 	} else {
 		if draft.Runtime.Permissions.User, err = p.ask("Chown moved files to user (empty to skip)", draft.Runtime.Permissions.User); err != nil {
@@ -371,7 +376,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		return errors.New("path preflight failed")
 	}
 
-	fmt.Fprintln(stdout, "\n— Review —")
+	clitheme.Section(stdout, "Review")
 	printDraftSummary(stdout, draft)
 	confirmed, err := p.askBool("Write this configuration and activate the daemon?", true)
 	if err != nil {
@@ -404,8 +409,8 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 
 	fmt.Fprintln(stdout, "Activating daemon…")
 	if err := deps.activate(ctx); err != nil {
-		fmt.Fprintf(stdout, "Daemon activation failed: %v\n", err)
-		fmt.Fprintln(stdout, "The configuration is saved; re-run 'plex2jellyfin setup' or start the daemon service and it will pick it up.")
+		clitheme.Err(stdout, fmt.Sprintf("Daemon activation failed: %v", err))
+		clitheme.Muted(stdout, "The configuration is saved; re-run 'plex2jellyfin setup' or start the daemon service and it will pick it up.")
 		return errors.New("daemon activation failed")
 	}
 
@@ -415,11 +420,11 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 	}
 
 	if pluginState.loaded {
-		fmt.Fprintln(stdout, "\n— Feedback loop —")
+		clitheme.Section(stdout, "Feedback loop")
 		if deps.runtime.Kind == setupdomain.RuntimeContainer {
-			fmt.Fprintln(stdout, "plex2jellyfin runs in a container: Jellyfin most likely reaches it via")
-			fmt.Fprintln(stdout, "the Docker gateway IP (often 172.17.0.1) or a compose service name,")
-			fmt.Fprintln(stdout, "not the LAN IP suggested below.")
+			clitheme.Muted(stdout, "plex2jellyfin runs in a container: Jellyfin most likely reaches it via")
+			clitheme.Muted(stdout, "the Docker gateway IP (often 172.17.0.1) or a compose service name,")
+			clitheme.Muted(stdout, "not the LAN IP suggested below.")
 		}
 		engine := deps.pluginEngine(candidate.Jellyfin.URL, candidate.Jellyfin.APIKey)
 		pd := pluginDeps{
@@ -429,17 +434,17 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 			advertiseIP: deps.advertiseIP,
 		}
 		if err := configureAndVerify(ctx, pd, candidate, engine, p, stdout); err != nil {
-			fmt.Fprintf(stdout, "  feedback-loop setup incomplete: %v\n", err)
-			fmt.Fprintln(stdout, "  finish it later with: plex2jellyfin plugin verify")
+			clitheme.Warn(stdout, fmt.Sprintf("feedback-loop setup incomplete: %v", err))
+			clitheme.Muted(stdout, "finish it later with: plex2jellyfin plugin verify")
 		}
 	} else if pluginState.attempted {
-		fmt.Fprintln(stdout, "\nCompanion plugin: restart Jellyfin, then run: plex2jellyfin plugin verify")
+		clitheme.Muted(stdout, "Companion plugin: restart Jellyfin, then run: plex2jellyfin plugin verify")
 	} else if candidate.Jellyfin.Enabled && pluginState.skipped != "" && pluginState.skipped != "jellyfin disabled" {
-		fmt.Fprintln(stdout, "\nCompanion plugin not installed - run: plex2jellyfin plugin install")
+		clitheme.Muted(stdout, "Companion plugin not installed - run: plex2jellyfin plugin install")
 	}
 
-	fmt.Fprintln(stdout, "\nSetup complete. The daemon is running.")
-	fmt.Fprintln(stdout, "Next: open the web UI on :5522, or run 'plex2jellyfin scan' to index an existing library.")
+	clitheme.OK(stdout, "Setup complete. The daemon is running.")
+	clitheme.Muted(stdout, "Next: open the web UI on :5522, or run 'plex2jellyfin scan' to index an existing library.")
 	return nil
 }
 
@@ -532,7 +537,7 @@ func promptService(p *prompter, name, defaultURL string, svc *setupdomain.Servic
 		return err
 	}
 	if err := test(svc.URL, svc.APIKey); err != nil {
-		fmt.Fprintf(p.out, "  connection failed: %v\n", err)
+		clitheme.Err(p.out, fmt.Sprintf("connection failed: %v", err))
 		retry, rerr := p.askBool("Edit "+name+" settings and retry?", true)
 		if rerr != nil {
 			return rerr
@@ -540,10 +545,10 @@ func promptService(p *prompter, name, defaultURL string, svc *setupdomain.Servic
 		if retry {
 			return promptService(p, name, defaultURL, svc, test)
 		}
-		fmt.Fprintf(p.out, "  keeping %s settings without a passing test\n", name)
+		clitheme.Warn(p.out, fmt.Sprintf("keeping %s settings without a passing test", name))
 		return nil
 	}
-	fmt.Fprintf(p.out, "  %s connection OK\n", name)
+	clitheme.OK(p.out, name+" connection OK")
 	return nil
 }
 
@@ -554,37 +559,37 @@ func promptArrCompatibility(p *prompter, out io.Writer, name string, svc setupdo
 	fix func(url, apiKey string, issues []service.HealthIssue) error) error {
 	issues, err := check(svc.URL, svc.APIKey)
 	if err != nil {
-		fmt.Fprintf(out, "  %s compatibility check failed: %v\n", name, err)
+		clitheme.Warn(out, fmt.Sprintf("%s compatibility check failed: %v", name, err))
 		return nil
 	}
 	if len(issues) == 0 {
-		fmt.Fprintf(out, "  %s settings are compatible\n", name)
+		clitheme.OK(out, name+" settings are compatible")
 		return nil
 	}
-	fmt.Fprintf(out, "  %s has %d incompatible setting(s):\n", name, len(issues))
+	clitheme.Warn(out, fmt.Sprintf("%s has %d incompatible setting(s):", name, len(issues)))
 	for _, issue := range issues {
-		fmt.Fprintf(out, "    %s: %s (currently %s, needs %s)\n", issue.Severity, issue.Setting, issue.Current, issue.Expected)
+		clitheme.Muted(out, fmt.Sprintf("%s: %s (currently %s, needs %s)", issue.Severity, issue.Setting, issue.Current, issue.Expected))
 	}
 	apply, err := p.askBool("Apply these "+name+" fixes now?", false)
 	if err != nil {
 		return err
 	}
 	if !apply {
-		fmt.Fprintf(out, "  leaving %s unchanged; run 'plex2jellyfin health --fix' later\n", name)
+		clitheme.Muted(out, fmt.Sprintf("leaving %s unchanged; run 'plex2jellyfin health --fix' later", name))
 		return nil
 	}
 	if err := fix(svc.URL, svc.APIKey, issues); err != nil {
-		fmt.Fprintf(out, "  fixing %s failed: %v\n", name, err)
+		clitheme.Err(out, fmt.Sprintf("fixing %s failed: %v", name, err))
 		return nil
 	}
-	fmt.Fprintf(out, "  %s updated\n", name)
+	clitheme.OK(out, name+" updated")
 	return nil
 }
 
 func printFieldErrors(out io.Writer, errs []setupdomain.FieldError) {
-	fmt.Fprintln(out, "\nSetup cannot continue:")
+	clitheme.Err(out, "Setup cannot continue:")
 	for _, e := range errs {
-		fmt.Fprintf(out, "  %s: %s\n", e.Field, e.Message)
+		clitheme.Muted(out, fmt.Sprintf("%s: %s", e.Field, e.Message))
 	}
 }
 

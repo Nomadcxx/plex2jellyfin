@@ -2,6 +2,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -181,7 +183,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.runInitialScan()
 
 	case arrFixMsg:
-		// After fixing, proceed to scan
+		if msg.err != nil {
+			m.errors = append(m.errors, fmt.Sprintf("fixing arr settings: %v", msg.err))
+			return m, nil
+		}
 		m.arrIssues = nil
 		m.step = stepScanning
 		return m, m.runInitialScan()

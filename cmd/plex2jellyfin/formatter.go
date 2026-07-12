@@ -1,16 +1,13 @@
 package main
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/clitheme"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
-
-//go:embed assets/header.txt
-var asciiHeader string
 
 // checkDatabasePopulated verifies that the database exists and has content.
 // Returns an error with guidance if the user needs to run scan first.
@@ -59,8 +56,7 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// printHeader displays the ASCII header with version info
+// printHeader displays the yellow ASCII header with version info.
 func printHeader(version string) {
-	fmt.Println(asciiHeader)
-	fmt.Printf("Version: %s\n\n", version)
+	clitheme.PrintBanner(os.Stdout, version)
 }

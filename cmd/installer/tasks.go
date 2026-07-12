@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -1057,14 +1058,19 @@ func (m model) fixArrSettings() tea.Cmd {
 			}
 		}
 
+		var errs []error
+
 		if sonarrEnabled && len(sonarrIssues) > 0 {
 			client := sonarr.NewClient(sonarr.Config{
 				URL:     sonarrURL,
 				APIKey:  sonarrAPIKey,
 				Timeout: 30 * time.Second,
 			})
-			fixed, _ := service.FixSonarrIssues(client, sonarrIssues, false)
+			fixed, err := service.FixSonarrIssues(client, sonarrIssues, false)
 			fixedCount += len(fixed)
+			if err != nil {
+				errs = append(errs, err)
+			}
 		}
 
 		if radarrEnabled && len(radarrIssues) > 0 {
@@ -1073,10 +1079,13 @@ func (m model) fixArrSettings() tea.Cmd {
 				APIKey:  radarrAPIKey,
 				Timeout: 30 * time.Second,
 			})
-			fixed, _ := service.FixRadarrIssues(client, radarrIssues, false)
+			fixed, err := service.FixRadarrIssues(client, radarrIssues, false)
 			fixedCount += len(fixed)
+			if err != nil {
+				errs = append(errs, err)
+			}
 		}
 
-		return arrFixMsg{fixed: fixedCount}
+		return arrFixMsg{fixed: fixedCount, err: errors.Join(errs...)}
 	}
 }

@@ -150,7 +150,7 @@ func runDatabaseInit(scan bool, allowOverwrite bool) error {
 	}
 	db.Close()
 
-	fmt.Println("✓ Database initialized successfully")
+	fmt.Println("[ok] Database initialized successfully")
 
 	// Run scan if requested
 	if scan {
@@ -197,7 +197,7 @@ func runDatabaseReset(scan bool, force bool) error {
 		return fmt.Errorf("failed to delete database: %w", err)
 	}
 
-	fmt.Println("✓ Database deleted")
+	fmt.Println("[ok] Database deleted")
 	fmt.Println()
 
 	// Initialize fresh database

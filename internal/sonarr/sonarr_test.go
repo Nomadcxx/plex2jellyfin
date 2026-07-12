@@ -145,6 +145,52 @@ func TestUpdateNamingConfig(t *testing.T) {
 	}
 }
 
+// Sonarr v4 requires specialsFolderFormat on PUT; a typed NamingConfig
+// omitempty dump used to drop it and get 400.
+func TestUpdateNamingConfig_PreservesSpecialsFolderFormat(t *testing.T) {
+	var putBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/config/naming" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":                   1,
+				"renameEpisodes":       false,
+				"specialsFolderFormat": "Specials",
+				"standardEpisodeFormat": "{Series Title} - S{season:00}E{episode:00} - {Episode Title}",
+			})
+			return
+		}
+		if r.Method == http.MethodPut {
+			if err := json.NewDecoder(r.Body).Decode(&putBody); err != nil {
+				t.Errorf("decode put: %v", err)
+			}
+			if putBody["specialsFolderFormat"] == nil || putBody["specialsFolderFormat"] == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode([]map[string]any{{
+					"propertyName": "SpecialsFolderFormat",
+					"errorMessage": "'Specials Folder Format' must not be empty.",
+					"errorCode":    "NotEmptyValidator",
+				}})
+				return
+			}
+			json.NewEncoder(w).Encode(putBody)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{URL: server.URL, APIKey: "test-key"})
+	err := client.UpdateNamingConfig(&NamingConfig{RenameEpisodes: true})
+	require.NoError(t, err)
+	assert.Equal(t, true, putBody["renameEpisodes"])
+	assert.Equal(t, "Specials", putBody["specialsFolderFormat"])
+}
+
 func TestDeleteRootFolder(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {

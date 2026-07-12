@@ -162,7 +162,7 @@ func applyApproved(cfg *config.Config, item daemon.EnhanceLogEntry) error {
 			return err
 		}
 		if result != nil && result.Success {
-			fmt.Printf("   → %s\n", result.TargetPath)
+			fmt.Printf("   -> %s\n", result.TargetPath)
 			return nil
 		}
 		if result != nil && result.Error != nil {
@@ -187,7 +187,7 @@ func applyApproved(cfg *config.Config, item daemon.EnhanceLogEntry) error {
 			return err
 		}
 		if result != nil && result.Success {
-			fmt.Printf("   → %s\n", result.TargetPath)
+			fmt.Printf("   -> %s\n", result.TargetPath)
 			return nil
 		}
 		if result != nil && result.Error != nil {

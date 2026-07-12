@@ -247,6 +247,46 @@ func TestFixSonarrIssues_RealFix(t *testing.T) {
 	assert.True(t, putCalled)
 }
 
+func TestFixSonarrIssues_RenamePreservesSpecialsFolderFormat(t *testing.T) {
+	var putBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v3/config/naming" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":                   1,
+				"renameEpisodes":       false,
+				"specialsFolderFormat": "Specials",
+			})
+			return
+		}
+		if r.Method == http.MethodPut {
+			json.NewDecoder(r.Body).Decode(&putBody)
+			if putBody["specialsFolderFormat"] == nil || putBody["specialsFolderFormat"] == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`[{"propertyName":"SpecialsFolderFormat","errorMessage":"must not be empty"}]`))
+				return
+			}
+			json.NewEncoder(w).Encode(putBody)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	defer server.Close()
+
+	client := sonarr.NewClient(sonarr.Config{URL: server.URL, APIKey: "test"})
+	fixed, err := FixSonarrIssues(client, []HealthIssue{
+		{Service: "sonarr", Setting: "renameEpisodes"},
+	}, false)
+	require.NoError(t, err)
+	assert.Len(t, fixed, 1)
+	assert.Equal(t, true, putBody["renameEpisodes"])
+	assert.Equal(t, "Specials", putBody["specialsFolderFormat"])
+}
+
 func TestFixRadarrIssues_DryRun(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

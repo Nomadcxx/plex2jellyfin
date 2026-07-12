@@ -151,9 +151,9 @@ func auditScopeFromArgs(args []string) (string, error) {
 
 func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, limit int, scopePath string) error {
 	if scopePath == "" {
-		fmt.Printf("🔍 Scanning for files with confidence < %.2f\n", threshold)
+		fmt.Printf("Scanning for files with confidence < %.2f\n", threshold)
 	} else {
-		fmt.Printf("🔍 Scanning %s for files with confidence < %.2f\n", scopePath, threshold)
+		fmt.Printf("Scanning %s for files with confidence < %.2f\n", scopePath, threshold)
 	}
 
 	var files []*database.MediaFile
@@ -168,7 +168,7 @@ func generateAudit(db *database.MediaDB, cfg *config.Config, threshold float64, 
 	}
 
 	if len(files) == 0 {
-		fmt.Println("✓ No low-confidence files found")
+		fmt.Println("[ok] No low-confidence files found")
 		return nil
 	}
 
@@ -428,7 +428,7 @@ func isAuditExtraContentPath(path string) bool {
 
 // printAuditSummary displays the audit generation results
 func printAuditSummary(plan *plans.AuditPlan) {
-	fmt.Printf("\n✓ Processing complete\n\n")
+	fmt.Printf("\n[ok] Processing complete\n\n")
 	fmt.Printf("Summary:\n")
 	fmt.Printf("  Total files analyzed: %d\n", plan.Summary.TotalFiles)
 	fmt.Printf("  AI candidates: %d\n", plan.Summary.AICandidateCount)
@@ -462,12 +462,12 @@ func printAuditSummary(plan *plans.AuditPlan) {
 		}
 	}
 
-	fmt.Printf("\n📁 Plan saved to: %s\n", getAuditPlansPath())
+	fmt.Printf("\nPlan saved to: %s\n", getAuditPlansPath())
 	if plan.Summary.FilesToRename > 0 {
 		printSmallAuditActionList(plan)
-		fmt.Printf("💡 Next: run 'plex2jellyfin audit --dry-run' to preview, then 'plex2jellyfin audit --execute' to apply these renames\n")
+		fmt.Printf("Next: run 'plex2jellyfin audit --dry-run' to preview, then 'plex2jellyfin audit --execute' to apply these renames\n")
 	} else {
-		fmt.Printf("💡 Next: run 'plex2jellyfin audit --dry-run' to inspect skipped/manual-review items\n")
+		fmt.Printf("Next: run 'plex2jellyfin audit --dry-run' to inspect skipped/manual-review items\n")
 	}
 }
 
@@ -525,7 +525,7 @@ func auditPlanSkipBreakdown(plan *plans.AuditPlan) auditSkipCounts {
 }
 
 func displayAuditPlan(plan *plans.AuditPlan, showDetails bool) error {
-	fmt.Printf("\n📋 Audit Plan\n")
+	fmt.Printf("\nAudit Plan\n")
 	fmt.Printf("Created: %s\n", plan.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Printf("\nSummary:\n")
 	fmt.Printf("  Total Files: %d\n", plan.Summary.TotalFiles)
@@ -542,7 +542,7 @@ func displayAuditPlan(plan *plans.AuditPlan, showDetails bool) error {
 
 	if !showDetails {
 		if plan.Summary.FilesToRename > 0 {
-			fmt.Printf("\n💡 Run 'plex2jellyfin audit --dry-run' to see detailed changes\n")
+			fmt.Printf("\nRun 'plex2jellyfin audit --dry-run' to see detailed changes\n")
 		}
 		return nil
 	}
@@ -558,10 +558,10 @@ func displayAuditPlan(plan *plans.AuditPlan, showDetails bool) error {
 		fmt.Printf("    Current: %s (confidence: %.2f)\n", item.Title, item.Confidence)
 
 		if item.SkipReason != "" {
-			fmt.Printf("    ⚠️  Skipped: %s\n", item.SkipReason)
+			fmt.Printf("    [warn] Skipped: %s\n", item.SkipReason)
 		} else if actionIdx < len(plan.Actions) {
 			action := plan.Actions[actionIdx]
-			fmt.Printf("    ✓ %s → %s\n", action.Action, filepath.Base(action.NewPath))
+			fmt.Printf("    [ok] %s -> %s\n", action.Action, filepath.Base(action.NewPath))
 			fmt.Printf("      New title: %s (confidence: %.2f)\n", action.NewTitle, action.Confidence)
 			if action.Reasoning != "" {
 				fmt.Printf("      Reason: %s\n", action.Reasoning)
@@ -571,7 +571,7 @@ func displayAuditPlan(plan *plans.AuditPlan, showDetails bool) error {
 	}
 
 	if plan.Summary.FilesToRename > 0 {
-		fmt.Printf("\n💡 Run 'plex2jellyfin audit --execute' to apply changes\n")
+		fmt.Printf("\nRun 'plex2jellyfin audit --execute' to apply changes\n")
 	}
 
 	return nil
@@ -620,7 +620,7 @@ func modelsFromAuditSkipReasons(items []plans.AuditItem) map[string]struct{} {
 }
 
 func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan, cfg *config.Config) error {
-	fmt.Printf("\n🚀 Executing Audit Plan\n")
+	fmt.Printf("\nExecuting Audit Plan\n")
 
 	threshold := auditOpts.Threshold
 	if threshold == 0 {
@@ -638,7 +638,7 @@ func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan, cfg *config.C
 	}
 
 	if issues := auditPlanRootIssues(plan, filteredIndices, cfg); len(issues) > 0 {
-		fmt.Println("❌ Audit plan failed safety validation; refusing to execute.")
+		fmt.Println("[error] Audit plan failed safety validation; refusing to execute.")
 		printConsolidateSafetyIssues(issues)
 		fmt.Println("\nRegenerate the audit plan before retrying.")
 		return nil
@@ -699,25 +699,25 @@ func executeAuditPlan(db *database.MediaDB, plan *plans.AuditPlan, cfg *config.C
 
 		start := time.Now()
 		if err := plans.ExecuteAuditAction(db, item, action, auditOpts.DryRun, cfg); err != nil {
-			fmt.Printf("  ✗ Failed: %v\n", err)
+			fmt.Printf("  [error] Failed: %v\n", err)
 			failed++
 		} else {
-			fmt.Printf("  ✓ Success (%s)\n", time.Since(start).Round(time.Millisecond))
+			fmt.Printf("  [ok] Success (%s)\n", time.Since(start).Round(time.Millisecond))
 			succeeded++
 		}
 	}
 
 	// Print summary
-	fmt.Printf("\n📊 Summary:\n")
+	fmt.Printf("\nSummary:\n")
 	fmt.Printf("  Succeeded: %d\n", succeeded)
 	fmt.Printf("  Failed: %d\n", failed)
 
 	// Delete plan file on success (all actions completed successfully)
 	if failed == 0 && succeeded > 0 {
 		if err := plans.DeleteAuditPlans(); err != nil {
-			fmt.Printf("  ⚠️  Warning: failed to delete plan file: %v\n", err)
+			fmt.Printf("  [warn] Warning: failed to delete plan file: %v\n", err)
 		} else {
-			fmt.Printf("  ✓ Plan file deleted\n")
+			fmt.Printf("  [ok] Plan file deleted\n")
 		}
 	}
 

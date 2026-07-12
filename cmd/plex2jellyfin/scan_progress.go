@@ -59,7 +59,7 @@ func (b *ScanProgressBar) render(full bool) {
 
 	aiSuffix := ""
 	if b.aiCount > 0 {
-		aiSuffix = fmt.Sprintf(" │ AI: %d ✓", b.aiCount)
+		aiSuffix = fmt.Sprintf(" │ AI: %d [ok]", b.aiCount)
 	}
 
 	status := "..."
@@ -104,12 +104,12 @@ func RenderScanSummary(d ScanSummaryData) {
 		Rows(rows...)
 
 	fmt.Printf("\n%s\n", t.Render())
-	fmt.Printf("⏱  Duration: %.1fs\n", d.Duration.Seconds())
+	fmt.Printf("Duration: %.1fs\n", d.Duration.Seconds())
 
 	// Render issues if any
 	hasIssues := d.DupSets > 0 || d.ScatteredSeries > 0 || d.LowConfidence > 0
 	if hasIssues {
-		fmt.Println("\n⚠️  Issues Found:")
+		fmt.Println("\n[warn] Issues Found:")
 		var issueRows [][]string
 
 		step := 1
@@ -149,6 +149,6 @@ func RenderScanSummary(d ScanSummaryData) {
 
 		fmt.Printf("%s\n", issueTable.Render())
 	} else {
-		fmt.Println("\n✓  No issues found")
+		fmt.Println("\n[ok] No issues found")
 	}
 }

@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"time"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/clitheme"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
@@ -51,7 +51,7 @@ func runHealth(cmd *cobra.Command, args []string) error {
 	var radarrClient *radarr.Client
 
 	if cfg.Sonarr.URL != "" && cfg.Sonarr.APIKey != "" {
-		fmt.Println("Checking Sonarr...")
+		clitheme.Section(cmd.OutOrStdout(), "Sonarr")
 		sonarrClient = sonarr.NewClient(sonarr.Config{
 			URL:     cfg.Sonarr.URL,
 			APIKey:  cfg.Sonarr.APIKey,
@@ -59,19 +59,19 @@ func runHealth(cmd *cobra.Command, args []string) error {
 		})
 		issues, err := service.CheckSonarrConfig(sonarrClient)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  Warning: Sonarr check failed: %v\n", err)
+			clitheme.Warn(cmd.OutOrStdout(), fmt.Sprintf("Sonarr check failed: %v", err))
 		} else {
 			allIssues = append(allIssues, issues...)
 			if len(issues) == 0 {
-				fmt.Println("  OK - all settings correct")
+				clitheme.OK(cmd.OutOrStdout(), "all settings correct")
 			}
 		}
 	} else {
-		fmt.Println("Sonarr: not configured")
+		clitheme.Muted(cmd.OutOrStdout(), "Sonarr: not configured")
 	}
 
 	if cfg.Radarr.URL != "" && cfg.Radarr.APIKey != "" {
-		fmt.Println("Checking Radarr...")
+		clitheme.Section(cmd.OutOrStdout(), "Radarr")
 		radarrClient = radarr.NewClient(radarr.Config{
 			URL:     cfg.Radarr.URL,
 			APIKey:  cfg.Radarr.APIKey,
@@ -79,41 +79,41 @@ func runHealth(cmd *cobra.Command, args []string) error {
 		})
 		issues, err := service.CheckRadarrConfig(radarrClient)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  Warning: Radarr check failed: %v\n", err)
+			clitheme.Warn(cmd.OutOrStdout(), fmt.Sprintf("Radarr check failed: %v", err))
 		} else {
 			allIssues = append(allIssues, issues...)
 			if len(issues) == 0 {
-				fmt.Println("  OK - all settings correct")
+				clitheme.OK(cmd.OutOrStdout(), "all settings correct")
 			}
 		}
 	} else {
-		fmt.Println("Radarr: not configured")
+		clitheme.Muted(cmd.OutOrStdout(), "Radarr: not configured")
 	}
 
 	if len(allIssues) == 0 {
-		fmt.Println("\nAll arr settings are correctly configured for plex2jellyfin.")
+		clitheme.OK(cmd.OutOrStdout(), "All arr settings are correctly configured for plex2jellyfin.")
 		return nil
 	}
 
-	fmt.Printf("\nFound %d configuration issue(s):\n", len(allIssues))
+	clitheme.Warn(cmd.OutOrStdout(), fmt.Sprintf("Found %d configuration issue(s):", len(allIssues)))
 	for i, issue := range allIssues {
-		icon := "!"
+		marker := "[warn]"
 		if issue.Severity == "critical" {
-			icon = "X"
+			marker = "[error]"
 		}
-		fmt.Printf("  %s %d. [%s] %s: %s (expected: %s)\n",
-			icon, i+1, issue.Service, issue.Setting, issue.Current, issue.Expected)
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s %d. [%s] %s: %s (expected: %s)\n",
+			marker, i+1, issue.Service, issue.Setting, issue.Current, issue.Expected)
 	}
 
 	if !healthFix {
-		fmt.Println("\nRun with --fix to attempt automatic remediation.")
+		clitheme.Muted(cmd.OutOrStdout(), "Run with --fix to attempt automatic remediation.")
 		return nil
 	}
 
 	if healthDryRun {
-		fmt.Println("\n[dry-run] Would fix the following issues:")
+		clitheme.Muted(cmd.OutOrStdout(), "[dry-run] Would fix the following issues:")
 	} else {
-		fmt.Println("\nApplying fixes...")
+		fmt.Fprintln(cmd.OutOrStdout(), "Applying fixes...")
 	}
 
 	var sonarrIssues, radarrIssues []service.HealthIssue
@@ -130,14 +130,14 @@ func runHealth(cmd *cobra.Command, args []string) error {
 	if len(sonarrIssues) > 0 && sonarrClient != nil {
 		fixed, err := service.FixSonarrIssues(sonarrClient, sonarrIssues, healthDryRun)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error fixing Sonarr issues: %v\n", err)
+			clitheme.Err(cmd.OutOrStdout(), fmt.Sprintf("fixing Sonarr issues: %v", err))
 		}
 		fixedCount += len(fixed)
 		for _, f := range fixed {
 			if healthDryRun {
-				fmt.Printf("  Would fix [sonarr] %s\n", f.Setting)
+				clitheme.Muted(cmd.OutOrStdout(), fmt.Sprintf("Would fix [sonarr] %s", f.Setting))
 			} else {
-				fmt.Printf("  Fixed [sonarr] %s\n", f.Setting)
+				clitheme.OK(cmd.OutOrStdout(), fmt.Sprintf("Fixed [sonarr] %s", f.Setting))
 			}
 		}
 	}
@@ -145,22 +145,22 @@ func runHealth(cmd *cobra.Command, args []string) error {
 	if len(radarrIssues) > 0 && radarrClient != nil {
 		fixed, err := service.FixRadarrIssues(radarrClient, radarrIssues, healthDryRun)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error fixing Radarr issues: %v\n", err)
+			clitheme.Err(cmd.OutOrStdout(), fmt.Sprintf("fixing Radarr issues: %v", err))
 		}
 		fixedCount += len(fixed)
 		for _, f := range fixed {
 			if healthDryRun {
-				fmt.Printf("  Would fix [radarr] %s\n", f.Setting)
+				clitheme.Muted(cmd.OutOrStdout(), fmt.Sprintf("Would fix [radarr] %s", f.Setting))
 			} else {
-				fmt.Printf("  Fixed [radarr] %s\n", f.Setting)
+				clitheme.OK(cmd.OutOrStdout(), fmt.Sprintf("Fixed [radarr] %s", f.Setting))
 			}
 		}
 	}
 
 	if healthDryRun {
-		fmt.Printf("\n[dry-run] Would fix %d issue(s). Run with --dry-run=false to apply.\n", fixedCount)
+		clitheme.Muted(cmd.OutOrStdout(), fmt.Sprintf("[dry-run] Would fix %d issue(s). Run with --dry-run=false to apply.", fixedCount))
 	} else {
-		fmt.Printf("\nFixed %d issue(s).\n", fixedCount)
+		clitheme.OK(cmd.OutOrStdout(), fmt.Sprintf("Fixed %d issue(s).", fixedCount))
 	}
 
 	return nil

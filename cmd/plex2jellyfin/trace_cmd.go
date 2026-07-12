@@ -92,7 +92,7 @@ func writeTrace(w io.Writer, d *database.ParseDecision) {
 
 	parsed := fmt.Sprintf("via %s", orUnknown(d.ParseMethod))
 	if d.ParsedTitle != "" {
-		parsed += fmt.Sprintf(" → %q", d.ParsedTitle)
+		parsed += fmt.Sprintf(" -> %q", d.ParsedTitle)
 		if d.ParsedYear != nil {
 			parsed += fmt.Sprintf(" (%d)", *d.ParsedYear)
 		}
@@ -107,9 +107,9 @@ func writeTrace(w io.Writer, d *database.ParseDecision) {
 
 	switch {
 	case d.TargetPath != "" && d.TargetAt != nil:
-		fmt.Fprintf(w, "  moved      → %s  at %s\n", d.TargetPath, d.TargetAt.Local().Format(timeLayout))
+		fmt.Fprintf(w, "  moved      -> %s  at %s\n", d.TargetPath, d.TargetAt.Local().Format(timeLayout))
 	case d.TargetPath != "":
-		fmt.Fprintf(w, "  moved      → %s\n", d.TargetPath)
+		fmt.Fprintf(w, "  moved      -> %s\n", d.TargetPath)
 	default:
 		fmt.Fprintln(w, "  moved      (not moved)")
 	}

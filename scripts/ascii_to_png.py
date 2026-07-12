@@ -12,7 +12,7 @@ Example:
     python3 scripts/ascii_to_png.py assets/plex2jellyfin-header.png
 
 Note: This script is for generating the README header image.
-      The ASCII art source of truth is cmd/plex2jellyfin/assets/header.txt
+      The ASCII art source of truth is internal/clitheme/header.txt
       (the same art the CLI embeds and prints).
 """
 
@@ -20,13 +20,13 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 import sys
 
-# ASCII art — read from the CLI's embedded header so the two never drift
+# ASCII art — read from the CLI theme package so the two never drift
 ASCII_ART = (
-    Path(__file__).resolve().parent.parent / "cmd/plex2jellyfin/assets/header.txt"
+    Path(__file__).resolve().parent.parent / "internal/clitheme/header.txt"
 ).read_text().rstrip("\n")
 
-# Jellyfin theme colors
-JELLYFIN_PURPLE = "#AA5CC3"  # Primary purple
+# README / marketing wordmark — white on transparent for dark GitHub chrome
+WORDMARK_COLOR = "#FFFFFF"
 
 
 def create_ascii_png(output_path="assets/plex2jellyfin-header.png"):
@@ -68,7 +68,7 @@ def create_ascii_png(output_path="assets/plex2jellyfin-header.png"):
     draw = ImageDraw.Draw(img)
 
     # Convert hex color to RGB tuple
-    color = tuple(int(JELLYFIN_PURPLE.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
+    color = tuple(int(WORDMARK_COLOR.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
 
     # Draw text line by line
     y = pad

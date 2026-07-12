@@ -25,7 +25,7 @@ func runDuplicatesGenerate() error {
 	}
 	defer db.Close()
 
-	fmt.Println("🔍 Analyzing library for duplicates...")
+	fmt.Println("Analyzing library for duplicates...")
 
 	svc := service.NewCleanupService(db)
 	analysis, err := svc.AnalyzeDuplicates()
@@ -34,7 +34,7 @@ func runDuplicatesGenerate() error {
 	}
 
 	if len(analysis.Groups) == 0 {
-		fmt.Println("✅ No duplicates found!")
+		fmt.Println("[ok] No duplicates found!")
 		return nil
 	}
 
@@ -119,7 +119,7 @@ func runDuplicatesGenerate() error {
 		return fmt.Errorf("failed to save plan: %w", err)
 	}
 
-	fmt.Println("✅ Duplicate plan generated")
+	fmt.Println("[ok] Duplicate plan generated")
 	fmt.Printf("   Files to delete: %d\n", plan.Summary.FilesToDelete)
 	fmt.Printf("   Space reclaimable: %s\n\n", formatBytes(plan.Summary.SpaceReclaimable))
 	fmt.Println("Next steps:")
@@ -155,7 +155,7 @@ func runDuplicatesDryRun() error {
 		return nil
 	}
 
-	fmt.Println("📋 Duplicate Deletion Plan (DRY RUN)")
+	fmt.Println("Duplicate Deletion Plan (DRY RUN)")
 	fmt.Println()
 	fmt.Printf("Files to delete: %d\n", plan.Summary.FilesToDelete)
 	fmt.Printf("Space to reclaim: %s\n\n", formatBytes(plan.Summary.SpaceReclaimable))

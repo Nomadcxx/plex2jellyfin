@@ -541,3 +541,58 @@ func TestDefaultConfig_MetadataRecoveryDefaults(t *testing.T) {
 		t.Errorf("expected needs_review_after 4, got %d", cfg.MetadataRecovery.NeedsReviewAfter)
 	}
 }
+
+func TestArrFixMsg_ErrorStaysOnIssuesStep(t *testing.T) {
+	m := model{
+		step:      stepArrIssues,
+		arrIssues: []ArrIssue{{Service: "sonarr", Setting: "renameEpisodes"}},
+	}
+	next, cmd := m.Update(arrFixMsg{fixed: 0, err: fmt.Errorf("fixing renameEpisodes: 400")})
+	got := next.(model)
+	if got.step != stepArrIssues {
+		t.Fatalf("step = %v, want stepArrIssues so user can retry/skip", got.step)
+	}
+	if len(got.arrIssues) == 0 {
+		t.Fatal("arrIssues cleared on failure; user loses context")
+	}
+	if len(got.errors) == 0 {
+		t.Fatal("expected fix error surfaced in m.errors")
+	}
+	if cmd != nil {
+		t.Fatal("must not proceed to scan on fix failure")
+	}
+}
+
+func TestFixArrSettings_PropagatesSonarrError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v3/config/naming" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"id":1,"renameEpisodes":false,"specialsFolderFormat":"Specials"}`))
+		case r.URL.Path == "/api/v3/config/naming" && r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`[{"propertyName":"SpecialsFolderFormat","errorMessage":"must not be empty"}]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	m := model{
+		sonarrEnabled: true,
+		sonarrURL:     server.URL,
+		sonarrAPIKey:  "test",
+		arrIssues: []ArrIssue{{
+			Service: "sonarr", Setting: "renameEpisodes",
+			Current: "false", Expected: "true", Severity: "warning",
+		}},
+	}
+	msg := m.fixArrSettings()()
+	got, ok := msg.(arrFixMsg)
+	if !ok {
+		t.Fatalf("got %T, want arrFixMsg", msg)
+	}
+	if got.err == nil {
+		t.Fatal("expected Sonarr fix error in arrFixMsg; was discarding with _")
+	}
+}
