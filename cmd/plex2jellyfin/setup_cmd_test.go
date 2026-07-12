@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +22,8 @@ import (
 // assert on what the wizard actually did.
 type wizardState struct {
 	activated        bool
+	webStarted       bool
+	scanned          bool
 	sonarrFixed      bool
 	pluginInstalled  bool
 	pluginRestarted  bool
@@ -58,6 +62,16 @@ func wizardTestDeps(t *testing.T) (setupDeps, *wizardState) {
 			state.activated = true
 			return nil
 		},
+		activateWeb: func() error {
+			state.webStarted = true
+			return nil
+		},
+		webUnitOK: func() bool { return true },
+		initialScan: func(ctx context.Context, out io.Writer, draft setupdomain.Draft) error {
+			state.scanned = true
+			fmt.Fprintln(out, "Initial library scan")
+			return nil
+		},
 		generateToken: func() (string, error) { return "generated-secret", nil },
 		runtime:       setupdomain.RuntimeInfo{Kind: setupdomain.RuntimeNative, UID: 1000, GID: 1000},
 		pluginEngine: func(url, apiKey string) pluginEngine {
@@ -65,6 +79,9 @@ func wizardTestDeps(t *testing.T) (setupDeps, *wizardState) {
 		},
 		advertiseIP: func() string { return "10.0.0.5" },
 		saveConfig:  func(c *config.Config) error { return c.Save() },
+		permDefaults: func() config.PermissionsConfig {
+			return config.PermissionsConfig{Group: "media", FileMode: "0664", DirMode: "0775"}
+		},
 	}
 	return deps, state
 }
@@ -133,8 +150,9 @@ func TestSetupWizardShowsBannerAndIntro(t *testing.T) {
 		"n", "n", "n",
 		"n",
 		"5m", "n", "n",
-		"",
-		"y",
+		"", "", "", "", // permissions (defaults)
+		"y", // confirm
+		"y", // start web UI
 	}
 	out, err := runWizard(t, deps, answers)
 	if err != nil {
@@ -148,6 +166,18 @@ func TestSetupWizardShowsBannerAndIntro(t *testing.T) {
 	}
 	if !strings.Contains(out, "Media paths") {
 		t.Fatalf("expected Media paths section:\n%s", out)
+	}
+	if !strings.Contains(out, "low-confidence titles") {
+		t.Fatalf("expected AI guidance text:\n%s", out)
+	}
+	if !strings.Contains(out, "periodic catch-up") {
+		t.Fatalf("expected runtime guidance text:\n%s", out)
+	}
+	if !strings.Contains(out, "Group is the critical setting") {
+		t.Fatalf("expected permissions group guidance:\n%s", out)
+	}
+	if !strings.Contains(out, "Initial library scan") && !strings.Contains(out, "Setup complete") {
+		t.Fatalf("expected setup completion:\n%s", out)
 	}
 	if strings.Contains(out, "💡") || strings.Contains(out, "✅") {
 		t.Fatalf("emoji leaked into setup output:\n%s", out)
@@ -176,8 +206,12 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 		"10m",            // scan frequency
 		"y",              // move files?
 		"n",              // verify checksums?
-		"",               // chown user (skip)
+		"",               // owner user
+		"",               // owner group (default media)
+		"",               // file mode
+		"",               // dir mode
 		"y",              // confirm write
+		"y",              // start web UI
 		"",               // webhook URL (accept detected default)
 	}
 	out, err := runWizard(t, deps, answers)
@@ -187,6 +221,12 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 
 	if !state.activated {
 		t.Error("daemon was not activated")
+	}
+	if !state.webStarted {
+		t.Error("web UI was not started")
+	}
+	if !state.scanned {
+		t.Error("initial scan was not run")
 	}
 	if !state.sonarrFixed {
 		t.Error("sonarr fix was confirmed but not applied")
@@ -228,6 +268,10 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 	if saved.Setup.Version != setupdomain.CurrentVersion || !saved.Setup.Completed {
 		t.Errorf("setup marker = %+v", saved.Setup)
 	}
+	if saved.Permissions.User != "" || saved.Permissions.Group != "media" ||
+		saved.Permissions.FileMode != "0664" || saved.Permissions.DirMode != "0775" {
+		t.Errorf("permissions = %+v, want empty:media 0664/0775", saved.Permissions)
+	}
 }
 
 func TestSetupWizardDecliningFixLeavesArrAlone(t *testing.T) {
@@ -240,8 +284,9 @@ func TestSetupWizardDecliningFixLeavesArrAlone(t *testing.T) {
 		"n", "n", // radarr, jellyfin off
 		"n",             // no ollama
 		"5m", "n", "n",  // runtime
-		"",              // chown skip
+		"", "", "", "",  // permissions (defaults)
 		"y",             // confirm
+		"y",             // start web UI
 	}
 	out, err := runWizard(t, deps, answers)
 	if err != nil {
@@ -255,6 +300,32 @@ func TestSetupWizardDecliningFixLeavesArrAlone(t *testing.T) {
 	}
 }
 
+func TestSetupWizardDecliningWebUIPrintsServiceHints(t *testing.T) {
+	deps, state := wizardTestDeps(t)
+	answers := []string{
+		"/downloads/tv", "/media/tv", "", "",
+		"n", "n", "n",
+		"n",
+		"5m", "n", "n",
+		"", "", "", "",
+		"y", // confirm
+		"n", // decline web UI
+	}
+	out, err := runWizard(t, deps, answers)
+	if err != nil {
+		t.Fatalf("setup: %v\n%s", err, out)
+	}
+	if state.webStarted {
+		t.Error("web UI started despite decline")
+	}
+	if !strings.Contains(out, "systemctl enable --now plex2jellyfin-web") {
+		t.Fatalf("expected web start hint:\n%s", out)
+	}
+	if !strings.Contains(out, "systemctl status plex2jellyfin-daemon plex2jellyfin-web") {
+		t.Fatalf("expected status check hint:\n%s", out)
+	}
+}
+
 func TestSetupWizardFailedActivationLeavesSetupIncomplete(t *testing.T) {
 	deps, _ := wizardTestDeps(t)
 	deps.activate = func(ctx context.Context) error { return errors.New("no daemon") }
@@ -264,8 +335,9 @@ func TestSetupWizardFailedActivationLeavesSetupIncomplete(t *testing.T) {
 		"n", "n", "n", // no services
 		"n",            // no ollama
 		"5m", "n", "n", // runtime
-		"",  // chown skip
+		"", "", "", "", // permissions (defaults)
 		"y", // confirm
+		"y", // start web UI
 	}
 	out, err := runWizard(t, deps, answers)
 	if err == nil {
@@ -289,7 +361,7 @@ func TestSetupWizardRejectsHalfConfiguredMedia(t *testing.T) {
 		"n", "n", "n",
 		"n",
 		"5m", "n", "n",
-		"",
+		"", "", "", "", // permissions (still prompted before validate)
 	}
 	out, err := runWizard(t, deps, answers)
 	if err == nil {
@@ -317,8 +389,9 @@ func TestSetupWizardDeclinedPluginRestartStillCompletesSetup(t *testing.T) {
 		"n",            // restart Jellyfin? (declined)
 		"n",            // no ollama
 		"5m", "n", "n", // runtime
-		"",  // chown skip
+		"", "", "", "", // permissions (defaults)
 		"y", // confirm
+		"y", // start web UI
 	}
 	out, err := runWizard(t, deps, answers)
 	if err != nil {
@@ -351,8 +424,9 @@ func TestSetupWizardPluginFailureDoesNotFailSetup(t *testing.T) {
 		"y", "", "jf-key",
 		"n",            // no ollama
 		"5m", "n", "n", // runtime
-		"",
-		"y",
+		"", "", "", "", // permissions (defaults)
+		"y", // confirm
+		"y", // start web UI
 	}
 	out, err := runWizard(t, deps, answers)
 	if err != nil {
@@ -368,5 +442,41 @@ func TestSetupWizardPluginFailureDoesNotFailSetup(t *testing.T) {
 	}
 	if !strings.Contains(out, "plex2jellyfin plugin install") {
 		t.Errorf("expected install recovery pointer:\n%s", out)
+	}
+}
+
+func TestSetupWizardAINumberedModelPick(t *testing.T) {
+	deps, _ := wizardTestDeps(t)
+	answers := []string{
+		"/downloads/tv", "/media/tv", "", "",
+		"n", "n", "n", // no arr/jellyfin
+		"y",            // enable ollama
+		"",             // endpoint default
+		"2",            // primary = qwen
+		"",             // fallback empty
+		"5m", "n", "n", // runtime
+		"", "", "", "", // permissions (defaults)
+		"y",            // confirm
+		"y",            // start web UI
+	}
+	out, err := runWizard(t, deps, answers)
+	if err != nil {
+		t.Fatalf("setup: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "1) llama3") || !strings.Contains(out, "2) qwen") {
+		t.Fatalf("expected numbered model list:\n%s", out)
+	}
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !saved.AI.Enabled {
+		t.Fatal("AI should be enabled")
+	}
+	if saved.AI.Model != "qwen" {
+		t.Fatalf("primary model = %q, want qwen", saved.AI.Model)
+	}
+	if saved.AI.FallbackModel != "" {
+		t.Fatalf("fallback = %q, want empty", saved.AI.FallbackModel)
 	}
 }

@@ -241,7 +241,7 @@ func runScan(syncSonarr, syncRadarr, syncFilesystem, showStats bool, scanPath st
 		var err error
 		scanResult, err = syncService.SyncFromFilesystem(ctx)
 		if err != nil {
-			return fmt.Errorf("filesystem sync failed: %w", err)
+			return fmt.Errorf("filesystem sync failed: %w", wrapReadonlyDB(err, dbPath))
 		}
 		if !jsonOutput {
 			fmt.Println("Filesystem sync complete")
@@ -438,7 +438,7 @@ func runTargetedScan(ctx context.Context, db *database.MediaDB, cfg *config.Conf
 	}
 	scanResult, err := fileScanner.ScanPath(ctx, path, libraryRoot, mediaType)
 	if err != nil {
-		return fmt.Errorf("targeted filesystem sync failed: %w", err)
+		return fmt.Errorf("targeted filesystem sync failed: %w", wrapReadonlyDB(err, dbPath))
 	}
 	if !jsonOutput {
 		fmt.Println("Targeted filesystem sync complete")
@@ -533,4 +533,18 @@ func pathIsUnderRoot(path, root string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// wrapReadonlyDB turns SQLite's opaque "readonly database" into an ownership fix hint.
+// The root daemon often creates media.db as root:root; a user-level scan then fails.
+func wrapReadonlyDB(err error, dbPath string) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "readonly") && !strings.Contains(msg, "read-only") {
+		return err
+	}
+	return fmt.Errorf("%w\n\nDatabase is not writable at %s (often owned by root after the daemon created it).\nFix ownership, then re-run scan:\n  sudo chown -R \"$USER:$USER\" %s\n  plex2jellyfin scan",
+		err, dbPath, filepath.Dir(dbPath))
 }

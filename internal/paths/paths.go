@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 )
 
 // UserHomeDir returns the home directory of the actual user.
@@ -111,4 +112,48 @@ func ActualUser() string {
 		return u.Username
 	}
 	return "unknown"
+}
+
+// ChownToActualUser chowns paths to SUDO_USER (or no-ops when not root / no
+// target user). Used so a root daemon writing under the user's config dir
+// leaves files the interactive user can also write (CLI scan, etc.).
+func ChownToActualUser(paths ...string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	name := ActualUser()
+	if name == "" || name == "root" || name == "unknown" {
+		return nil
+	}
+	u, err := user.Lookup(name)
+	if err != nil {
+		return err
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return err
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return err
+	}
+	var first error
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		if err := os.Chown(p, uid, gid); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }

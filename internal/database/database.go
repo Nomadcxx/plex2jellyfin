@@ -59,7 +59,15 @@ func OpenPath(path string) (*MediaDB, error) {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	// Root daemon (SUDO_USER set) creates DB/WAL as root; hand ownership back
+	// so the interactive user can run `plex2jellyfin scan` without sudo.
+	_ = chownDBArtifacts(path)
+
 	return mdb, nil
+}
+
+func chownDBArtifacts(path string) error {
+	return paths.ChownToActualUser(path, path+"-wal", path+"-shm", filepath.Dir(path))
 }
 
 func sqliteDSN(path string) string {

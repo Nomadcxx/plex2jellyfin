@@ -9,9 +9,11 @@ except ImportError as error:
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# Full wordmark is white for docs/README chrome; compact P2J is brand yellow
+# matching plexo.go ANSI (rgb 229,229,16).
 ASSETS = (
-    (ROOT / "docs-site/brand/plex2jellyfin.txt", ROOT / "docs-site/public/brand/plex2jellyfin-wordmark.png"),
-    (ROOT / "docs-site/brand/P2J.txt", ROOT / "docs-site/public/brand/p2j-mark.png"),
+    (ROOT / "docs-site/brand/plex2jellyfin.txt", ROOT / "docs-site/public/brand/plex2jellyfin-wordmark.png", (255, 255, 255)),
+    (ROOT / "docs-site/brand/P2J.txt", ROOT / "docs-site/public/brand/p2j-mark.png", (229, 229, 16)),
 )
 FONT_CANDIDATES = (
     Path("/usr/share/fonts/TTF/DejaVuSansMono.ttf"),
@@ -26,7 +28,7 @@ def find_font() -> Path:
     raise FileNotFoundError("DejaVu Sans Mono was not found in a standard system font directory")
 
 
-def render_ascii(source: Path, destination: Path) -> None:
+def render_ascii(source: Path, destination: Path, color: tuple[int, int, int] = (255, 255, 255)) -> None:
     text = source.read_text(encoding="utf-8").replace("\r\n", "\n").rstrip("\r\n")
     if not text.strip():
         raise ValueError(f"ASCII source is empty: {source}")
@@ -41,7 +43,7 @@ def render_ascii(source: Path, destination: Path) -> None:
         (padding - bounds[0], padding - bounds[1]),
         text,
         font=font,
-        fill=(242, 244, 243, 255),
+        fill=color + (255,),
         spacing=0,
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -51,9 +53,9 @@ def render_ascii(source: Path, destination: Path) -> None:
 def check_assets() -> None:
     with tempfile.TemporaryDirectory() as directory:
         temporary = Path(directory)
-        for source, destination in ASSETS:
+        for source, destination, color in ASSETS:
             candidate = temporary / destination.name
-            render_ascii(source, candidate)
+            render_ascii(source, candidate, color)
             if not destination.is_file() or candidate.read_bytes() != destination.read_bytes():
                 raise SystemExit(f"Brand asset is stale: {destination.relative_to(ROOT)}")
 
@@ -66,8 +68,8 @@ def main() -> None:
     if args.check:
         check_assets()
         return
-    for source, destination in ASSETS:
-        render_ascii(source, destination)
+    for source, destination, color in ASSETS:
+        render_ascii(source, destination, color)
 
 
 if __name__ == "__main__":

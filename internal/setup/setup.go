@@ -5,7 +5,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
@@ -150,8 +149,8 @@ func ValidateDraft(d Draft, runtime RuntimeInfo) []FieldError {
 	validatePair("tv", tvWatch, tvLibrary)
 	validatePair("movies", movieWatch, movieLibrary)
 
-	if duration, err := time.ParseDuration(strings.TrimSpace(d.Runtime.ScanFrequency)); err != nil || duration <= 0 {
-		errs = append(errs, FieldError{Field: "runtime.scan_frequency", Message: "must be a positive duration such as 5m"})
+	if _, err := NormalizeScanFrequency(d.Runtime.ScanFrequency); err != nil {
+		errs = append(errs, FieldError{Field: "runtime.scan_frequency", Message: "must be a positive duration such as 5m or 10"})
 	}
 
 	for name, svc := range map[string]ServiceDraft{"sonarr": d.Sonarr, "radarr": d.Radarr} {
@@ -221,6 +220,9 @@ func ApplyDraft(current *config.Config, d Draft) *config.Config {
 	next.Libraries.Movies = nonEmpty(d.Libraries.Movies)
 	next.Daemon.Enabled = true
 	next.Daemon.ScanFrequency = strings.TrimSpace(d.Runtime.ScanFrequency)
+	if normalized, err := NormalizeScanFrequency(next.Daemon.ScanFrequency); err == nil {
+		next.Daemon.ScanFrequency = normalized
+	}
 	next.Options.DeleteSource = d.Runtime.DeleteSource
 	next.Options.VerifyChecksums = d.Runtime.VerifyChecksums
 	next.Permissions = d.Runtime.Permissions

@@ -3,6 +3,7 @@ package paths
 import (
 	"os"
 	"os/user"
+	"path/filepath"
 	"testing"
 )
 
@@ -224,5 +225,19 @@ func TestActualUser_SudoRoot(t *testing.T) {
 	currentUser, _ := user.Current()
 	if got != currentUser.Username {
 		t.Errorf("ActualUser() = %q, want %q", got, currentUser.Username)
+	}
+}
+
+func TestChownToActualUser_NoopWhenNotRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root")
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "x")
+	if err := os.WriteFile(f, []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ChownToActualUser(f); err != nil {
+		t.Fatalf("expected nil when not root, got %v", err)
 	}
 }

@@ -11,7 +11,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,10 +26,12 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin/plugininstall"
 	"github.com/Nomadcxx/plex2jellyfin/internal/llm"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/privilege"
 	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
+	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
 )
 
@@ -45,11 +49,15 @@ type setupDeps struct {
 	fixRadarr     func(url, apiKey string, issues []service.HealthIssue) error
 	listModels    func(endpoint string) ([]string, error)
 	activate      func(ctx context.Context) error
+	activateWeb   func() error
+	webUnitOK     func() bool
+	initialScan   func(ctx context.Context, out io.Writer, draft setupdomain.Draft) error
 	generateToken func() (string, error)
 	runtime       setupdomain.RuntimeInfo
 	pluginEngine  func(url, apiKey string) pluginEngine
 	advertiseIP   func() string
 	saveConfig    func(*config.Config) error
+	permDefaults  func() config.PermissionsConfig
 }
 
 func defaultSetupDeps() setupDeps {
@@ -96,14 +104,20 @@ func defaultSetupDeps() setupDeps {
 			}
 			return names, nil
 		},
-		activate:      activateDaemonCLI,
+		activate:    activateDaemonCLI,
+		activateWeb: activateWebCLI,
+		webUnitOK:   webUnitInstalled,
+		initialScan: func(ctx context.Context, out io.Writer, draft setupdomain.Draft) error {
+			return runSetupInitialScan(ctx, out, draft)
+		},
 		generateToken: newSetupSecret,
 		runtime:       setupdomain.DetectRuntime(),
 		pluginEngine: func(url, apiKey string) pluginEngine {
 			return plugininstall.New(url, apiKey, &http.Client{Timeout: 15 * time.Second})
 		},
-		advertiseIP: setupdomain.DetectAdvertiseIP,
-		saveConfig:  func(c *config.Config) error { return c.Save() },
+		advertiseIP:  setupdomain.DetectAdvertiseIP,
+		saveConfig:   func(c *config.Config) error { return c.Save() },
+		permDefaults: setupdomain.DefaultPermissions,
 	}
 }
 
@@ -153,6 +167,37 @@ func activateDaemonCLI(ctx context.Context) error {
 	}
 }
 
+func webUnitInstalled() bool {
+	return exec.Command("systemctl", "cat", "plex2jellyfin-web.service").Run() == nil
+}
+
+// activateWebCLI enables and starts the system web unit (same as the TUI
+// installer). Uses sudo when not already root — systemctl needs privileges.
+func activateWebCLI() error {
+	args := []string{"systemctl", "enable", "--now", "plex2jellyfin-web.service"}
+	var cmd *exec.Cmd
+	if privilege.NeedsRoot() {
+		cmd = exec.Command("sudo", args...)
+	} else {
+		cmd = exec.Command(args[0], args[1:]...)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
+}
+
+func printWebServiceSkipHints(stdout io.Writer) {
+	clitheme.Muted(stdout, "Web UI left stopped. When you want it:")
+	clitheme.Muted(stdout, "  sudo systemctl enable --now plex2jellyfin-web")
+	clitheme.Muted(stdout, "Check services: systemctl status plex2jellyfin-daemon plex2jellyfin-web")
+}
+
 func newSetupSecret() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
@@ -162,17 +207,60 @@ func newSetupSecret() (string, error) {
 }
 
 // prompter is a line-based question helper over the wizard's stdio.
+// On a real TTY it uses readline so arrow keys edit the line instead of
+// inserting raw escape sequences (^[[A etc.).
 type prompter struct {
-	in  *bufio.Scanner
-	out io.Writer
+	in    *bufio.Scanner
+	out   io.Writer
+	rl    *readline.Instance
+	useRL bool
+}
+
+func newPrompter(stdin io.Reader, stdout io.Writer) *prompter {
+	p := &prompter{in: bufio.NewScanner(stdin), out: stdout}
+	f, ok := stdin.(*os.File)
+	if !ok || !readline.IsTerminal(int(f.Fd())) {
+		return p
+	}
+	outFile, _ := stdout.(*os.File)
+	if outFile == nil {
+		outFile = os.Stdout
+	}
+	rl, err := readline.NewEx(&readline.Config{
+		Stdin:           f,
+		Stdout:          outFile,
+		HistoryLimit:    -1,
+		HistoryFile:     "",
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		return p
+	}
+	p.rl = rl
+	p.useRL = true
+	return p
+}
+
+func (p *prompter) Close() {
+	if p.rl != nil {
+		_ = p.rl.Close()
+		p.rl = nil
+		p.useRL = false
+	}
 }
 
 func (p *prompter) ask(label, def string) (string, error) {
-	if def != "" {
-		fmt.Fprintf(p.out, "%s [%s]: ", label, def)
-	} else {
-		fmt.Fprintf(p.out, "%s: ", label)
+	if p.useRL {
+		// Prefill the editable buffer with the default so arrow keys can revise
+		// long values (paths, etc.). Prompt stays a simple label.
+		return p.askReadline(label+": ", def)
 	}
+	prompt := label + ": "
+	if def != "" {
+		prompt = fmt.Sprintf("%s [%s]: ", label, def)
+	}
+	fmt.Fprint(p.out, prompt)
 	if !p.in.Scan() {
 		if err := p.in.Err(); err != nil {
 			return "", err
@@ -180,6 +268,30 @@ func (p *prompter) ask(label, def string) (string, error) {
 		return "", errors.New("input ended before setup finished")
 	}
 	answer := strings.TrimSpace(p.in.Text())
+	if answer == "" {
+		return def, nil
+	}
+	return answer, nil
+}
+
+func (p *prompter) askReadline(prompt, def string) (string, error) {
+	p.rl.SetPrompt(prompt)
+	if def != "" {
+		p.rl.Operation.SetBuffer(def)
+	} else {
+		p.rl.Operation.SetBuffer("")
+	}
+	line, err := p.rl.Readline()
+	if err != nil {
+		if errors.Is(err, readline.ErrInterrupt) {
+			return "", errors.New("setup interrupted")
+		}
+		if errors.Is(err, io.EOF) {
+			return "", errors.New("input ended before setup finished")
+		}
+		return "", err
+	}
+	answer := strings.TrimSpace(line)
 	if answer == "" {
 		return def, nil
 	}
@@ -228,6 +340,107 @@ func (p *prompter) askPaths(label string, def []string) ([]string, error) {
 	return out, nil
 }
 
+// askModelChoice prints a numbered model list and accepts an index or name.
+// When allowEmpty is true, a blank answer returns "" (used for optional fallback).
+func (p *prompter) askModelChoice(label string, options []string, def string, allowEmpty bool) (string, error) {
+	if len(options) == 0 {
+		return p.ask(label, def)
+	}
+	for i, opt := range options {
+		fmt.Fprintf(p.out, "  %d) %s\n", i+1, opt)
+	}
+	hint := modelChoiceDefaultHint(options, def, allowEmpty)
+	prompt := label
+	if allowEmpty {
+		prompt = label + " (empty for none)"
+	}
+	for {
+		answer, err := p.ask(prompt, hint)
+		if err != nil {
+			return "", err
+		}
+		if allowEmpty && answer == "" {
+			return "", nil
+		}
+		got, err := resolveModelChoice(answer, options, hint)
+		if err != nil {
+			fmt.Fprintf(p.out, "  %v\n", err)
+			continue
+		}
+		return got, nil
+	}
+}
+
+func modelChoiceDefaultHint(options []string, def string, allowEmpty bool) string {
+	if def == "" {
+		if allowEmpty {
+			return ""
+		}
+		if len(options) > 0 {
+			return "1"
+		}
+		return ""
+	}
+	for i, opt := range options {
+		if opt == def {
+			return fmt.Sprintf("%d", i+1)
+		}
+	}
+	return def
+}
+
+// resolveModelChoice maps a typed answer to a model name.
+// Empty answer uses def (which may itself be a 1-based index string).
+func resolveModelChoice(answer string, options []string, def string) (string, error) {
+	raw := strings.TrimSpace(answer)
+	if raw == "" {
+		raw = strings.TrimSpace(def)
+	}
+	if raw == "" {
+		return "", errors.New("pick a model number or name")
+	}
+	if n, err := strconv.Atoi(raw); err == nil {
+		if n < 1 || n > len(options) {
+			return "", fmt.Errorf("choose a number between 1 and %d", len(options))
+		}
+		return options[n-1], nil
+	}
+	return raw, nil
+}
+
+func (p *prompter) askScanFrequency(def string) (string, error) {
+	for {
+		raw, err := p.ask("Library scan frequency (e.g. 5m, 10m, 1h — bare 10 means 10m)", def)
+		if err != nil {
+			return "", err
+		}
+		normalized, err := setupdomain.NormalizeScanFrequency(raw)
+		if err != nil {
+			fmt.Fprintf(p.out, "  invalid frequency %q — use a duration like 5m or 10m\n", raw)
+			continue
+		}
+		return normalized, nil
+	}
+}
+
+func (p *prompter) askOctalMode(label, def string) (string, error) {
+	for {
+		raw, err := p.ask(label+" (octal, e.g. "+def+")", def)
+		if err != nil {
+			return "", err
+		}
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			raw = def
+		}
+		if _, err := strconv.ParseUint(raw, 8, 32); err != nil {
+			fmt.Fprintf(p.out, "  %q is not an octal mode — try %s\n", raw, def)
+			continue
+		}
+		return raw, nil
+	}
+}
+
 func newSetupCmd() *cobra.Command {
 	return newSetupCmdWithDeps(defaultSetupDeps(), os.Stdin, os.Stdout)
 }
@@ -241,13 +454,20 @@ optional Sonarr/Radarr/Jellyfin connections, optional Ollama matching, and
 runtime behavior. Validates every path, saves the config atomically, and
 activates the daemon — the same flow as the web UI's /setup wizard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// TUI installer parity: escalate once at the start so systemd,
+			// the initial scan, and post-scan chown all run as root with
+			// SUDO_USER preserved for path/ownership resolution.
+			if privilege.NeedsRoot() {
+				return privilege.Escalate("configure services, scan libraries, and set file ownership")
+			}
 			return runSetupWizard(cmd.Context(), deps, stdin, stdout)
 		},
 	}
 }
 
 func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout io.Writer) error {
-	p := &prompter{in: bufio.NewScanner(stdin), out: stdout}
+	p := newPrompter(stdin, stdout)
+	defer p.Close()
 
 	clitheme.PrintBanner(stdout, version)
 	clitheme.Muted(stdout, "Interactive first-run setup: watch and library paths, optional Sonarr/Radarr/Jellyfin/AI,")
@@ -315,6 +535,8 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 	pluginState := wizardPluginStep(ctx, p, stdout, deps, jellyfinDraft)
 
 	clitheme.Section(stdout, "AI matching (optional)")
+	clitheme.Muted(stdout, "Most filenames parse without AI. Enable Ollama only for edge cases:")
+	clitheme.Muted(stdout, "low-confidence titles, missing years, or release tags the regex parser cannot fix.")
 	if draft.AI.Enabled, err = p.askBool("Use a local Ollama instance for ambiguous filenames?", draft.AI.Enabled); err != nil {
 		return err
 	}
@@ -325,19 +547,22 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		models, err := deps.listModels(draft.AI.Endpoint)
 		if err != nil {
 			clitheme.Warn(stdout, fmt.Sprintf("could not list models: %v", err))
-		} else if len(models) > 0 {
-			clitheme.Muted(stdout, "installed models: "+strings.Join(models, ", "))
+			models = nil
 		}
-		if draft.AI.PrimaryModel, err = p.ask("Primary model", draft.AI.PrimaryModel); err != nil {
+		if draft.AI.PrimaryModel, err = p.askModelChoice("Primary model", models, draft.AI.PrimaryModel, false); err != nil {
 			return err
 		}
-		if draft.AI.FallbackModel, err = p.ask("Fallback model (empty for none)", draft.AI.FallbackModel); err != nil {
+		if draft.AI.FallbackModel, err = p.askModelChoice("Fallback model", models, draft.AI.FallbackModel, true); err != nil {
 			return err
 		}
 	}
 
 	clitheme.Section(stdout, "Runtime behavior")
-	if draft.Runtime.ScanFrequency, err = p.ask("Library scan frequency", firstNonEmpty(draft.Runtime.ScanFrequency, "5m")); err != nil {
+	clitheme.Muted(stdout, "Watch folders are monitored live. Scan frequency is a periodic catch-up for")
+	clitheme.Muted(stdout, "anything the watcher missed (default 5m is fine for most libraries).")
+	clitheme.Muted(stdout, "Move deletes the download after a successful import; copy keeps the source.")
+	clitheme.Muted(stdout, "Checksums add an integrity check after each transfer (slower; off by default).")
+	if draft.Runtime.ScanFrequency, err = p.askScanFrequency(firstNonEmpty(draft.Runtime.ScanFrequency, "5m")); err != nil {
 		return err
 	}
 	if draft.Runtime.DeleteSource, err = p.askBool("Move files (delete the source after import)?", draft.Runtime.DeleteSource); err != nil {
@@ -350,19 +575,44 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		clitheme.Muted(stdout, fmt.Sprintf("Container runtime detected (uid %d, gid %d): ownership is controlled by PUID/PGID.", deps.runtime.UID, deps.runtime.GID))
 		draft.Runtime.Permissions = config.PermissionsConfig{}
 	} else {
-		if draft.Runtime.Permissions.User, err = p.ask("Chown moved files to user (empty to skip)", draft.Runtime.Permissions.User); err != nil {
+		// Same model as the TUI installer: group is what Sonarr/Radarr/Jellyfin
+		// need for upgrades/deletes; user may stay empty (daemon/root owns).
+		defs := deps.permDefaults()
+		if ms := setupdomain.DetectedMediaServerName(); ms != "" {
+			clitheme.Muted(stdout, fmt.Sprintf("Detected media server user/group defaults from %s.", ms))
+		}
+		clitheme.Muted(stdout, "Group is the critical setting: Sonarr, Radarr, and Jellyfin need a shared")
+		clitheme.Muted(stdout, "group (and group-writable modes) to rename/upgrade/delete after import.")
+		clitheme.Muted(stdout, "User may be blank (daemon/root owns) or your media server user.")
+		clitheme.Muted(stdout, "Recommended: group=media (or jellyfin), file_mode=0664, dir_mode=0775.")
+		clitheme.Muted(stdout, "Full guide: https://github.com/Nomadcxx/plex2jellyfin/blob/main/docs/permissions.md")
+		for {
+			draft.Runtime.Permissions.User, err = p.ask("Owner username (blank = leave owner as-is)", firstNonEmpty(draft.Runtime.Permissions.User, defs.User))
+			if err != nil {
+				return err
+			}
+			u := strings.ToLower(strings.TrimSpace(draft.Runtime.Permissions.User))
+			if u == "y" || u == "n" || u == "yes" || u == "no" {
+				fmt.Fprintln(stdout, "  that looks like a yes/no answer — enter a username (e.g. jellyfin), or leave blank")
+				draft.Runtime.Permissions.User = ""
+				continue
+			}
+			break
+		}
+		if draft.Runtime.Permissions.Group, err = p.ask("Owner group (shared group for multi-app access)", firstNonEmpty(draft.Runtime.Permissions.Group, defs.Group)); err != nil {
 			return err
 		}
-		if draft.Runtime.Permissions.User != "" {
-			if draft.Runtime.Permissions.Group, err = p.ask("Group", firstNonEmpty(draft.Runtime.Permissions.Group, draft.Runtime.Permissions.User)); err != nil {
-				return err
+		if g := draft.Runtime.Permissions.Group; g != "" {
+			if who := setupdomain.ActualUsername(); who != "" && !setupdomain.UserInGroup(who, g) {
+				clitheme.Warn(stdout, fmt.Sprintf("%s is not in group %q — CLI deletes/renames may fail", who, g))
+				clitheme.Muted(stdout, fmt.Sprintf("Fix: sudo usermod -aG %s %s  (then re-login)", g, who))
 			}
-			if draft.Runtime.Permissions.FileMode, err = p.ask("File mode", firstNonEmpty(draft.Runtime.Permissions.FileMode, "0644")); err != nil {
-				return err
-			}
-			if draft.Runtime.Permissions.DirMode, err = p.ask("Directory mode", firstNonEmpty(draft.Runtime.Permissions.DirMode, "0755")); err != nil {
-				return err
-			}
+		}
+		if draft.Runtime.Permissions.FileMode, err = p.askOctalMode("File mode", firstNonEmpty(draft.Runtime.Permissions.FileMode, defs.FileMode)); err != nil {
+			return err
+		}
+		if draft.Runtime.Permissions.DirMode, err = p.askOctalMode("Directory mode", firstNonEmpty(draft.Runtime.Permissions.DirMode, defs.DirMode)); err != nil {
+			return err
 		}
 	}
 
@@ -419,6 +669,33 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		return fmt.Errorf("mark setup complete: %w", err)
 	}
 
+	// Start Web UI before the Jellyfin feedback-loop verify (webhook hits :5522).
+	webStarted := false
+	if deps.runtime.Kind == setupdomain.RuntimeContainer {
+		clitheme.Muted(stdout, "Container runtime: start the web UI container/service yourself if you need :5522.")
+	} else if deps.webUnitOK != nil && !deps.webUnitOK() {
+		clitheme.Warn(stdout, "plex2jellyfin-web systemd unit not installed; skipping Web UI start")
+		clitheme.Muted(stdout, "Install via the TUI installer, then: sudo systemctl enable --now plex2jellyfin-web")
+	} else {
+		clitheme.Muted(stdout, "The Web UI serves the dashboard and Jellyfin webhook receiver on :5522.")
+		startWeb, err := p.askBool("Enable and start the Web UI now?", true)
+		if err != nil {
+			return err
+		}
+		if startWeb {
+			fmt.Fprintln(stdout, "Starting Web UI…")
+			if err := deps.activateWeb(); err != nil {
+				clitheme.Warn(stdout, fmt.Sprintf("Web UI start failed: %v", err))
+				printWebServiceSkipHints(stdout)
+			} else {
+				webStarted = true
+				clitheme.OK(stdout, "Web UI enabled and started")
+			}
+		} else {
+			printWebServiceSkipHints(stdout)
+		}
+	}
+
 	if pluginState.loaded {
 		clitheme.Section(stdout, "Feedback loop")
 		if deps.runtime.Kind == setupdomain.RuntimeContainer {
@@ -443,8 +720,20 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		clitheme.Muted(stdout, "Companion plugin not installed - run: plex2jellyfin plugin install")
 	}
 
-	clitheme.OK(stdout, "Setup complete. The daemon is running.")
-	clitheme.Muted(stdout, "Next: open the web UI on :5522, or run 'plex2jellyfin scan' to index an existing library.")
+	// Always index libraries at finish (TUI installer parity), then chown.
+	if deps.initialScan != nil {
+		if err := deps.initialScan(ctx, stdout, draft); err != nil {
+			clitheme.Warn(stdout, fmt.Sprintf("Initial scan failed: %v", err))
+			clitheme.Muted(stdout, "Re-run later with: plex2jellyfin scan")
+		}
+	}
+
+	if webStarted {
+		clitheme.OK(stdout, "Setup complete. Daemon and Web UI are running.")
+		clitheme.Muted(stdout, "Open the web UI on :5522 when you are ready.")
+	} else {
+		clitheme.OK(stdout, "Setup complete. The daemon is running.")
+	}
 	return nil
 }
 
@@ -622,8 +911,19 @@ func printDraftSummary(out io.Writer, d setupdomain.Draft) {
 	} else {
 		line("Transfer mode", "copy")
 	}
-	if d.Runtime.Permissions.User != "" {
-		line("Ownership", d.Runtime.Permissions.User+":"+d.Runtime.Permissions.Group)
+	if d.Runtime.Permissions.WantsOwnership() || d.Runtime.Permissions.WantsMode() {
+		owner := d.Runtime.Permissions.User
+		if owner == "" {
+			owner = "(unchanged)"
+		}
+		group := d.Runtime.Permissions.Group
+		if group == "" {
+			group = "(unchanged)"
+		}
+		line("Ownership", owner+":"+group)
+		if d.Runtime.Permissions.FileMode != "" || d.Runtime.Permissions.DirMode != "" {
+			line("Modes", firstNonEmpty(d.Runtime.Permissions.FileMode, "-")+" files / "+firstNonEmpty(d.Runtime.Permissions.DirMode, "-")+" dirs")
+		}
 	}
 }
 

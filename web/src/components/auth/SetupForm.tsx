@@ -42,16 +42,17 @@ export function SetupForm() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen p-4">
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <div className="flex items-center justify-center mb-4">
+          <div className="mb-4 flex items-center justify-center">
             <Image
-              src="/plex2jellyfin_brand.png"
+              src="/p2j-mark.png"
               alt="Plex2Jellyfin"
-              width={80}
-              height={80}
-              className="rounded"
+              width={200}
+              height={72}
+              priority
+              className="h-auto w-[180px]"
             />
           </div>
           <CardTitle className="text-2xl text-center">Secure your dashboard</CardTitle>

@@ -46,6 +46,7 @@ type ScanResult struct {
 type ScanProgress struct {
 	FilesScanned   int
 	CurrentPath    string
+	Library        string // library root currently being scanned (empty when finished)
 	LibrariesDone  int
 	LibrariesTotal int
 }
@@ -128,12 +129,14 @@ func (s *FileScanner) ScanWithOptions(ctx context.Context, opts ScanOptions) (*S
 
 	totalLibs := len(opts.TVLibraries) + len(opts.MovieLibraries)
 	libsDone := 0
+	currentLib := ""
 
 	progressFn := func(currentPath string, filesScanned int) {
 		if opts.OnProgress != nil {
 			opts.OnProgress(ScanProgress{
 				FilesScanned:   filesScanned,
 				CurrentPath:    currentPath,
+				Library:        currentLib,
 				LibrariesDone:  libsDone,
 				LibrariesTotal: totalLibs,
 			})
@@ -142,11 +145,13 @@ func (s *FileScanner) ScanWithOptions(ctx context.Context, opts ScanOptions) (*S
 
 	// Scan TV libraries
 	for _, lib := range opts.TVLibraries {
+		currentLib = lib
 		// Send initial progress for this library
 		if opts.OnProgress != nil {
 			opts.OnProgress(ScanProgress{
 				FilesScanned:   result.FilesScanned,
 				CurrentPath:    lib,
+				Library:        lib,
 				LibrariesDone:  libsDone,
 				LibrariesTotal: totalLibs,
 			})
@@ -159,11 +164,13 @@ func (s *FileScanner) ScanWithOptions(ctx context.Context, opts ScanOptions) (*S
 
 	// Scan movie libraries
 	for _, lib := range opts.MovieLibraries {
+		currentLib = lib
 		// Send initial progress for this library
 		if opts.OnProgress != nil {
 			opts.OnProgress(ScanProgress{
 				FilesScanned:   result.FilesScanned,
 				CurrentPath:    lib,
+				Library:        lib,
 				LibrariesDone:  libsDone,
 				LibrariesTotal: totalLibs,
 			})
@@ -174,11 +181,13 @@ func (s *FileScanner) ScanWithOptions(ctx context.Context, opts ScanOptions) (*S
 		libsDone++
 	}
 
+	currentLib = ""
 	// Final progress update
 	if opts.OnProgress != nil {
 		opts.OnProgress(ScanProgress{
 			FilesScanned:   result.FilesScanned,
 			CurrentPath:    "",
+			Library:        "",
 			LibrariesDone:  totalLibs,
 			LibrariesTotal: totalLibs,
 		})
