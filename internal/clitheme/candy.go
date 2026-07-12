@@ -7,10 +7,14 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"charm.land/lipgloss/v2"
 )
 
 // CandyBar renders an ILoveCandy-style pacman progress bar (pct in [0,1]).
 // Eaten trail = '-', pacman = 'C', remaining pellets = 'o'.
+// Uses the same Plex-yellow lipgloss palette as FangScheme (Fang itself only
+// styles Cobra help/errors; progress chrome shares the brand colors).
 func CandyBar(pct float64, width int) string {
 	if width < 4 {
 		width = 4
@@ -21,33 +25,33 @@ func CandyBar(pct float64, width int) string {
 	if pct > 1 {
 		pct = 1
 	}
-	var b strings.Builder
-	b.Grow(width + 2)
-	b.WriteByte('[')
+
+	trail := lipgloss.NewStyle().Foreground(mutedColor)
+	pacman := lipgloss.NewStyle().Bold(true).Foreground(PlexYellow)
+	pellet := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	bracket := lipgloss.NewStyle().Foreground(PlexYellow)
+
+	var inner strings.Builder
+	inner.Grow(width * 8)
 	if pct <= 0 {
-		b.WriteString(strings.Repeat("o", width))
-		b.WriteByte(']')
-		return b.String()
-	}
-	if pct >= 1 {
-		b.WriteString(strings.Repeat("-", width-1))
-		b.WriteByte('C')
-		b.WriteByte(']')
-		return b.String()
-	}
-	pos := int(pct * float64(width-1))
-	for i := 0; i < width; i++ {
-		switch {
-		case i < pos:
-			b.WriteByte('-')
-		case i == pos:
-			b.WriteByte('C')
-		default:
-			b.WriteByte('o')
+		inner.WriteString(pellet.Render(strings.Repeat("o", width)))
+	} else if pct >= 1 {
+		inner.WriteString(trail.Render(strings.Repeat("-", width-1)))
+		inner.WriteString(pacman.Render("C"))
+	} else {
+		pos := int(pct * float64(width-1))
+		for i := 0; i < width; i++ {
+			switch {
+			case i < pos:
+				inner.WriteString(trail.Render("-"))
+			case i == pos:
+				inner.WriteString(pacman.Render("C"))
+			default:
+				inner.WriteString(pellet.Render("o"))
+			}
 		}
 	}
-	b.WriteByte(']')
-	return b.String()
+	return bracket.Render("[") + inner.String() + bracket.Render("]")
 }
 
 // SoftCandyPct maps an unbounded counter (files seen in the active library)
@@ -58,6 +62,22 @@ func SoftCandyPct(n int) float64 {
 	}
 	// Asymptotic toward ~0.92 until the library is marked done.
 	return 1 - 1/((float64(n)/40)+1.05)
+}
+
+// LibraryLabel turns /mnt/STORAGE1/TVSHOWS into STORAGE1/TVSHOWS so sibling
+// mounts with the same leaf name stay distinguishable in the candy UI.
+func LibraryLabel(path string, max int) string {
+	path = strings.TrimRight(filepath.Clean(path), "/")
+	if path == "" || path == "." {
+		return truncateRunes("?", max)
+	}
+	base := filepath.Base(path)
+	parent := filepath.Base(filepath.Dir(path))
+	label := base
+	if parent != "" && parent != "." && parent != "/" && parent != string(filepath.Separator) {
+		label = parent + "/" + base
+	}
+	return truncateRunes(label, max)
 }
 
 // LibraryCandyUI draws one ILoveCandy bar per library and redraws in place.
@@ -131,30 +151,39 @@ func (u *LibraryCandyUI) redraw(active, filesScanned int) {
 		fmt.Fprintf(u.Out, "\033[%dA", u.lines)
 	}
 
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#d4d4d4"))
+	activeLabel := lipgloss.NewStyle().Bold(true).Foreground(PlexYellow)
+	doneLabel := lipgloss.NewStyle().Foreground(successColor)
+	queuedStatus := mutedStyle()
+	scanStatus := lipgloss.NewStyle().Foreground(PlexYellow)
+	doneStatus := successStyle()
+	totalStyle := mutedStyle()
+
+	const labelWidth = 28
 	lines := 0
 	for i, lib := range u.Libs {
-		label := filepath.Base(strings.TrimSuffix(lib, "/"))
-		if label == "" {
-			label = lib
-		}
-		label = truncateRunes(label, 26)
+		label := LibraryLabel(lib, labelWidth)
+		label = padRight(label, labelWidth)
 
-		var bar, status string
+		var bar, status, row string
 		switch {
 		case u.done[i] || active >= len(u.Libs):
 			bar = CandyBar(1, u.Width)
-			status = fmt.Sprintf("%d files", u.files[i])
+			status = doneStatus.Render(fmt.Sprintf("%d files", u.files[i]))
+			row = doneLabel.Render(label) + " " + bar + "  " + status
 		case i == active:
 			bar = CandyBar(SoftCandyPct(u.files[i]), u.Width)
-			status = "scanning"
+			status = scanStatus.Render("scanning")
+			row = activeLabel.Render(label) + " " + bar + "  " + status
 		default:
 			bar = CandyBar(0, u.Width)
-			status = "queued"
+			status = queuedStatus.Render("queued")
+			row = labelStyle.Render(label) + " " + bar + "  " + status
 		}
-		fmt.Fprintf(u.Out, "  %s %s  %s\033[K\n", padRight(label, 26), bar, status)
+		fmt.Fprintf(u.Out, "  %s\033[K\n", row)
 		lines++
 	}
-	fmt.Fprintf(u.Out, "  total files indexed: %d\033[K\n", filesScanned)
+	fmt.Fprintf(u.Out, "  %s\033[K\n", totalStyle.Render(fmt.Sprintf("total files indexed: %d", filesScanned)))
 	lines++
 
 	u.lines = lines
@@ -170,6 +199,9 @@ func padRight(s string, width int) string {
 }
 
 func truncateRunes(s string, max int) string {
+	if max < 2 {
+		max = 2
+	}
 	if utf8.RuneCountInString(s) <= max {
 		return s
 	}

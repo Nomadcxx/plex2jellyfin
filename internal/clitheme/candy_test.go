@@ -1,19 +1,33 @@
 package clitheme
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCandyBarEndpoints(t *testing.T) {
 	empty := CandyBar(0, 10)
-	if empty != "[oooooooooo]" {
+	if !strings.Contains(empty, "oooooooooo") {
 		t.Fatalf("queued bar should be all pellets: %q", empty)
 	}
 	full := CandyBar(1, 10)
-	if full[len(full)-2] != 'C' {
-		t.Fatalf("pacman should finish at right: %q", full)
+	if !strings.Contains(full, "C") || !strings.Contains(full, "---------") {
+		t.Fatalf("pacman should finish at right with trail: %q", full)
 	}
 	mid := CandyBar(0.5, 10)
-	if !containsByte(mid, 'C') || !containsByte(mid, 'o') || !containsByte(mid, '-') {
+	if !strings.Contains(mid, "C") || !strings.Contains(mid, "o") || !strings.Contains(mid, "-") {
 		t.Fatalf("mid bar should have trail/pacman/pellets: %q", mid)
+	}
+}
+
+func TestLibraryLabelDistinguishesSiblingMounts(t *testing.T) {
+	a := LibraryLabel("/mnt/STORAGE1/TVSHOWS", 28)
+	b := LibraryLabel("/mnt/STORAGE2/TVSHOWS", 28)
+	if a != "STORAGE1/TVSHOWS" || b != "STORAGE2/TVSHOWS" {
+		t.Fatalf("got %q / %q", a, b)
+	}
+	if a == b {
+		t.Fatal("sibling mounts must not share the same label")
 	}
 }
 
@@ -29,13 +43,4 @@ func TestSoftCandyPctMonotonic(t *testing.T) {
 		}
 		prev = got
 	}
-}
-
-func containsByte(s string, b byte) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return true
-		}
-	}
-	return false
 }

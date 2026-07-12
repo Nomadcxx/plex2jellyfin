@@ -664,6 +664,15 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		return errors.New("daemon activation failed")
 	}
 
+	// Index libraries immediately after activate (before interactive web/plugin
+	// prompts) so Ctrl+C on feedback-loop cannot skip the TUI-parity scan.
+	if deps.initialScan != nil {
+		if err := deps.initialScan(ctx, stdout, draft); err != nil {
+			clitheme.Warn(stdout, fmt.Sprintf("Initial scan failed: %v", err))
+			clitheme.Muted(stdout, "Re-run later with: plex2jellyfin scan")
+		}
+	}
+
 	candidate.Setup.Completed = true
 	if err := candidate.Save(); err != nil {
 		return fmt.Errorf("mark setup complete: %w", err)
@@ -718,14 +727,6 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		clitheme.Muted(stdout, "Companion plugin: restart Jellyfin, then run: plex2jellyfin plugin verify")
 	} else if candidate.Jellyfin.Enabled && pluginState.skipped != "" && pluginState.skipped != "jellyfin disabled" {
 		clitheme.Muted(stdout, "Companion plugin not installed - run: plex2jellyfin plugin install")
-	}
-
-	// Always index libraries at finish (TUI installer parity), then chown.
-	if deps.initialScan != nil {
-		if err := deps.initialScan(ctx, stdout, draft); err != nil {
-			clitheme.Warn(stdout, fmt.Sprintf("Initial scan failed: %v", err))
-			clitheme.Muted(stdout, "Re-run later with: plex2jellyfin scan")
-		}
 	}
 
 	if webStarted {

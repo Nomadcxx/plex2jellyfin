@@ -39,7 +39,6 @@ import {
   testSettingsConnection,
 } from '@/lib/api/client';
 import { useAIModels, useTestAIConnection, useTestAIPrompt } from '@/hooks/useSettings';
-import { useStartScan } from '@/hooks/useScan';
 import { SetupDraft, SetupStatus, setupKeys, useApplySetup } from '@/hooks/useSetup';
 import {
   emptyChecks,
@@ -77,8 +76,8 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
   const [testingService, setTestingService] = useState<ServiceName | null>(null);
   const [fixTarget, setFixTarget] = useState<'sonarr' | 'radarr' | null>(null);
   const [applied, setApplied] = useState(false);
+  const [scanWarning, setScanWarning] = useState('');
   const apply = useApplySetup();
-  const startScan = useStartScan();
   const router = useRouter();
   const queryClient = useQueryClient();
   const current = steps[stepIndex];
@@ -134,7 +133,7 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
   };
 
   if (applied) {
-    return <SetupComplete scanning={startScan.isPending} onDashboard={finish} onScan={async () => { await startScan.mutateAsync(); finish(); }} />;
+    return <SetupComplete scanWarning={scanWarning} onDashboard={finish} />;
   }
 
   return (
@@ -227,13 +226,17 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
                       if (result.plugin_warning) {
                         toast.warning(result.plugin_warning);
                       }
+                      if (result.scan_warning) {
+                        setScanWarning(result.scan_warning);
+                        toast.warning(result.scan_warning);
+                      }
                     },
                   });
                 }}
                 disabled={apply.isPending}
               >
                 {apply.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                Apply and start
+                {apply.isPending ? 'Applying and indexing…' : 'Apply and start'}
               </Button>
             ) : (
               <Button onClick={next}>Continue<ArrowRight className="h-4 w-4" /></Button>
@@ -523,8 +526,28 @@ function ReviewStep({ draft, runtime }: { draft: SetupDraft; runtime: RuntimeKin
   return <dl className="divide-y divide-zinc-800 border-y border-zinc-800">{rows.map(([term, value]) => <div key={term} className="grid gap-1 py-4 sm:grid-cols-[12rem_1fr]"><dt className="font-mono text-sm text-zinc-500">{term}</dt><dd className="min-w-0 break-words text-sm text-zinc-200">{value}</dd></div>)}</dl>;
 }
 
-function SetupComplete({ scanning, onDashboard, onScan }: { scanning: boolean; onDashboard: () => void; onScan: () => void }) {
-  return <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-6 text-zinc-100"><div className="w-full max-w-xl border-y border-zinc-800 py-10 text-center"><CheckCircle2 className="mx-auto h-10 w-10 text-green-400" /><Image src="/p2j-mark.png" alt="P2J" width={150} height={58} className="mx-auto mt-6 h-auto w-[140px]" /><h1 className="mt-6 text-2xl font-semibold">Setup complete</h1><p className="mt-2 text-sm text-zinc-400">The daemon is running with the applied configuration.</p><div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row"><Button variant="outline" onClick={onDashboard}>Open dashboard<ArrowRight className="h-4 w-4" /></Button><Button onClick={onScan} disabled={scanning}>{scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Start initial scan</Button></div></div></div>;
+function SetupComplete({ scanWarning, onDashboard }: { scanWarning?: string; onDashboard: () => void }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-6 text-zinc-100">
+      <div className="w-full max-w-xl border-y border-zinc-800 py-10 text-center">
+        <CheckCircle2 className="mx-auto h-10 w-10 text-green-400" />
+        <Image src="/p2j-mark.png" alt="P2J" width={150} height={58} className="mx-auto mt-6 h-auto w-[140px]" />
+        <h1 className="mt-6 text-2xl font-semibold">Setup complete</h1>
+        <p className="mt-2 text-sm text-zinc-400">
+          The daemon is running and libraries were indexed (same finish path as the CLI/TUI installer).
+        </p>
+        {scanWarning ? (
+          <p className="mx-auto mt-4 max-w-md text-sm text-amber-300/90">{scanWarning}</p>
+        ) : null}
+        <div className="mt-7 flex justify-center">
+          <Button onClick={onDashboard}>
+            Open dashboard
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ToggleRow({ label: text, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {

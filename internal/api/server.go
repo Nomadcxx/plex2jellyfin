@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
+	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -39,6 +41,9 @@ type Server struct {
 	launcher          DaemonLauncher
 	setupPollInterval time.Duration
 	setupTimeout      time.Duration
+	// Optional hooks for tests; nil uses production index/chown helpers.
+	setupIndexLibraries func(ctx context.Context, draft setupdomain.Draft) error
+	setupChownConfig    func(user, group string) error
 }
 
 // NewServer creates a new API server

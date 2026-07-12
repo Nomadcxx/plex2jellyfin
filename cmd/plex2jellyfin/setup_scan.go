@@ -4,14 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/clitheme"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
-	"github.com/Nomadcxx/plex2jellyfin/internal/privilege"
 	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 )
@@ -24,7 +21,7 @@ func runSetupInitialScan(ctx context.Context, stdout io.Writer, draft setupdomai
 	libs := append(append([]string{}, tv...), movies...)
 	if len(libs) == 0 {
 		clitheme.Muted(stdout, "No library paths configured — skipping initial scan.")
-		return chownConfigDirCLI(draft.Runtime.Permissions.User, draft.Runtime.Permissions.Group)
+		return paths.ChownConfigDir(draft.Runtime.Permissions.User, draft.Runtime.Permissions.Group)
 	}
 
 	clitheme.Section(stdout, "Initial library scan")
@@ -51,7 +48,7 @@ func runSetupInitialScan(ctx context.Context, stdout io.Writer, draft setupdomai
 	})
 
 	// TUI order: chown even when the scan fails (DB artifacts already exist).
-	if err := chownConfigDirCLI(draft.Runtime.Permissions.User, draft.Runtime.Permissions.Group); err != nil {
+	if err := paths.ChownConfigDir(draft.Runtime.Permissions.User, draft.Runtime.Permissions.Group); err != nil {
 		clitheme.Warn(stdout, fmt.Sprintf("could not fix config-dir ownership: %v", err))
 		clitheme.Muted(stdout, "Fix with: sudo chown -R \"$USER:$USER\" ~/.config/plex2jellyfin")
 	}
@@ -72,42 +69,6 @@ func runSetupInitialScan(ctx context.Context, stdout io.Writer, draft setupdomai
 	clitheme.Muted(stdout, fmt.Sprintf("  episode rows: %d   movie rows: %d", tvCount, movieCount))
 	if len(result.Errors) > 0 {
 		clitheme.Warn(stdout, fmt.Sprintf("%d path errors during indexing (see logs)", len(result.Errors)))
-	}
-	return nil
-}
-
-// chownConfigDirCLI hands ~/.config/plex2jellyfin to the interactive user
-// (and optional shared group), matching the TUI installer post-scan step.
-func chownConfigDirCLI(ownerUser, ownerGroup string) error {
-	dir, err := paths.Plex2JellyfinDir()
-	if err != nil {
-		return err
-	}
-	who := ownerUser
-	if who == "" {
-		who = paths.ActualUser()
-	}
-	if who == "" || who == "root" || who == "unknown" {
-		return nil
-	}
-	group := ownerGroup
-	if group == "" {
-		group = who
-	}
-	args := []string{"chown", "-R", who + ":" + group, dir}
-	var cmd *exec.Cmd
-	if privilege.NeedsRoot() {
-		cmd = exec.Command("sudo", args...)
-	} else {
-		cmd = exec.Command(args[0], args[1:]...)
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg != "" {
-			return fmt.Errorf("%w: %s", err, msg)
-		}
-		return err
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -257,6 +258,103 @@ func TestApplySetupActivationFailureLeavesIncompleteMarker(t *testing.T) {
 	}
 	if loaded.Setup.Version != setupdomain.CurrentVersion || loaded.Setup.Completed {
 		t.Fatalf("activation failure should remain incomplete: %+v", loaded.Setup)
+	}
+}
+
+func TestApplySetupIndexesLibrariesThenChowns(t *testing.T) {
+	setupTestHome(t)
+	cfg := config.DefaultConfig()
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(nil, cfg)
+	s.ipc = &setupTestIPC{}
+	s.launcher = &setupTestLauncher{}
+	s.setupPollInterval = time.Millisecond
+	s.setupTimeout = 50 * time.Millisecond
+
+	var indexed, chowned bool
+	var gotUser, gotGroup string
+	s.setupIndexLibraries = func(_ context.Context, d setupdomain.Draft) error {
+		indexed = true
+		if len(d.Libraries.TV) == 0 {
+			t.Fatal("index called without library paths")
+		}
+		return nil
+	}
+	s.setupChownConfig = func(user, group string) error {
+		chowned = true
+		gotUser, gotGroup = user, group
+		return nil
+	}
+
+	draft := validSetupDraft(t.TempDir(), t.TempDir())
+	draft.Runtime.Permissions.User = "nomadx"
+	draft.Runtime.Permissions.Group = "media"
+
+	w := applySetupRequest(t, s, draft)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if !indexed {
+		t.Fatal("expected library index after daemon activate")
+	}
+	if !chowned {
+		t.Fatal("expected config-dir chown after index")
+	}
+	if gotUser != "nomadx" || gotGroup != "media" {
+		t.Fatalf("chown args = %q:%q, want nomadx:media", gotUser, gotGroup)
+	}
+	var resp setupApplyResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Complete || resp.ScanWarning != "" {
+		t.Fatalf("response = %+v", resp)
+	}
+}
+
+func TestApplySetupChownsEvenWhenIndexFails(t *testing.T) {
+	setupTestHome(t)
+	cfg := config.DefaultConfig()
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(nil, cfg)
+	s.ipc = &setupTestIPC{}
+	s.launcher = &setupTestLauncher{}
+	s.setupPollInterval = time.Millisecond
+	s.setupTimeout = 50 * time.Millisecond
+
+	var chowned bool
+	s.setupIndexLibraries = func(context.Context, setupdomain.Draft) error {
+		return errors.New("scan boom")
+	}
+	s.setupChownConfig = func(string, string) error {
+		chowned = true
+		return nil
+	}
+
+	w := applySetupRequest(t, s, validSetupDraft(t.TempDir(), t.TempDir()))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if !chowned {
+		t.Fatal("chown must run even when index fails")
+	}
+	var resp setupApplyResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Complete || !strings.Contains(resp.ScanWarning, "scan boom") {
+		t.Fatalf("expected scan_warning, got %+v", resp)
+	}
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Setup.Completed {
+		t.Fatal("setup must still complete when index soft-fails")
 	}
 }
 

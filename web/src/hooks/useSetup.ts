@@ -22,6 +22,12 @@ export function useSetupStatus(enabled = true) {
 export function useApplySetup() {
   return useMutation({
     mutationFn: (draft: SetupDraft) =>
-      api.post<{ applied: boolean; complete: boolean; daemon_state: string; plugin_warning?: string }>('/setup/apply', draft),
+      api.post<{
+        applied: boolean;
+        complete: boolean;
+        daemon_state: string;
+        plugin_warning?: string;
+        scan_warning?: string;
+      }>('/setup/apply', draft),
   });
 }

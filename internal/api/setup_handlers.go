@@ -11,7 +11,10 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin/plugininstall"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 )
 
@@ -30,6 +33,7 @@ type setupApplyResponse struct {
 	Complete      bool   `json:"complete"`
 	DaemonState   string `json:"daemon_state"`
 	PluginWarning string `json:"plugin_warning,omitempty"`
+	ScanWarning   string `json:"scan_warning,omitempty"`
 }
 
 func (s *Server) GetSetupStatus(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +121,17 @@ func (s *Server) ApplySetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// TUI/CLI parity: index libraries then chown config dir (chown even if scan fails).
+	scanWarning := ""
+	if err := s.indexLibrariesAfterSetup(r.Context(), draft); err != nil {
+		scanWarning = "initial library scan failed: " + err.Error()
+	}
+	if err := s.chownConfigAfterSetup(draft); err != nil && scanWarning == "" {
+		scanWarning = "config ownership fix failed: " + err.Error()
+	} else if err != nil {
+		scanWarning += "; config ownership fix failed: " + err.Error()
+	}
+
 	candidate.Setup.Completed = true
 	if err := candidate.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, "config_save_error", err.Error())
@@ -124,7 +139,8 @@ func (s *Server) ApplySetup(w http.ResponseWriter, r *http.Request) {
 	}
 	s.replaceConfigLocked(candidate)
 	writeJSON(w, http.StatusOK, setupApplyResponse{
-		Applied: true, Complete: true, DaemonState: "running", PluginWarning: pluginWarning,
+		Applied: true, Complete: true, DaemonState: "running",
+		PluginWarning: pluginWarning, ScanWarning: scanWarning,
 	})
 }
 
@@ -275,4 +291,40 @@ func (s *Server) setupCompanionPlugin(ctx context.Context, cfg *config.Config, d
 // HTTP layer (the CLI wizard shares it).
 func ValidateSetupPaths(draft setupdomain.Draft) []setupdomain.FieldError {
 	return validateSetupPaths(draft)
+}
+
+func (s *Server) indexLibrariesAfterSetup(ctx context.Context, draft setupdomain.Draft) error {
+	if s.setupIndexLibraries != nil {
+		return s.setupIndexLibraries(ctx, draft)
+	}
+	return defaultSetupIndexLibraries(ctx, draft)
+}
+
+func (s *Server) chownConfigAfterSetup(draft setupdomain.Draft) error {
+	user := draft.Runtime.Permissions.User
+	group := draft.Runtime.Permissions.Group
+	if s.setupChownConfig != nil {
+		return s.setupChownConfig(user, group)
+	}
+	return paths.ChownConfigDir(user, group)
+}
+
+// defaultSetupIndexLibraries walks configured library roots into media.db —
+// the same job as CLI/TUI initial scan (not the duplicates POST /scan).
+func defaultSetupIndexLibraries(ctx context.Context, draft setupdomain.Draft) error {
+	tv := draft.Libraries.TV
+	movies := draft.Libraries.Movies
+	if len(tv)+len(movies) == 0 {
+		return nil
+	}
+	db, err := database.Open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = scanner.NewFileScanner(db).ScanWithOptions(ctx, scanner.ScanOptions{
+		TVLibraries:    tv,
+		MovieLibraries: movies,
+	})
+	return err
 }
