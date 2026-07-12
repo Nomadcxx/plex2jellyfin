@@ -274,9 +274,11 @@ dir_mode  = "0755"
 ### Dashboard
 
 <p align="center">
-  <video src="assets/showcase.mp4" controls width="800" poster="assets/showcase-poster.png">
-    <a href="assets/showcase.mp4">Watch the showcase video</a>
-  </video>
+  <a href="assets/showcase.mp4">
+    <img src="assets/showcase-poster.png" alt="Dashboard showcase — click for MP4" width="800" />
+  </a>
+  <br />
+  <sub><a href="assets/showcase.mp4">Play showcase video (MP4)</a></sub>
 </p>
 
 <p align="center">
@@ -292,9 +294,9 @@ dir_mode  = "0755"
 ### TUI installer
 
 <p align="center">
-  <video src="assets/tui-installer.mp4" controls width="960" poster="assets/tui-installer-poster.png">
-    <a href="assets/tui-installer.mp4">Watch the TUI installer</a>
-  </video>
+  <img src="assets/tui-installer.gif" alt="TUI installer" width="960" />
+  <br />
+  <sub><a href="assets/tui-installer.mp4">Higher-quality MP4</a></sub>
 </p>
 
 ### CLI setup and scan

@@ -64,12 +64,13 @@ asciinema rec "$OUT/tui-installer.cast" \
   --command "python3 $ROOT/scripts/showcase/drive_tui.py"
 render_gif "$OUT/tui-installer.cast" "$OUT/tui-installer-master.gif"
 gif_to_mp4 "$OUT/tui-installer-master.gif" "$ASSETS/tui-installer.mp4"
-# Poster for README <video>
+# README needs a GIF — GitHub strips relative <video> tags
+cp -f "$OUT/tui-installer-master.gif" "$ASSETS/tui-installer.gif"
+# Poster for links / MP4 pages
 ffmpeg -y -ss 2 -i "$ASSETS/tui-installer.mp4" -frames:v 1 -update 1 \
   "$ASSETS/tui-installer-poster.png" 2>/dev/null || \
 ffmpeg -y -i "$ASSETS/tui-installer.mp4" -frames:v 1 -update 1 \
   "$ASSETS/tui-installer-poster.png"
-rm -f "$ASSETS/tui-installer.gif"
 
 echo "== CLI setup + scan (GIF) =="
 export SHOWCASE_HOME=/tmp/p2j
@@ -85,4 +86,4 @@ asciinema rec "$OUT/cli-setup-scan.cast" \
 render_gif "$OUT/cli-setup-scan.cast" "$ASSETS/cli-setup-scan.gif"
 
 echo "Done."
-ls -lh "$ASSETS"/tui-installer.mp4 "$ASSETS"/tui-installer-poster.png "$ASSETS"/cli-setup-scan.gif
+ls -lh "$ASSETS"/tui-installer.gif "$ASSETS"/tui-installer.mp4 "$ASSETS"/tui-installer-poster.png "$ASSETS"/cli-setup-scan.gif
