@@ -11,33 +11,35 @@ const stages = [
 ] as const;
 
 const links = [
-  ['Installation', 'Script, packages, and source builds', '/docs/getting-started/installation'],
+  ['Installation', 'TUI, scripts, packages, and source builds', '/docs/getting-started/installation'],
+  ['Setup wizards', 'Web, CLI, and TUI first-run flow', '/docs/getting-started/setup-wizards'],
   ['Docker', 'Container paths, ownership, and startup', '/docs/getting-started/docker'],
   ['Configuration', 'Complete config.toml reference', '/docs/reference/configuration'],
   ['CLI Reference', 'Migration, repair, and control commands', '/docs/reference/cli'],
+  ['Architecture', 'Binaries, daemon, web, and plugin loop', '/docs/reference/architecture'],
   ['Troubleshooting', 'Permissions, mappings, parsing, and services', '/docs/troubleshooting'],
 ] as const;
 
 const installOptions = [
   [
-    'Guided installer',
-    'Interactive Linux setup for paths, permissions, services, integrations, and the initial scan.',
-    '/docs/getting-started/installation#quick-install',
+    'TUI installer',
+    'Interactive terminal setup for paths, permissions, services, and the initial scan.',
+    '/docs/getting-started/installation#option-a--tui-installer',
+  ],
+  [
+    'CLI / web scripts',
+    'Fresh build from source, then finish with plex2jellyfin setup or the browser wizard.',
+    '/docs/getting-started/installation#option-b--build--cli-setup',
   ],
   [
     'Docker',
-    'Run the daemon and Web UI together with bind-mounted config, watch, and library paths.',
+    'Run the daemon and web UI together with bind-mounted config, watch, and library paths.',
     '/docs/getting-started/docker',
   ],
   [
     'Deb / RPM',
-    'Install release-built packages, then configure and enable the systemd services.',
+    'Install release packages, set SUDO_USER, then configure via the web wizard.',
     '/docs/getting-started/packages',
-  ],
-  [
-    'Source build',
-    'Build the installer locally when a release package is not suitable for the host.',
-    '/docs/getting-started/installation#build-from-source',
   ],
 ] as const;
 
@@ -50,8 +52,8 @@ export function DocsHome() {
           className="docs-wordmark"
           src={`${basePath}/brand/plex2jellyfin-wordmark.png`}
           alt="plex2jellyfin"
-          width="1591"
-          height="229"
+          width="1440"
+          height="168"
         />
         <p id="docs-home-purpose">
           Migrate a Plex-organized media library to Jellyfin, then keep every new arrival clean.

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Fresh clone + build + install, then CLI setup.
-# Does NOT start services — run `plex2jellyfin setup` after.
+# Fresh clone + build + install, then start the web UI for browser setup.
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/scripts/fresh-build-install.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/scripts/fresh-build-install-web.sh)
 #
 # Run as your normal user (not sudo). The script prompts for sudo only when
 # installing into /usr/bin and /etc/systemd.
@@ -27,11 +26,11 @@ need go
 need npm
 need sudo
 
-export PLEX2JELLYFIN_SETUP_MODE=cli
+export PLEX2JELLYFIN_SETUP_MODE=web
 export PLEX2JELLYFIN_PREFIX="$PREFIX"
 export PLEX2JELLYFIN_REAL_USER="$USER"
 
-echo "Plex2Jellyfin fresh build/install (CLI setup)"
+echo "Plex2Jellyfin fresh build/install (web setup)"
 echo "  repo:   $REPO_URL @$REPO_REF"
 echo "  user:   $USER  (SUDO_USER for systemd)"
 echo "  prefix: $PREFIX"

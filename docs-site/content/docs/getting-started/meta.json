@@ -2,6 +2,7 @@
   "title": "Getting Started",
   "pages": [
     "installation",
+    "setup-wizards",
     "packages",
     "docker",
     "jellyfin-plugin",

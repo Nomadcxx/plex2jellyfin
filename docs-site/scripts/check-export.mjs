@@ -42,7 +42,7 @@ assert.ok(
   'search client is missing the deployment base path',
 );
 assert.match(docsHtml, /brand\/plex2jellyfin-wordmark\.png/, 'docs home is missing the full wordmark');
-for (const option of ['Guided installer', 'Docker', 'Deb / RPM', 'Source build']) {
+for (const option of ['TUI installer', 'CLI / web scripts', 'Docker', 'Deb / RPM']) {
   assert.ok(docsHtml.includes(`data-install-option="${option}"`), `docs home is missing ${option}`);
 }
 assert.doesNotMatch(
@@ -55,9 +55,11 @@ for (const stage of ['scan', 'duplicates', 'consolidate', 'audit', 'daemon']) {
 }
 for (const route of [
   '/docs/getting-started/installation/',
+  '/docs/getting-started/setup-wizards/',
   '/docs/getting-started/docker/',
   '/docs/reference/configuration/',
   '/docs/reference/cli/',
+  '/docs/reference/architecture/',
   '/docs/troubleshooting/',
 ]) {
   assert.ok(docsHtml.includes(`href="${basePath}${route}"`), `docs home is missing ${route}`);

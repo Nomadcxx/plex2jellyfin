@@ -12,8 +12,10 @@ type Launcher struct {
 
 	systemdUserExists   func() bool
 	systemdUserStart    func() error
+	systemdUserEnable   func() error
 	systemdSystemExists func() bool
 	systemdSystemStart  func() error
+	systemdSystemEnable func() error
 	directExec          func() error
 }
 
@@ -23,13 +25,19 @@ func New(binary, logPath string) *Launcher {
 		return exec.Command("systemctl", "--user", "list-unit-files", "plex2jellyfin-daemon.service").Run() == nil
 	}
 	l.systemdUserStart = func() error {
-		return exec.Command("systemctl", "--user", "start", "plex2jellyfin-daemon").Run()
+		return exec.Command("systemctl", "--user", "enable", "--now", "plex2jellyfin-daemon").Run()
+	}
+	l.systemdUserEnable = func() error {
+		return exec.Command("systemctl", "--user", "enable", "plex2jellyfin-daemon").Run()
 	}
 	l.systemdSystemExists = func() bool {
 		return exec.Command("systemctl", "list-unit-files", "plex2jellyfin-daemon.service").Run() == nil
 	}
 	l.systemdSystemStart = func() error {
-		return exec.Command("systemctl", "start", "plex2jellyfin-daemon").Run()
+		return exec.Command("systemctl", "enable", "--now", "plex2jellyfin-daemon").Run()
+	}
+	l.systemdSystemEnable = func() error {
+		return exec.Command("systemctl", "enable", "plex2jellyfin-daemon").Run()
 	}
 	l.directExec = func() error {
 		f, err := openLogFile(logPath)
@@ -46,6 +54,23 @@ func New(binary, logPath string) *Launcher {
 		return nil
 	}
 	return l
+}
+
+// Enable marks the systemd unit for boot when a unit exists. No-op for direct-exec.
+func (l *Launcher) Enable() error {
+	if l.systemdUserExists != nil && l.systemdUserExists() {
+		if l.systemdUserEnable != nil {
+			return l.systemdUserEnable()
+		}
+		return nil
+	}
+	if l.systemdSystemExists != nil && l.systemdSystemExists() {
+		if l.systemdSystemEnable != nil {
+			return l.systemdSystemEnable()
+		}
+		return nil
+	}
+	return nil
 }
 
 func (l *Launcher) Start() error {

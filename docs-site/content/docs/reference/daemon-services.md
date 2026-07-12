@@ -5,6 +5,8 @@ description: Configure the daemon, web service, and postmortem timer.
 
 The installer and deb/rpm packages register the daemon and web systemd units. The repository also includes a user-level postmortem timer for the author's deployment; packages do not install it. On Docker, the entrypoint runs the daemon and web server as background processes instead; see [Docker](/docs/getting-started/docker).
 
+Setup wizards **enable the daemon for boot** (`systemctl enable --now`) when the unit exists. Fresh-build **web** install enables only `plex2jellyfin-web` until the wizard runs; fresh-build **CLI** install leaves units installed but stopped until `plex2jellyfin setup`.
+
 ```bash
 systemctl status plex2jellyfin-daemon                   # daemon
 systemctl status plex2jellyfin-web                      # web UI on :5522

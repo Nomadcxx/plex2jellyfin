@@ -43,13 +43,20 @@ func (s *setupTestIPC) Call(_ context.Context, cmd ipc.Command, _ any) (json.Raw
 func (s *setupTestIPC) StreamWithID(context.Context, ipc.Command, any, string) error { return nil }
 
 type setupTestLauncher struct {
-	called bool
-	err    error
+	called       bool
+	enableCalled bool
+	err          error
+	enableErr    error
 }
 
 func (l *setupTestLauncher) Start() error {
 	l.called = true
 	return l.err
+}
+
+func (l *setupTestLauncher) Enable() error {
+	l.enableCalled = true
+	return l.enableErr
 }
 
 func TestSetupStatusMasksSecretsAndDetectsFreshInstall(t *testing.T) {
@@ -199,6 +206,9 @@ func TestApplySetupLaunchesStoppedDaemonAndMarksComplete(t *testing.T) {
 	if !launcher.called {
 		t.Fatal("stopped daemon was not launched")
 	}
+	if !launcher.enableCalled {
+		t.Fatal("daemon unit was not enabled for boot")
+	}
 	var resp setupApplyResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
@@ -245,6 +255,9 @@ func TestApplySetupReloadsRunningDaemon(t *testing.T) {
 	}
 	if launcher.called {
 		t.Fatal("running daemon should be reloaded, not launched")
+	}
+	if !launcher.enableCalled {
+		t.Fatal("running daemon should still be enabled for boot")
 	}
 	foundReload := false
 	for _, call := range ipcClient.calls {

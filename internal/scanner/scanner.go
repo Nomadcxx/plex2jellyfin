@@ -2,18 +2,24 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/Nomadcxx/plex2jellyfin/internal/quality"
 )
+
+// ErrLibraryStalled is returned (as a wrapped error in ScanResult.Errors)
+// when a single library makes no walk progress for LibraryStallTimeout.
+var ErrLibraryStalled = errors.New("library scan stalled")
 
 // FileScanner scans libraries and populates the media_files database
 type FileScanner struct {
@@ -49,6 +55,7 @@ type ScanProgress struct {
 	Library        string // library root currently being scanned (empty when finished)
 	LibrariesDone  int
 	LibrariesTotal int
+	Heartbeat      bool // true when emitted on a timer (no new files), not a file tick
 }
 
 // ProgressCallback is called periodically during scanning
@@ -59,10 +66,24 @@ type ScanOptions struct {
 	TVLibraries    []string
 	MovieLibraries []string
 	OnProgress     ProgressCallback // Optional progress callback
+
+	// LibraryStallTimeout skips a library that makes no walk progress for this
+	// long (hung/dead mounts). Zero uses DefaultLibraryStallTimeout; negative disables.
+	LibraryStallTimeout time.Duration
+	// HeartbeatInterval emits OnProgress ticks while a library is still walking
+	// so UIs do not look frozen during slow NAS listing. Zero uses
+	// DefaultProgressHeartbeat; negative disables.
+	HeartbeatInterval time.Duration
 }
 
 // progressReportInterval controls how often progress is reported during scanning
 const progressReportInterval = 10
+
+// DefaultLibraryStallTimeout skips a wedged library after this much silence.
+const DefaultLibraryStallTimeout = 12 * time.Minute
+
+// DefaultProgressHeartbeat is how often ScanWithOptions emits time-based progress.
+const DefaultProgressHeartbeat = 5 * time.Second
 
 // NewFileScanner creates a new file scanner with default settings
 func NewFileScanner(db *database.MediaDB) *FileScanner {
@@ -129,60 +150,71 @@ func (s *FileScanner) ScanWithOptions(ctx context.Context, opts ScanOptions) (*S
 
 	totalLibs := len(opts.TVLibraries) + len(opts.MovieLibraries)
 	libsDone := 0
-	currentLib := ""
 
-	progressFn := func(currentPath string, filesScanned int) {
+	scanOne := func(lib, mediaType string) {
 		if opts.OnProgress != nil {
 			opts.OnProgress(ScanProgress{
-				FilesScanned:   filesScanned,
-				CurrentPath:    currentPath,
-				Library:        currentLib,
+				FilesScanned:   result.FilesScanned,
+				CurrentPath:    lib,
+				Library:        lib,
 				LibrariesDone:  libsDone,
 				LibrariesTotal: totalLibs,
 			})
 		}
+		err := runLibraryScanWithGuard(ctx, opts.LibraryStallTimeout, opts.HeartbeatInterval,
+			func(libCtx context.Context, touch func()) error {
+				return s.scanPathWithProgress(libCtx, lib, mediaType, result, func(path string, files int) {
+					touch()
+					if opts.OnProgress != nil {
+						opts.OnProgress(ScanProgress{
+							FilesScanned:   files,
+							CurrentPath:    path,
+							Library:        lib,
+							LibrariesDone:  libsDone,
+							LibrariesTotal: totalLibs,
+						})
+					}
+				}, touch)
+			},
+			func() {
+				if opts.OnProgress != nil {
+					opts.OnProgress(ScanProgress{
+						FilesScanned:   result.FilesScanned,
+						CurrentPath:    lib,
+						Library:        lib,
+						LibrariesDone:  libsDone,
+						LibrariesTotal: totalLibs,
+						Heartbeat:      true,
+					})
+				}
+			},
+		)
+		if err != nil {
+			if errors.Is(err, ErrLibraryStalled) {
+				log.Printf("scanner: skipping stalled library %s: %v", lib, err)
+				result.Errors = append(result.Errors, fmt.Errorf("%s: %w", lib, err))
+			} else if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				result.Errors = append(result.Errors, fmt.Errorf("%s library %s: %w", mediaType, lib, err))
+			} else if ctx.Err() != nil {
+				result.Errors = append(result.Errors, ctx.Err())
+			}
+		}
+		libsDone++
 	}
 
-	// Scan TV libraries
 	for _, lib := range opts.TVLibraries {
-		currentLib = lib
-		// Send initial progress for this library
-		if opts.OnProgress != nil {
-			opts.OnProgress(ScanProgress{
-				FilesScanned:   result.FilesScanned,
-				CurrentPath:    lib,
-				Library:        lib,
-				LibrariesDone:  libsDone,
-				LibrariesTotal: totalLibs,
-			})
+		if ctx.Err() != nil {
+			break
 		}
-		if err := s.scanPathWithProgress(ctx, lib, "episode", result, progressFn); err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("TV library %s: %w", lib, err))
-		}
-		libsDone++
+		scanOne(lib, "episode")
 	}
-
-	// Scan movie libraries
 	for _, lib := range opts.MovieLibraries {
-		currentLib = lib
-		// Send initial progress for this library
-		if opts.OnProgress != nil {
-			opts.OnProgress(ScanProgress{
-				FilesScanned:   result.FilesScanned,
-				CurrentPath:    lib,
-				Library:        lib,
-				LibrariesDone:  libsDone,
-				LibrariesTotal: totalLibs,
-			})
+		if ctx.Err() != nil {
+			break
 		}
-		if err := s.scanPathWithProgress(ctx, lib, "movie", result, progressFn); err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("Movie library %s: %w", lib, err))
-		}
-		libsDone++
+		scanOne(lib, "movie")
 	}
 
-	currentLib = ""
-	// Final progress update
 	if opts.OnProgress != nil {
 		opts.OnProgress(ScanProgress{
 			FilesScanned:   result.FilesScanned,
@@ -194,7 +226,86 @@ func (s *FileScanner) ScanWithOptions(ctx context.Context, opts ScanOptions) (*S
 	}
 
 	result.Duration = time.Since(start)
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
 	return result, nil
+}
+
+// runLibraryScanWithGuard runs scan until it finishes, the parent context ends,
+// or no touch() call arrives for stallTimeout (soft skip of hung mounts).
+// Heartbeats fire onHeartbeat while the scan is still running.
+//
+// ponytail: if filepath.Walk is blocked inside a hung kernel readdir, cancel
+// only helps after the syscall returns; a leaked goroutine may linger until
+// then. Upgrade path: scan each library in a subprocess that can be killed.
+func runLibraryScanWithGuard(
+	ctx context.Context,
+	stallTimeout, heartbeatInterval time.Duration,
+	scan func(context.Context, func()) error,
+	onHeartbeat func(),
+) error {
+	if stallTimeout == 0 {
+		stallTimeout = DefaultLibraryStallTimeout
+	}
+	if heartbeatInterval == 0 {
+		heartbeatInterval = DefaultProgressHeartbeat
+	}
+
+	libCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var lastTouch atomic.Int64
+	touch := func() { lastTouch.Store(time.Now().UnixNano()) }
+	touch()
+
+	done := make(chan error, 1)
+	go func() { done <- scan(libCtx, touch) }()
+
+	tickEvery := heartbeatInterval
+	if tickEvery < 0 {
+		tickEvery = time.Second
+	}
+	if stallTimeout > 0 && (tickEvery <= 0 || tickEvery > 30*time.Second) {
+		tickEvery = 5 * time.Second
+	}
+	if tickEvery <= 0 {
+		err := <-done
+		return err
+	}
+
+	ticker := time.NewTicker(tickEvery)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-ctx.Done():
+			cancel()
+			err := <-done
+			if err != nil {
+				return err
+			}
+			return ctx.Err()
+		case <-ticker.C:
+			if stallTimeout > 0 {
+				last := time.Unix(0, lastTouch.Load())
+				if time.Since(last) >= stallTimeout {
+					cancel()
+					select {
+					case <-done:
+					case <-time.After(3 * time.Second):
+						// ponytail: walk still stuck in syscall; abandon wait (see comment above)
+					}
+					return fmt.Errorf("%w: no progress for %s", ErrLibraryStalled, stallTimeout)
+				}
+			}
+			if heartbeatInterval > 0 && onHeartbeat != nil {
+				onHeartbeat()
+			}
+		}
+	}
 }
 
 // scanPath is the internal recursive scanner
@@ -246,12 +357,16 @@ func (s *FileScanner) scanPathWithLibraryRoot(ctx context.Context, path string, 
 }
 
 // scanPathWithProgress is like scanPath but calls progress callback
-func (s *FileScanner) scanPathWithProgress(ctx context.Context, path string, mediaType string, result *ScanResult, progressFn func(string, int)) error {
+func (s *FileScanner) scanPathWithProgress(ctx context.Context, path string, mediaType string, result *ScanResult, progressFn func(string, int), touch func()) error {
 	return filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+
+		if touch != nil {
+			touch()
 		}
 
 		if err != nil {

@@ -1,30 +1,51 @@
 ---
 title: Installation
-description: Install plex2jellyfin with the script, packages, or a source build.
+description: Install plex2jellyfin via TUI, fresh-build scripts, Docker, packages, or source.
 ---
 
-Plex2Jellyfin ships as an interactive installer, a Go build from source, or distro packages (deb/rpm). Docker is covered separately on the [Docker page](/docs/getting-started/docker).
+Every install path ships the same binaries:
 
-Every path installs the same three binaries: `plex2jellyfin` (CLI), `plex2jellyfin-daemon`, and `plex2jellyfin-web`.
+| Binary | Role |
+|---|---|
+| `plex2jellyfin` | CLI — setup, scan, duplicates, consolidate, plugin, status |
+| `plex2jellyfin-daemon` | Watches download dirs, organizes arrivals, periodic library scan |
+| `plex2jellyfin-web` | Dashboard + setup wizard on `:5522` |
+| `plex2jellyfin-installer` | Interactive TUI (also built as `installer` from `./cmd/installer`) |
 
-## One-liner (recommended)
+Config lives at `~/.config/plex2jellyfin/config.toml`. Systemd units typically run as root and resolve that path via `SUDO_USER` (fresh-build scripts inject it automatically).
+
+After install, finish with a [setup wizard](/docs/getting-started/setup-wizards) (TUI, CLI, or web). Install the [Jellyfin companion plugin](/docs/getting-started/jellyfin-plugin) for the feedback loop.
+
+## Option A — TUI installer
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
 ```
 
-This clones the repo into a temporary directory, builds the interactive installer TUI, and runs it. It requires Go 1.24+ and `git` on `PATH`. The installer walks you through:
+Requires Go 1.24+ and `git`. Clones into a temp dir, builds `./cmd/installer`, and runs the interactive wizard (paths, *arr, AI, permissions, systemd, initial scan). Re-run to update binaries; existing `config.toml` is preserved.
 
-- Watch paths (where Sonarr/Radarr/download clients drop new files)
-- Library paths (your Jellyfin `Movies` / `TV Shows` roots)
-- Sonarr / Radarr connection details
-- AI (Ollama) configuration
-- File permissions (chown behavior — see [Configuration](/docs/reference/configuration#permissions))
-- systemd service registration
+## Option B — Build + CLI setup
 
-Re-run the installer any time to change settings; it preserves your existing `config.toml`.
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/scripts/fresh-build-install.sh)
+plex2jellyfin setup
+```
 
-## Manual build
+Run as your normal user (not root). Needs Go, git, npm, and sudo. Installs binaries to `/usr/bin`, writes systemd units with `SUDO_USER`, then leaves services stopped until `plex2jellyfin setup` enables them.
+
+## Option C — Build + web setup
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/scripts/fresh-build-install-web.sh)
+```
+
+Same build as Option B, then `systemctl enable --now plex2jellyfin-web` and prints the wizard URL (usually `http://127.0.0.1:5522/`). The browser wizard writes config, enables the daemon, and runs the initial library index.
+
+## Option D — Docker
+
+See the [Docker guide](/docs/getting-started/docker).
+
+## Option E — Development (local tree)
 
 ```bash
 git clone https://github.com/Nomadcxx/plex2jellyfin.git
@@ -33,59 +54,36 @@ go build -o installer ./cmd/installer
 sudo ./installer
 ```
 
-Or build the binaries directly without the TUI:
+Or, from an existing checkout:
 
 ```bash
-make                                                    # build all binaries into bin/
-go build -o bin/plex2jellyfin         ./cmd/plex2jellyfin
-go build -o bin/plex2jellyfin-daemon  ./cmd/plex2jellyfin-daemon
-go build -o bin/plex2jellyfin-web     ./cmd/plex2jellyfin-web
-cd web && npm run build                                 # rebuild dashboard (embedded into plex2jellyfin-web)
+PLEX2JELLYFIN_SETUP_MODE=cli bash scripts/fresh-build-from-tree.sh   # then plex2jellyfin setup
+PLEX2JELLYFIN_SETUP_MODE=web bash scripts/fresh-build-from-tree.sh   # enable web + print URL
+make                                                                   # frontend + all binaries into bin/
 ```
 
-`plex2jellyfin-web` embeds the compiled Next.js dashboard, so `web/out` must exist before `go build` picks it up (the Makefile handles this ordering).
+`plex2jellyfin-web` embeds `embedded/frontend` (built from `web/`). The Makefile and fresh-build scripts order that correctly.
 
-Run the full test sweep with `./test-all.sh`.
+## Option F — AUR (Arch Linux)
 
-## Distro packages (deb/rpm)
+Coming soon. Planned package will install binaries and units; configure with CLI or web setup afterward.
 
-Releases are built with [GoReleaser](https://goreleaser.com) and published to the project's GitHub Releases page as `.deb` and `.rpm` packages (via [nfpm](https://nfpm.goreleaser.com)), alongside plain tarballs for `cli`, `daemon`, `web`, and `installer`.
+## Option G — Deb / RPM
 
-```bash
-# Debian / Ubuntu
-sudo dpkg -i plex2jellyfin_<version>_linux_amd64.deb
-
-# Fedora / RHEL
-sudo rpm -i plex2jellyfin-<version>.linux.amd64.rpm
-```
-
-The package installs:
-
-- `/usr/bin/plex2jellyfin`, `/usr/bin/plex2jellyfin-daemon`, `/usr/bin/plex2jellyfin-web`
-- `/usr/lib/systemd/system/plex2jellyfin-daemon.service`
-- `/usr/lib/systemd/system/plex2jellyfin-web.service`
-- `/usr/share/doc/plex2jellyfin/config.toml.example`
-
-Postinstall prints the next steps and reloads systemd; preremove stops and disables both services. After installing:
-
-```bash
-mkdir -p ~/.config/plex2jellyfin
-cp /usr/share/doc/plex2jellyfin/config.toml.example ~/.config/plex2jellyfin/config.toml
-# edit config.toml for your paths
-sudo systemctl enable --now plex2jellyfin-daemon plex2jellyfin-web
-```
-
-Packages are `amd64`/`arm64`, Linux only.
+See [Pre-built packages](/docs/getting-started/packages).
 
 ## Requirements
 
-- **Go 1.24+** — only needed if building from source; packages and the installer script handle this for you (the installer script itself still needs a system Go to build the TUI).
-- **Node.js** (for `npm run build`) — only needed if you're rebuilding the web dashboard from source.
-- **systemd** — the installer and packages register systemd units; running without systemd means starting the daemon and web server manually.
-- **Ollama** (optional) — only required if you enable `[ai]` in `config.toml` for AI-assisted rename suggestions.
+- Linux (amd64 or arm64)
+- Go 1.24+ for source / script / TUI builds
+- npm for building the embedded web UI (script and `make` paths)
+- Root or sudo for systemd unit install and `CAP_CHOWN` on bare metal
+- Jellyfin 10.11.x if you use the companion plugin
 
-## Next steps
+## Verify
 
-- [Migration Guide](/docs/getting-started/migration-guide) — run the one-shot migration workflow against your existing library
-- [Configuration](/docs/reference/configuration) — full `config.toml` reference
-- [Daemon & Services](/docs/reference/daemon-services) — systemd units in detail
+```bash
+plex2jellyfin version
+systemctl status plex2jellyfin-daemon plex2jellyfin-web
+curl -s http://127.0.0.1:5522/api/v1/auth/status
+```

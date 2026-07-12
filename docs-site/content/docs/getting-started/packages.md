@@ -11,9 +11,9 @@ sudo dnf install ./plex2jellyfin-*.x86_64.rpm     # Fedora
 ```
 
 The package installs the three binaries, systemd units, and an example
-config — **no configuration yet**. Configuration happens in the browser:
-the web UI's setup wizard collects paths and connections, validates them,
-writes the config, and activates the daemon.
+config — **no configuration yet**. Prefer the [web setup wizard](/docs/getting-started/setup-wizards#web-wizard):
+it collects paths and connections, validates them, writes the config,
+enables the daemon for boot, and runs the initial library index.
 
 ## 1. Point the services at your user's config
 

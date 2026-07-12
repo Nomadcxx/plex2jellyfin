@@ -10,7 +10,6 @@ export default function Layout({ children }: LayoutProps<'/docs'>) {
       {...baseOptions()}
       containerProps={{ className: 'docs-shell' }}
       slots={{ header: OperatorHeader }}
-      sidebar={{ footer: <span className="docs-version">BETA / DOCS</span> }}
     >
       {children}
     </DocsLayout>

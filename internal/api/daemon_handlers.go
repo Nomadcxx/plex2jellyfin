@@ -14,6 +14,7 @@ type DaemonHandlers struct {
 
 type DaemonLauncher interface {
 	Start() error
+	Enable() error // persist unit on boot when systemd is available
 }
 
 func (h *DaemonHandlers) Status(w http.ResponseWriter, r *http.Request) {

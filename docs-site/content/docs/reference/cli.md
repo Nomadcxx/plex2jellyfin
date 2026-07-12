@@ -7,12 +7,13 @@ description: Commands for migration, repair, audit, and daemon control.
 
 ## Primary
 
-The core one-shot migration workflow. See the [Migration Guide](/docs/getting-started/migration-guide) for the recommended run order.
+Root `--help` shows these. See the [Migration Guide](/docs/getting-started/migration-guide) for recommended order after [setup](/docs/getting-started/setup-wizards).
 
 | Command | Description |
 |---|---|
+| `plex2jellyfin setup` | Interactive first-run wizard (CLI). |
 | `plex2jellyfin scan` | Index libraries into `media.db`. |
-| `plex2jellyfin status` | Show database statistics and deployment health. |
+| `plex2jellyfin status` | Database statistics and deployment health. |
 | `plex2jellyfin duplicates generate` | Find duplicate media. |
 | `plex2jellyfin duplicates dry-run` | Preview the deletion plan. |
 | `plex2jellyfin duplicates execute` | Keep the best copy, remove the rest. |
@@ -20,7 +21,9 @@ The core one-shot migration workflow. See the [Migration Guide](/docs/getting-st
 | `plex2jellyfin consolidate dry-run` | Preview consolidation moves. |
 | `plex2jellyfin consolidate execute` | Merge scattered series into a single library path. |
 | `plex2jellyfin config` | Manage configuration (see [below](#config)). |
+| `plex2jellyfin plugin` | Install / verify the companion Jellyfin plugin. |
 | `plex2jellyfin trace [fragment]` | Show what the daemon did to a file, step by step. |
+| `plex2jellyfin version` | Print version (`dev` unless built with release ldflags). |
 
 ### trace
 

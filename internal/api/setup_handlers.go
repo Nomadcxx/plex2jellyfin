@@ -176,6 +176,12 @@ func (s *Server) activateSetupDaemon(parent context.Context) error {
 	if s.ipc == nil {
 		return errors.New("daemon IPC is unavailable")
 	}
+	// Match CLI setup: enable the unit for boot even when the daemon is already up.
+	if s.launcher != nil {
+		if err := s.launcher.Enable(); err != nil {
+			return fmt.Errorf("enable daemon: %w", err)
+		}
+	}
 	if _, err := s.ipc.Call(parent, ipc.CmdStatus, nil); err == nil {
 		raw, err := s.ipc.Call(parent, ipc.CmdReload, nil)
 		if err != nil {
@@ -414,6 +420,18 @@ func (s *Server) SetupIndexStream(w http.ResponseWriter, r *http.Request) {
 			}
 			log.Printf("setup index: scan error: %v", err)
 			scanWarning = "initial library scan failed: " + err.Error()
+		} else if result != nil && len(result.Errors) > 0 {
+			var stalled int
+			for _, e := range result.Errors {
+				if errors.Is(e, scanner.ErrLibraryStalled) {
+					stalled++
+				}
+			}
+			if stalled > 0 {
+				scanWarning = fmt.Sprintf("%d library path(s) stalled and were skipped (hung mount?)", stalled)
+			} else {
+				scanWarning = fmt.Sprintf("%d path errors during indexing", len(result.Errors))
+			}
 		}
 	}
 

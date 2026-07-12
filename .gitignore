@@ -68,6 +68,7 @@ test-all.sh
 # Development directories
 experiments/
 docs/plans/
+docs/superpowers/plans/
 docs/session-*.md
 docs/*_PLAN.md
 docs/*-architecture.md
