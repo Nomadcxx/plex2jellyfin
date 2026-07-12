@@ -209,6 +209,8 @@ func (s *Server) apiRouter() *chi.Mux {
 			r.Post("/metadata/repair/{id}", opsStream.MetadataRepairItem)
 			r.Get("/plugin/status", s.GetJellyfinPluginStatus)
 			r.Post("/plugin/verify", s.VerifyJellyfinPlugin)
+			r.Get("/recently-added", s.GetJellyfinRecentlyAdded)
+			r.Get("/items/{id}/image/primary", s.ProxyJellyfinPrimaryImage)
 		})
 
 		r.Route("/jobs", func(r chi.Router) {
@@ -284,6 +286,8 @@ func (s *Server) apiRouter() *chi.Mux {
 	// ipc is nil; keep these outside the ipc gate.
 	r.Get("/jellyfin/plugin/status", s.GetJellyfinPluginStatus)
 	r.Post("/jellyfin/plugin/verify", s.VerifyJellyfinPlugin)
+	r.Get("/jellyfin/recently-added", s.GetJellyfinRecentlyAdded)
+	r.Get("/jellyfin/items/{id}/image/primary", s.ProxyJellyfinPrimaryImage)
 
 	// Mount generated API routes
 	api.HandlerFromMux(s, r)

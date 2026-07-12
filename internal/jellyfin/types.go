@@ -48,6 +48,7 @@ type Item struct {
 	Overview          string            `json:"Overview,omitempty"`
 	ImageTags         map[string]string `json:"ImageTags,omitempty"`
 	PremiereDate      string            `json:"PremiereDate,omitempty"`
+	LocationType      string            `json:"LocationType,omitempty"`
 }
 
 // ItemsResponse from GET /Items.

@@ -197,6 +197,29 @@ export async function getHealth() {
   return api.get<HealthCheckResult>('/health');
 }
 
+export type RecentlyAddedItem = {
+  id: string;
+  name: string;
+  type: string;
+  series_name?: string;
+  date_created?: string;
+  image_item_id: string;
+};
+
+export type RecentlyAddedResponse = {
+  enabled: boolean;
+  error?: string;
+  items?: RecentlyAddedItem[];
+};
+
+export async function getRecentlyAdded(limit = 24) {
+  return api.get<RecentlyAddedResponse>(`/jellyfin/recently-added?limit=${limit}`);
+}
+
+export function recentlyAddedImageURL(imageItemID: string) {
+  return `${API_BASE}/jellyfin/items/${encodeURIComponent(imageItemID)}/image/primary`;
+}
+
 export type OperationAcceptedResponse = {
   op_id: string;
 };
