@@ -7,8 +7,6 @@
     <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
   </p>
 
-  <p><b>Alpha.</b> Daily-driver on the author's boxes; expect rough edges and config churn between tags.</p>
-
   <p>Plex papers over messy release names; Jellyfin takes your folders at face value.</p>
 
   <p>This tool migrates the files once (scan, dedupe, consolidate, rename), then <code>plex2jellyfin-daemon</code> watches download dirs and organizes every new arrival into Jellyfin naming.</p>
