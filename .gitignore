@@ -133,9 +133,8 @@ media.db
 # Generated reports containing real library contents
 docs/reports/
 
-# Showcase capture output (may contain real library UI)
-scripts/showcase/out/
-scripts/showcase/node_modules/
+# Showcase capture tooling + output (local only; may contain real library UI)
+scripts/showcase/
 
 # Python bytecode
 __pycache__/

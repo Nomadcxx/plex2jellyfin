@@ -280,19 +280,11 @@ dir_mode  = "0755"
 ### Library Setup (web UI)
 
 <p align="center">
-  <img src="assets/screenshot-setup.png" alt="Library setup (web UI)" width="800" />
+  <img src="assets/screenshot-setup.png" alt="Library setup — media paths" width="800" />
 </p>
 
-### TUI installer
-
 <p align="center">
-  <img src="assets/tui-installer.gif" alt="TUI installer" width="720" />
-</p>
-
-### CLI setup and scan
-
-<p align="center">
-  <img src="assets/cli-setup-scan.gif" alt="CLI setup and scan" width="720" />
+  <img src="assets/screenshot-indexing.png" alt="Library setup — indexing" width="800" />
 </p>
 
 ## License
