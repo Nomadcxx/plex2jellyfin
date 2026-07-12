@@ -3,13 +3,25 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Copy, Download, Activity, FolderSync, Settings, Calendar, Route } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Copy,
+  Download,
+  Activity,
+  FolderSync,
+  Settings,
+  Calendar,
+  Route,
+  ListChecks,
+} from 'lucide-react';
+import { LogoutButton } from '@/components/auth/LogoutButton';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Duplicates', href: '/duplicates', icon: Copy },
   { name: 'Queue', href: '/queue', icon: Download },
   { name: 'Activity', href: '/activity', icon: Activity },
+  { name: 'Jellyfin', href: '/jellyfin', icon: ListChecks },
   { name: 'Trace', href: '/trace', icon: Route },
   { name: 'Consolidation', href: '/consolidation', icon: FolderSync },
   { name: 'Scheduler', href: '/scheduler', icon: Calendar },
@@ -24,17 +36,15 @@ export function Sidebar() {
 
   return (
     <aside className="hidden w-60 bg-zinc-950 border-r border-zinc-800 h-screen p-4 md:flex md:flex-col">
-      <div className="mb-8 flex items-center gap-3 px-1">
+      <div className="mb-8 px-1">
         <Image
-          src="/plex2jellyfin_brand.png"
-          alt=""
-          width={32}
-          height={32}
-          className="rounded"
+          src="/p2j-mark.png"
+          alt="plex2jellyfin"
+          width={140}
+          height={50}
+          priority
+          className="h-auto w-[120px]"
         />
-        <h1 className="font-mono text-sm font-semibold tracking-tight text-zinc-100">
-          plex2jellyfin
-        </h1>
       </div>
       <nav className="space-y-1">
         {navigation.map((item) => (
@@ -53,7 +63,8 @@ export function Sidebar() {
           </Link>
         ))}
       </nav>
-      <div className="mt-auto px-1 pb-1">
+      <div className="mt-auto space-y-3 px-1 pb-1">
+        <LogoutButton className="flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-2 font-mono text-[13px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-50" />
         <p className="term-eyebrow">beta</p>
       </div>
     </aside>
@@ -87,6 +98,10 @@ export function MobileNav() {
             <span>{item.name}</span>
           </Link>
         ))}
+        <LogoutButton
+          iconOnly
+          className="flex min-w-16 flex-col items-center gap-1 rounded-md px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-50"
+        />
       </div>
     </nav>
   );

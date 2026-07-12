@@ -26,8 +26,8 @@ export function useLogin() {
   return useMutation({
     mutationFn: (password: string) =>
       api.post('/auth/login', { password }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: authKeys.status });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: authKeys.status });
     },
   });
 }
@@ -37,8 +37,8 @@ export function useLogout() {
 
   return useMutation({
     mutationFn: () => api.post('/auth/logout', {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: authKeys.status });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: authKeys.status });
     },
   });
 }
@@ -49,8 +49,8 @@ export function useSetupAuth() {
   return useMutation({
     mutationFn: (password: string) =>
       api.post('/auth/setup', { password }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: authKeys.status });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: authKeys.status });
     },
   });
 }
@@ -64,8 +64,8 @@ export function useChangePassword() {
         current_password: params.currentPassword,
         new_password: params.newPassword,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: authKeys.status });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: authKeys.status });
     },
   });
 }

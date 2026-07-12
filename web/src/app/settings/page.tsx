@@ -1,7 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, Bot, FolderOpen, HardDrive, ListChecks, Radio, Search, Settings, SlidersHorizontal, Wrench } from 'lucide-react';
+import {
+  ArrowRight,
+  BarChart3,
+  Bot,
+  Database,
+  FolderOpen,
+  HardDrive,
+  ListChecks,
+  LockKeyhole,
+  Radio,
+  Search,
+  Server,
+  Settings,
+  ShieldCheck,
+  SlidersHorizontal,
+  Wrench,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 const sections = [
@@ -10,10 +26,16 @@ const sections = [
   { href: '/settings/sonarr', title: 'Sonarr', desc: 'TV manager connection and import notification settings.', icon: Radio },
   { href: '/settings/radarr', title: 'Radarr', desc: 'Movie manager connection and import notification settings.', icon: Radio },
   { href: '/settings/jellyfin', title: 'Jellyfin', desc: 'Server connection, playback safety, and webhooks.', icon: ListChecks },
+  { href: '/settings/jellystat', title: 'Jellystat', desc: 'Optional watch statistics from a Jellystat instance.', icon: BarChart3 },
   { href: '/settings/tmdb', title: 'TMDB', desc: 'Optional API key used by the housekeeping verifier to disambiguate remakes.', icon: Search },
   { href: '/settings/ai', title: 'AI', desc: 'Ollama parsing and enhancement model settings.', icon: Bot },
   { href: '/settings/options', title: 'Options', desc: 'Transfer and verification behavior.', icon: SlidersHorizontal },
   { href: '/settings/logging', title: 'Logging', desc: 'Runtime log level and rotation settings.', icon: Wrench },
+  { href: '/settings/permissions', title: 'Permissions', desc: 'Ownership and mode applied to organized files.', icon: LockKeyhole },
+  { href: '/settings/daemon', title: 'Daemon', desc: 'Background organizer process controls.', icon: Server },
+  { href: '/settings/indexing', title: 'Indexing', desc: 'Library index and scan behavior.', icon: Search },
+  { href: '/settings/database', title: 'Database', desc: 'Rescan and reset the local media database.', icon: Database },
+  { href: '/settings/security', title: 'Security', desc: 'Admin password and sign-out.', icon: ShieldCheck },
 ];
 
 export default function SettingsPage() {
@@ -50,4 +72,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-
