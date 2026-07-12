@@ -33,10 +33,10 @@ def render_ascii(source: Path, destination: Path, color: tuple[int, int, int] = 
     if not text.strip():
         raise ValueError(f"ASCII source is empty: {source}")
 
-    font = ImageFont.truetype(str(find_font()), 32)
+    font = ImageFont.truetype(str(find_font()), 48)
     probe = Image.new("RGBA", (1, 1))
     bounds = ImageDraw.Draw(probe).multiline_textbbox((0, 0), text, font=font, spacing=0)
-    padding = 24
+    padding = 28
     size = (bounds[2] - bounds[0] + padding * 2, bounds[3] - bounds[1] + padding * 2)
     image = Image.new("RGBA", size, (0, 0, 0, 0))
     ImageDraw.Draw(image).multiline_text(
