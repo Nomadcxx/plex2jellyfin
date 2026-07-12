@@ -14,12 +14,14 @@ import (
 var jellyfinItemIDRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 type recentlyAddedItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	SeriesName  string `json:"series_name,omitempty"`
-	DateCreated string `json:"date_created,omitempty"`
-	ImageItemID string `json:"image_item_id"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	SeriesName    string `json:"series_name,omitempty"`
+	DateCreated   string `json:"date_created,omitempty"`
+	ImageItemID   string `json:"image_item_id"`
+	SeasonNumber  *int   `json:"season_number,omitempty"`
+	EpisodeNumber *int   `json:"episode_number,omitempty"`
 }
 
 func (s *Server) jellyfinClientFromConfig() *jellyfin.Client {
@@ -66,12 +68,14 @@ func (s *Server) GetJellyfinRecentlyAdded(w http.ResponseWriter, r *http.Request
 			imageID = item.SeriesID
 		}
 		out = append(out, recentlyAddedItem{
-			ID:          item.ID,
-			Name:        item.Name,
-			Type:        item.Type,
-			SeriesName:  item.SeriesName,
-			DateCreated: item.DateCreated,
-			ImageItemID: imageID,
+			ID:            item.ID,
+			Name:          item.Name,
+			Type:          item.Type,
+			SeriesName:    item.SeriesName,
+			DateCreated:   item.DateCreated,
+			ImageItemID:   imageID,
+			SeasonNumber:  item.ParentIndexNumber,
+			EpisodeNumber: item.IndexNumber,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "items": out})

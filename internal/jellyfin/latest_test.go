@@ -25,6 +25,8 @@ func TestGetLatestItemsFiltersVirtualAndUsesLimit(t *testing.T) {
 			require.Equal(t, "5", q.Get("Limit"))
 			require.Contains(t, q.Get("Fields"), "DateCreated")
 			require.Contains(t, q.Get("Fields"), "SeriesId")
+			require.Contains(t, q.Get("Fields"), "IndexNumber")
+			require.Contains(t, q.Get("Fields"), "ParentIndexNumber")
 			items := []Item{
 				{ID: "m1", Name: "Movie", Type: "Movie", LocationType: "FileSystem"},
 				{ID: "v1", Name: "Virtual", Type: "Movie", LocationType: "Virtual"},

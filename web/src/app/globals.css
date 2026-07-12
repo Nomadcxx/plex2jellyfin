@@ -46,3 +46,26 @@ body {
   scrollbar-width: thin;
   scrollbar-color: #2a3236 transparent;
 }
+
+/* Jellystat-style row: thicker horizontal thumb so it is easy to grab/drag. */
+.recently-added-scroll {
+  scrollbar-width: auto;
+  scrollbar-color: #71717a transparent;
+}
+.recently-added-scroll::-webkit-scrollbar {
+  height: 14px;
+}
+.recently-added-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.recently-added-scroll::-webkit-scrollbar-thumb {
+  background-color: #52525b;
+  border-radius: 7px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.recently-added-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #a1a1aa;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}

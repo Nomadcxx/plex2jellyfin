@@ -204,6 +204,8 @@ export type RecentlyAddedItem = {
   series_name?: string;
   date_created?: string;
   image_item_id: string;
+  season_number?: number;
+  episode_number?: number;
 };
 
 export type RecentlyAddedResponse = {

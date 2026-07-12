@@ -10,7 +10,7 @@ import (
 	"strconv"
 )
 
-const latestItemFields = "DateCreated,SeriesId,SeriesName,ImageTags,Overview,Genres,MediaSources"
+const latestItemFields = "DateCreated,SeriesId,SeriesName,ImageTags,Overview,Genres,MediaSources,IndexNumber,ParentIndexNumber"
 
 // GetLatestItems returns recently added library items for the default admin
 // user, dropping Virtual placeholders Jellyfin sometimes includes.

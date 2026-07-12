@@ -39,7 +39,7 @@ describe('RecentlyAdded', () => {
       enabled: true,
       items: [
         { id: 'm1', name: 'Film One', type: 'Movie', image_item_id: 'm1', date_created: '2026-01-01T00:00:00Z' },
-        { id: 'e1', name: 'Ep One', type: 'Episode', series_name: 'Show', image_item_id: 's1' },
+        { id: 'e1', name: 'Ep One', type: 'Episode', series_name: 'Show', image_item_id: 's1', season_number: 1, episode_number: 2 },
       ],
     });
 
@@ -47,6 +47,8 @@ describe('RecentlyAdded', () => {
     expect(await screen.findByRole('heading', { name: /recently added/i })).toBeInTheDocument();
     expect(screen.getByText('Film One')).toBeInTheDocument();
     expect(screen.getByText('Show')).toBeInTheDocument();
+    expect(screen.getByText('Ep One')).toBeInTheDocument();
+    expect(screen.getByText('S1 - E2')).toBeInTheDocument();
     const imgs = screen.getAllByRole('img');
     expect(imgs[0]).toHaveAttribute('src', '/api/v1/jellyfin/items/m1/image/primary');
     expect(imgs[1]).toHaveAttribute('src', '/api/v1/jellyfin/items/s1/image/primary');

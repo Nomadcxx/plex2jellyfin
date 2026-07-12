@@ -27,11 +27,12 @@ export default function DashboardPage() {
       <div className="space-y-6">
         <div className="flex items-center gap-4">
           <Image
-            src="/plex2jellyfin_brand.png"
+            src="/p2j-mark.png"
             alt="Plex2Jellyfin"
-            width={100}
-            height={100}
-            className="rounded"
+            width={160}
+            height={58}
+            priority
+            className="h-auto w-[140px]"
           />
           <h1 className="text-3xl font-bold">Dashboard</h1>
         </div>
