@@ -1,0 +1,13 @@
+{
+  "name": "plex2jellyfin-showcase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "record-web": "node record-web.mjs",
+    "capture-shots": "node capture-shots.mjs",
+    "install-browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.52.0"
+  }
+}
