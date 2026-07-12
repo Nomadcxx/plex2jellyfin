@@ -27,7 +27,7 @@ The web UI is missing everyday affordances that the backend already supports (lo
 - Logout control: sidebar footer, Security settings, mobile account affordance
 - Uses existing `POST /auth/logout` + `useLogout()`; invalidate auth query; hard-navigate to login/home
 - Add **Jellyfin** to sidebar + mobile nav (`/jellyfin`)
-- Settings overview cards: include Jellystat, Security, Daemon, Database, Indexing, Permissions (match settings side nav)
+- Settings as a focused console: replace the app sidebar with a grouped settings rail; Overview is a thin status summary (no card grid); **← Dashboard** exit
 
 ### PR 2 — Operator controls
 
