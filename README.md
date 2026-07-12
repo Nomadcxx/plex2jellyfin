@@ -159,13 +159,15 @@ The companion plugin ([Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcx
 ### TUI installer
 
 <p align="center">
-  <img src="assets/tui-installer.gif" alt="TUI installer" width="800" />
+  <video src="assets/tui-installer.mp4" controls width="960" poster="assets/tui-installer-poster.png">
+    <a href="assets/tui-installer.mp4">Watch the TUI installer</a>
+  </video>
 </p>
 
 ### CLI setup and scan
 
 <p align="center">
-  <img src="assets/cli-setup-scan.gif" alt="CLI setup and scan" width="800" />
+  <img src="assets/cli-setup-scan.gif" alt="CLI setup and scan" width="960" />
 </p>
 
 ## Architecture
