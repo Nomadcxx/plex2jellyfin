@@ -6,7 +6,9 @@
     <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
   </p>
 
-  <p>Plex papers over messy release names; Jellyfin takes your folders at face value. This tool migrates the files once (scan, dedupe, consolidate, rename), then <code>plex2jellyfin-daemon</code> watches download dirs and organizes every new arrival into Jellyfin naming. Out of scope: Plex accounts, watch state, ratings, and playlists.</p>
+  <p>Plex papers over messy release names; Jellyfin takes your folders at face value.</p>
+
+  <p>This tool migrates the files once (scan, dedupe, consolidate, rename), then <code>plex2jellyfin-daemon</code> watches download dirs and organizes every new arrival into Jellyfin naming. Out of scope: Plex accounts, watch state, ratings, and playlists.</p>
 
   <p>
     <a href="https://nomadcxx.github.io/plex2jellyfin/docs/">Documentation</a>
@@ -80,7 +82,7 @@ docker compose -f docker-compose.example.yml up -d
 
 `PUID`/`PGID` (linuxserver.io-style, default `1000:1000`) set the user everything runs as inside the container; `/config` is chowned to match on start. Set them to the UID/GID that should own files under `/library`.
 
-The container runs as that non-root user, so the `[permissions]` chown feature has nothing to elevate to and is unavailable in-container. `PUID`/`PGID` replace it. The [Docker guide](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/docker/) covers SELinux and rootless setups.
+The container runs as that non-root user, so `[permissions]` chown has no effect in-container; use `PUID`/`PGID` instead. The [Docker guide](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/docker/) covers SELinux and rootless setups.
 
 </details>
 
@@ -139,7 +141,7 @@ Then open `http://<host>:5522/`. Full walkthrough: [packages](https://nomadcxx.g
 
 ### Jellyfin Plugin — install this too
 
-The companion plugin ([Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcxx/plex2jellyfin-plugin)) is required for the feedback loop: it forwards item-added/updated/removed and playback events from Jellyfin back to plex2jellyfin, which is how organized files get confirmed against real Jellyfin items (and how orphan detection works). Without it, plex2jellyfin can move files but never sees whether Jellyfin actually recognized them.
+The companion plugin ([Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcxx/plex2jellyfin-plugin)) is required for the feedback loop: it forwards item-added/updated/removed and playback events from Jellyfin so plex2jellyfin can confirm organized files against real library items (and detect orphans). Without it, files move but confirmations never land.
 
 Setup wizards install and configure it when you connect Jellyfin (or run `plex2jellyfin plugin install`). Details: [plugin docs](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/jellyfin-plugin/).
 
