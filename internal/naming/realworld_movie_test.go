@@ -13,6 +13,8 @@ func TestRealWorldMovieParsing(t *testing.T) {
 		{"Avatar.Fire.and.Ash.2025.SDR.1080p.WEB-DL.mkv", "Avatar Fire and Ash", "2025"},
 		{"The.Room.Next.Door.2024.6CH.1080p.BluRay.mkv", "The Room Next Door", "2024"},
 		{"How.to.Make.A.Killing.2026.1080p.WEB-DL.AAC5.1.mkv", "How to Make A Killing", "2026"},
+		// TOD = Turkish On Demand (source tag between quality and WEB-DL).
+		{"One.Mile.Chapter.Two.2026.1080p.TOD.WEB-DL.EN-TR.AAC2.0.H.264-TURG.mkv", "One Mile Chapter Two", "2026"},
 		{"Pretty.Lethal.2026.AMZN.EAC3.@TSRG.mkv", "Pretty Lethal", "2026"},
 		{"Kraven.the.Hunter.2024.1080p.BluRay.mkv", "Kraven the Hunter", "2024"},
 		// Regression: TSRG-style shorthand where the "3" is dropped from

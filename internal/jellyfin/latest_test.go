@@ -22,15 +22,18 @@ func TestGetLatestItemsFiltersVirtualAndUsesLimit(t *testing.T) {
 		case "/Users/admin-1/Items/Latest":
 			require.Equal(t, http.MethodGet, r.Method)
 			q := r.URL.Query()
-			require.Equal(t, "5", q.Get("Limit"))
+			require.Equal(t, "15", q.Get("Limit")) // over-fetch 5*3
 			require.Contains(t, q.Get("Fields"), "DateCreated")
 			require.Contains(t, q.Get("Fields"), "SeriesId")
 			require.Contains(t, q.Get("Fields"), "IndexNumber")
 			require.Contains(t, q.Get("Fields"), "ParentIndexNumber")
+			require.Equal(t, "Movie,Episode,Series", q.Get("IncludeItemTypes"))
 			items := []Item{
 				{ID: "m1", Name: "Movie", Type: "Movie", LocationType: "FileSystem"},
 				{ID: "v1", Name: "Virtual", Type: "Movie", LocationType: "Virtual"},
+				{ID: "sp1", Name: "Match", Type: "Video", LocationType: "FileSystem"},
 				{ID: "e1", Name: "Ep", Type: "Episode", SeriesID: "s1", LocationType: "FileSystem"},
+				{ID: "s1", Name: "Show", Type: "Series", LocationType: "FileSystem"},
 			}
 			w.Header().Set("Content-Type", "application/json")
 			require.NoError(t, json.NewEncoder(w).Encode(items))
@@ -43,9 +46,10 @@ func TestGetLatestItemsFiltersVirtualAndUsesLimit(t *testing.T) {
 	client := NewClient(Config{URL: server.URL, APIKey: "key"})
 	got, err := client.GetLatestItems(context.Background(), 5)
 	require.NoError(t, err)
-	require.Len(t, got, 2)
+	require.Len(t, got, 3)
 	assert.Equal(t, "m1", got[0].ID)
 	assert.Equal(t, "e1", got[1].ID)
+	assert.Equal(t, "s1", got[2].ID)
 }
 
 func TestGetPrimaryImageProxiesBytes(t *testing.T) {

@@ -73,7 +73,7 @@ func init() {
 		`\b(CAM|HDTS|TS|TC|SCR|R5)\b`,
 
 		// Streaming platforms
-		`\b(AMZN|NF|DSNP|HMAX|HULU|ATVP|PCOK|PMTP)\b`,
+		`\b(AMZN|NF|DSNP|HMAX|HULU|ATVP|PCOK|PMTP|TOD)\b`,
 
 		// Locale/language and subtitle markers. 3-letter codes only -
 		// 2-letter codes (EN, ES) collide with real title words ("No

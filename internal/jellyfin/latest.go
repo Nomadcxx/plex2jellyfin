@@ -12,8 +12,16 @@ import (
 
 const latestItemFields = "DateCreated,SeriesId,SeriesName,ImageTags,Overview,Genres,MediaSources,IndexNumber,ParentIndexNumber"
 
+// Latest keeps movies + TV only. Sports/homevideos land as Type=Video in
+// Jellyfin and would otherwise dominate Items/Latest.
+var latestAllowedTypes = map[string]bool{
+	"Movie":   true,
+	"Episode": true,
+	"Series":  true,
+}
+
 // GetLatestItems returns recently added library items for the default admin
-// user, dropping Virtual placeholders Jellyfin sometimes includes.
+// user, dropping Virtual placeholders and non movie/TV types (sports, etc.).
 func (c *Client) GetLatestItems(ctx context.Context, limit int) ([]Item, error) {
 	if limit <= 0 {
 		limit = 24
@@ -23,9 +31,21 @@ func (c *Client) GetLatestItems(ctx context.Context, limit int) ([]Item, error) 
 		return nil, err
 	}
 
+	// Over-fetch: Jellyfin's IncludeItemTypes is soft on Latest (Series still
+	// appears when asking for Movie,Episode), and Sports Video items crowd
+	// the unfiltered feed.
+	fetchLimit := limit * 3
+	if fetchLimit < limit {
+		fetchLimit = limit
+	}
+	if fetchLimit > 100 {
+		fetchLimit = 100
+	}
+
 	query := url.Values{}
-	query.Set("Limit", strconv.Itoa(limit))
+	query.Set("Limit", strconv.Itoa(fetchLimit))
 	query.Set("Fields", latestItemFields)
+	query.Set("IncludeItemTypes", "Movie,Episode,Series")
 
 	path := "/Users/" + url.PathEscape(userID) + "/Items/Latest?" + query.Encode()
 	resp, err := c.requestCtx(ctx, http.MethodGet, path, nil, true)
@@ -39,12 +59,18 @@ func (c *Client) GetLatestItems(ctx context.Context, limit int) ([]Item, error) 
 		return nil, fmt.Errorf("decoding latest items: %w", err)
 	}
 
-	out := make([]Item, 0, len(items))
+	out := make([]Item, 0, limit)
 	for _, item := range items {
 		if item.LocationType == "Virtual" {
 			continue
 		}
+		if !latestAllowedTypes[item.Type] {
+			continue
+		}
 		out = append(out, item)
+		if len(out) >= limit {
+			break
+		}
 	}
 	return out, nil
 }
