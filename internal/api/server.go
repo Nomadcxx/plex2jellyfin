@@ -207,6 +207,8 @@ func (s *Server) apiRouter() *chi.Mux {
 			r.Post("/metadata/reconcile", opsStream.MetadataReconcile)
 			r.Post("/metadata/repair", opsStream.MetadataRepair)
 			r.Post("/metadata/repair/{id}", opsStream.MetadataRepairItem)
+			r.Get("/plugin/status", s.GetJellyfinPluginStatus)
+			r.Post("/plugin/verify", s.VerifyJellyfinPlugin)
 		})
 
 		r.Route("/jobs", func(r chi.Router) {
@@ -275,6 +277,13 @@ func (s *Server) apiRouter() *chi.Mux {
 	// when not configured).
 	r.Get("/jellystat/overview", s.GetJellystatOverview)
 	r.Get("/jellystat/item-stats", s.GetJellystatItemStats)
+
+	// Companion plugin status/verify (spec'd in openapi; mounted manually
+	// like jellystat so they work without regenerating the chi router).
+	// Registered before the /jellyfin IPC subrouter would not apply when
+	// ipc is nil; keep these outside the ipc gate.
+	r.Get("/jellyfin/plugin/status", s.GetJellyfinPluginStatus)
+	r.Post("/jellyfin/plugin/verify", s.VerifyJellyfinPlugin)
 
 	// Mount generated API routes
 	api.HandlerFromMux(s, r)
