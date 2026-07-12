@@ -271,20 +271,32 @@ dir_mode  = "0755"
 
 ## Screenshots
 
+### Login
+
+<p align="center">
+  <img src="assets/screenshot-login.png" alt="Login" width="800" />
+</p>
+
 ### Dashboard
 
 <p align="center">
   <img src="assets/screenshot-dashboard.png" alt="Dashboard" width="800" />
 </p>
 
+### Settings
+
+<p align="center">
+  <img src="assets/screenshot-settings.png" alt="Settings overview" width="800" />
+</p>
+
 ### Library Setup (web UI)
 
 <p align="center">
-  <img src="assets/screenshot-setup.png" alt="Library setup — media paths" width="800" />
+  <img src="assets/screenshot-setup.png" alt="Library setup - media paths" width="800" />
 </p>
 
 <p align="center">
-  <img src="assets/screenshot-indexing.png" alt="Library setup — indexing" width="800" />
+  <img src="assets/screenshot-indexing.png" alt="Library setup - indexing" width="800" />
 </p>
 
 ## License
