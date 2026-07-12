@@ -289,6 +289,18 @@ dir_mode  = "0755"
   <img src="assets/screenshot-settings.png" alt="Settings overview" width="800" />
 </p>
 
+### Consolidation
+
+<p align="center">
+  <img src="assets/screenshot-consolidation.png" alt="Library consolidation" width="800" />
+</p>
+
+### Scheduler
+
+<p align="center">
+  <img src="assets/screenshot-scheduler.png" alt="Scheduler" width="800" />
+</p>
+
 ### Library Setup (web UI)
 
 <p align="center">
