@@ -271,7 +271,7 @@ dir_mode  = "0755"
 
 ## Screenshots
 
-### Web
+### Dashboard
 
 <p align="center">
   <video src="assets/showcase.mp4" controls width="800" poster="assets/showcase-poster.png">
@@ -283,8 +283,10 @@ dir_mode  = "0755"
   <img src="assets/screenshot-dashboard.png" alt="Dashboard" width="800" />
 </p>
 
+### Library Setup (web UI)
+
 <p align="center">
-  <img src="assets/screenshot-setup.png" alt="First-run setup" width="800" />
+  <img src="assets/screenshot-setup.png" alt="Library setup (web UI)" width="800" />
 </p>
 
 ### TUI installer
