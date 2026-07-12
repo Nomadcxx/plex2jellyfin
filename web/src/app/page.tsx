@@ -6,6 +6,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { useDashboard, useJellyfinIdentification } from '@/hooks/useDashboard';
 import { useDuplicates } from '@/hooks/useDashboard';
 import { useJellystatOverview, mostViewedName, mostViewedPlays, JellystatRow } from '@/hooks/useJellystat';
+import { RecentlyAdded } from '@/components/dashboard/RecentlyAdded';
 import { formatBytes } from '@/lib/utils';
 import { Database, HardDrive, Copy, FolderTree, Film, Tv, ListVideo, AlertTriangle, CheckCircle2, HelpCircle, BarChart3 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -134,6 +135,8 @@ export default function DashboardPage() {
             <p className="text-sm text-zinc-500">Loading identification stats…</p>
           )}
         </div>
+
+        <RecentlyAdded />
 
         <JellystatSection />
 

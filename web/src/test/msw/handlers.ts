@@ -15,6 +15,9 @@ export const handlers = [
   http.get('/api/v1/jellystat/overview', () =>
     HttpResponse.json({ enabled: false })
   ),
+  http.get('/api/v1/jellyfin/recently-added', () =>
+    HttpResponse.json({ enabled: false })
+  ),
   http.get('/api/v1/files/trace', () =>
     HttpResponse.json({
       items: [
