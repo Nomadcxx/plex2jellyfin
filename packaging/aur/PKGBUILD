@@ -1,12 +1,4 @@
 # Maintainer: Nomadcxx <noovie@gmail.com>
-#
-# Template AUR package for plex2jellyfin.
-# On first release:
-#   1. Set pkgver to the tag without the leading "v" (tag v0.1.0 → pkgver=0.1.0)
-#   2. Run: updpkgsums
-#   3. Update version strings in plex2jellyfin.install
-#   4. makepkg -si   (or push to AUR)
-#
 pkgname=plex2jellyfin
 pkgver=0.1.0
 pkgrel=1
@@ -21,11 +13,10 @@ optdepends=(
     'sonarr: TV download integration'
     'radarr: movie download integration'
 )
-# npm only needed if you rebuild the embedded web UI from web/;
-# tagged source already includes embedded/frontend/.
-makedepends=('go>=1.25' 'npm')
+# Tagged source ships embedded/frontend/; no npm at build time.
+makedepends=('go>=1.25')
 source=("${pkgname}-${pkgver}.tar.gz::https://github.com/Nomadcxx/${pkgname}/archive/refs/tags/v${pkgver}.tar.gz")
-sha256sums=('SKIP') # run updpkgsums after the v${pkgver} tag exists
+sha256sums=('12d554de15d9eb461fc77a9e6e0ed8dec70415142a7e54530d9df9bfba29bded')
 install=${pkgname}.install
 
 build() {
@@ -37,11 +28,6 @@ build() {
     export CGO_LDFLAGS="${LDFLAGS}"
     export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
     export CGO_ENABLED=0
-
-    # Keep the dashboard in sync with this tree (matches goreleaser "make frontend").
-    (cd web && npm install --omit=dev && npm run build)
-    rm -rf embedded/frontend
-    cp -r web/out embedded/frontend
 
     local ldflags="-s -w -X main.version=${pkgver}"
 
