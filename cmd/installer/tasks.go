@@ -470,18 +470,27 @@ plugin_daemon_url = %s
 notify_on_import = true
 playback_safety = true
 verify_after_refresh = false
-
+`, m.jellyfinURL, m.jellyfinAPIKey, webhookSecret, webhookSecret, m.pluginInstall, strconv.Quote(m.pluginDaemonURL))
+		if len(m.pathMappings) > 0 {
+			configStr += "\n# Jellyfin container paths → P2J host paths (feedback-loop correlation).\n"
+			for _, mapping := range m.pathMappings {
+				configStr += fmt.Sprintf(`
+[[jellyfin.path_mappings]]
+jellyfin = %s
+daemon = %s
+`, strconv.Quote(mapping.Jellyfin), strconv.Quote(mapping.Daemon))
+			}
+		} else {
+			configStr += `
 # If Jellyfin reports paths from a different mount namespace than Plex2Jellyfin,
-# add one mapping per mounted library root.
+# add one mapping per mounted library root. See:
+# https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/
 #
 # [[jellyfin.path_mappings]]
 # jellyfin = "/path/as/jellyfin/sees/it"
 # daemon = "/path/as/plex2jellyfin/sees/it"
-#
-# [[jellyfin.path_mappings]]
-# jellyfin = "/another/jellyfin/root"
-# daemon = "/another/plex2jellyfin/root"
-`, m.jellyfinURL, m.jellyfinAPIKey, webhookSecret, webhookSecret, m.pluginInstall, strconv.Quote(m.pluginDaemonURL))
+`
+		}
 	}
 
 	if m.aiEnabled && m.aiModel != "" {

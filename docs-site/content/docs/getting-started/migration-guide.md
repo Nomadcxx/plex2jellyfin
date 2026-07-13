@@ -32,7 +32,7 @@ See what you have and what's broken before changing anything:
 plex2jellyfin status
 ```
 
-Reports database statistics and deployment health: file counts, parse-confidence breakdown, duplicate groups pending review, and known issues (unmapped Jellyfin paths, stuck housekeeping items, etc.).
+Reports database statistics and deployment health: file counts, parse-confidence breakdown, duplicate groups pending review, stuck housekeeping items, and related issues. Unmapped Jellyfin library roots are detected at Jellyfin Test / daemon startup and in the [path mappings](/docs/getting-started/path-mappings) flow — not by `status`.
 
 ## 3. Duplicates
 

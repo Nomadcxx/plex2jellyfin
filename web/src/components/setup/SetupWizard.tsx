@@ -451,7 +451,11 @@ function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest,
   return (
     <div className="divide-y divide-zinc-800 border-y border-zinc-800">
       <p className="pb-5 text-sm text-zinc-400">
-        Optional. Connect Sonarr/Radarr so completed downloads can be imported with the right quality profile behavior, and Jellyfin for library refresh plus the companion plugin feedback loop. Test each service before continuing.
+        Optional. Connect Sonarr/Radarr so completed downloads can be imported with the right quality profile behavior, and Jellyfin for library refresh plus the companion plugin feedback loop. When Jellyfin runs in Docker (or any bind mount), configure path mappings so webhook paths match host library roots — see{' '}
+        <a className="text-amber-400 underline decoration-amber-400/40 underline-offset-2 hover:text-amber-300" href="https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/" target="_blank" rel="noreferrer">
+          path mappings guide
+        </a>
+        . Test each service before continuing.
       </p>
       {(['sonarr', 'radarr', 'jellyfin'] as ServiceName[]).map((name) => {
         const value = draft[name];
@@ -538,7 +542,10 @@ function PathMappings({ draft, setDraft, unmapped }: { draft: SetupDraft; setDra
     <div className="mt-5 border-t border-zinc-900 pt-4">
       <div className="flex items-center justify-between"><h3 className="font-mono text-sm text-zinc-300">Path mappings</h3><Button type="button" size="sm" variant="ghost" onClick={() => update([...mappings, { jellyfin: '', daemon: '' }])}><Plus className="h-4 w-4" />Add mapping</Button></div>
       <p className="mt-2 text-sm text-zinc-500">
-        Required when Jellyfin runs in Docker (or any mount) and sees different roots than P2J — e.g. Jellyfin <code className="text-zinc-400">/movies1</code> ↔ host <code className="text-zinc-400">/mnt/STORAGE1/MOVIES</code>. Without these, organizes succeed but confirmation/DRIFT never attach.
+        Jellyfin in Docker often sees roots like <code className="text-zinc-400">/movies1</code> while P2J organizes on the host as <code className="text-zinc-400">/mnt/.../MOVIES</code>. Without a row per library root, organizes still succeed but plugin webhooks never match <code className="text-zinc-400">parse_decisions</code> — <code className="text-zinc-400">jellyfin_item_id</code> stays empty and PASS/DRIFT/FAIL labeling never runs. Skip only when Jellyfin Locations already match your library paths.{' '}
+        <a className="text-amber-400 underline decoration-amber-400/40 underline-offset-2 hover:text-amber-300" href="https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/" target="_blank" rel="noreferrer">
+          Full guide
+        </a>
       </p>
       {unmapped.length > 0 && (
         <div className="mt-3 border-l-2 border-amber-500 bg-amber-950/10 px-4 py-3 text-sm text-amber-200">

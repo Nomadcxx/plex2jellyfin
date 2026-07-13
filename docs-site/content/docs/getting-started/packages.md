@@ -13,7 +13,10 @@ sudo dnf install ./plex2jellyfin-*.x86_64.rpm     # Fedora
 The package installs the three binaries, systemd units, and an example
 config — **no configuration yet**. Prefer the [web setup wizard](/docs/getting-started/setup-wizards#web-wizard):
 it collects paths and connections, validates them, writes the config,
-enables the daemon for boot, and runs the initial library index.
+enables the daemon for boot, and runs the initial library index. If
+Jellyfin uses Docker bind mounts that differ from your library roots,
+configure [path mappings](/docs/getting-started/path-mappings) on the
+Services step (or in `config.toml`) so the feedback loop can confirm organizes.
 
 ## 1. Point the services at your user's config
 

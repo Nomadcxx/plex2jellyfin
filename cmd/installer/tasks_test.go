@@ -188,6 +188,28 @@ func TestConfigurePluginFeedback_SkipsWhenListenerDidNotStart(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigString_WritesPathMappings(t *testing.T) {
+	m := &model{
+		watchFolders:    []WatchFolder{{Type: "movies", Paths: "/watch/movies"}},
+		movieLibraryPaths: "/mnt/STORAGE1/MOVIES",
+		jellyfinEnabled: true,
+		webhookSecret:   "secret-1",
+		pathMappings: []configpkg.JellyfinPathMapping{
+			{Jellyfin: "/movies1", Daemon: "/mnt/STORAGE1/MOVIES"},
+		},
+	}
+	configStr, err := m.generateConfigString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(configStr, `[[jellyfin.path_mappings]]`) {
+		t.Fatalf("expected path_mappings in config:\n%s", configStr)
+	}
+	if !strings.Contains(configStr, `jellyfin = "/movies1"`) || !strings.Contains(configStr, `daemon = "/mnt/STORAGE1/MOVIES"`) {
+		t.Fatalf("expected mapping values:\n%s", configStr)
+	}
+}
+
 func TestGenerateConfigString_EscapesPluginDaemonURL(t *testing.T) {
 	m := &model{
 		watchFolders:    []WatchFolder{{Type: "tv", Paths: "/watch/tv"}},

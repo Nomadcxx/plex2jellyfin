@@ -1,13 +1,17 @@
 ---
 title: What health --fix Changes
-description: The exact Sonarr/Radarr settings plex2jellyfin health --fix modifies, and why.
+description: The exact Sonarr/Radarr settings plex2jellyfin health --fix can modify, and why.
 ---
 
 `plex2jellyfin health` checks that your Sonarr/Radarr configuration is
 compatible with the daemon owning file imports. `plex2jellyfin health --fix`
-**modifies your *arr settings** — this page is the exact list, so nothing
-changes behind your back. `--fix --dry-run` prints what would change
-without touching anything.
+is a **dry-run by default**: it prints what would change and does not modify
+*arr settings until you pass `--dry-run=false`.
+
+```bash
+plex2jellyfin health --fix                  # preview only (default)
+plex2jellyfin health --fix --dry-run=false  # apply the changes below
+```
 
 ## Completed Download Handling → disabled (critical)
 

@@ -45,7 +45,14 @@ flowchart TB
 5. Notify Sonarr/Radarr / Jellyfin when configured.
 6. Record parse decision; sweeper + plugin webhooks confirm Jellyfin actually ingested the item.
 
-Path mappings (`[[jellyfin.path_mappings]]`) are required when Jellyfin’s container paths differ from host paths — otherwise confirmations fail.
+Path mappings (`[[jellyfin.path_mappings]]`) are required when Jellyfin’s container paths differ from host paths — otherwise confirmations fail. See [Path mappings](/docs/getting-started/path-mappings).
+
+### First organize → confirmation → labels
+
+1. Daemon organizes a file under a `[libraries]` root and records a `parse_decisions` row.
+2. Companion plugin posts an item-added/updated webhook with Jellyfin’s path (often a container root).
+3. Path translator rewrites that path to the daemon view; the webhook handler attaches `jellyfin_item_id` (and provider IDs) when correlation succeeds.
+4. Labeler compares the parsed title to Jellyfin’s name → **PASS** / **DRIFT** / **FAIL**. Without plugin webhooks or without mappings, step 3 never attaches IDs and labels do not run.
 
 ## Initial library scan
 
@@ -53,4 +60,4 @@ Used by setup wizards (and `plex2jellyfin scan`) to walk library roots into `med
 
 ## Safety model
 
-Destructive migration commands use **generate → dry-run → execute**. Preview plans before touching files. The daemon respects `[options].dry_run` when set.
+Destructive migration commands use **generate → dry-run → execute**. Preview plans before touching files. The daemon always organizes for real — it ignores `[options].dry_run` (forced off at startup).

@@ -29,8 +29,8 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/privilege"
 	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
-	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
 )
@@ -38,26 +38,27 @@ import (
 // setupDeps injects every side effect the wizard performs so tests can
 // script a full run without a network, daemon, or real home directory.
 type setupDeps struct {
-	loadConfig    func() (*config.Config, error)
-	preflight     func(setupdomain.Draft) []setupdomain.FieldError
-	testSonarr    func(url, apiKey string) error
-	testRadarr    func(url, apiKey string) error
-	testJellyfin  func(url, apiKey string) error
-	checkSonarr   func(url, apiKey string) ([]service.HealthIssue, error)
-	fixSonarr     func(url, apiKey string, issues []service.HealthIssue) error
-	checkRadarr   func(url, apiKey string) ([]service.HealthIssue, error)
-	fixRadarr     func(url, apiKey string, issues []service.HealthIssue) error
-	listModels    func(endpoint string) ([]string, error)
-	activate      func(ctx context.Context) error
-	activateWeb   func() error
-	webUnitOK     func() bool
-	initialScan   func(ctx context.Context, out io.Writer, draft setupdomain.Draft) error
-	generateToken func() (string, error)
-	runtime       setupdomain.RuntimeInfo
-	pluginEngine  func(url, apiKey string) pluginEngine
-	advertiseIP   func() string
-	saveConfig    func(*config.Config) error
-	permDefaults  func() config.PermissionsConfig
+	loadConfig          func() (*config.Config, error)
+	preflight           func(setupdomain.Draft) []setupdomain.FieldError
+	testSonarr          func(url, apiKey string) error
+	testRadarr          func(url, apiKey string) error
+	testJellyfin        func(url, apiKey string) error
+	listJellyfinFolders func(url, apiKey string) ([]jellyfin.VirtualFolder, error)
+	checkSonarr         func(url, apiKey string) ([]service.HealthIssue, error)
+	fixSonarr           func(url, apiKey string, issues []service.HealthIssue) error
+	checkRadarr         func(url, apiKey string) ([]service.HealthIssue, error)
+	fixRadarr           func(url, apiKey string, issues []service.HealthIssue) error
+	listModels          func(endpoint string) ([]string, error)
+	activate            func(ctx context.Context) error
+	activateWeb         func() error
+	webUnitOK           func() bool
+	initialScan         func(ctx context.Context, out io.Writer, draft setupdomain.Draft) error
+	generateToken       func() (string, error)
+	runtime             setupdomain.RuntimeInfo
+	pluginEngine        func(url, apiKey string) pluginEngine
+	advertiseIP         func() string
+	saveConfig          func(*config.Config) error
+	permDefaults        func() config.PermissionsConfig
 }
 
 func defaultSetupDeps() setupDeps {
@@ -75,6 +76,9 @@ func defaultSetupDeps() setupDeps {
 		testJellyfin: func(url, apiKey string) error {
 			_, err := jellyfin.NewClient(jellyfin.Config{URL: url, APIKey: apiKey, Timeout: 5 * time.Second}).GetSystemInfo()
 			return err
+		},
+		listJellyfinFolders: func(url, apiKey string) ([]jellyfin.VirtualFolder, error) {
+			return jellyfin.NewClient(jellyfin.Config{URL: url, APIKey: apiKey, Timeout: 5 * time.Second}).GetVirtualFolders()
 		},
 		checkSonarr: func(url, apiKey string) ([]service.HealthIssue, error) {
 			return service.CheckSonarrConfig(sonarr.NewClient(sonarr.Config{URL: url, APIKey: apiKey, Timeout: 5 * time.Second}))
@@ -544,6 +548,11 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 	draft.Jellyfin.Enabled = jellyfinDraft.Enabled
 	draft.Jellyfin.URL = jellyfinDraft.URL
 	draft.Jellyfin.APIKey = jellyfinDraft.APIKey
+	if draft.Jellyfin.Enabled {
+		if err := promptJellyfinPathMappings(p, stdout, deps, &draft); err != nil {
+			return err
+		}
+	}
 
 	pluginState := wizardPluginStep(ctx, p, stdout, deps, jellyfinDraft)
 
@@ -822,6 +831,70 @@ func wizardPluginStep(ctx context.Context, p *prompter, out io.Writer, deps setu
 	}
 	fmt.Fprintln(out, "  plugin loaded")
 	return wizardPluginState{attempted: true, loaded: true}
+}
+
+func promptJellyfinPathMappings(p *prompter, out io.Writer, deps setupDeps, draft *setupdomain.Draft) error {
+	clitheme.Section(out, "Jellyfin path mappings")
+	for _, line := range setupdomain.PathMappingsLines() {
+		clitheme.Muted(out, line)
+	}
+
+	var folders []jellyfin.VirtualFolder
+	if deps.listJellyfinFolders != nil {
+		var err error
+		folders, err = deps.listJellyfinFolders(draft.Jellyfin.URL, draft.Jellyfin.APIKey)
+		if err != nil {
+			clitheme.Warn(out, fmt.Sprintf("could not list Jellyfin libraries: %v", err))
+			clitheme.Muted(out, "Add mappings manually if Jellyfin paths differ from [libraries].")
+			add, aerr := p.askBool("Add a path mapping now?", false)
+			if aerr != nil {
+				return aerr
+			}
+			if !add {
+				return nil
+			}
+		}
+	}
+
+	for {
+		unmapped := setupdomain.FindUnmappedJellyfinRoots(
+			folders, draft.Libraries.Movies, draft.Libraries.TV, draft.Jellyfin.PathMappings,
+		)
+		if len(unmapped) == 0 {
+			if len(draft.Jellyfin.PathMappings) > 0 {
+				clitheme.OK(out, fmt.Sprintf("%d path mapping(s) cover Jellyfin library roots", len(draft.Jellyfin.PathMappings)))
+			} else if len(folders) > 0 {
+				clitheme.OK(out, "Jellyfin library roots already match [libraries] — no mappings needed")
+			}
+			return nil
+		}
+
+		clitheme.Warn(out, "Unmapped Jellyfin roots (feedback loop will not attach until these are mapped):")
+		for _, loc := range unmapped {
+			fmt.Fprintf(out, "  - %s\n", loc)
+		}
+		clitheme.Muted(out, "Add one mapping per root. Continue is blocked until the list is empty (same as the web wizard).")
+
+		defJF := unmapped[0]
+		jfPath, err := p.ask("Jellyfin path (as Jellyfin sees it)", defJF)
+		if err != nil {
+			return err
+		}
+		daemonPath, err := p.ask("P2J / host path (as this machine sees it)", "")
+		if err != nil {
+			return err
+		}
+		jfPath = strings.TrimSpace(jfPath)
+		daemonPath = strings.TrimSpace(daemonPath)
+		if jfPath == "" || daemonPath == "" {
+			clitheme.Warn(out, "both paths are required")
+			continue
+		}
+		draft.Jellyfin.PathMappings = append(draft.Jellyfin.PathMappings, config.JellyfinPathMapping{
+			Jellyfin: jfPath,
+			Daemon:   daemonPath,
+		})
+	}
 }
 
 func promptService(p *prompter, name, defaultURL string, svc *setupdomain.ServiceDraft, test func(url, apiKey string) error) error {

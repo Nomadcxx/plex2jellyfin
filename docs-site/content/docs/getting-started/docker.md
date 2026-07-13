@@ -136,7 +136,7 @@ services:
    ```
 
 2. Set `PUID`/`PGID` to match the UID/GID your Jellyfin instance runs as (see [above](#puidpgid-and-file-ownership)).
-3. If your Jellyfin also runs in a container with bind mounts whose paths differ from this container's `/library`, add `[[jellyfin.path_mappings]]` entries to `config.toml` so the post-organize feedback loop can correlate Jellyfin items with daemon paths — see [Configuration](/docs/reference/configuration#jellyfin-path-mappings).
+3. If your Jellyfin also runs in a container with bind mounts whose paths differ from this container's `/library`, add `[[jellyfin.path_mappings]]` entries to `config.toml` so the post-organize feedback loop can correlate Jellyfin items with daemon paths — see [Path mappings](/docs/getting-started/path-mappings) and [Configuration](/docs/reference/configuration#jellyfin-path-mappings).
 4. Bring it up:
 
    ```bash
@@ -152,9 +152,12 @@ services:
       (use the *container* paths: `/watch/...`, `/library/...`), optional
       Sonarr/Radarr/Jellyfin connections, optional Ollama, and runtime
       behavior — every path is validated before you can continue;
-   3. **Review & activate** writes the config atomically and starts the
-      daemon; you land on the dashboard and can optionally kick off the
-      initial scan.
+   3. **Review & activate** writes the config atomically, starts the
+      daemon, and — when library paths are configured — runs the initial
+      library index (progress streams in the wizard). You land on the
+      dashboard when indexing finishes. If Jellyfin paths differ from
+      `/library`, set [path mappings](/docs/getting-started/path-mappings)
+      on the Services step before continuing.
 
    The wizard only appears while the install is unconfigured. Existing
    configs (including ones written by hand on older releases) skip it.

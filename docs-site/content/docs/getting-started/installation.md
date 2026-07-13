@@ -14,7 +14,7 @@ Every install path ships the same binaries:
 
 Config lives at `~/.config/plex2jellyfin/config.toml`. Systemd units typically run as root and resolve that path via `SUDO_USER` (fresh-build scripts inject it automatically).
 
-After install, finish with a [setup wizard](/docs/getting-started/setup-wizards) (TUI, CLI, or web). Install the [Jellyfin companion plugin](/docs/getting-started/jellyfin-plugin) for the feedback loop.
+After install, finish with a [setup wizard](/docs/getting-started/setup-wizards) (TUI, CLI, or web). Install the [Jellyfin companion plugin](/docs/getting-started/jellyfin-plugin) for the feedback loop, and configure [path mappings](/docs/getting-started/path-mappings) when Jellyfin’s library paths differ from yours (common with Docker bind mounts).
 
 ## Option A — TUI installer
 
@@ -22,7 +22,7 @@ After install, finish with a [setup wizard](/docs/getting-started/setup-wizards)
 curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
 ```
 
-Requires Go 1.24+ and `git`. Clones into a temp dir, builds `./cmd/installer`, and runs the interactive wizard (paths, *arr, AI, permissions, systemd, initial scan). Re-run to update binaries; existing `config.toml` is preserved.
+Requires Go 1.25+ and `git`. Clones into a temp dir, builds `./cmd/installer`, and runs the interactive wizard (paths, *arr, AI, permissions, systemd, initial scan). Re-run to update binaries; existing `config.toml` is preserved.
 
 ## Option B — Build + CLI setup
 
@@ -76,7 +76,7 @@ make                                                                   # fronten
 ## Requirements
 
 - Linux (amd64 or arm64)
-- Go 1.24+ for source / script / TUI builds
+- Go 1.25+ for source / script / TUI builds
 - npm for building the embedded web UI (script and `make` paths)
 - Root or sudo for systemd unit install and `CAP_CHOWN` on bare metal
 - Jellyfin 10.11.x if you use the companion plugin

@@ -5,7 +5,7 @@ description: Complete config.toml reference for local and container deployments.
 
 Config file: `~/.config/plex2jellyfin/config.toml` on bare metal, `/config/.config/plex2jellyfin/config.toml` in Docker (see [Docker](/docs/getting-started/docker#where-config-lives-in-the-container)).
 
-A fully annotated template ships as [`config.toml.example`](https://github.com/Nomadcxx/plex2jellyfin/blob/main/config.toml.example) in the repo root and is installed to `/usr/share/doc/plex2jellyfin/config.toml.example` by the deb/rpm packages. Generate a starting point with:
+A starter template ships as [`config.toml.example`](https://github.com/Nomadcxx/plex2jellyfin/blob/main/config.toml.example) in the repo root and is installed to `/usr/share/doc/plex2jellyfin/config.toml.example` by the deb/rpm packages. For a config that matches the current schema (including defaults), generate:
 
 ```bash
 plex2jellyfin config init
@@ -72,18 +72,21 @@ verify_checksums  = false
 delete_source     = true
 ```
 
-- `dry_run` — global override: preview every operation without writing/moving/deleting anything
+- `dry_run` — used by some CLI flows as a preview flag; **the daemon always organizes for real** and forces this off at startup
 - `verify_checksums` — verify file integrity (checksum) after a move before deleting the source
 - `delete_source` — whether the source file is deleted after a successful move (set `false` to copy instead of move)
 
 ## `[ai]`
 
+Defaults from `DefaultConfig` (examples below are illustrative — any valid Ollama model name works):
+
 ```toml
 [ai]
 enabled                = true
 ollama_endpoint        = "http://localhost:11434"
-model                  = "minimax-m2.5:cloud"
-fallback_model         = "kimi-k2.6:cloud"
+model                  = "qwen2.5vl:7b"
+fallback_model         = ""
+cloud_model            = "nemotron-3-nano:30b-cloud"
 confidence_threshold   = 0.8
 auto_trigger_threshold = 0.6
 timeout_seconds        = 30
@@ -97,13 +100,16 @@ daily_limit            = 50
 - `enabled` — turn AI-assisted naming on/off globally
 - `ollama_endpoint` — Ollama server URL (local install or [Ollama Cloud](https://ollama.com))
 - `model` / `fallback_model` — primary and fallback model names; the fallback is used if the primary errors or trips the circuit breaker
-- `confidence_threshold` — parse confidence below this triggers an AI lookup during `audit --generate` and daemon ingestion
-- `auto_trigger_threshold` — separate, typically lower, threshold below which the daemon automatically queries the AI in real time (vs. leaving the file for a manual `audit` pass)
+- `cloud_model` — optional cloud model name used by cloud-oriented setups
+- `confidence_threshold` — cutoff for `audit --generate` (files below this are candidates for AI)
+- `auto_trigger_threshold` — daemon real-time gate: only queues AI when parse confidence is **below** this value (default `0.6`). Deterministic movie/TV identity (title+year / SxxExx, non-obfuscated) bypasses AI even when confidence is low
 - `timeout_seconds` — per-request timeout
 - `cache_enabled` — cache AI responses to avoid repeat calls for the same input
 - `auto_resolve_risky` — whether to auto-apply AI suggestions the tool flags as risky, vs. always queuing them for manual review
 - `max_retries` — retry attempts before falling back
 - `hourly_limit` / `daily_limit` — rate limits on AI calls, to protect a local Ollama instance or a metered cloud model
+
+This page highlights the keys most operators edit. `plex2jellyfin config init` emits the full persisted surface (`plugin_*`, `metadata_recovery`, `logging`, `api`, …).
 
 ## `[sonarr]` / `[radarr]`
 
@@ -163,7 +169,7 @@ Connects to Jellyfin's API so the daemon can query and correlate library items a
 
 ### Jellyfin path mappings
 
-When Jellyfin runs in a container with bind mounts, its view of a file's path (container-internal) differs from the daemon's view (host filesystem path, or this tool's own container mounts). Configure path mappings so the post-organize feedback loop can correlate Jellyfin items with daemon paths:
+When Jellyfin runs in a container with bind mounts, its view of a file's path (container-internal) differs from the daemon's view (host filesystem path, or this tool's own container mounts). Configure path mappings so the post-organize feedback loop can correlate Jellyfin items with daemon paths. Full walkthrough: [Path mappings](/docs/getting-started/path-mappings).
 
 ```toml
 [[jellyfin.path_mappings]]
@@ -175,7 +181,7 @@ jellyfin = "/movies"
 daemon   = "/mnt/STORAGE2/MOVIES"
 ```
 
-Mappings apply longest-prefix first. **Without these, the sweeper labels parse-decision rows for organized files as FAIL** once it can no longer correlate a Jellyfin item with a daemon-known path — this is the single most common misconfiguration when both Jellyfin and Plex2Jellyfin run in containers with different mount layouts.
+Mappings apply longest-prefix first. **Without these**, webhook paths never match organize targets: `jellyfin_item_id` stays empty on `parse_decisions`, the labeler never gets provider IDs for PASS/DRIFT/FAIL, and the sweeper eventually marks uncorrelated rows FAIL. This is the single most common misconfiguration when Jellyfin and Plex2Jellyfin use different mount layouts.
 
 ## Full example
 
@@ -196,8 +202,7 @@ health_addr    = ":8686"
 [ai]
 enabled                = true
 ollama_endpoint        = "http://localhost:11434"
-model                  = "minimax-m2.5:cloud"
-fallback_model         = "kimi-k2.6:cloud"
+model                  = "qwen2.5vl:7b"
 confidence_threshold   = 0.8
 auto_trigger_threshold = 0.6
 timeout_seconds        = 30

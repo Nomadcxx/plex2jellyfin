@@ -13,6 +13,11 @@ IMDB/TMDB/TVDB IDs), how the Trace view shows "matched item …", and how
 orphan detection works. Without it, plex2jellyfin can move files but never
 learns whether Jellyfin recognized them.
 
+If Jellyfin’s library paths differ from the daemon’s `[libraries]` roots
+(common with Docker bind mounts), you also need
+[path mappings](/docs/getting-started/path-mappings) — the plugin alone is
+not enough when `/movies1` never matches `/mnt/.../MOVIES`.
+
 ## Compatibility
 
 - Jellyfin **10.11.x** (`targetAbi 10.11.0.0`)

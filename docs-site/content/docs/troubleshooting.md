@@ -72,13 +72,21 @@ Adjust the owner/group and modes to whatever `[permissions]` you've configured.
 
 ## Jellyfin path mappings and parse decisions marked FAIL
 
-**Symptom:** organized files exist and look correct, but `plex2jellyfin status` or the parse-decisions data shows them as FAIL.
+**Symptom:** organized files exist and look correct, but decisions never get a `jellyfin_item_id`, PASS/DRIFT/FAIL labels never appear, or rows eventually show FAIL.
 
-**Cause:** the post-organize feedback loop (sweeper + Jellyfin webhook) can't correlate a Jellyfin library item's path with the daemon's own path for that file. This happens whenever Jellyfin runs in a container with bind mounts whose paths differ from what the daemon sees — for example Jellyfin sees `/tv/Show/...` but the daemon organized the file to `/mnt/storage1/TVSHOWS/Show/...`.
+**Cause:** the post-organize feedback loop (plugin webhook + path translator + sweeper) can't correlate a Jellyfin library item's path with the daemon's path for that file. Typical case: Jellyfin sees `/movies1/...` while the daemon organized to `/mnt/STORAGE1/MOVIES/...`.
 
-**Fix:** add `[[jellyfin.path_mappings]]` entries to `config.toml` covering every root where the two views diverge. See [Configuration &rarr; Jellyfin path mappings](/docs/reference/configuration#jellyfin-path-mappings). Without them, every row eventually gets auto-labeled FAIL as the sweeper runs.
+**Fix:** add `[[jellyfin.path_mappings]]` covering every root where the two views diverge, and keep the companion plugin installed. See [Path mappings](/docs/getting-started/path-mappings) and [Configuration → Jellyfin path mappings](/docs/reference/configuration#jellyfin-path-mappings). Re-test Jellyfin in a setup wizard until unmapped roots are empty.
 
 ## AI audit issues
+
+### AI never ran on a file that looked wrong
+
+**Symptom:** a polluted or odd title landed in the library, but no AI enhancement ran.
+
+**Cause:** the daemon only queues AI when parse confidence is **below** `auto_trigger_threshold` (default `0.6`). Movies/episodes with a deterministic identity (title + year or SxxExx, and a non-obfuscated filename) bypass AI even when confidence is low — see `shouldQueueForAI` in the daemon handler. High-confidence regex parses also skip AI.
+
+**Fix:** raise naming quality via parser fixes / re-organize, or lower `auto_trigger_threshold` only if you accept more AI calls. `audit --generate` still uses `confidence_threshold` for bulk review.
 
 ### AI proposes the wrong show or movie
 

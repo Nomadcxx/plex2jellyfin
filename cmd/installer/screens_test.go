@@ -27,6 +27,8 @@ func TestRenderJellyfin_PluginTogglesVisibleAfterSuccessfulTest(t *testing.T) {
 		"Restart Jellyfin after install: Yes",
 		"(recommended)",
 		"closes the feedback loop",
+		"Path mappings",
+		"feedback loop",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in Jellyfin screen, got:\n%s", want, out)

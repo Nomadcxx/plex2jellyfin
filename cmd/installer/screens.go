@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	setuppkg "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -317,6 +318,43 @@ func (m model) renderJellyfin() string {
 				b.WriteString(fmt.Sprintf("  %s Connected - %s\n", checkMark.String(), m.jellyfinVersion))
 			} else {
 				b.WriteString(fmt.Sprintf("  %s Failed - %s\n", failMark.String(), m.jellyfinVersion))
+			}
+		}
+
+		if m.jellyfinTested {
+			b.WriteString("\n" + fgBold(Primary).Render("Path mappings") + "\n")
+			for _, line := range setuppkg.PathMappingsLines() {
+				b.WriteString(fg(FgMuted).Render("  "+line) + "\n")
+			}
+			if len(m.jellyfinUnmapped) > 0 {
+				b.WriteString("\n" + fg(WarningColor).Render("  Unmapped Jellyfin roots:") + "\n")
+				for _, loc := range m.jellyfinUnmapped {
+					b.WriteString(fmt.Sprintf("    - %s\n", loc))
+				}
+			} else if len(m.jellyfinFolders) > 0 {
+				b.WriteString("\n  " + checkMark.String() + " All Jellyfin roots map to P2J paths\n")
+			}
+			if len(m.pathMappings) > 0 {
+				b.WriteString("\n  Configured:\n")
+				for i, mapping := range m.pathMappings {
+					b.WriteString(fmt.Sprintf("    %d. %s → %s\n", i+1, mapping.Jellyfin, mapping.Daemon))
+				}
+			}
+			if len(m.inputs) >= 5 {
+				jfPrefix := "  "
+				if m.focusedInput == 4 {
+					jfPrefix = fg(Primary).Render("▸ ")
+				}
+				daemonPrefix := "  "
+				if m.focusedInput == 5 {
+					daemonPrefix = fg(Primary).Render("▸ ")
+				}
+				b.WriteString(fmt.Sprintf("\n%sJellyfin path: %s\n", jfPrefix, m.inputs[3].View()))
+				b.WriteString(fmt.Sprintf("%sP2J path:      %s\n", daemonPrefix, m.inputs[4].View()))
+				b.WriteString(fg(FgMuted).Render("  [A] Add mapping  [X] Remove last") + "\n")
+			}
+			if m.pathMappingsError != "" {
+				b.WriteString("\n  " + fg(WarningColor).Render(m.pathMappingsError) + "\n")
 			}
 		}
 

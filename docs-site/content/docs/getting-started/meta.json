@@ -3,6 +3,7 @@
   "pages": [
     "installation",
     "setup-wizards",
+    "path-mappings",
     "packages",
     "docker",
     "jellyfin-plugin",

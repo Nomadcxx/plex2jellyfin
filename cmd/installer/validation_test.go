@@ -9,31 +9,41 @@ import (
 
 func TestTestJellyfinCmd_UsesValidAuthorizationHeader(t *testing.T) {
 	const apiKey = "abc123"
-	wantAuth := `MediaBrowser Token="abc123", Client="plex2jellyfin-installer", Device="installer", DeviceId="installer", Version="1.0.0"`
 
 	origTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/System/Info" {
-			t.Fatalf("unexpected path: %s", req.URL.Path)
-		}
-		if got := req.Header.Get("Authorization"); got != wantAuth {
+		switch req.URL.Path {
+		case "/System/Info":
+			auth := req.Header.Get("Authorization")
+			if !strings.Contains(auth, `Token="abc123"`) || !strings.Contains(auth, `Client="plex2jellyfin"`) {
+				return &http.Response{
+					StatusCode: http.StatusUnauthorized,
+					Body:       io.NopCloser(strings.NewReader("unauthorized")),
+					Header:     make(http.Header),
+					Request:    req,
+				}, nil
+			}
 			return &http.Response{
-				StatusCode: http.StatusUnauthorized,
-				Body:       io.NopCloser(strings.NewReader("unauthorized")),
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"ServerName":"Jellyfin","Version":"10.10.7"}`)),
 				Header:     make(http.Header),
 				Request:    req,
 			}, nil
+		case "/Library/VirtualFolders":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`[]`)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		default:
+			t.Fatalf("unexpected path: %s", req.URL.Path)
+			return nil, nil
 		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"ServerName":"Jellyfin","Version":"10.10.7"}`)),
-			Header:     make(http.Header),
-			Request:    req,
-		}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = origTransport })
 
-	cmd := testJellyfinCmd("http://jellyfin.local", apiKey)
+	cmd := testJellyfinCmd("http://jellyfin.local", apiKey, nil, nil, nil)
 	msg := cmd()
 	got, ok := msg.(apiTestResultMsg)
 	if !ok {

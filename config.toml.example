@@ -1,5 +1,14 @@
 # Plex2Jellyfin Configuration
 # Location: ~/.config/plex2jellyfin/config.toml
+#
+# This is a starter template. For a schema-complete file with current defaults,
+# run: plex2jellyfin config init
+# Guide: https://nomadcxx.github.io/plex2jellyfin/docs/reference/configuration/
+
+# Managed by setup wizards (web / CLI / TUI).
+[setup]
+version = 1
+completed = false
 
 # Directories to watch for new media files
 [watch]
@@ -11,13 +20,14 @@ tv = ["/path/to/downloads/tv"]
 movies = ["/path/to/jellyfin/Movies"]
 tv = ["/path/to/jellyfin/TV Shows"]
 
-# Daemon settings
+# Daemon settings (daemon.enabled defaults to false until a wizard activates it)
 [daemon]
 enabled = true
 scan_frequency = "5m"
 health_addr = ":8686"
 
 # General options
+# dry_run is ignored by plex2jellyfin-daemon (always organizes for real).
 [options]
 dry_run = false
 verify_checksums = false
@@ -39,29 +49,42 @@ url = "http://localhost:7878"
 api_key = ""
 notify_on_import = true
 
-# File permissions (optional)
-# Set ownership and permissions for transferred files.
-# Useful when Jellyfin runs as a different user than the download client.
+# File permissions (optional, bare metal only — no effect in Docker)
 # Leave user/group empty to preserve source ownership.
 [permissions]
-# user = "jellyfin"      # Username or numeric UID
-# group = "jellyfin"     # Group name or numeric GID
-# file_mode = "0644"     # File permissions (rw-r--r--)
-# dir_mode = "0755"      # Directory permissions (rwxr-xr-x)
+# user = "jellyfin"
+# group = "media"
+# file_mode = "0664"
+# dir_mode = "0775"
+
+# Optional Ollama assist for low-confidence / obfuscated names.
+# Defaults match DefaultConfig; any valid Ollama model name works.
+[ai]
+enabled = false
+ollama_endpoint = "http://localhost:11434"
+model = "qwen2.5vl:7b"
+# fallback_model = ""
+# cloud_model = "nemotron-3-nano:30b-cloud"
+confidence_threshold = 0.8
+auto_trigger_threshold = 0.6
 
 [jellyfin]
 # enabled = true
 # url = "http://localhost:8096"
 # api_key = "..."
 # webhook_secret = "..."
+# plugin_shared_secret = "..."   # usually same as webhook_secret
+# plugin_enabled = true
+# plugin_daemon_url = "http://192.168.1.10:5522"  # never localhost from a container
 
 # Path mappings translate between Jellyfin's view of a media file (typically
 # a container-internal path) and the daemon's view (the host filesystem
 # path). Required whenever Jellyfin runs in a container with bind mounts
-# whose roots differ from the daemon's. Without these, the post-organize
-# feedback loop (sweeper + webhook) cannot correlate Jellyfin items with
-# parse_decisions rows and every row will eventually be auto-labeled FAIL.
-# Mappings are applied longest-prefix first.
+# whose roots differ from the daemon's. Without these, organizes still
+# succeed but webhooks never match parse_decisions (jellyfin_item_id stays
+# empty) and PASS/DRIFT/FAIL labeling never runs; the sweeper eventually
+# marks uncorrelated rows FAIL. Mappings are applied longest-prefix first.
+# Full guide: https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/
 #
 # [[jellyfin.path_mappings]]
 # jellyfin = "/tv5"

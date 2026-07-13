@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin/plugininstall"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
@@ -44,6 +45,9 @@ func wizardTestDeps(t *testing.T) (setupDeps, *wizardState) {
 		testRadarr: func(url, apiKey string) error { return nil },
 		testJellyfin: func(url, apiKey string) error {
 			return nil
+		},
+		listJellyfinFolders: func(url, apiKey string) ([]jellyfin.VirtualFolder, error) {
+			return nil, nil
 		},
 		checkSonarr: func(url, apiKey string) ([]service.HealthIssue, error) {
 			return []service.HealthIssue{{
@@ -271,6 +275,50 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 	if saved.Permissions.User != "" || saved.Permissions.Group != "media" ||
 		saved.Permissions.FileMode != "0664" || saved.Permissions.DirMode != "0775" {
 		t.Errorf("permissions = %+v, want empty:media 0664/0775", saved.Permissions)
+	}
+}
+
+func TestSetupWizardPromptsPathMappingsWhenUnmapped(t *testing.T) {
+	deps, _ := wizardTestDeps(t)
+	deps.listJellyfinFolders = func(url, apiKey string) ([]jellyfin.VirtualFolder, error) {
+		return []jellyfin.VirtualFolder{{
+			Name:      "Movies",
+			Locations: []string{"/movies1"},
+		}}, nil
+	}
+
+	answers := []string{
+		"", "", // TV skip
+		"/downloads/movies", "/mnt/STORAGE1/MOVIES",
+		"n", "n",
+		"y", "", "jf-key",
+		"/movies1", "/mnt/STORAGE1/MOVIES", // path mapping
+		"n", // skip plugin install
+		"n",
+		"5m", "n", "n",
+		"", "", "", "",
+		"y",
+		"y",
+		"", // webhook URL default
+	}
+	out, err := runWizard(t, deps, answers)
+	if err != nil {
+		t.Fatalf("wizard error: %v\n---\n%s", err, out)
+	}
+	if !strings.Contains(out, "Jellyfin path mappings") {
+		t.Fatalf("expected path mappings section:\n%s", out)
+	}
+	if !strings.Contains(out, "/movies1") {
+		t.Fatalf("expected unmapped root listed:\n%s", out)
+	}
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("load saved config: %v", err)
+	}
+	if len(saved.Jellyfin.PathMappings) != 1 ||
+		saved.Jellyfin.PathMappings[0].Jellyfin != "/movies1" ||
+		saved.Jellyfin.PathMappings[0].Daemon != "/mnt/STORAGE1/MOVIES" {
+		t.Fatalf("path mappings not saved: %+v", saved.Jellyfin.PathMappings)
 	}
 }
 

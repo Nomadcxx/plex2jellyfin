@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	setuppkg "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -169,46 +172,38 @@ func testRadarrCmd(url, apiKey string) tea.Cmd {
 
 func (m model) testJellyfin() (tea.Model, tea.Cmd) {
 	m.jellyfinTesting = true
-	url := m.jellyfinURL
-	apiKey := m.jellyfinAPIKey
-	if len(m.inputs) >= 2 {
-		url = m.inputs[0].Value()
-		apiKey = m.inputs[1].Value()
-	}
-	return m, testJellyfinCmd(url, apiKey)
+	m.saveJellyfinInputs()
+	return m, testJellyfinCmd(m.jellyfinURL, m.jellyfinAPIKey, splitPaths(m.movieLibraryPaths), splitPaths(m.tvLibraryPaths), m.pathMappings)
 }
 
-func testJellyfinCmd(url, apiKey string) tea.Cmd {
+func testJellyfinCmd(url, apiKey string, movieLibs, tvLibs []string, mappings []config.JellyfinPathMapping) tea.Cmd {
 	return func() tea.Msg {
-		client := &http.Client{Timeout: 10 * time.Second}
-		req, err := http.NewRequest("GET", fmt.Sprintf("%s/System/Info", strings.TrimRight(url, "/")), nil)
+		client := jellyfin.NewClient(jellyfin.Config{URL: url, APIKey: apiKey, Timeout: 10 * time.Second})
+		info, err := client.GetSystemInfo()
 		if err != nil {
 			return apiTestResultMsg{service: "jellyfin", success: false, err: err}
 		}
-		req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token="%s", Client="plex2jellyfin-installer", Device="installer", DeviceId="installer", Version="1.0.0"`, apiKey))
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return apiTestResultMsg{service: "jellyfin", success: false, err: err}
+		label := info.Version
+		if info.ServerName != "" && info.Version != "" {
+			label = fmt.Sprintf("%s (%s)", info.ServerName, info.Version)
 		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != 200 {
-			return apiTestResultMsg{service: "jellyfin", success: false, err: fmt.Errorf("HTTP %d", resp.StatusCode)}
+		folders, ferr := client.GetVirtualFolders()
+		if ferr != nil {
+			return apiTestResultMsg{
+				service: "jellyfin",
+				success: true,
+				version: label,
+				err:     fmt.Errorf("connected, but could not list libraries: %w", ferr),
+			}
 		}
-
-		body, _ := io.ReadAll(resp.Body)
-		var result struct {
-			ServerName string `json:"ServerName"`
-			Version    string `json:"Version"`
+		unmapped := setuppkg.FindUnmappedJellyfinRoots(folders, movieLibs, tvLibs, mappings)
+		return apiTestResultMsg{
+			service:  "jellyfin",
+			success:  true,
+			version:  label,
+			folders:  folders,
+			unmapped: unmapped,
 		}
-		_ = json.Unmarshal(body, &result)
-
-		label := result.Version
-		if result.ServerName != "" && result.Version != "" {
-			label = fmt.Sprintf("%s (%s)", result.ServerName, result.Version)
-		}
-		return apiTestResultMsg{service: "jellyfin", success: true, version: label}
 	}
 }
 
@@ -439,10 +434,19 @@ func (m model) handleAPITestResult(msg apiTestResultMsg) (tea.Model, tea.Cmd) {
 	case "jellyfin":
 		m.jellyfinTesting = false
 		m.jellyfinTested = msg.success
+		m.pathMappingsError = ""
 		if msg.success {
 			m.jellyfinVersion = msg.version
+			m.jellyfinFolders = msg.folders
+			m.jellyfinUnmapped = msg.unmapped
+			m.ensurePathMappingInputs()
+			if msg.err != nil {
+				m.pathMappingsError = msg.err.Error()
+			}
 		} else if msg.err != nil {
 			m.jellyfinVersion = msg.err.Error()
+			m.jellyfinUnmapped = nil
+			m.jellyfinFolders = nil
 		}
 	case "ollama":
 		m.aiTesting = false

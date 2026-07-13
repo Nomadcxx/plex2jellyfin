@@ -76,6 +76,7 @@ docs/COMPREHENSIVE_FIX_PLAN*.md
 docs/IMPLEMENTATION*.md
 docs/UI_*.md
 docs/audits/
+docs/audit/
 
 # Bug reports and session transcripts
 PLEX2JELLYFIN_BUG_REPORT_*.md

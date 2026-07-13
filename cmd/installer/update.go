@@ -396,19 +396,50 @@ func (m model) handleJellyfinKeys(key string) (tea.Model, tea.Cmd) {
 		case m.jellyfinPluginTogglesVisible() && m.focusedInput == len(m.inputs)+2:
 			m.pluginRestart = !m.pluginRestart
 		}
+	case "a", "A":
+		if m.jellyfinTested {
+			m.tryAddPathMapping()
+		}
+	case "x", "X":
+		if m.jellyfinTested {
+			m.removeLastPathMapping()
+		}
 	case "t", "T":
 		if m.jellyfinEnabled {
 			return m.testJellyfin()
 		}
 	case "s", "S":
+		m.saveJellyfinInputs()
+		if block, msg := m.jellyfinAdvanceBlocked(); block {
+			m.pathMappingsError = msg
+			return m, nil
+		}
 		return m.nextStep()
 	case "enter":
 		m.saveJellyfinInputs()
+		if m.jellyfinTested && m.focusedInput >= 4 && m.focusedInput <= 5 {
+			m.tryAddPathMapping()
+			return m, nil
+		}
+		if block, msg := m.jellyfinAdvanceBlocked(); block {
+			m.pathMappingsError = msg
+			return m, nil
+		}
 		return m.nextStep()
 	case "esc":
 		return m.prevStep()
 	}
 	return m, nil
+}
+
+func (m model) jellyfinAdvanceBlocked() (bool, string) {
+	if !m.jellyfinEnabled {
+		return false, ""
+	}
+	if len(m.jellyfinUnmapped) > 0 {
+		return true, "Map every unmapped Jellyfin root (Add with [A]), then continue."
+	}
+	return false, ""
 }
 
 func (m model) handleAIKeys(key string) (tea.Model, tea.Cmd) {

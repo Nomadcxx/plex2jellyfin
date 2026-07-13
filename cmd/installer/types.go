@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	configpkg "github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 )
@@ -133,13 +135,17 @@ type model struct {
 	radarrTesting bool
 
 	// Jellyfin configuration
-	jellyfinEnabled bool
-	jellyfinURL     string
-	jellyfinAPIKey  string
-	webhookSecret   string
-	jellyfinTested  bool
-	jellyfinVersion string
-	jellyfinTesting bool
+	jellyfinEnabled   bool
+	jellyfinURL       string
+	jellyfinAPIKey    string
+	webhookSecret     string
+	jellyfinTested    bool
+	jellyfinVersion   string
+	jellyfinTesting   bool
+	pathMappings      []configpkg.JellyfinPathMapping
+	jellyfinUnmapped  []string
+	jellyfinFolders   []jellyfin.VirtualFolder
+	pathMappingsError string
 
 	// AI configuration
 	aiEnabled            bool
@@ -277,10 +283,12 @@ type subTaskUpdateMsg struct {
 }
 
 type apiTestResultMsg struct {
-	service string // "sonarr", "radarr", "jellyfin", "ollama"
-	success bool
-	version string
-	err     error
+	service  string // "sonarr", "radarr", "jellyfin", "ollama"
+	success  bool
+	version  string
+	err      error
+	folders  []jellyfin.VirtualFolder // jellyfin only
+	unmapped []string                 // jellyfin only
 }
 
 type aiModelsMsg struct {

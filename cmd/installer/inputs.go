@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	configpkg "github.com/Nomadcxx/plex2jellyfin/internal/config"
 	setuppkg "github.com/Nomadcxx/plex2jellyfin/internal/setup"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -154,6 +155,64 @@ func (m *model) saveJellyfinInputs() {
 	if len(m.inputs) >= 3 {
 		m.webhookSecret = m.inputs[2].Value()
 	}
+}
+
+// ensurePathMappingInputs appends Jellyfin→P2J mapping fields after a successful Test.
+func (m *model) ensurePathMappingInputs() {
+	if len(m.inputs) >= 5 {
+		return
+	}
+	for len(m.inputs) < 3 {
+		ti := textinput.New()
+		styleTextInput(&ti)
+		m.inputs = append(m.inputs, ti)
+	}
+	jf := textinput.New()
+	jf.Placeholder = "/movies1"
+	jf.Width = 30
+	jf.CharLimit = 200
+	styleTextInput(&jf)
+	daemon := textinput.New()
+	daemon.Placeholder = "/mnt/STORAGE1/MOVIES"
+	daemon.Width = 40
+	daemon.CharLimit = 300
+	styleTextInput(&daemon)
+	m.inputs = append(m.inputs, jf, daemon)
+}
+
+func (m *model) recomputeJellyfinUnmapped() {
+	m.jellyfinUnmapped = setuppkg.FindUnmappedJellyfinRoots(
+		m.jellyfinFolders,
+		splitPaths(m.movieLibraryPaths),
+		splitPaths(m.tvLibraryPaths),
+		m.pathMappings,
+	)
+}
+
+func (m *model) tryAddPathMapping() bool {
+	if len(m.inputs) < 5 {
+		return false
+	}
+	jf := strings.TrimSpace(m.inputs[3].Value())
+	daemon := strings.TrimSpace(m.inputs[4].Value())
+	if jf == "" || daemon == "" {
+		m.pathMappingsError = "both Jellyfin and P2J paths are required"
+		return false
+	}
+	m.pathMappings = append(m.pathMappings, configpkg.JellyfinPathMapping{Jellyfin: jf, Daemon: daemon})
+	m.inputs[3].SetValue("")
+	m.inputs[4].SetValue("")
+	m.pathMappingsError = ""
+	m.recomputeJellyfinUnmapped()
+	return true
+}
+
+func (m *model) removeLastPathMapping() {
+	if len(m.pathMappings) == 0 {
+		return
+	}
+	m.pathMappings = m.pathMappings[:len(m.pathMappings)-1]
+	m.recomputeJellyfinUnmapped()
 }
 
 func (m *model) initAIInputs() {

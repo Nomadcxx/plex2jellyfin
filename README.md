@@ -33,7 +33,7 @@ Interactive terminal wizard: watch paths, library paths, *arr keys, AI, permissi
 <details>
 <summary><b>Option B — Build from source + CLI setup</b></summary>
 
-Requires Go 1.24+, git, npm, and sudo. Builds binaries, installs units, then you finish with the CLI wizard:
+Requires Go 1.25+, git, npm, and sudo. Builds binaries, installs units, then you finish with the CLI wizard:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/scripts/fresh-build-install.sh)
@@ -102,7 +102,7 @@ Installs binaries and systemd units. Finish with the web or CLI setup wizard aft
 <details>
 <summary><b>Option F — Development</b></summary>
 
-Requires Go 1.24+, git, and npm (for the embedded web UI):
+Requires Go 1.25+, git, and npm (for the embedded web UI):
 
 ```bash
 git clone https://github.com/Nomadcxx/plex2jellyfin.git
@@ -119,7 +119,7 @@ Or build individual binaries with `go build -o plex2jellyfin ./cmd/plex2jellyfin
 
 The companion plugin ([Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcxx/plex2jellyfin-plugin)) is required for the feedback loop: it forwards item-added/updated/removed and playback events from Jellyfin so plex2jellyfin can confirm organized files against real library items (and detect orphans). Without it, files move but confirmations never land.
 
-Setup wizards install and configure it when you connect Jellyfin (or run `plex2jellyfin plugin install`). Details: [plugin docs](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/jellyfin-plugin/).
+Setup wizards install and configure it when you connect Jellyfin (or run `plex2jellyfin plugin install`). Details: [plugin docs](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/jellyfin-plugin/). If Jellyfin paths differ from host library roots, also configure [path mappings](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/).
 
 ## Architecture
 
@@ -186,7 +186,7 @@ scan_frequency = "5m"
 [ai]
 enabled              = true
 ollama_endpoint      = "http://localhost:11434"
-model                = "minimax-m2.5:cloud"
+model                = "qwen2.5vl:7b"
 confidence_threshold = 0.8
 ```
 
@@ -212,7 +212,7 @@ notify_on_import = true
 <details>
 <summary><b>Jellyfin path mappings</b> (container/host mount differences)</summary>
 
-When Jellyfin runs in a container with bind mounts, configure path mappings so the post-organize feedback loop can correlate Jellyfin items with daemon paths:
+When Jellyfin runs in a container with bind mounts, configure path mappings so the post-organize feedback loop can correlate Jellyfin items with daemon paths. Full guide: [path mappings](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/).
 
 ```toml
 [jellyfin]
@@ -226,7 +226,7 @@ jellyfin = "/tv"
 daemon   = "/mnt/storage1/TVSHOWS"
 ```
 
-Without these, the sweeper marks parse-decision rows for organized files as FAIL.
+Without these, webhooks never match organize targets (`jellyfin_item_id` stays empty), PASS/DRIFT/FAIL labeling never runs, and the sweeper eventually marks uncorrelated rows FAIL.
 
 </details>
 
