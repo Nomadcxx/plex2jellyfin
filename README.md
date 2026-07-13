@@ -7,9 +7,9 @@
     <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
   </p>
 
-  <p>Plex papers over messy release names; Jellyfin takes your folders at face value.</p>
+  <p>Plex papers over messy release names. Jellyfin reads your folders at face value.</p>
 
-  <p>This tool migrates the files once (scan, dedupe, consolidate, rename), then <code>plex2jellyfin-daemon</code> watches download dirs and organizes every new arrival into Jellyfin naming.</p>
+  <p><code>plex2jellyfin</code> cleans an existing media library, then keeps new downloads in Jellyfin naming.</p>
 
   <p>
     <a href="https://nomadcxx.github.io/plex2jellyfin/docs/">Documentation</a>
@@ -18,22 +18,51 @@
   </p>
 </div>
 
-## Installation
+## Plex to Jellyfin
 
-Every path ships the same binaries: CLI (`plex2jellyfin`), daemon, web UI on `:5522`, and the TUI installer. Config lives at `~/.config/plex2jellyfin/config.toml`.
+Run a migration pass when you move a library over from Plex. The CLI indexes your movie and TV roots, reports library health, finds duplicates, consolidates TV series split across drives, and prepares rename or delete plans for review.
 
-### Option A — TUI installer
+Keep the daemon running after the first pass. It watches download folders, parses release names, strips scene tags, creates Jellyfin-style movie and TV folders, and moves new arrivals into the configured libraries.
+
+The web UI gives you setup, dashboard, queue, activity, trace, scheduler, duplicate review, consolidation, and settings screens on port `5522`.
+
+## Safety
+
+Cleanup commands use a plan-first flow:
+
+```bash
+generate -> dry-run -> execute
+```
+
+`generate` writes a plan. `dry-run` prints the moves or deletes. `execute` applies the plan you reviewed.
+
+The daemon organizes new arrivals for real. Use watch paths that contain completed downloads, not folders still owned by your download client.
+
+## Install
+
+Each install path provides the same pieces:
+
+| Piece | Role |
+| --- | --- |
+| `plex2jellyfin` | CLI for setup, scan, duplicates, consolidate, plugin, status |
+| `plex2jellyfin-daemon` | Watches download dirs, organizes arrivals, runs periodic scans |
+| `plex2jellyfin-web` | Dashboard and setup wizard on `:5522` |
+| TUI installer | Terminal setup for paths, services, permissions, AI, systemd |
+
+Config lives at `~/.config/plex2jellyfin/config.toml`.
+
+### TUI installer
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/install.sh | sudo bash
 ```
 
-Interactive terminal wizard: watch paths, library paths, *arr keys, AI, permissions, and systemd units. Re-run to update; it preserves an existing `config.toml`.
+The installer builds and installs the binaries, walks through paths and service settings, and preserves an existing `config.toml` when you rerun it.
 
 <details>
-<summary><b>Option B — Build from source + CLI setup</b></summary>
+<summary><b>Build from source, then run CLI setup</b></summary>
 
-Requires Go 1.25+, git, npm, and sudo. Builds binaries, installs units, then you finish with the CLI wizard:
+Requires Go 1.25+, git, npm, and sudo.
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/scripts/fresh-build-install.sh)
@@ -43,22 +72,22 @@ plex2jellyfin setup
 </details>
 
 <details>
-<summary><b>Option C — Build from source + web setup</b></summary>
+<summary><b>Build from source, then run web setup</b></summary>
 
-Same build/install as Option B, then enables `plex2jellyfin-web` and prints the wizard URL:
+Same build path as CLI setup, then starts `plex2jellyfin-web` and prints the setup URL.
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin/main/scripts/fresh-build-install-web.sh)
 ```
 
-Open the URL the script prints (usually `http://127.0.0.1:5522/`), set an admin password, and walk through media paths, services, and review in the browser.
+Open the printed URL, set an admin password, and finish media paths, services, and review in the browser.
 
 </details>
 
 <details>
-<summary><b>Option D — Docker</b></summary>
+<summary><b>Docker</b></summary>
 
-One image, three binaries: the daemon and web UI run together under the entrypoint, and the CLI is available for one-off commands (`docker run --rm <image> plex2jellyfin version`).
+One image contains the daemon, web UI, and CLI.
 
 ```yaml
 services:
@@ -81,28 +110,29 @@ services:
 docker compose -f docker-compose.example.yml up -d
 ```
 
-`PUID`/`PGID` (linuxserver.io-style, default `1000:1000`) set the user everything runs as inside the container; `/config` is chowned to match on start. Set them to the UID/GID that should own files under `/library`.
+Set `PUID` and `PGID` to the user that should own files under `/library`. The container drops to that user before it starts the daemon and web UI, so `[permissions]` chown settings have no effect inside Docker.
 
-The container runs as that non-root user, so `[permissions]` chown has no effect in-container; use `PUID`/`PGID` instead. The [Docker guide](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/docker/) covers SELinux and rootless setups.
+The [Docker guide](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/docker/) covers SELinux, rootless Podman, and multi-drive mounts.
 
 </details>
 
 <details>
-<summary><b>Option E — AUR (Arch Linux)</b></summary>
+<summary><b>AUR on Arch Linux</b></summary>
 
 ```bash
 yay -S plex2jellyfin
-# or: paru -S plex2jellyfin
+# or
+paru -S plex2jellyfin
 ```
 
-Installs binaries and systemd units. Finish with the web or CLI setup wizard afterward. Package sources live in [`packaging/aur/`](packaging/aur/).
+The package installs binaries and systemd units. Finish with the web or CLI setup wizard.
 
 </details>
 
 <details>
-<summary><b>Option F — Development</b></summary>
+<summary><b>Development checkout</b></summary>
 
-Requires Go 1.25+, git, and npm (for the embedded web UI):
+Requires Go 1.25+, git, and npm.
 
 ```bash
 git clone https://github.com/Nomadcxx/plex2jellyfin.git
@@ -111,64 +141,116 @@ go build -o installer ./cmd/installer
 sudo ./installer
 ```
 
-Or build individual binaries with `go build -o plex2jellyfin ./cmd/plex2jellyfin` (and the matching `cmd/plex2jellyfin-daemon`, `cmd/plex2jellyfin-web` targets). For day-to-day UI work, see the docs [development](https://nomadcxx.github.io/plex2jellyfin/docs/) pages and `web/`.
+For individual binaries:
+
+```bash
+go build -o plex2jellyfin ./cmd/plex2jellyfin
+go build -o plex2jellyfin-daemon ./cmd/plex2jellyfin-daemon
+go build -o plex2jellyfin-web ./cmd/plex2jellyfin-web
+```
+
+Frontend work lives in `web/`. The release build embeds the exported frontend into the Go binary.
 
 </details>
 
-### Jellyfin Plugin — install this too
+## Migration Pass
 
-The companion plugin ([Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcxx/plex2jellyfin-plugin)) is required for the feedback loop: it forwards item-added/updated/removed and playback events from Jellyfin so plex2jellyfin can confirm organized files against real library items (and detect orphans). Without it, files move but confirmations never land.
+Run this once after setup when you want to clean an existing library:
 
-Setup wizards install and configure it when you connect Jellyfin (or run `plex2jellyfin plugin install`). Details: [plugin docs](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/jellyfin-plugin/). If Jellyfin paths differ from host library roots, also configure [path mappings](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/).
+```bash
+plex2jellyfin scan
+plex2jellyfin status
+plex2jellyfin duplicates generate
+plex2jellyfin duplicates dry-run
+plex2jellyfin duplicates execute
+plex2jellyfin consolidate generate
+plex2jellyfin consolidate dry-run
+plex2jellyfin consolidate execute
+plex2jellyfin audit --generate
+plex2jellyfin audit --generate --dry-run
+plex2jellyfin audit --execute
+```
 
-## Architecture
+Skip a stage if it does not fit your library. For example, single-drive TV libraries may not need consolidation.
 
-| Binary | Role |
-|---|---|
-| `plex2jellyfin` | CLI — migration, setup, scan, duplicates, consolidate, plugin, status |
-| `plex2jellyfin-daemon` | Watches download dirs, organizes arrivals, periodic scan, housekeeping; Unix control socket |
-| `plex2jellyfin-web` | Dashboard + setup wizard on `:5522` (talks to the daemon over the socket) |
-| Companion plugin | Inside Jellyfin — webhooks for item and playback events |
+`audit` reviews low-confidence parses and can ask Ollama for rename suggestions. It sends library kind, folder path, and current parse data. It does not send raw media contents.
 
-There is **no TCP** between web and daemon — only the Unix-domain control socket under `~/.config/plex2jellyfin/`.
+## Companion Plugin
+
+The organizer can move files without the plugin. The full feedback loop needs it.
+
+The companion plugin, [Nomadcxx/plex2jellyfin-plugin](https://github.com/Nomadcxx/plex2jellyfin-plugin), runs inside Jellyfin and sends item, removal, and playback events back to plex2jellyfin. With those events, plex2jellyfin can confirm Jellyfin recognized organized files, attach Jellyfin item IDs, detect orphaned media, and avoid moving files during playback.
+
+Setup wizards install and configure the plugin when you connect Jellyfin. Existing installs can run:
+
+```bash
+plex2jellyfin plugin install
+plex2jellyfin plugin verify
+```
+
+If Jellyfin reports container paths that differ from your host paths, configure [path mappings](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/). Without mappings, Jellyfin events cannot match moved files, so confirmation and orphan detection will miss items.
+
+## Runtime Pieces
+
+| Piece | Runs where | Responsibility |
+| --- | --- | --- |
+| CLI | foreground | Setup, scan, migration, repair, status |
+| Daemon | systemd or container | Watch dirs, organize files, periodic scans, housekeeping |
+| Web UI | `:5522` | Browser dashboard and setup |
+| Plugin | Jellyfin | Webhooks for item and playback events |
+| SQLite DB | config dir | Indexed files, parse decisions, traces, housekeeping |
+
+The web UI talks to the daemon through a Unix-domain socket under `~/.config/plex2jellyfin/`. It does not use TCP for web-to-daemon control.
 
 ```mermaid
 flowchart TB
     A[Sonarr / Radarr] -->|downloads| B["Download Client<br/>(SABnzbd, NZBGet, qBittorrent, ...)"]
-    B -->|drops file| C[Watch Directory]
+    B -->|completed file| C[Watch Directory]
     C -->|inotify| D[plex2jellyfin-daemon]
-    D -->|rename + move| E[Jellyfin Library]
-    D -->|state + audit| DB[(SQLite media.db)]
+    D -->|rename and move| E[Jellyfin Library]
+    D -->|state and audit| DB[(SQLite media.db)]
     D -.->|low confidence| O[Ollama]
     O -.->|suggested rename| D
     D <-->|control.sock| W[plex2jellyfin-web :5522]
     W <-->|browser| U[You]
     D -->|periodic| H[Housekeeping queue]
-    H -->|consolidate / dedupe / fix-naming| E
-    J[Plex2Jellyfin plugin in Jellyfin] -->|item + playback webhooks| W
+    H -->|consolidate / dedupe / fix naming| E
+    J[Plex2Jellyfin plugin in Jellyfin] -->|item and playback webhooks| W
     E -.->|scanned by| J
 ```
 
 More detail: [architecture](https://nomadcxx.github.io/plex2jellyfin/docs/reference/architecture/).
 
-## Naming Rules
+## Naming
 
-**Movies:** `Movies/Movie Name (YYYY)/Movie Name (YYYY).ext`
+Movies:
 
-**TV Shows:** `TV Shows/Show Name (Year)/Season 01/Show Name (Year) S01E01.ext`
+```text
+Movies/Movie Name (YYYY)/Movie Name (YYYY).ext
+```
 
-The parser strips release-group noise (`1080p`, `x264`, `WEB-DL`, `RARBG`, `-YTS`, etc.) and pulls resolution, source, and HDR from the parent directory when the filename lacks them, so quality grouping works on legacy libraries.
+TV:
 
-Examples:
+```text
+TV Shows/Show Name (Year)/Season 01/Show Name (Year) S01E01.ext
+```
+
+The parser removes release-group noise such as `1080p`, `x264`, `WEB-DL`, `RARBG`, and `-YTS`. It also reads resolution, source, and HDR tags from the parent directory when the filename lacks them, which helps quality scoring on older libraries.
 
 | Incoming | Organized |
-|---|---|
+| --- | --- |
 | `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv` | `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv` |
 | `Movie.Title.2020.2160p.BluRay.x265-GROUP.mkv` | `Movies/Movie Title (2020)/Movie Title (2020).mkv` |
 
-## Configuration
+## Config
 
-Config lives at `~/.config/plex2jellyfin/config.toml`. Annotated template: [`config.toml.example`](config.toml.example). See the [configuration reference](https://nomadcxx.github.io/plex2jellyfin/docs/reference/configuration/).
+Generate a starter config with:
+
+```bash
+plex2jellyfin config init
+```
+
+Annotated template: [`config.toml.example`](config.toml.example). Full reference: [configuration docs](https://nomadcxx.github.io/plex2jellyfin/docs/reference/configuration/).
 
 ```toml
 [watch]
@@ -182,16 +264,10 @@ tv     = ["/media/TV Shows"]
 [daemon]
 enabled        = true
 scan_frequency = "5m"
-
-[ai]
-enabled              = true
-ollama_endpoint      = "http://localhost:11434"
-model                = "qwen2.5vl:7b"
-confidence_threshold = 0.8
 ```
 
 <details>
-<summary><b>Sonarr / Radarr</b></summary>
+<summary><b>Sonarr and Radarr</b></summary>
 
 ```toml
 [sonarr]
@@ -210,9 +286,9 @@ notify_on_import = true
 </details>
 
 <details>
-<summary><b>Jellyfin path mappings</b> (container/host mount differences)</summary>
+<summary><b>Jellyfin path mappings</b></summary>
 
-When Jellyfin runs in a container with bind mounts, configure path mappings so the post-organize feedback loop can correlate Jellyfin items with daemon paths. Full guide: [path mappings](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/).
+Use mappings when Jellyfin reports paths that differ from the daemon view. Docker bind mounts often need this.
 
 ```toml
 [jellyfin]
@@ -226,14 +302,12 @@ jellyfin = "/tv"
 daemon   = "/mnt/storage1/TVSHOWS"
 ```
 
-Without these, webhooks never match organize targets (`jellyfin_item_id` stays empty), PASS/DRIFT/FAIL labeling never runs, and the sweeper eventually marks uncorrelated rows FAIL.
-
 </details>
 
 <details>
-<summary><b>File permissions</b> (bare-metal installs)</summary>
+<summary><b>File permissions on bare metal</b></summary>
 
-If Jellyfin runs as a different user, set ownership on moved files:
+Set ownership on moved files when Jellyfin runs as a different user:
 
 ```toml
 [permissions]
@@ -243,17 +317,24 @@ file_mode = "0644"
 dir_mode  = "0755"
 ```
 
-`plex2jellyfin-daemon` needs root to chown; the bundled systemd unit keeps `CAP_CHOWN` / `CAP_FOWNER` / `CAP_DAC_OVERRIDE`. In Docker, use `PUID`/`PGID` instead — `[permissions]` has no effect in-container.
+The bundled systemd unit gives `plex2jellyfin-daemon` the permissions it needs for `chown`. In Docker, set `PUID` and `PGID` instead.
+
+</details>
+
+<details>
+<summary><b>Optional AI naming assist</b></summary>
+
+```toml
+[ai]
+enabled              = false
+ollama_endpoint      = "http://localhost:11434"
+model                = "qwen2.5vl:7b"
+confidence_threshold = 0.8
+```
 
 </details>
 
 ## Screenshots
-
-### Login
-
-<p align="center">
-  <img src="assets/screenshot-login.png" alt="Login" width="800" />
-</p>
 
 ### Dashboard
 
@@ -261,10 +342,10 @@ dir_mode  = "0755"
   <img src="assets/screenshot-dashboard.png" alt="Dashboard" width="800" />
 </p>
 
-### Settings
+### Setup
 
 <p align="center">
-  <img src="assets/screenshot-settings.png" alt="Settings overview" width="800" />
+  <img src="assets/screenshot-setup.png" alt="Library setup - media paths" width="800" />
 </p>
 
 ### Consolidation
@@ -277,16 +358,6 @@ dir_mode  = "0755"
 
 <p align="center">
   <img src="assets/screenshot-scheduler.png" alt="Scheduler" width="800" />
-</p>
-
-### Library Setup (web UI)
-
-<p align="center">
-  <img src="assets/screenshot-setup.png" alt="Library setup - media paths" width="800" />
-</p>
-
-<p align="center">
-  <img src="assets/screenshot-indexing.png" alt="Library setup - indexing" width="800" />
 </p>
 
 ## License
