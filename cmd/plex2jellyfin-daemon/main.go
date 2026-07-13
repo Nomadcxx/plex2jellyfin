@@ -286,6 +286,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "Jellyfin path mappings configured",
 			logging.F("count", len(pathMappings)))
 	}
+	if jellyfinClient != nil {
+		if folders, ferr := jellyfinClient.GetVirtualFolders(); ferr == nil {
+			libs := append(append([]string{}, cfg.Libraries.Movies...), cfg.Libraries.TV...)
+			if unmapped := jellyfin.UnmappedJellyfinLocations(folders, libs, pathMappings); len(unmapped) > 0 {
+				logger.Warn("daemon", "Jellyfin library paths need [[jellyfin.path_mappings]] or the feedback loop cannot confirm organizes",
+					logging.F("unmapped", strings.Join(unmapped, ", ")))
+			}
+		}
+	}
 
 	handler, err := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
 		TVLibraries:                  cfg.Libraries.TV,

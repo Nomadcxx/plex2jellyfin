@@ -113,6 +113,8 @@ export type ConnectionTestResult = {
   ok: boolean;
   version?: string;
   error?: string;
+  unmapped_locations?: string[];
+  path_mapping_warning?: string;
 };
 
 export type CompatibilityIssue = {

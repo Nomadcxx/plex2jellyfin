@@ -8,6 +8,7 @@ export type WizardChecks = {
   paths: Record<string, boolean>;
   services: Partial<Record<ServiceName, string>>;
   ai?: string;
+  jellyfinUnmapped?: string[];
 };
 
 type DeepPartial<T> = {
@@ -148,6 +149,9 @@ function serviceErrors(draft: SetupDraft, checks: WizardChecks): string[] {
   }
   for (const mapping of draft.jellyfin.path_mappings) {
     if (!mapping.jellyfin.trim() || !mapping.daemon.trim()) errors.push('Each Jellyfin path mapping needs both paths.');
+  }
+  if (draft.jellyfin.enabled && (checks.jellyfinUnmapped?.length ?? 0) > 0) {
+    errors.push('Map every Jellyfin library root to a P2J path, then Test Jellyfin again.');
   }
   if (draft.jellyfin.enabled && draft.jellyfin.plugin_install) {
     const url = (draft.jellyfin.plugin_daemon_url ?? '').trim();

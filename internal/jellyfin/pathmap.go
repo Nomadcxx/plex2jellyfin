@@ -100,3 +100,57 @@ func hasPathPrefix(p, prefix string) bool {
 	}
 	return p[len(prefix)] == '/'
 }
+
+// LocationCoveredByLibraries reports whether a Jellyfin library root, after
+// path translation, lands on (or under/over) one of the daemon library roots.
+// Same-host installs where Jellyfin and the daemon share paths return true
+// with a nil translator.
+func LocationCoveredByLibraries(jellyfinLocation string, daemonLibraries []string, t *PathTranslator) bool {
+	loc := strings.TrimRight(strings.TrimSpace(jellyfinLocation), "/")
+	if loc == "" {
+		return true
+	}
+	daemonPath := loc
+	if t != nil {
+		daemonPath = strings.TrimRight(t.JellyfinToDaemon(loc), "/")
+	}
+	for _, lib := range daemonLibraries {
+		lib = strings.TrimRight(strings.TrimSpace(lib), "/")
+		if lib == "" {
+			continue
+		}
+		if daemonPath == lib || hasPathPrefix(daemonPath, lib) || hasPathPrefix(lib, daemonPath) {
+			return true
+		}
+	}
+	return false
+}
+
+// UnmappedJellyfinLocations returns Jellyfin virtual-folder roots that do not
+// correlate to any daemon library path under the given mappings. Empty result
+// means the feedback loop can resolve organize targets for those libraries.
+// Locations that already have an explicit mapping are treated as handled even
+// when they sit outside [libraries] (e.g. a sports library).
+func UnmappedJellyfinLocations(folders []VirtualFolder, daemonLibraries []string, mappings []PathMapping) []string {
+	tr := NewPathTranslator(mappings)
+	seen := make(map[string]bool)
+	var out []string
+	for _, folder := range folders {
+		for _, loc := range folder.Locations {
+			loc = strings.TrimRight(strings.TrimSpace(loc), "/")
+			if loc == "" || seen[loc] {
+				continue
+			}
+			seen[loc] = true
+			translated := strings.TrimRight(tr.JellyfinToDaemon(loc), "/")
+			if translated != loc {
+				continue // explicit mapping already handles this root
+			}
+			if !LocationCoveredByLibraries(loc, daemonLibraries, tr) {
+				out = append(out, loc)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}

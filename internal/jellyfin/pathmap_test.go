@@ -78,3 +78,25 @@ func TestPathTranslator_EmptyMappingsSkipped(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestUnmappedJellyfinLocations(t *testing.T) {
+	folders := []VirtualFolder{
+		{Name: "Movies1", Locations: []string{"/movies1"}},
+		{Name: "TV", Locations: []string{"/mnt/STORAGE1/TVSHOWS"}},
+		{Name: "Sports", Locations: []string{"/sports"}},
+	}
+	libs := []string{"/mnt/STORAGE1/MOVIES", "/mnt/STORAGE1/TVSHOWS"}
+
+	got := UnmappedJellyfinLocations(folders, libs, nil)
+	if len(got) != 2 || got[0] != "/movies1" || got[1] != "/sports" {
+		t.Fatalf("without mappings: got %#v, want [/movies1 /sports]", got)
+	}
+
+	got = UnmappedJellyfinLocations(folders, libs, []PathMapping{
+		{Jellyfin: "/movies1", Daemon: "/mnt/STORAGE1/MOVIES"},
+		{Jellyfin: "/sports", Daemon: "/mnt/STORAGE5/SPORTS"},
+	})
+	if len(got) != 0 {
+		t.Fatalf("with mappings: got %#v, want empty", got)
+	}
+}

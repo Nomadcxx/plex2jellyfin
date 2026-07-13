@@ -113,17 +113,27 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
     const value = draft[name];
     setTestingService(name);
     try {
-      const result = await testSettingsConnection(name, value);
+      const payload: Record<string, unknown> = { ...value };
+      if (name === 'jellyfin') {
+        payload.path_mappings = draft.jellyfin.path_mappings;
+        payload.libraries_movies = draft.libraries.movies;
+        payload.libraries_tv = draft.libraries.tv;
+      }
+      const result = await testSettingsConnection(name, payload);
       if (!result.ok) throw new Error(result.error || `${name} connection failed`);
       setChecks((state) => ({
         ...state,
         services: { ...state.services, [name]: serviceFingerprint(value) },
+        jellyfinUnmapped: name === 'jellyfin' ? (result.unmapped_locations ?? []) : state.jellyfinUnmapped,
       }));
       if (name === 'sonarr' || name === 'radarr') {
         const report = await checkArrCompatibility(name, value);
         setCompatibility((state) => ({ ...state, [name]: report }));
       }
       toast.success(`${label(name)} connected${result.version ? ` (${result.version})` : ''}`);
+      if (name === 'jellyfin' && result.path_mapping_warning) {
+        toast.warning(result.path_mapping_warning);
+      }
     } catch (error) {
       setChecks((state) => ({ ...state, services: { ...state.services, [name]: undefined } }));
       toast.error(error instanceof Error ? error.message : `${label(name)} connection failed`);
@@ -511,7 +521,7 @@ function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest,
                     </>
                   )}
                 </div>
-                <PathMappings draft={draft} setDraft={setDraft} />
+                <PathMappings draft={draft} setDraft={setDraft} unmapped={checks.jellyfinUnmapped ?? []} />
               </>
             )}
           </section>
@@ -521,17 +531,25 @@ function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest,
   );
 }
 
-function PathMappings({ draft, setDraft }: { draft: SetupDraft; setDraft: React.Dispatch<React.SetStateAction<SetupDraft>> }) {
+function PathMappings({ draft, setDraft, unmapped }: { draft: SetupDraft; setDraft: React.Dispatch<React.SetStateAction<SetupDraft>>; unmapped: string[] }) {
   const mappings = draft.jellyfin.path_mappings;
   const update = (next: typeof mappings) => setDraft((value) => ({ ...value, jellyfin: { ...value.jellyfin, path_mappings: next } }));
   return (
     <div className="mt-5 border-t border-zinc-900 pt-4">
       <div className="flex items-center justify-between"><h3 className="font-mono text-sm text-zinc-300">Path mappings</h3><Button type="button" size="sm" variant="ghost" onClick={() => update([...mappings, { jellyfin: '', daemon: '' }])}><Plus className="h-4 w-4" />Add mapping</Button></div>
+      <p className="mt-2 text-sm text-zinc-500">
+        Required when Jellyfin runs in Docker (or any mount) and sees different roots than P2J — e.g. Jellyfin <code className="text-zinc-400">/movies1</code> ↔ host <code className="text-zinc-400">/mnt/STORAGE1/MOVIES</code>. Without these, organizes succeed but confirmation/DRIFT never attach.
+      </p>
+      {unmapped.length > 0 && (
+        <div className="mt-3 border-l-2 border-amber-500 bg-amber-950/10 px-4 py-3 text-sm text-amber-200">
+          Unmapped Jellyfin roots: {unmapped.join(', ')}. Add a row for each, then Test Jellyfin again.
+        </div>
+      )}
       <div className="mt-3 space-y-2">
         {mappings.map((mapping, index) => (
           <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-            <Input value={mapping.jellyfin} onChange={(event) => update(mappings.map((item, i) => i === index ? { ...item, jellyfin: event.target.value } : item))} placeholder="Jellyfin path" aria-label={`Jellyfin path mapping ${index + 1}`} />
-            <Input value={mapping.daemon} onChange={(event) => update(mappings.map((item, i) => i === index ? { ...item, daemon: event.target.value } : item))} placeholder="P2J path" aria-label={`P2J path mapping ${index + 1}`} />
+            <Input value={mapping.jellyfin} onChange={(event) => update(mappings.map((item, i) => i === index ? { ...item, jellyfin: event.target.value } : item))} placeholder="/movies1" aria-label={`Jellyfin path mapping ${index + 1}`} />
+            <Input value={mapping.daemon} onChange={(event) => update(mappings.map((item, i) => i === index ? { ...item, daemon: event.target.value } : item))} placeholder="/mnt/STORAGE1/MOVIES" aria-label={`P2J path mapping ${index + 1}`} />
             <Button type="button" variant="ghost" size="icon" onClick={() => update(mappings.filter((_, i) => i !== index))} aria-label={`Remove path mapping ${index + 1}`}><Trash2 className="h-4 w-4" /></Button>
           </div>
         ))}
@@ -675,6 +693,51 @@ function SetupIndexing({
     setPhase('Starting index…');
     setRows(libraries.map((path) => ({ path, status: 'queued', files: 0 })));
     setFilesScanned(0);
+
+    // Showcase / demo: timed fake progress (no EventSource). Set by scripts/showcase.
+    if (typeof window !== 'undefined' && sessionStorage.getItem('p2j-showcase') === '1') {
+      let cancelled = false;
+      const fileCounts = libraries.map(() => 0);
+      let total = 0;
+      (async () => {
+        setPhase('Indexing libraries');
+        for (let i = 0; i < libraries.length; i++) {
+          if (cancelled) return;
+          const target = 800 + i * 1200;
+          while (fileCounts[i] < target) {
+            if (cancelled) return;
+            fileCounts[i] = Math.min(target, fileCounts[i] + 90 + Math.floor(Math.random() * 80));
+            total = fileCounts.reduce((a, b) => a + b, 0);
+            setFilesScanned(total);
+            setRows(libraries.map((path, index) => ({
+              path,
+              status: index < i ? 'done' : index === i ? 'scanning' : 'queued',
+              files: fileCounts[index],
+            })));
+            await new Promise((r) => setTimeout(r, 120));
+          }
+          fileCounts[i] = target;
+        }
+        if (cancelled) return;
+        const doneTotal = fileCounts.reduce((a, b) => a + b, 0);
+        setFilesScanned(doneTotal);
+        setRows(libraries.map((path, index) => ({ path, status: 'done', files: fileCounts[index] })));
+        setPhase('Complete');
+        onDone({
+          type: 'done',
+          msg: 'Setup complete',
+          files_scanned: doneTotal,
+          files_added: doneTotal,
+          files_updated: 0,
+          files_skipped: 12,
+          episode_rows: Math.round(doneTotal * 0.82),
+          movie_rows: Math.round(doneTotal * 0.18),
+          duration_ms: 8200,
+          daemon_state: 'running',
+        });
+      })();
+      return () => { cancelled = true; };
+    }
 
     const es = new EventSource('/api/v1/setup/index/stream');
     let closed = false;

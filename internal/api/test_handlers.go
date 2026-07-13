@@ -18,9 +18,11 @@ type TestHandlers struct {
 }
 
 type testResult struct {
-	OK      bool   `json:"ok"`
-	Version string `json:"version,omitempty"`
-	Error   string `json:"error,omitempty"`
+	OK                 bool     `json:"ok"`
+	Version            string   `json:"version,omitempty"`
+	Error              string   `json:"error,omitempty"`
+	UnmappedLocations  []string `json:"unmapped_locations,omitempty"`
+	PathMappingWarning string   `json:"path_mapping_warning,omitempty"`
 }
 
 type compatibilityResult struct {
@@ -34,8 +36,14 @@ type compatibilityResult struct {
 // connectionTestPayload mirrors the JSON the UI sends. Config structs use
 // mapstructure tags only, so we decode the wire format directly here.
 type connectionTestPayload struct {
-	URL    string `json:"url"`
-	APIKey string `json:"api_key"`
+	URL              string `json:"url"`
+	APIKey           string `json:"api_key"`
+	PathMappings     []struct {
+		Jellyfin string `json:"jellyfin"`
+		Daemon   string `json:"daemon"`
+	} `json:"path_mappings,omitempty"`
+	LibrariesMovies []string `json:"libraries_movies,omitempty"`
+	LibrariesTV     []string `json:"libraries_tv,omitempty"`
 }
 
 // resolveSecret returns the request-supplied secret unless it's a mask,
@@ -104,7 +112,31 @@ func (h *TestHandlers) Jellyfin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, testResult{OK: false, Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, testResult{OK: true, Version: info.Version})
+	result := testResult{OK: true, Version: info.Version}
+	mappings := make([]jellyfin.PathMapping, 0)
+	libs := []string{}
+	if h.Cfg != nil {
+		libs = append(append(libs, h.Cfg.Libraries.Movies...), h.Cfg.Libraries.TV...)
+		for _, m := range h.Cfg.Jellyfin.PathMappings {
+			mappings = append(mappings, jellyfin.PathMapping{Jellyfin: m.Jellyfin, Daemon: m.Daemon})
+		}
+	}
+	if len(p.LibrariesMovies) > 0 || len(p.LibrariesTV) > 0 {
+		libs = append(append([]string{}, p.LibrariesMovies...), p.LibrariesTV...)
+	}
+	if len(p.PathMappings) > 0 {
+		mappings = mappings[:0]
+		for _, m := range p.PathMappings {
+			mappings = append(mappings, jellyfin.PathMapping{Jellyfin: m.Jellyfin, Daemon: m.Daemon})
+		}
+	}
+	if folders, ferr := cli.GetVirtualFolders(); ferr == nil {
+		if unmapped := jellyfin.UnmappedJellyfinLocations(folders, libs, mappings); len(unmapped) > 0 {
+			result.UnmappedLocations = unmapped
+			result.PathMappingWarning = "Jellyfin library paths do not match P2J library roots. Add path mappings or the feedback loop cannot confirm organizes."
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *TestHandlers) Jellystat(w http.ResponseWriter, r *http.Request) {
