@@ -7,9 +7,9 @@
     <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
   </p>
 
-  <p>Plex papers over messy release names; Jellyfin takes your folders at face value.</p>
+  <p>Plex can hide messy filenames. Jellyfin works best with clean folders.</p>
 
-  <p>Migrate once: scan, dedupe, consolidate, rename. Then run <code>plex2jellyfin-daemon</code> to keep new downloads in Jellyfin naming.</p>
+  <p>Scan, dedupe, consolidate, and rename your existing library. Then let <code>plex2jellyfin-daemon</code> organize new downloads as they arrive.</p>
 
   <p>
     <a href="https://nomadcxx.github.io/plex2jellyfin/docs/">Documentation</a>
