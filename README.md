@@ -201,12 +201,20 @@ More detail: [architecture](https://nomadcxx.github.io/plex2jellyfin/docs/refere
 
 **TV Shows:** `TV Shows/Show Name (Year)/Season 01/Show Name (Year) S01E01.ext`
 
-The parser strips release-group noise (`1080p`, `x264`, `WEB-DL`, `RARBG`, `-YTS`, etc.) and reads quality tags from parent folders when filenames lack them.
+The parser strips scene/release noise (`1080p`, `x264`, `WEB-DL`, `RARBG`, `-YTS`, etc.), keeps title words that look like noise (`All`, `IT`, `Her`, `Rome`), and reads quality tags from parent folders when filenames lack them.
 
-| Incoming | Organized |
+| Incoming file | Parsed result |
 | --- | --- |
-| `Show.Name.S01E01.1080p.WEB-DL.x264-RARBG.mkv` | `TV Shows/Show Name (2019)/Season 01/Show Name (2019) S01E01.mkv` |
-| `Movie.Title.2020.2160p.BluRay.x265-GROUP.mkv` | `Movies/Movie Title (2020)/Movie Title (2020).mkv` |
+| `Breaking.Bad.S01E01.1080p.WEB-DL.DDP5.1.H.264-FLUX.mkv` | `Breaking Bad` / `S01E01`; strips codec, audio, source, release group |
+| `Worst.Ex.Ever.S02E01.2026.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-HDSWEB.mkv` | `Worst Ex Ever` / `S02E01`; ignores the post-episode release year |
+| `The.Daily.Show.2026.04.20.Annalena.Baerbock.1080p.WEB.h264-EDITH.mkv` | `The Daily Show` / date episode `2026-04-20` |
+| `Bones.And.All.2022.2160p.4K.WEB.x265.10bit.AAC5.1-YTS.MX.mkv` | `Bones And All (2022)`; keeps `All` as title text |
+| `Blade.Runner.2049.2017.1080p.BluRay.x264.mkv` | `Blade Runner 2049 (2017)`; keeps the title number separate from the year |
+| `U.S.Marshals.1998.1080p.BluRay.x264-SPARKS.mkv` | `U.S. Marshals (1998)`; keeps abbreviation punctuation |
+| `fast.five.2011.1080p.pcok.web-dl.ddp.5.1.h.264-pirates.mkv` | `Fast Five (2011)`; strips streaming-source tags such as `PCOK` |
+| `One.Mile.Chapter.Two.2026.1080p.TOD.WEB-DL.EN-TR.AAC2.0.H.264-TURG.mkv` | `One Mile Chapter Two (2026)`; strips language and source tags |
+| `Triple.Frontier.2019.1080p.NF.WEB-DL.H.264.DUAL.EAC5.1-TSRG.mkv` | `Triple Frontier (2019)`; handles shorthand audio tags |
+| `2.Guns.2013.1080p.BluRay.OPUS5.1.AV1-YorMama.mkv` | `2 Guns (2013)`; handles title-leading numbers and modern codecs |
 
 ## Configuration
 
