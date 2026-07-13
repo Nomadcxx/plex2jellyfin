@@ -61,7 +61,8 @@ func init() {
 		`\bBlu[ .-]?Ray[ .-]+MA\b`,
 		`\b(Blu[ .-]?Ray|BDRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
 		`\b(HDTV|HDRip|DVDRip|DVD)\b`,
-		`\b(AMZN|NF|ATVP|HULU|DSNP|HMAX|MAX|PMTP|TOD)\b`,
+		// Streaming rip sources (not release groups): Peacock=PCOK, etc.
+		`\b(AMZN|NF|ATVP|HULU|DSNP|HMAX|MAX|PCOK|PMTP|TOD)\b`,
 		`\b[xh][ .]?26[45]\b`,
 		`\b(HEVC|AVC|AV1)\b`,
 		`\b(PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED|REMASTERED|REMASTER|Up[ .-]?Scaled)\b`,

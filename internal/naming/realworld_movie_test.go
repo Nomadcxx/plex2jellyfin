@@ -16,6 +16,11 @@ func TestRealWorldMovieParsing(t *testing.T) {
 		// TOD = Turkish On Demand (source tag between quality and WEB-DL).
 		{"One.Mile.Chapter.Two.2026.1080p.TOD.WEB-DL.EN-TR.AAC2.0.H.264-TURG.mkv", "One Mile Chapter Two", "2026"},
 		{"Pretty.Lethal.2026.AMZN.EAC3.@TSRG.mkv", "Pretty Lethal", "2026"},
+		// PCOK = Peacock streaming source (same class as AMZN/NF). Was missing
+		// from the simple-path strip list so it leaked into titles
+		// ("Fast Five Pcok", "...Them PCOK").
+		{"fast.five.2011.1080p.pcok.web-dl.ddp.5.1.h.264-pirates.mkv", "Fast Five", "2011"},
+		{"Fantastic.Beasts.and.Where.to.Find.Them.2016.1080p.PCOK.WEB-DL.DDP.5.1.H.264-PiRaTeS.mkv", "Fantastic Beasts and Where to Find Them", "2016"},
 		{"Kraven.the.Hunter.2024.1080p.BluRay.mkv", "Kraven the Hunter", "2024"},
 		// Regression: TSRG-style shorthand where the "3" is dropped from
 		// EAC3 so the audio tag reads EAC5.1. Without the EAC3? variant
