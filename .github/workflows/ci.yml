@@ -69,6 +69,10 @@ jobs:
 
       - name: Tests
         run: go test ./...
+        env:
+          # Tests replace HOME with per-test directories; a runner-wide XDG
+          # path would override those and make packages share mutable state.
+          XDG_CONFIG_HOME: ''
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
