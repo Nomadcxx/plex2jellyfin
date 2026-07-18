@@ -222,6 +222,26 @@ func WithDeferredQueue(queue *jellyfin.DeferredQueue) func(*Organizer) {
 	}
 }
 
+// alreadyOrganizedResult detects the duplicate-event race: a concurrent
+// handler invocation already moved the source to the target, so this
+// transfer's failure is not a real error. Returns nil when it was.
+func alreadyOrganizedResult(sourcePath, targetPath string) *OrganizationResult {
+	if _, err := os.Stat(sourcePath); !os.IsNotExist(err) {
+		return nil
+	}
+	st, err := os.Stat(targetPath)
+	if err != nil || st.Size() == 0 {
+		return nil
+	}
+	return &OrganizationResult{
+		Success:    false,
+		SourcePath: sourcePath,
+		TargetPath: targetPath,
+		Skipped:    true,
+		SkipReason: "already_organized",
+	}
+}
+
 func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
 	return transfer.TransferOptions{
 		Timeout:       o.timeout,
@@ -449,6 +469,9 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 	}
 
 	if err != nil {
+		if skipped := alreadyOrganizedResult(sourcePath, targetPath); skipped != nil {
+			return skipped, nil
+		}
 		return &OrganizationResult{
 			Success:       false,
 			SourcePath:    sourcePath,
@@ -691,6 +714,9 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 	}
 
 	if err != nil {
+		if skipped := alreadyOrganizedResult(sourcePath, targetPath); skipped != nil {
+			return skipped, nil
+		}
 		return &OrganizationResult{
 			Success:       false,
 			SourcePath:    sourcePath,
