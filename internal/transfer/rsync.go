@@ -181,6 +181,10 @@ func (r *RsyncTransferer) buildArgs(opts TransferOptions, removeSource bool) []s
 		args = append(args, "--no-owner", "--no-group", "--no-perms")
 	}
 
+	if !opts.PreserveTimes {
+		args = append(args, "--no-times")
+	}
+
 	if opts.TargetUID >= 0 || opts.TargetGID >= 0 {
 		uid := opts.TargetUID
 		gid := opts.TargetGID
