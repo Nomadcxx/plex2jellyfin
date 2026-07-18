@@ -209,8 +209,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		})
 		info, err := jellyfinClient.GetSystemInfo()
 		if err != nil {
-			logger.Warn("daemon", "Jellyfin connection failed, disabling integration", logging.F("error", err.Error()))
-			jellyfinClient = nil
+			logger.Warn("daemon", "Jellyfin unreachable at startup; integration stays enabled and will retry per operation",
+				logging.F("error", err.Error()))
 		} else if info != nil {
 			logger.Info("daemon", "Jellyfin integration enabled",
 				logging.F("server", info.ServerName),
@@ -218,9 +218,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		} else {
 			logger.Info("daemon", "Jellyfin integration enabled", logging.F("url", cfg.Jellyfin.URL))
 		}
-		if jellyfinClient != nil {
-			notifyMgr.Register(notify.NewJellyfinNotifier(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, cfg.Jellyfin.NotifyOnImport))
-		}
+		notifyMgr.Register(notify.NewJellyfinNotifier(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, cfg.Jellyfin.NotifyOnImport))
 	}
 
 	var playbackLocks *jellyfin.PlaybackLockManager
