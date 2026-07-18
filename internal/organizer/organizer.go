@@ -897,7 +897,26 @@ func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func
 func (o *Organizer) organizeExtrasRelease(releaseDir string, packInfo *naming.TVSeasonPackInfo, result *SeasonPackResult) (*SeasonPackResult, error) {
 	showDir := ""
 	for _, lib := range o.libraries {
+		if packInfo.Year != "" {
+			if dir := findExistingShowDir(lib, naming.NormalizeMediaName(packInfo.Title, packInfo.Year)); dir != "" {
+				showDir = dir
+				break
+			}
+		}
 		if dir := findExistingShowDir(lib, packInfo.Title); dir != "" {
+			if packInfo.Year != "" {
+				year := 0
+				_, _ = fmt.Sscanf(packInfo.Year, "%d", &year)
+				decision := identity.CompareSeries(
+					identity.SeriesIdentity{Title: packInfo.Title, Year: year, Path: releaseDir},
+					identity.SeriesIdentity{Path: dir},
+				)
+				if decision.Verdict != identity.VerdictSame {
+					continue
+				}
+			}
+			// ponytail: a yearless release cannot disambiguate same-title
+			// remakes; require release metadata before adding remote lookup.
 			showDir = dir
 			break
 		}
@@ -919,6 +938,33 @@ func (o *Organizer) organizeExtrasRelease(releaseDir string, packInfo *naming.TV
 	}
 
 	extrasDir := filepath.Join(showDir, "extras")
+	targets := make([]string, len(videos))
+	seenTargets := make(map[string]struct{}, len(videos))
+	for i, path := range videos {
+		ext := filepath.Ext(path)
+		cleaned := naming.CleanExtrasName(strings.TrimSuffix(filepath.Base(path), ext))
+		if cleaned == "" {
+			cleaned = strings.TrimSuffix(filepath.Base(path), ext)
+		}
+		targets[i] = filepath.Join(extrasDir, cleaned+ext)
+		if _, exists := seenTargets[targets[i]]; exists {
+			result.Unresolved = videos
+			result.Skipped = true
+			result.SkipReason = "extras_unresolved"
+			result.Error = fmt.Errorf("multiple extras resolve to the same target: %s", targets[i])
+			return result, nil
+		}
+		seenTargets[targets[i]] = struct{}{}
+		if !o.forceOverwrite {
+			if _, err := os.Lstat(targets[i]); err == nil || !os.IsNotExist(err) {
+				result.Unresolved = videos
+				result.Skipped = true
+				result.SkipReason = "extras_unresolved"
+				result.Error = fmt.Errorf("extras target already exists: %s", targets[i])
+				return result, nil
+			}
+		}
+	}
 	if !o.dryRun {
 		if err := os.MkdirAll(extrasDir, 0755); err != nil {
 			result.Error = fmt.Errorf("unable to create extras directory: %w", err)
@@ -932,12 +978,7 @@ func (o *Organizer) organizeExtrasRelease(releaseDir string, packInfo *naming.TV
 
 	opts := o.buildTransferOptions()
 	for i, path := range videos {
-		ext := filepath.Ext(path)
-		cleaned := naming.CleanExtrasName(strings.TrimSuffix(filepath.Base(path), ext))
-		if cleaned == "" {
-			cleaned = strings.TrimSuffix(filepath.Base(path), ext)
-		}
-		targetPath := filepath.Join(extrasDir, cleaned+ext)
+		targetPath := targets[i]
 		item := &OrganizationResult{SourcePath: path, TargetPath: targetPath}
 		if o.dryRun {
 			item.Success = true

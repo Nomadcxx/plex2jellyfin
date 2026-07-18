@@ -12,12 +12,14 @@ builds:
     env: [CGO_ENABLED=0]
     goos: [linux]
     goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
   - id: daemon
     main: ./cmd/plex2jellyfin-daemon
     binary: plex2jellyfin-daemon
     env: [CGO_ENABLED=0]
     goos: [linux]
     goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
   - id: web
     main: ./cmd/plex2jellyfin-web
     binary: plex2jellyfin-web
@@ -42,7 +44,7 @@ nfpms:
       Mass rename, dedupe, and consolidate an existing library, then a
       daemon guards new downloads as they arrive.
     homepage: https://github.com/Nomadcxx/plex2jellyfin
-    ids: [cli, daemon, web]
+    ids: [cli, daemon, web, installer]
     contents:
       - src: systemd/plex2jellyfin-daemon.service
         dst: /usr/lib/systemd/system/plex2jellyfin-daemon.service
@@ -62,4 +64,4 @@ release:
   github:
     owner: Nomadcxx
     name: plex2jellyfin
-  draft: true
+  draft: false

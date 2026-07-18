@@ -636,6 +636,8 @@ func TestParseTVShowExtractsEpisodeTitle(t *testing.T) {
 		{"Lucky.2026.S01E02.1080p.WEB.h264-ETHEL.mkv", ""},
 		{"Lucky (2026) S01E01 - No Shortcuts.mkv", "No Shortcuts"}, // round-trip of our own output form
 		{"The.New.Adventures.S03E05.Whats.the.Score.Pooh.1080p.DSNP.WEB-DL.AAC2.0.x264-AndreMor.mkv", "Whats the Score Pooh"},
+		{"Show.S01E03.Maximum.Effort.1080p.WEB.mkv", "Maximum Effort"},
+		{"Show.S01E04.Properly.Done.1080p.WEB.mkv", "Properly Done"},
 		// A bare year after the episode marker is release metadata, never an
 		// episode title (matches the parser's post-marker-year rule).
 		{"Upload.S04E03.2025.1080p.Amazon.WEB-DL.AVC.DDP.5.1-DBTV.mkv", ""},

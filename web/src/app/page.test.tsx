@@ -1,10 +1,11 @@
 import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import DashboardPage from './page';
 
 vi.mock('next/image', () => ({
-  default: (props: any) => <img {...props} />,
+  default: ({ priority: _priority, ...props }: any) => <img {...props} />,
 }));
 
 vi.mock('next/link', () => ({
@@ -48,7 +49,12 @@ vi.mock('@/hooks/useDashboard', () => ({
 
 describe('DashboardPage', () => {
   it('links duplicate summary to the duplicate review workflow', () => {
-    render(<DashboardPage />);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
 
     expect(screen.getByText('Duplicates').closest('a')).toHaveAttribute('href', '/duplicates');
   });

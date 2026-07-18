@@ -1110,3 +1110,63 @@ func TestOrganizeSeasonPackExtrasUnresolvedWhenShowMissing(t *testing.T) {
 	assert.Equal(t, "extras_unresolved", result.SkipReason)
 	assert.FileExists(t, videoFile, "unresolved extras must not be moved")
 }
+
+func TestOrganizeSeasonPackExtrasDoesNotOverwriteExistingTarget(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	extrasDir := filepath.Join(libraryDir, "Show", "extras")
+	require.NoError(t, os.MkdirAll(extrasDir, 0755))
+	target := filepath.Join(extrasDir, "Show S01 EXTRAS.mkv")
+	require.NoError(t, os.WriteFile(target, []byte("keep me"), 0644))
+
+	releaseDir := filepath.Join(sourceDir, "Show.S01.EXTRAS.1080p.WEB")
+	require.NoError(t, os.MkdirAll(releaseDir, 0755))
+	source := filepath.Join(releaseDir, "Show.S01.EXTRAS.1080p.WEB.mkv")
+	createTestFile(t, source, 1024)
+
+	org, err := NewOrganizer([]string{libraryDir})
+	require.NoError(t, err)
+	result, err := org.OrganizeTVSeasonPackAuto(releaseDir, func(path string) (int64, error) {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return 0, statErr
+		}
+		return info.Size(), nil
+	})
+
+	require.NoError(t, err)
+	assert.True(t, result.Skipped)
+	assert.Equal(t, "extras_unresolved", result.SkipReason)
+	assert.FileExists(t, source)
+	contents, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, "keep me", string(contents))
+}
+
+func TestOrganizeSeasonPackExtrasMatchesShowYear(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(libraryDir, "Show (1990)"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(libraryDir, "Show (2020)"), 0755))
+	releaseDir := filepath.Join(sourceDir, "Show.S01.EXTRAS.2020.1080p.WEB")
+	require.NoError(t, os.MkdirAll(releaseDir, 0755))
+	source := filepath.Join(releaseDir, "Show.S01.EXTRAS.2020.1080p.WEB.mkv")
+	createTestFile(t, source, 1024)
+
+	org, err := NewOrganizer([]string{libraryDir})
+	require.NoError(t, err)
+	result, err := org.OrganizeTVSeasonPackAuto(releaseDir, func(path string) (int64, error) {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return 0, statErr
+		}
+		return info.Size(), nil
+	})
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.FileExists(t, filepath.Join(libraryDir, "Show (2020)", "extras", "Show S01 EXTRAS.mkv"))
+	assert.NoDirExists(t, filepath.Join(libraryDir, "Show (1990)", "extras"))
+}

@@ -353,7 +353,7 @@ var qualityMarkerDetect = regexp.MustCompile(`(?i)(x264|x265|h264|h265|hevc|avc|
 // episodeTitleStopToken marks tokens that begin the release-metadata tail of a
 // filename (quality, source, codec, audio). Episode-title extraction stops at
 // the first such token.
-var episodeTitleStopToken = regexp.MustCompile(`(?i)^(480p|720p|1080p|2160p|4k|uhd|web|web-dl|webdl|webrip|hdtv|bluray|blu-ray|bdrip|remux|dsnp|nf|amzn|hulu|max|atvp|pcok|dvdrip|repack|proper|internal|limited|extended|uncut|multi|10bit|8bit|hdr|hdr10|dv|x264|x265|h264|h265|hevc|avc|aac|aac2|ac3|eac3|ddp|dd5|dts|truehd|atmos)`)
+var episodeTitleStopToken = regexp.MustCompile(`(?i)^(480p|720p|1080p|2160p|4k|uhd|web|web-dl|webdl|webrip|hdtv|bluray|blu-ray|bdrip|remux|dsnp|nf|amzn|hulu|max|atvp|pcok|dvdrip|repack|proper|internal|limited|extended|uncut|multi|10bit|8bit|hdr|hdr10|dv|x264|x265|h264|h265|hevc|avc|aac|aac2|ac3|eac3|ddp|dd5|dts|truehd|atmos)$`)
 
 // episodeTitleYearToken matches a standalone year token. A bare year in the
 // tail after the episode marker is release metadata (see the parser rule that

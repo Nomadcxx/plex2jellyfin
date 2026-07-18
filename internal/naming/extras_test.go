@@ -9,11 +9,14 @@ func TestIsExtrasRelease(t *testing.T) {
 		"Show.S03.Behind.The.Scenes.720p",
 		"Show.Featurettes.BluRay",
 		"Show S02 Extra Features",
+		"Show_S01_EXTRAS_1080p_WEB",
 	}
 	no := []string{
 		"The.Last.Ship.S02.2015.BluRay.1080p",
-		"Bonus.Family.S01E01.720p", // real show titled "Bonus Family" with an episode marker
+		"Bonus.Family.S01E01.720p",    // real show titled "Bonus Family" with an episode marker
 		"The.Extras.S01E03.1080p.WEB", // real show titled "The Extras"
+		"Bonus.Family.S01.720p",       // season packs still keep the title before Sxx
+		"The.Extras.S01.1080p.WEB",
 		"Plain.Show.S04.1080p.BluRay",
 	}
 	for _, name := range yes {

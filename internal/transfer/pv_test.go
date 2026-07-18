@@ -2,9 +2,9 @@ package transfer
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,22 +27,21 @@ func TestPVDetection(t *testing.T) {
 }
 
 func TestPV_PreservesExistingFileOnFailure(t *testing.T) {
-	transferer, err := New(BackendPV)
-	if err != nil {
-		t.Skipf("PV not available: %v", err)
-	}
+	falsePath, err := exec.LookPath("false")
+	require.NoError(t, err)
+	transferer := NewPVTransferer(falsePath)
 
 	srcDir := t.TempDir()
 	dstDir := t.TempDir()
 
 	srcFile := filepath.Join(srcDir, "source.mkv")
-	require.NoError(t, os.WriteFile(srcFile, make([]byte, 10*1024*1024), 0644))
+	require.NoError(t, os.WriteFile(srcFile, []byte("new content"), 0644))
 
 	existingFile := filepath.Join(dstDir, "target.mkv")
 	require.NoError(t, os.WriteFile(existingFile, []byte("original content"), 0644))
 
-	_, err = transferer.Copy(srcFile, existingFile, TransferOptions{Timeout: 1 * time.Millisecond})
-	require.Error(t, err, "should fail due to timeout")
+	_, err = transferer.Copy(srcFile, existingFile, TransferOptions{})
+	require.Error(t, err, "should fail when pv exits unsuccessfully")
 
 	data, readErr := os.ReadFile(existingFile)
 	require.NoError(t, readErr)

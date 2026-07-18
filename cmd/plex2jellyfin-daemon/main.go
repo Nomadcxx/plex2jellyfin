@@ -201,6 +201,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	var jellyfinClient *jellyfin.Client
+	// ponytail: when the boot probe fails, skip per-file playback API polling
+	// until restart; webhook locks and all other Jellyfin integrations remain active.
+	var organizerJellyfinClient *jellyfin.Client
 	if cfg.Jellyfin.Enabled && cfg.Jellyfin.APIKey != "" && cfg.Jellyfin.URL != "" {
 		jellyfinClient = jellyfin.NewClient(jellyfin.Config{
 			URL:     cfg.Jellyfin.URL,
@@ -212,10 +215,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			logger.Warn("daemon", "Jellyfin unreachable at startup; integration stays enabled and will retry per operation",
 				logging.F("error", err.Error()))
 		} else if info != nil {
+			organizerJellyfinClient = jellyfinClient
 			logger.Info("daemon", "Jellyfin integration enabled",
 				logging.F("server", info.ServerName),
 				logging.F("version", info.Version))
 		} else {
+			organizerJellyfinClient = jellyfinClient
 			logger.Info("daemon", "Jellyfin integration enabled", logging.F("url", cfg.Jellyfin.URL))
 		}
 		notifyMgr.Register(notify.NewJellyfinNotifier(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, cfg.Jellyfin.NotifyOnImport))
@@ -310,7 +315,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		FileMode:                     fileMode,
 		DirMode:                      dirMode,
 		SonarrClient:                 sonarrClient,
-		JellyfinClient:               jellyfinClient,
+		JellyfinClient:               organizerJellyfinClient,
 		PlaybackSafety:               cfg.Jellyfin.PlaybackSafety,
 		Database:                     db,
 		ConfigDir:                    configDir,

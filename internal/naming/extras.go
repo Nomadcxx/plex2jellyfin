@@ -16,7 +16,15 @@ func IsExtrasRelease(name string) bool {
 	if episodeSERegex.MatchString(name) {
 		return false
 	}
-	return extrasMarkerRegex.MatchString(name)
+	name = strings.ReplaceAll(name, "_", ".")
+	markers := extrasMarkerRegex.FindAllStringIndex(name, -1)
+	season := seasonPackRegex.FindStringIndex(name)
+	for _, marker := range markers {
+		if season == nil || marker[0] >= season[1] {
+			return true
+		}
+	}
+	return false
 }
 
 // CleanExtrasName converts a release-style name (dot separators, quality and
