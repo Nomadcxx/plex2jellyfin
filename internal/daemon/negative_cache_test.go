@@ -74,6 +74,7 @@ func TestIsDeterministicUnparseable(t *testing.T) {
 		"transfer failed: all backends failed: rsync: timed out":                                                                             false,
 		"unable to parse TV show name: could not extract TV show info from path (obfuscated filename, no episode markers in parent folders)": true,
 		"season_pack_unresolved: /downloads/tv/Supergirl.S03.1080p.BluRay.x264-YELLOWBiRD":                                                   true,
+		"extras_unresolved: /downloads/tv/The.Last.Ship.S02.BONUS.2015.BluRay.1080p.AC3.x264-MTeam":                                          true,
 		"":                           false,
 		"open /foo: no such file":    false,
 		"unable to parse movie name": true,

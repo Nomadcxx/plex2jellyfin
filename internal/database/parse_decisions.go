@@ -863,11 +863,15 @@ func (m *MediaDB) GetRecentDeterministicFailures(lookback time.Duration) ([]Dete
 		          FROM parse_decisions p2
 		         WHERE p2.source_path = p1.source_path
 		           AND (p2.organize_outcome = 'failed'
-		                OR (p2.organize_outcome = 'skipped' AND p2.organize_error LIKE 'season_pack_unresolved:%'))
+		                OR (p2.organize_outcome = 'skipped'
+		                    AND (p2.organize_error LIKE 'season_pack_unresolved:%'
+		                         OR p2.organize_error LIKE 'extras_unresolved:%')))
 		         ORDER BY p2.event_at DESC LIMIT 1) AS last_error
 		FROM parse_decisions p1
 		WHERE (organize_outcome = 'failed'
-		       OR (organize_outcome = 'skipped' AND organize_error LIKE 'season_pack_unresolved:%'))
+		       OR (organize_outcome = 'skipped'
+		           AND (organize_error LIKE 'season_pack_unresolved:%'
+		                OR organize_error LIKE 'extras_unresolved:%')))
 		  AND event_at >= ?
 		GROUP BY source_path
 		HAVING failures >= 1`, cutoff)

@@ -206,6 +206,7 @@ func IsDeterministicUnparseable(errMsg string) bool {
 		"obfuscated filename, no episode markers",
 		"no episode markers in parent folders",
 		"season_pack_unresolved",
+		"extras_unresolved",
 		"unable to parse tv show name",
 		"could not extract movie info from path",
 		"unable to parse movie name",

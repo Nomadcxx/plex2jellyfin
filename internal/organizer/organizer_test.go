@@ -1046,3 +1046,67 @@ func TestOrganizeMovieDuplicateEventAlreadyOrganized(t *testing.T) {
 	assert.Equal(t, "already_organized", result.SkipReason)
 	assert.Nil(t, result.Error)
 }
+
+func TestOrganizeSeasonPackExtrasRoutedToShowExtrasDir(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	// Show already exists in the library.
+	showDir := filepath.Join(libraryDir, "The Last Ship")
+	require.NoError(t, os.MkdirAll(showDir, 0755))
+
+	releaseDir := filepath.Join(sourceDir, "The.Last.Ship.S02.BONUS.2015.BluRay.1080p.AC3.x264-MTeam")
+	require.NoError(t, os.MkdirAll(releaseDir, 0755))
+	videoFile := filepath.Join(releaseDir, "The.Last.Ship.S02.BONUS.2015.BluRay.1080p.AC3.x264-MTeam.mkv")
+	createTestFile(t, videoFile, 1024*1024)
+
+	org, err := NewOrganizer([]string{libraryDir})
+	require.NoError(t, err)
+
+	getFileSize := func(path string) (int64, error) {
+		st, err := os.Stat(path)
+		if err != nil {
+			return 0, err
+		}
+		return st.Size(), nil
+	}
+
+	result, err := org.OrganizeTVSeasonPackAuto(releaseDir, getFileSize)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Success, "extras release with matching show should organize")
+	assert.False(t, result.Skipped)
+	assert.Empty(t, result.Unresolved)
+
+	expected := filepath.Join(showDir, "extras", "The Last Ship S02 BONUS.mkv")
+	assert.FileExists(t, expected, "video should land in the show's extras folder")
+	assert.NoFileExists(t, videoFile, "source should be moved")
+}
+
+func TestOrganizeSeasonPackExtrasUnresolvedWhenShowMissing(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	releaseDir := filepath.Join(sourceDir, "Absent.Show.S01.EXTRAS.1080p.BluRay.x264-GRP")
+	require.NoError(t, os.MkdirAll(releaseDir, 0755))
+	videoFile := filepath.Join(releaseDir, "Absent.Show.S01.EXTRAS.1080p.BluRay.x264-GRP.mkv")
+	createTestFile(t, videoFile, 1024*1024)
+
+	org, err := NewOrganizer([]string{libraryDir})
+	require.NoError(t, err)
+
+	getFileSize := func(path string) (int64, error) {
+		st, err := os.Stat(path)
+		if err != nil {
+			return 0, err
+		}
+		return st.Size(), nil
+	}
+
+	result, err := org.OrganizeTVSeasonPackAuto(releaseDir, getFileSize)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Skipped)
+	assert.Equal(t, "extras_unresolved", result.SkipReason)
+	assert.FileExists(t, videoFile, "unresolved extras must not be moved")
+}
