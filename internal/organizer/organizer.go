@@ -53,6 +53,7 @@ type Organizer struct {
 	dryRun         bool
 	keepSource     bool
 	forceOverwrite bool
+	libraries      []string
 	selector       *library.Selector
 	transferer     transfer.Transferer
 	timeout        time.Duration
@@ -84,6 +85,7 @@ func NewOrganizer(libraries []string, options ...func(*Organizer)) (*Organizer, 
 		dryRun:         false,
 		keepSource:     false,
 		forceOverwrite: false,
+		libraries:      libraries,
 		transferer:     transferer,
 		timeout:        5 * time.Minute,
 		checksumVerify: false,
@@ -219,6 +221,26 @@ func WithPlaybackLockManager(mgr *jellyfin.PlaybackLockManager) func(*Organizer)
 func WithDeferredQueue(queue *jellyfin.DeferredQueue) func(*Organizer) {
 	return func(o *Organizer) {
 		o.deferredQueue = queue
+	}
+}
+
+// alreadyOrganizedResult detects the duplicate-event race: a concurrent
+// handler invocation already moved the source to the target, so this
+// transfer's failure is not a real error. Returns nil when it was.
+func alreadyOrganizedResult(sourcePath, targetPath string) *OrganizationResult {
+	if _, err := os.Stat(sourcePath); !os.IsNotExist(err) {
+		return nil
+	}
+	st, err := os.Stat(targetPath)
+	if err != nil || st.Size() == 0 {
+		return nil
+	}
+	return &OrganizationResult{
+		Success:    false,
+		SourcePath: sourcePath,
+		TargetPath: targetPath,
+		Skipped:    true,
+		SkipReason: "already_organized",
 	}
 }
 
@@ -449,6 +471,9 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 	}
 
 	if err != nil {
+		if skipped := alreadyOrganizedResult(sourcePath, targetPath); skipped != nil {
+			return skipped, nil
+		}
 		return &OrganizationResult{
 			Success:       false,
 			SourcePath:    sourcePath,
@@ -691,6 +716,9 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 	}
 
 	if err != nil {
+		if skipped := alreadyOrganizedResult(sourcePath, targetPath); skipped != nil {
+			return skipped, nil
+		}
 		return &OrganizationResult{
 			Success:       false,
 			SourcePath:    sourcePath,
@@ -846,6 +874,9 @@ func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func
 	}
 
 	if len(result.Imported) == 0 {
+		if naming.IsExtrasRelease(filepath.Base(releaseDir)) {
+			return o.organizeExtrasRelease(releaseDir, packInfo, result)
+		}
 		result.Skipped = true
 		result.SkipReason = "season_pack_unresolved"
 		result.Error = fmt.Errorf("season pack has no episode-numbered video files: %s", releaseDir)
@@ -856,6 +887,85 @@ func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func
 	if !result.Success && result.SkipReason == "" {
 		result.SkipReason = "season_pack_partial_failure"
 	}
+	return result, nil
+}
+
+// organizeExtrasRelease routes a bonus/extras release into the matching show's
+// extras/ folder (Jellyfin's extras convention). It only matches existing show
+// directories — an extras release for a show not present in any library is
+// terminally skipped so it stops being retried.
+func (o *Organizer) organizeExtrasRelease(releaseDir string, packInfo *naming.TVSeasonPackInfo, result *SeasonPackResult) (*SeasonPackResult, error) {
+	showDir := ""
+	for _, lib := range o.libraries {
+		if dir := findExistingShowDir(lib, packInfo.Title); dir != "" {
+			showDir = dir
+			break
+		}
+	}
+	if showDir == "" {
+		result.Skipped = true
+		result.SkipReason = "extras_unresolved"
+		result.Error = fmt.Errorf("extras release has no matching show in any library: %s", releaseDir)
+		return result, nil
+	}
+
+	videos := result.Unresolved
+	result.Unresolved = nil
+	if len(videos) == 0 {
+		result.Skipped = true
+		result.SkipReason = "extras_unresolved"
+		result.Error = fmt.Errorf("extras release contains no video files: %s", releaseDir)
+		return result, nil
+	}
+
+	extrasDir := filepath.Join(showDir, "extras")
+	if !o.dryRun {
+		if err := os.MkdirAll(extrasDir, 0755); err != nil {
+			result.Error = fmt.Errorf("unable to create extras directory: %w", err)
+			return result, nil
+		}
+		if err := o.applyDirOwnership(extrasDir); err != nil {
+			result.Error = fmt.Errorf("unable to set extras directory permissions: %w", err)
+			return result, nil
+		}
+	}
+
+	opts := o.buildTransferOptions()
+	for i, path := range videos {
+		ext := filepath.Ext(path)
+		cleaned := naming.CleanExtrasName(strings.TrimSuffix(filepath.Base(path), ext))
+		if cleaned == "" {
+			cleaned = strings.TrimSuffix(filepath.Base(path), ext)
+		}
+		targetPath := filepath.Join(extrasDir, cleaned+ext)
+		item := &OrganizationResult{SourcePath: path, TargetPath: targetPath}
+		if o.dryRun {
+			item.Success = true
+			result.Imported = append(result.Imported, item)
+			continue
+		}
+		var transferResult *transfer.TransferResult
+		var err error
+		if o.keepSource {
+			transferResult, err = o.transferer.Copy(path, targetPath, opts)
+		} else {
+			transferResult, err = o.transferer.Move(path, targetPath, opts)
+		}
+		if err != nil {
+			result.Unresolved = append(result.Unresolved, videos[i:]...)
+			result.Error = fmt.Errorf("extras transfer failed: %w", err)
+			result.Success = false
+			return result, nil
+		}
+		item.Success = true
+		if transferResult != nil {
+			item.BytesCopied = transferResult.BytesCopied
+			result.BytesCopied += transferResult.BytesCopied
+		}
+		result.Imported = append(result.Imported, item)
+	}
+
+	result.Success = true
 	return result, nil
 }
 

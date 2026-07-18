@@ -63,6 +63,11 @@ type TransferOptions struct {
 	// PreserveAttrs preserves file ownership and permissions during transfer.
 	PreserveAttrs bool
 
+	// PreserveTimes preserves source modification times during transfer.
+	// Default false: organized files get current mtimes so Jellyfin's
+	// DateCreated (Recently Added) reflects when the file entered the library.
+	PreserveTimes bool
+
 	// DeletePartial removes partial files if transfer fails.
 	// If false, partial files are left for potential resumption.
 	DeletePartial bool

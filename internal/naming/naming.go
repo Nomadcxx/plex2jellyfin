@@ -21,11 +21,12 @@ type MovieInfo struct {
 }
 
 type TVShowInfo struct {
-	Title       string
-	Year        string
-	Season      int
-	Episode     int
-	EpisodeDate string
+	Title        string
+	Year         string
+	Season       int
+	Episode      int
+	EpisodeDate  string
+	EpisodeTitle string
 }
 
 var (
@@ -265,12 +266,18 @@ func parseTVShowFromBaseName(baseName, filename string) (*TVShowInfo, error) {
 		return nil, fmt.Errorf("%w: could not extract TV show title from: %s", ErrParseFailed, filename)
 	}
 
+	episodeTitle := ""
+	if episodeMatch.kind != "date" {
+		episodeTitle = extractEpisodeTitle(baseName, episodeMatch.loc[1])
+	}
+
 	return &TVShowInfo{
-		Title:       titlePart,
-		Year:        year,
-		Season:      episodeMatch.season,
-		Episode:     episodeMatch.episode,
-		EpisodeDate: episodeMatch.date,
+		Title:        titlePart,
+		Year:         year,
+		Season:       episodeMatch.season,
+		Episode:      episodeMatch.episode,
+		EpisodeDate:  episodeMatch.date,
+		EpisodeTitle: episodeTitle,
 	}, nil
 }
 
@@ -308,6 +315,12 @@ func FormatTVEpisodeFilenameFromInfo(info *TVShowInfo, ext string) string {
 		title := NormalizeMediaName(info.Title, info.Year)
 		return fmt.Sprintf("%s %s.%s", title, info.EpisodeDate, ext)
 	}
+	if info.EpisodeTitle != "" {
+		if info.Year != "" {
+			return fmt.Sprintf("%s (%s) S%02dE%02d - %s.%s", info.Title, info.Year, info.Season, info.Episode, info.EpisodeTitle, ext)
+		}
+		return fmt.Sprintf("%s S%02dE%02d - %s.%s", info.Title, info.Season, info.Episode, info.EpisodeTitle, ext)
+	}
 	return FormatTVEpisodeFilename(info.Title, info.Year, info.Season, info.Episode, ext)
 }
 
@@ -336,6 +349,33 @@ var knownReleaseGroups = map[string]bool{
 // qualityMarkerDetect detects if a string contains codec/quality markers,
 // indicating that any trailing -Word is almost certainly a release group
 var qualityMarkerDetect = regexp.MustCompile(`(?i)(x264|x265|h264|h265|hevc|avc|bluray|blu-ray|bdrip|remux|web-dl|webdl|webrip|\d{3,4}p|4k|uhd)`)
+
+// episodeTitleStopToken marks tokens that begin the release-metadata tail of a
+// filename (quality, source, codec, audio). Episode-title extraction stops at
+// the first such token.
+var episodeTitleStopToken = regexp.MustCompile(`(?i)^(480p|720p|1080p|2160p|4k|uhd|web|web-dl|webdl|webrip|hdtv|bluray|blu-ray|bdrip|remux|dsnp|nf|amzn|hulu|max|atvp|pcok|dvdrip|repack|proper|internal|limited|extended|uncut|multi|10bit|8bit|hdr|hdr10|dv|x264|x265|h264|h265|hevc|avc|aac|aac2|ac3|eac3|ddp|dd5|dts|truehd|atmos)`)
+
+// episodeTitleYearToken matches a standalone year token. A bare year in the
+// tail after the episode marker is release metadata (see the parser rule that
+// a post-marker year is never the series year), so it also stops extraction.
+var episodeTitleYearToken = regexp.MustCompile(`^(19|20)\d{2}$`)
+
+// extractEpisodeTitle pulls the human episode title that follows the episode
+// marker (SxxExx etc.) at matchEnd, stopping at the first release-metadata
+// token. Returns "" when the marker is immediately followed by metadata.
+func extractEpisodeTitle(baseName string, matchEnd int) string {
+	seg := strings.TrimLeft(baseName[matchEnd:], ".-_ ")
+	var kept []string
+	for _, tok := range strings.FieldsFunc(seg, func(r rune) bool {
+		return r == '.' || r == '_' || r == ' '
+	}) {
+		if episodeTitleStopToken.MatchString(tok) || qualityMarkerDetect.MatchString(tok) || episodeTitleYearToken.MatchString(tok) {
+			break
+		}
+		kept = append(kept, tok)
+	}
+	return normalizeSpaces(strings.TrimSpace(strings.Join(kept, " ")))
+}
 
 // releaseGroupSuffixToken matches the trailing segment after the last hyphen,
 // e.g. "SPARKS", "postbot", or "Ben.The.Men".

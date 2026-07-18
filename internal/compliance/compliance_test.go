@@ -135,6 +135,12 @@ func TestCheckEpisode_CompliantFile(t *testing.T) {
 			name: "Show with apostrophe",
 			path: "/media/TV/The Handmaid's Tale (2017)/Season 01/The Handmaid's Tale (2017) S01E03.mkv",
 		},
+		{
+			// Regression: filenames carrying an episode title (Jellyfin's
+			// metadata-gap fallback form) must not be flagged for rename.
+			name: "Episode title in filename",
+			path: "/media/TV/Show (2026)/Season 01/Show (2026) S01E01 - No Shortcuts.mkv",
+		},
 	}
 
 	for _, tt := range tests {
