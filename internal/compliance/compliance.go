@@ -166,7 +166,7 @@ func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 	}
 
 	// Validate expected filename
-	expectedFilename := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
+	expectedFilename := naming.FormatTVEpisodeFilenameFromInfo(tv, ext[1:])
 	if filename != expectedFilename {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: expected '%s'", IssueInvalidFilename, expectedFilename))
 	}

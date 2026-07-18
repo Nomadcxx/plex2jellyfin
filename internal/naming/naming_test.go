@@ -626,3 +626,70 @@ func TestOriginalFunctionsStillCompile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestParseTVShowExtractsEpisodeTitle(t *testing.T) {
+	cases := []struct {
+		file string
+		want string
+	}{
+		{"Lucky.2026.S01E01.No.Shortcuts.1080p.WEB.h264-ETHEL.mkv", "No Shortcuts"},
+		{"Lucky.2026.S01E02.1080p.WEB.h264-ETHEL.mkv", ""},
+		{"Lucky (2026) S01E01 - No Shortcuts.mkv", "No Shortcuts"}, // round-trip of our own output form
+		{"The.New.Adventures.S03E05.Whats.the.Score.Pooh.1080p.DSNP.WEB-DL.AAC2.0.x264-AndreMor.mkv", "Whats the Score Pooh"},
+		// A bare year after the episode marker is release metadata, never an
+		// episode title (matches the parser's post-marker-year rule).
+		{"Upload.S04E03.2025.1080p.Amazon.WEB-DL.AVC.DDP.5.1-DBTV.mkv", ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.file, func(t *testing.T) {
+			info, err := ParseTVShowName(c.file)
+			if err != nil {
+				t.Fatalf("ParseTVShowName(%q) unexpected error: %v", c.file, err)
+			}
+			if info.EpisodeTitle != c.want {
+				t.Errorf("ParseTVShowName(%q) EpisodeTitle = %q, want %q", c.file, info.EpisodeTitle, c.want)
+			}
+		})
+	}
+}
+
+func TestParseTVShowDateBasedHasNoEpisodeTitle(t *testing.T) {
+	file := "The.Daily.Show.2026.04.20.Annalena.Baerbock.1080p.WEB.h264-EDITH.mkv"
+	info, err := ParseTVShowName(file)
+	if err != nil {
+		t.Fatalf("ParseTVShowName(%q) unexpected error: %v", file, err)
+	}
+	if info.EpisodeTitle != "" {
+		t.Errorf("EpisodeTitle = %q, want empty for date-based episode", info.EpisodeTitle)
+	}
+	got := FormatTVEpisodeFilenameFromInfo(info, "mkv")
+	want := "The Daily Show 2026-04-20.mkv"
+	if got != want {
+		t.Errorf("FormatTVEpisodeFilenameFromInfo() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatTVEpisodeFilenameFromInfoWithEpisodeTitle(t *testing.T) {
+	info := &TVShowInfo{Title: "Lucky", Year: "2026", Season: 1, Episode: 1, EpisodeTitle: "No Shortcuts"}
+	got := FormatTVEpisodeFilenameFromInfo(info, "mkv")
+	want := "Lucky (2026) S01E01 - No Shortcuts.mkv"
+	if got != want {
+		t.Errorf("FormatTVEpisodeFilenameFromInfo() = %q, want %q", got, want)
+	}
+
+	info.EpisodeTitle = ""
+	got = FormatTVEpisodeFilenameFromInfo(info, "mkv")
+	want = "Lucky (2026) S01E01.mkv"
+	if got != want {
+		t.Errorf("FormatTVEpisodeFilenameFromInfo() without title = %q, want %q", got, want)
+	}
+
+	info.EpisodeTitle = "No Shortcuts"
+	info.Year = ""
+	got = FormatTVEpisodeFilenameFromInfo(info, "mkv")
+	want = "Lucky S01E01 - No Shortcuts.mkv"
+	if got != want {
+		t.Errorf("FormatTVEpisodeFilenameFromInfo() without year = %q, want %q", got, want)
+	}
+}
