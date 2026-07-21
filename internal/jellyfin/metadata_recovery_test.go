@@ -538,3 +538,215 @@ type metadataRepairWrite struct {
 func boolPtr(v bool) *bool {
 	return &v
 }
+
+type fakeCorrector struct {
+	decision CorrectionDecision
+	calls    []fakeCorrectorCall
+}
+
+type fakeCorrectorCall struct {
+	title string
+	year  string
+}
+
+func (f *fakeCorrector) Decide(ctx context.Context, currentTitle, year string) CorrectionDecision {
+	f.calls = append(f.calls, fakeCorrectorCall{title: currentTitle, year: year})
+	return f.decision
+}
+
+type fakeEnqueuer struct {
+	calls []fakeEnqueuerCall
+}
+
+type fakeEnqueuerCall struct {
+	parseDecisionID int64
+	srcPath         string
+	dstPath         string
+	newTitle        string
+	newYear         string
+	tmdbID          string
+}
+
+func (f *fakeEnqueuer) EnqueueVerifierRename(parseDecisionID int64, srcPath, dstPath, newTitle, newYear, tmdbID string) error {
+	f.calls = append(f.calls, fakeEnqueuerCall{parseDecisionID: parseDecisionID, srcPath: srcPath, dstPath: dstPath, newTitle: newTitle, newYear: newYear, tmdbID: tmdbID})
+	return nil
+}
+
+func TestPassiveCorrectionEnqueuesAndConsumesAttempt(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	targetAt := now.Add(-72 * time.Hour) // past 48h grace
+	year := 2023
+	row := &database.ParseDecision{
+		ID:                  42,
+		ParsedTitle:         "Some Wrong Title",
+		ParsedYear:          &year,
+		MediaTypeGuessed:    "movie",
+		TargetPath:          "/mnt/STORAGE1/MOVIES/Some Wrong Title (2023)/Some Wrong Title (2023).mkv",
+		TargetAt:            &targetAt,
+		OrganizeOutcome:     "success",
+		JellyfinItemID:      "movie-1",
+		JellyfinResolvedAt:  &targetAt,
+		JellyfinIdentified:  boolPtr(false),
+		MetadataRepairCount: 0,
+	}
+	store := &metadataStoreFake{due: []*database.ParseDecision{row}}
+	client := &metadataClientFake{items: map[string]Item{
+		"movie-1": {ID: "movie-1", Type: "Movie", Path: "/movies/Some Wrong Title (2023)/Some Wrong Title (2023).mkv"},
+	}}
+	reconciler := NewMetadataReconciler(client, store, MetadataRecoveryConfig{CorrectionEnabled: true, NeedsReviewAfter: 4})
+	reconciler.now = func() time.Time { return now }
+	reconciler.SetPathTranslator(NewPathTranslator([]PathMapping{{Jellyfin: "/movies", Daemon: "/mnt/STORAGE1/MOVIES"}}))
+
+	corr := &fakeCorrector{decision: CorrectionDecision{
+		Action:   "correct",
+		NewTitle: "Correct Title",
+		NewYear:  "2023",
+		TmdbID:   "12345",
+		Reason:   "matched via candidate strip",
+	}}
+	enq := &fakeEnqueuer{}
+	reconciler.SetCorrector(corr)
+	reconciler.SetEnqueuer(enq)
+
+	summary, err := reconciler.RunPassive(context.Background(), 25, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.Checked)
+
+	// Enqueued exactly once with the right args.
+	require.Len(t, enq.calls, 1)
+	assert.Equal(t, int64(42), enq.calls[0].parseDecisionID)
+	assert.Equal(t, "Correct Title", enq.calls[0].newTitle)
+	assert.Equal(t, "2023", enq.calls[0].newYear)
+	assert.Equal(t, "12345", enq.calls[0].tmdbID)
+	assert.Contains(t, enq.calls[0].srcPath, "Some Wrong Title (2023)")
+	assert.Contains(t, enq.calls[0].dstPath, "Correct Title (2023)")
+
+	// One attempt consumed: UpdateMetadataRepairState called with non-nil repairedAt.
+	require.Len(t, store.repairs, 1)
+	assert.NotNil(t, store.repairs[0].repairedAt)
+
+	// Corrector was asked about the current title.
+	require.Len(t, corr.calls, 1)
+	assert.Equal(t, "Some Wrong Title", corr.calls[0].title)
+}
+
+func TestPassiveCorrectionSkipsWhenCorrectorReturnsLeave(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	targetAt := now.Add(-72 * time.Hour)
+	year := 2023
+	row := &database.ParseDecision{
+		ID:                  43,
+		ParsedTitle:         "Some Title",
+		ParsedYear:          &year,
+		MediaTypeGuessed:    "movie",
+		TargetPath:          "/mnt/STORAGE1/MOVIES/Some Title (2023)/Some Title (2023).mkv",
+		TargetAt:            &targetAt,
+		OrganizeOutcome:     "success",
+		JellyfinItemID:      "movie-2",
+		JellyfinResolvedAt:  &targetAt,
+		JellyfinIdentified:  boolPtr(false),
+		MetadataRepairCount: 0,
+	}
+	store := &metadataStoreFake{due: []*database.ParseDecision{row}}
+	client := &metadataClientFake{items: map[string]Item{
+		"movie-2": {ID: "movie-2", Type: "Movie", Path: "/movies/Some Title (2023)/Some Title (2023).mkv"},
+	}}
+	reconciler := NewMetadataReconciler(client, store, MetadataRecoveryConfig{CorrectionEnabled: true, NeedsReviewAfter: 4})
+	reconciler.now = func() time.Time { return now }
+	reconciler.SetPathTranslator(NewPathTranslator([]PathMapping{{Jellyfin: "/movies", Daemon: "/mnt/STORAGE1/MOVIES"}}))
+
+	corr := &fakeCorrector{decision: CorrectionDecision{Action: "leave"}}
+	enq := &fakeEnqueuer{}
+	reconciler.SetCorrector(corr)
+	reconciler.SetEnqueuer(enq)
+
+	summary, err := reconciler.RunPassive(context.Background(), 25, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.Checked)
+	assert.Empty(t, enq.calls)
+	assert.Empty(t, store.repairs)
+}
+
+func TestPassiveCorrectionSkipsWithinGracePeriod(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	targetAt := now.Add(-10 * time.Minute) // within 48h grace
+	year := 2023
+	row := &database.ParseDecision{
+		ID:                  44,
+		ParsedTitle:         "Fresh Import",
+		ParsedYear:          &year,
+		MediaTypeGuessed:    "movie",
+		TargetPath:          "/mnt/STORAGE1/MOVIES/Fresh Import (2023)/Fresh Import (2023).mkv",
+		TargetAt:            &targetAt,
+		OrganizeOutcome:     "success",
+		JellyfinItemID:      "movie-3",
+		JellyfinResolvedAt:  &targetAt,
+		JellyfinIdentified:  boolPtr(false),
+		MetadataRepairCount: 0,
+	}
+	store := &metadataStoreFake{due: []*database.ParseDecision{row}}
+	client := &metadataClientFake{items: map[string]Item{
+		"movie-3": {ID: "movie-3", Type: "Movie", Path: "/movies/Fresh Import (2023)/Fresh Import (2023).mkv"},
+	}}
+	reconciler := NewMetadataReconciler(client, store, MetadataRecoveryConfig{CorrectionEnabled: true, NeedsReviewAfter: 4})
+	reconciler.now = func() time.Time { return now }
+	reconciler.SetPathTranslator(NewPathTranslator([]PathMapping{{Jellyfin: "/movies", Daemon: "/mnt/STORAGE1/MOVIES"}}))
+
+	corr := &fakeCorrector{decision: CorrectionDecision{Action: "correct", NewTitle: "Fixed", NewYear: "2023", TmdbID: "1"}}
+	enq := &fakeEnqueuer{}
+	reconciler.SetCorrector(corr)
+	reconciler.SetEnqueuer(enq)
+
+	_, err := reconciler.RunPassive(context.Background(), 25, nil)
+
+	require.NoError(t, err)
+	assert.Empty(t, enq.calls, "should not enqueue within grace period")
+	assert.Empty(t, store.repairs)
+}
+
+func TestPassiveCorrectionSkipsAtAttemptCap(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	targetAt := now.Add(-72 * time.Hour)
+	year := 2023
+	row := &database.ParseDecision{
+		ID:                  45,
+		ParsedTitle:         "Capped Title",
+		ParsedYear:          &year,
+		MediaTypeGuessed:    "movie",
+		TargetPath:          "/mnt/STORAGE1/MOVIES/Capped Title (2023)/Capped Title (2023).mkv",
+		TargetAt:            &targetAt,
+		OrganizeOutcome:     "success",
+		JellyfinItemID:      "movie-4",
+		JellyfinResolvedAt:  &targetAt,
+		JellyfinIdentified:  boolPtr(false),
+		MetadataRepairCount: 4, // == NeedsReviewAfter cap
+	}
+	store := &metadataStoreFake{due: []*database.ParseDecision{row}}
+	client := &metadataClientFake{items: map[string]Item{
+		"movie-4": {ID: "movie-4", Type: "Movie", Path: "/movies/Capped Title (2023)/Capped Title (2023).mkv"},
+	}}
+	reconciler := NewMetadataReconciler(client, store, MetadataRecoveryConfig{CorrectionEnabled: true, NeedsReviewAfter: 4})
+	reconciler.now = func() time.Time { return now }
+	reconciler.SetPathTranslator(NewPathTranslator([]PathMapping{{Jellyfin: "/movies", Daemon: "/mnt/STORAGE1/MOVIES"}}))
+
+	corr := &fakeCorrector{decision: CorrectionDecision{Action: "correct", NewTitle: "Fixed", NewYear: "2023", TmdbID: "1"}}
+	enq := &fakeEnqueuer{}
+	reconciler.SetCorrector(corr)
+	reconciler.SetEnqueuer(enq)
+
+	_, err := reconciler.RunPassive(context.Background(), 25, nil)
+
+	require.NoError(t, err)
+	assert.Empty(t, enq.calls, "should not enqueue at attempt cap")
+	assert.Empty(t, store.repairs)
+}

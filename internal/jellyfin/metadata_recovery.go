@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 )
 
 const (
@@ -36,6 +38,7 @@ type MetadataClassification struct {
 type MetadataRecoveryConfig struct {
 	RepairCooldown   time.Duration
 	NeedsReviewAfter int
+	CorrectionEnabled bool
 }
 
 type MetadataRunSummary struct {
@@ -65,12 +68,35 @@ type MetadataStore interface {
 	UpdateMetadataRepairState(id int64, state, errMsg string, nextCheck *time.Time, repairedAt *time.Time) error
 }
 
+// CorrectionDecision is the result of a movie name correction attempt.
+type CorrectionDecision struct {
+	Action   string
+	NewTitle string
+	NewYear  string
+	TmdbID   string
+	Reason   string
+}
+
+// MovieCorrector decides whether a movie title should be corrected.
+type MovieCorrector interface {
+	Decide(ctx context.Context, currentTitle, year string) CorrectionDecision
+}
+
+// CorrectionEnqueuer enqueues a verifier-driven rename task.
+type CorrectionEnqueuer interface {
+	EnqueueVerifierRename(parseDecisionID int64, srcPath, dstPath, newTitle, newYear, tmdbID string) error
+}
+
 type MetadataReconciler struct {
-	client     MetadataRepairClient
-	store      MetadataStore
-	translator *PathTranslator
-	cfg        MetadataRecoveryConfig
-	now        func() time.Time
+	client            MetadataRepairClient
+	store             MetadataStore
+	translator        *PathTranslator
+	cfg               MetadataRecoveryConfig
+	now               func() time.Time
+	corrector         MovieCorrector
+	enqueuer          CorrectionEnqueuer
+	correctionEnabled bool
+	correctionGrace   time.Duration
 }
 
 func NewMetadataReconciler(client MetadataRepairClient, store MetadataStore, cfg MetadataRecoveryConfig) *MetadataReconciler {
@@ -81,10 +107,12 @@ func NewMetadataReconciler(client MetadataRepairClient, store MetadataStore, cfg
 		cfg.NeedsReviewAfter = 4
 	}
 	return &MetadataReconciler{
-		client: client,
-		store:  store,
-		cfg:    cfg,
-		now:    func() time.Time { return time.Now().UTC() },
+		client:            client,
+		store:             store,
+		cfg:               cfg,
+		correctionEnabled: cfg.CorrectionEnabled,
+		correctionGrace:   48 * time.Hour,
+		now:               func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -93,6 +121,20 @@ func (r *MetadataReconciler) SetPathTranslator(t *PathTranslator) {
 		return
 	}
 	r.translator = t
+}
+
+func (r *MetadataReconciler) SetCorrector(c MovieCorrector) {
+	if r == nil {
+		return
+	}
+	r.corrector = c
+}
+
+func (r *MetadataReconciler) SetEnqueuer(e CorrectionEnqueuer) {
+	if r == nil {
+		return
+	}
+	r.enqueuer = e
 }
 
 func (r *MetadataReconciler) RunPassive(ctx context.Context, limit int, progress chan<- database.ProgressEvent) (MetadataRunSummary, error) {
@@ -117,7 +159,7 @@ func (r *MetadataReconciler) RunPassive(ctx context.Context, limit int, progress
 	for i, row := range rows {
 		classification := result.classifications[row.ID]
 		summary.Checked++
-		if err := r.applyPassiveClassification(row, result.itemFor(row), classification, now); err != nil {
+		if err := r.applyPassiveClassification(ctx, row, result.itemFor(row), classification, now); err != nil {
 			summary.Errors++
 			sendMetadataProgress(progress, "checking", fmt.Sprintf("row %d: %v", row.ID, err), i+1, len(rows))
 			continue
@@ -204,7 +246,7 @@ func (r *MetadataReconciler) repairRows(ctx context.Context, rows []*database.Pa
 		classification := result.classifications[row.ID]
 		summary.Checked++
 
-		if err := r.applyPassiveClassification(row, item, classification, now); err != nil {
+		if err := r.applyPassiveClassification(ctx, row, item, classification, now); err != nil {
 			summary.Errors++
 			sendMetadataProgress(progress, "repairing", fmt.Sprintf("row %d: %v", row.ID, err), i+1, len(rows))
 			continue
@@ -440,7 +482,7 @@ func (r metadataClassificationResult) repairTarget(item *Item, c MetadataClassif
 	}
 }
 
-func (r *MetadataReconciler) applyPassiveClassification(row *database.ParseDecision, item *Item, c MetadataClassification, now time.Time) error {
+func (r *MetadataReconciler) applyPassiveClassification(ctx context.Context, row *database.ParseDecision, item *Item, c MetadataClassification, now time.Time) error {
 	if c.Identified {
 		identified := true
 		imdb, tmdb, tvdb := metadataProviderIDs(item)
@@ -459,7 +501,79 @@ func (r *MetadataReconciler) applyPassiveClassification(row *database.ParseDecis
 	}
 
 	next := metadataNextCheck(row, c, now)
+
+	if r.maybeCorrect(ctx, row, c, next, now) {
+		return nil
+	}
+
 	return r.store.UpdateMetadataCheckState(row.ID, c.State, c.Error, next)
+}
+
+// maybeCorrect attempts a verifier-driven movie name correction when a movie
+// row has been stuck in missing_provider_ids past the correction grace period
+// and the attempt cap has not been reached. On a successful correction it
+// enqueues a verifier_rename task and consumes one attempt via
+// UpdateMetadataRepairState (non-nil repairedAt triggers the increment).
+// Returns true when a correction was enqueued (caller should skip the normal
+// UpdateMetadataCheckState return).
+func (r *MetadataReconciler) maybeCorrect(ctx context.Context, row *database.ParseDecision, c MetadataClassification, next *time.Time, now time.Time) bool {
+	if !r.correctionEnabled || r.enqueuer == nil || r.corrector == nil {
+		return false
+	}
+	if c.Identified || c.State != MetadataStateMissingProviderIDs {
+		return false
+	}
+	if !isMovieRow(row) || !correctionDue(row, r.correctionGrace, now) {
+		return false
+	}
+	if row.MetadataRepairCount >= r.cfg.NeedsReviewAfter {
+		return false
+	}
+
+	year := ""
+	if row.ParsedYear != nil {
+		year = fmt.Sprintf("%d", *row.ParsedYear)
+	}
+	d := r.corrector.Decide(ctx, row.ParsedTitle, year)
+	if d.Action != "correct" || d.NewTitle == "" {
+		return false
+	}
+
+	dst, err := r.computeCorrectedTargetPath(row, d.NewTitle, d.NewYear)
+	if err != nil {
+		return false
+	}
+
+	if err := r.enqueuer.EnqueueVerifierRename(row.ID, row.TargetPath, dst, d.NewTitle, d.NewYear, d.TmdbID); err != nil {
+		return false
+	}
+
+	repairedAt := now
+	_ = r.store.UpdateMetadataRepairState(row.ID, c.State, "correction enqueued: "+d.NewTitle, next, &repairedAt)
+	return true
+}
+
+func isMovieRow(row *database.ParseDecision) bool {
+	return row != nil && row.MediaTypeGuessed == "movie"
+}
+
+func correctionDue(row *database.ParseDecision, grace time.Duration, now time.Time) bool {
+	return row.TargetAt != nil && now.Sub(*row.TargetAt) >= grace
+}
+
+// computeCorrectedTargetPath builds the destination path for a corrected movie
+// by reusing the row's existing library root and file extension.
+func (r *MetadataReconciler) computeCorrectedTargetPath(row *database.ParseDecision, newTitle, newYear string) (string, error) {
+	src := row.TargetPath
+	if src == "" {
+		return "", fmt.Errorf("empty target path")
+	}
+	srcDir := filepath.Dir(src)
+	parentDir := filepath.Dir(srcDir) // library root or intermediate folder
+	ext := filepath.Ext(src)
+	folderName := naming.NormalizeMediaName(newTitle, newYear)
+	fileName := naming.FormatMovieFilename(newTitle, newYear, ext)
+	return filepath.Join(parentDir, folderName, fileName), nil
 }
 
 func ClassifyMetadata(row *database.ParseDecision, item *Item, series *Item, now time.Time) MetadataClassification {

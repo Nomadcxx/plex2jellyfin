@@ -169,6 +169,7 @@ type MetadataRecoveryConfig struct {
 	RepairBatchSize        int  `mapstructure:"repair_batch_size" toml:"repair_batch_size"`
 	RepairCooldownHours    int  `mapstructure:"repair_cooldown_hours" toml:"repair_cooldown_hours"`
 	NeedsReviewAfter       int  `mapstructure:"needs_review_after" toml:"needs_review_after"`
+	CorrectionEnabled      bool `mapstructure:"correction_enabled" toml:"correction_enabled"`
 }
 
 // AIConfig contains AI title matching configuration
@@ -379,9 +380,10 @@ func DefaultConfig() *Config {
 			PassiveIntervalMinutes: 60,
 			PassiveBatchSize:       25,
 			RepairBatchSize:        5,
-			RepairCooldownHours:    6,
-			NeedsReviewAfter:       4,
-		},
+		RepairCooldownHours:    6,
+		NeedsReviewAfter:       4,
+		CorrectionEnabled:      true,
+	},
 	}
 }
 

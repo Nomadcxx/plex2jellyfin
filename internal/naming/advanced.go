@@ -87,6 +87,11 @@ func init() {
 
 		// Special editions
 		`\b(IMAX\s?Enhanced|IMAX|Remastered|REMASTERED|Up[ .-]?Scaled)\b`,
+		// Compound edition phrases: stripped as whole phrases so bare 'cut'
+		// is never touched (real titles: "Final Cut", "Time Cut", "Urban
+		// Legends: Final Cut"). Must run before standalone EXTENDED below.
+		`\b(?:Extended|Theatrical|Director'?s|Directors|Unrated|Uncut|Special)[ .]Cut\b`,
+		`\b(?:Extended|Theatrical|Special|Collector'?s|Collectors|Limited|Ultimate|Anniversary|Deluxe)[ .]Edition\b`,
 		`\b(Directors\s?Cut|DC|Theatrical|UNCUT|Criterion)\b`,
 
 		// Multi-language and subtitles

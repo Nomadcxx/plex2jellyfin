@@ -81,19 +81,19 @@ machinery, and eliminates the Phase-2 ping-pong risk at its source.
 
 ### 1.1 Edition-cut vocabulary in the primary parser
 
-Add edition-cut markers to the primary release-strip patterns at
-`internal/naming/naming.go:69` (the list currently containing
-`PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED|REMASTERED|…`): `CUT`,
-`DIRECTOR'?S CUT`, `FINAL CUT`, `THEATRICAL`, `UNCUT`, `UNRATED`, and any others
-already known to `advanced.go`'s `editionMarkers`. Ensure dot/space-separated
-tokens are handled, not only hyphen-glued forms.
+Add *compound edition phrases* to the primary release-strip patterns at
+`internal/naming/naming.go:44`, running BEFORE the standalone `EXTENDED`
+pattern: `(extended|theatrical|director'?s|directors|unrated|uncut|special)
+[ .]cut` and `(extended|theatrical|special|collector'?s|collectors|limited|
+ultimate|anniversary|deluxe)[ .]edition`.
 
 Guard against false stripping of real titles that legitimately contain these
 words (e.g. "Final Cut (2022)", "Time Cut (2024)", "Urban Legends: Final Cut
-(2000)"). The strip must be conservative — only strip an edition token when it is
-release metadata (typically trailing, adjacent to other release tokens), never
-when it is an interior title word. Cover these known-good titles as regression
-fixtures so they are not damaged.
+(2000)"). Bare `cut` is NEVER stripped (those three titles depend on it), and
+no compound in the list collides with a real title. Standalone
+`UNRATED`/`UNCUT`/`THEATRICAL` leaks are deliberately NOT fixed in the parser
+(Phase 2's candidate vocabulary covers them). Cover the known-good titles as
+regression fixtures so they are not damaged.
 
 Deliverable: corpus test asserting `scary.movie.extended.cut.2026...` →
 "Scary Movie" (2026), plus the three known-good titles above remain unchanged.
@@ -149,11 +149,14 @@ Procedure:
 3. Verify each candidate at the parsed year with strict-year semantics. Accept
    the first candidate that returns an exact-title **and** exact-year match to a
    different title.
-4. Outcome:
+4. Outcome (binary — the flag-for-review middle outcome is deferred, see
+   "Open items deferred"):
    - Confident exact-title+exact-year match to a different title, candidate
      >= 2 tokens → auto-correct.
-   - Candidates tried, only a loose/near/single-token match → flag-for-review.
-   - Nothing matched either way → leave-alone (too new / obscure); no rename.
+   - Anything else (loose/near/single-token match, or no match at all) →
+     leave-alone. Strict-only auto-apply means no reviewable suggestion is
+     ever produced, so the review path adds nothing until `Decide` is
+     relaxed to emit loose suggestions.
 
 ### 2.2 Strict-year lookup (mandatory)
 
@@ -164,11 +167,10 @@ single-candidate fallback that ignores year entirely. Left as-is, this makes
 **Avatar (2009)** reachable as an auto-rename.
 
 For auto-apply the corrector must require integer-equal year against
-`match.Year`, after lookup returns. The ±1 tolerance and the single-candidate
-fallback are permitted only to produce **review-only** suggestions, never
-auto-apply. Implement either as a `lookupStrict` variant or as a post-lookup
-re-check in the corrector; do not weaken the existing `lookup` used by
-housekeeping dedup.
+`match.Year`, after lookup returns. Implement as a strict `LookupExact`
+variant; do not weaken the existing `lookup` used by housekeeping dedup.
+(The ±1 tolerance / single-candidate fallback producing review-only
+suggestions is deferred with the review path.)
 
 ### 2.3 Trigger seam: enqueue, do not mutate from `RunPassive`
 
@@ -181,9 +183,10 @@ housekeeping queue reuses the bounded-concurrency drainer, dedup, the
 repair-event audit trail, and the existing human-approval WebUI path.
 
 - Auto-correct outcome → a new auto-apply task kind (2.4).
-- Flag-for-review outcome → a flag-kind task mirroring `TaskKindYearMismatch`,
-  which executes only on human approval via the existing WebUI flow. No new
-  review-storage is built; the suggested title rides in the task payload.
+- Flag-for-review outcome → deferred (see "Open items deferred"). When
+  revisited it maps to a flag-kind task mirroring `TaskKindYearMismatch`,
+  executed only on human approval via the existing WebUI flow; the suggested
+  title rides in the task payload. No new review-storage is needed.
 
 ### 2.4 Execution: new task kind
 
@@ -218,13 +221,14 @@ rescan. Add a new task kind (e.g. `TaskKindVerifierRename`).
 ### 2.5 Loop guards and idempotency
 
 - **Attempt cap:** reuse the `MetadataRepairCount` / `NeedsReviewAfter` pattern;
-  after the cap the row goes to `needs_review` and correction stops. Record the
-  last-tried candidate so an identical candidate is never retried, and so
-  progressive-trim does not walk "Scary Movie" → "Scary" on successive cycles.
-- **Idempotency / dedup:** a `correction_pending` state (or a unique
-  (kind, parse_decision_id, pending) constraint on the task table) so the next
-  passive cycle does not enqueue the same correction again before the first
-  drains.
+  one attempt is consumed at enqueue time (`UpdateMetadataRepairState` with
+  non-nil `repairedAt`); after the cap the existing `needsReview` machinery
+  parks the row and correction stops. No last-tried-candidate record: the
+  executor overwrites `parsed_title` with the verifier title, which resolves
+  exactly on the next cycle, so retries self-terminate.
+- **Idempotency / dedup:** the housekeeping queue's `dedup_key` unique index
+  (jobName+kind+payload, pending/running) makes a duplicate enqueue a no-op
+  while the first task drains.
 - **Post-rescan check:** if the targeted rescan still yields no ProviderIds, the
   row returns to `missing_provider_ids`; the attempt cap and last-candidate
   record prevent an infinite loop.
@@ -253,15 +257,14 @@ Phase 1:
 
 Phase 2:
 - Corrector decision table with a fake verifier: exact match different title →
-  auto; ±1-year / single-candidate / single-token → review; current-name match →
-  leave-alone; nothing → leave-alone.
+  auto; current-name match → leave-alone; nothing → leave-alone.
 - Strict-year: `Avatar Fire and Ash (2025)` never auto-applies to Avatar (2009).
-- Enqueue seam: `RunPassive` enqueues, never renames; flag outcome maps to the
-  review task kind.
+- Enqueue seam: `RunPassive` enqueues, never renames.
 - New executor: writes verifier title (no re-parse), preserves `TargetAt`,
-  updates all rows under the folder, records the Match in the repair event.
-- Loop guards: attempt cap honored; identical candidate not retried;
-  correction_pending prevents duplicate enqueue.
+  updates all parse_decision and media_files rows under the folder, records
+  the Match in the repair event.
+- Loop guards: attempt cap honored (one attempt consumed per enqueue);
+  dedup_key prevents duplicate enqueue while pending.
 - Drift exclusion: a verifier-corrected row (whose source filename still
   parses to the wrong title) is skipped by `parserDriftMovieRename` — no
   rename-back is enqueued.
@@ -271,6 +274,9 @@ Phase 2:
 - Leading-junk titles (only trailing-trim is in scope; observed cases are
   trailing).
 - TV self-correction (this design is movie-only).
+- Flag-for-review outcome (loose/±1-year/single-token suggestions surfaced
+  for human approval). Strict-only auto-apply produces nothing reviewable;
+  revisit if `Decide` is ever relaxed to emit loose suggestions.
 
 ## Provenance
 

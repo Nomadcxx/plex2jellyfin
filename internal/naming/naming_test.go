@@ -142,6 +142,58 @@ func TestParseMovieName(t *testing.T) {
 			wantYear:  "2022",
 			wantErr:   false,
 		},
+		// Edition-cut vocabulary: compound phrases stripped as release
+		// metadata; bare 'cut' and 'final cut' are never stripped (real
+		// titles depend on them).
+		{
+			name:      "Strips extended cut marker",
+			input:     "scary.movie.extended.cut.2026.1080p.web.h264-edith[EZTVx.to].mkv",
+			wantTitle: "scary movie",
+			wantYear:  "2026",
+			wantErr:   false,
+		},
+		{
+			name:      "Strips extended cut marker (Harry Potter)",
+			input:     "Harry.Potter.and.the.Sorcerers.Stone.2001.Extended.Cut.2160p.BluRay.x265.mkv",
+			wantTitle: "Harry Potter and the Sorcerers Stone",
+			wantYear:  "2001",
+			wantErr:   false,
+		},
+		{
+			name:      "Strips extended cut marker (Jurassic Park)",
+			input:     "Jurassic.Park.1993.Extended.Cut.2160p.UHD.BluRay.x265.mkv",
+			wantTitle: "Jurassic Park",
+			wantYear:  "1993",
+			wantErr:   false,
+		},
+		{
+			name:      "Strips special edition marker",
+			input:     "Star.Wars.Episode.IV.A.New.Hope.1977.Special.Edition.1080p.BluRay.x264.mkv",
+			wantTitle: "Star Wars Episode IV A New Hope",
+			wantYear:  "1977",
+			wantErr:   false,
+		},
+		{
+			name:      "Preserves real title containing final cut",
+			input:     "Final.Cut.2022.720p.BluRay.H264.AAC-RARBG.mkv",
+			wantTitle: "Final Cut",
+			wantYear:  "2022",
+			wantErr:   false,
+		},
+		{
+			name:      "Preserves real title containing time cut",
+			input:     "Time.Cut.2024.1080p.NF.WEB-DL.DDP5.1.Atmos.x264.mkv",
+			wantTitle: "Time Cut",
+			wantYear:  "2024",
+			wantErr:   false,
+		},
+		{
+			name:      "Preserves real title ending in final cut",
+			input:     "Urban.Legends.Final.Cut.2000.1080p.BluRay.x264.mkv",
+			wantTitle: "Urban Legends Final Cut",
+			wantYear:  "2000",
+			wantErr:   false,
+		},
 	}
 
 	for _, tt := range tests {

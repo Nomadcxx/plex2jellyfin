@@ -35,6 +35,10 @@ var (
 	episodeSERegex = regexp.MustCompile(`[Ss](\d{1,2})[Ee](\d{1,4})`)
 	episodeXRegex  = regexp.MustCompile(`(\d{1,2})x(\d{1,2})`)
 	episodeEPRegex = regexp.MustCompile(`(?i)\bEP[.\-_ ]?(\d{2,5})\b`)
+	// squareBracketRE strips bracketed release tags early in
+	// stripReleaseMarkers so a trailing -group[tag] suffix (e.g.
+	// -edith[EZTVx.to]) is recognized by the release-group phases.
+	squareBracketRE = regexp.MustCompile(`\[[^\]]*\]`)
 	// Date-based episode pattern: YYYY.MM.DD, YYYY-MM-DD, YYYY_MM_DD
 	episodeDateRegex = regexp.MustCompile(`\b((19|20)\d{2})[.\-_](0[1-9]|1[0-2])[.\-_](0[1-9]|[12]\d|3[01])\b`)
 	releasePatterns  []*regexp.Regexp
@@ -42,6 +46,11 @@ var (
 
 func init() {
 	patterns := []string{
+		// Compound edition phrases: stripped as whole phrases so bare 'cut'
+		// is never touched (real titles: "Final Cut", "Time Cut", "Urban
+		// Legends: Final Cut"). Must run before standalone EXTENDED below.
+		`[ ._-](?:extended|theatrical|director'?s|directors|unrated|uncut|special)[ ._-]cut`,
+		`[ ._-](?:extended|theatrical|special|collector'?s|collectors|limited|ultimate|anniversary|deluxe)[ ._-]edition`,
 		`\b\d{3,4}[pi]\b`,
 		`\b(?:2160|1080|720|480)\b`,
 		`\b(4K|UHD)\b`,
@@ -457,6 +466,10 @@ func collectStrippedTokens(baseName string) []string {
 }
 
 func stripReleaseMarkers(s string) string {
+	// Phase 0: Strip bracketed content early so a trailing -group[tag]
+	// suffix is visible to Phase 1/2 (e.g. -edith[EZTVx.to]).
+	s = squareBracketRE.ReplaceAllString(s, "")
+
 	// Phase 1: Strip known release group suffixes (safe — always strip these)
 	for {
 		idx := strings.LastIndex(s, "-")

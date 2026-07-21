@@ -19,6 +19,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon"
 	daemonipc "github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	daemonreload "github.com/Nomadcxx/plex2jellyfin/internal/daemon/reload"
+	"github.com/Nomadcxx/plex2jellyfin/internal/correction"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/housekeeping"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
@@ -466,8 +467,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		jfSweeper = jellyfin.NewSweeper(jellyfinClient, db)
 		jfSweeper.SetPathTranslator(pathTranslator)
 		metadataReconciler = jellyfin.NewMetadataReconciler(jellyfinClient, db, jellyfin.MetadataRecoveryConfig{
-			RepairCooldown:   time.Duration(cfg.MetadataRecovery.RepairCooldownHours) * time.Hour,
-			NeedsReviewAfter: cfg.MetadataRecovery.NeedsReviewAfter,
+			RepairCooldown:    time.Duration(cfg.MetadataRecovery.RepairCooldownHours) * time.Hour,
+			NeedsReviewAfter:  cfg.MetadataRecovery.NeedsReviewAfter,
+			CorrectionEnabled: cfg.MetadataRecovery.CorrectionEnabled,
 		})
 		metadataReconciler.SetPathTranslator(pathTranslator)
 	}
@@ -691,6 +693,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			hkEngine.SetMediaRescanner(jellyfinClient)
 		}
 		hkEngine.SetPathTranslator(pathTranslator)
+
+		// Wire verifier-driven movie name correction into the metadata reconciler.
+		if metadataReconciler != nil && cfg.MetadataRecovery.CorrectionEnabled {
+			metadataReconciler.SetCorrector(&correctorAdapter{c: correction.NewCorrector(hkVerifier)})
+			metadataReconciler.SetEnqueuer(&enqueuerAdapter{db: db})
+		}
 
 		sched = scheduler.New(db, logger)
 		if err := sched.Register(scheduler.Job{
@@ -973,4 +981,37 @@ func newUninstallCmd() *cobra.Command {
 			fmt.Println("   sudo systemctl daemon-reload")
 		},
 	}
+}
+
+// correctorAdapter bridges correction.Corrector to jellyfin.MovieCorrector.
+type correctorAdapter struct {
+	c *correction.Corrector
+}
+
+func (a *correctorAdapter) Decide(ctx context.Context, currentTitle, year string) jellyfin.CorrectionDecision {
+	d := a.c.Decide(ctx, currentTitle, year)
+	return jellyfin.CorrectionDecision{
+		Action:   d.Action,
+		NewTitle: d.NewTitle,
+		NewYear:  d.NewYear,
+		TmdbID:   d.TmdbID,
+		Reason:   d.Reason,
+	}
+}
+
+// enqueuerAdapter bridges db.EnqueueHousekeepingTask to jellyfin.CorrectionEnqueuer.
+type enqueuerAdapter struct {
+	db *database.MediaDB
+}
+
+func (a *enqueuerAdapter) EnqueueVerifierRename(parseDecisionID int64, srcPath, dstPath, newTitle, newYear, tmdbID string) error {
+	_, err := a.db.EnqueueHousekeepingTask("metadata.correction", database.TaskKindVerifierRename, map[string]any{
+		"parse_decision_id": parseDecisionID,
+		"src_path":          srcPath,
+		"dst_path":          dstPath,
+		"new_title":         newTitle,
+		"new_year":          newYear,
+		"tmdb_id":           tmdbID,
+	}, 70)
+	return err
 }

@@ -93,3 +93,19 @@ auto_trigger_threshold = 0.6
 # [[jellyfin.path_mappings]]
 # jellyfin = "/movies"
 # daemon   = "/mnt/STORAGE2/MOVIES"
+
+# Metadata recovery — passive classification + active repair of Jellyfin items.
+[metadata_recovery]
+# correction_enabled: when true, the reconciler enqueues a verifier_rename
+# housekeeping task to fix movie titles that Jellyfin failed to identify
+# (missing provider IDs) after the correction grace period (48h). The
+# correction uses TMDB LookupExact to find the canonical title and enqueues
+# a rename; attempts are capped by needs_review_after.
+correction_enabled = true
+# passive_enabled = true
+# repair_enabled = false
+# passive_interval_minutes = 60
+# passive_batch_size = 25
+# repair_batch_size = 5
+# repair_cooldown_hours = 6
+# needs_review_after = 4
