@@ -1113,6 +1113,11 @@ func (e *Engine) executeTask(ctx context.Context, t *database.HousekeepingTask) 
 		// derives a better same-library episode path, so move that file in
 		// place and reconcile the DB row.
 		return e.execParserDriftTVRename(t)
+	case database.TaskKindVerifierRename:
+		// Phase 2 corrector: rename a movie folder to a TMDB-verified title
+		// that the parser could not derive. Writes the verifier title (never
+		// re-parses) and stamps the row so drift detection ignores it.
+		return e.execVerifierRename(t)
 	case database.TaskKindConsolidateDuplicate:
 		// Duplicate workflow: delete the inferior copies of a known
 		// high-confidence duplicate group via the same logic the CLI
@@ -1155,17 +1160,12 @@ func (e *Engine) recordRepairEvent(action, safetyClass string, confidence float6
 	})
 }
 
-func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error) {
-	src, _ := t.Payload["src_path"].(string)
-	dst, _ := t.Payload["dst_path"].(string)
-	defer func() {
-		if err != nil {
-			e.recordRepairEvent(database.TaskKindParserDriftRename, "auto_safe", 0.95, src, dst, "failed", err.Error(), t.Payload)
-		}
-	}()
-	if src == "" || dst == "" {
-		return fmt.Errorf("payload missing src_path/dst_path")
-	}
+// moveOrganizedFolder performs the on-disk half of a folder rename src->dst
+// with the same safety checks as parser-drift rename: refuses if both or
+// neither exist, requires a folder-level rename, tolerates an already-moved
+// source (src missing, dst exists => on-disk no-op). Re-points the triggering
+// file's media_files row.
+func (e *Engine) moveOrganizedFolder(src, dst string) error {
 	src = filepath.Clean(src)
 	dst = filepath.Clean(dst)
 	if src == dst {
@@ -1174,7 +1174,7 @@ func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error)
 	srcDir := filepath.Dir(src)
 	dstDir := filepath.Dir(dst)
 	if srcDir == dstDir {
-		return fmt.Errorf("parser drift rename requires folder rename: %s", srcDir)
+		return fmt.Errorf("rename requires folder rename: %s", srcDir)
 	}
 	srcExists := false
 	if _, err := os.Stat(src); err == nil {
@@ -1230,6 +1230,28 @@ func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error)
 		file.LibraryRoot = containingLibrary(dst, e.cfg.MovieLibraries)
 		_ = e.db.UpsertMediaFile(file)
 	}
+	return nil
+}
+
+func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error) {
+	src, _ := t.Payload["src_path"].(string)
+	dst, _ := t.Payload["dst_path"].(string)
+	defer func() {
+		if err != nil {
+			e.recordRepairEvent(database.TaskKindParserDriftRename, "auto_safe", 0.95, src, dst, "failed", err.Error(), t.Payload)
+		}
+	}()
+	if src == "" || dst == "" {
+		return fmt.Errorf("payload missing src_path/dst_path")
+	}
+	src = filepath.Clean(src)
+	dst = filepath.Clean(dst)
+	if src == dst {
+		return fmt.Errorf("src == dst (%s)", src)
+	}
+	if err := e.moveOrganizedFolder(src, dst); err != nil {
+		return err
+	}
 
 	if id, ok := payloadInt64(t.Payload, "parse_decision_id"); ok && id > 0 {
 		var preservedTargetAt *time.Time
@@ -1268,6 +1290,60 @@ func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error)
 	e.rescanAfterMove(dst)
 	e.logf("info", "parser-drift renamed src=%s dst=%s", src, dst)
 	e.recordRepairEvent(database.TaskKindParserDriftRename, "auto_safe", 0.95, src, dst, "success", "", t.Payload)
+	return nil
+}
+
+func (e *Engine) execVerifierRename(t *database.HousekeepingTask) (err error) {
+	src, _ := t.Payload["src_path"].(string)
+	dst, _ := t.Payload["dst_path"].(string)
+	newTitle, _ := t.Payload["new_title"].(string)
+	newYear, _ := t.Payload["new_year"].(string)
+	tmdbID, _ := t.Payload["tmdb_id"].(string)
+	evidence := map[string]any{"tmdb_id": tmdbID, "new_title": newTitle, "new_year": newYear}
+	defer func() {
+		if err != nil {
+			e.recordRepairEvent(database.TaskKindVerifierRename, "auto_verified", 0.9, src, dst, "failed", err.Error(), evidence)
+		}
+	}()
+	if src == "" || dst == "" || newTitle == "" {
+		return fmt.Errorf("payload missing src_path/dst_path/new_title")
+	}
+	if err := e.moveOrganizedFolder(src, dst); err != nil {
+		return err
+	}
+
+	srcDir := filepath.Dir(filepath.Clean(src))
+	dstDir := filepath.Dir(filepath.Clean(dst))
+
+	_ = e.db.RepointMediaFilesUnderFolder(srcDir, dstDir)
+
+	rows, _ := e.db.QueryDecisionsUnderFolder(srcDir)
+	var parsedYear *int
+	if newYear != "" {
+		y := 0
+		if _, scanErr := fmt.Sscanf(newYear, "%d", &y); scanErr == nil {
+			parsedYear = &y
+		}
+	}
+	for _, row := range rows {
+		newTarget := strings.Replace(row.TargetPath, srcDir, dstDir, 1)
+		_ = e.db.UpdateOrganize(row.ID, database.OrganizeUpdate{
+			TargetPath:          newTarget,
+			TargetAt:            row.TargetAt,
+			ExistingMatchMethod: "verifier",
+			OrganizeOutcome:     "success",
+		})
+		_ = e.db.UpdateParse(row.ID, database.ParseUpdate{
+			ParseMethod:      "verifier",
+			ParsedTitle:      newTitle,
+			ParsedYear:       parsedYear,
+			MediaTypeGuessed: "movie",
+		})
+	}
+
+	e.rescanAfterMove(dst)
+	e.logf("info", "verifier renamed src=%s dst=%s title=%q tmdb=%s", src, dst, newTitle, tmdbID)
+	e.recordRepairEvent(database.TaskKindVerifierRename, "auto_verified", 0.9, src, dst, "success", "", evidence)
 	return nil
 }
 

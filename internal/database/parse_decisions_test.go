@@ -1,6 +1,8 @@
 package database
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -721,4 +723,32 @@ func TestIdentificationStatsEmptyTable(t *testing.T) {
 	assert.Equal(t, 0, stats.Unidentified)
 	assert.Equal(t, 0, stats.PendingNoSeen)
 	assert.Equal(t, 0, stats.FailedAutoLabel)
+}
+
+func TestQueryDecisionsUnderFolder(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	folder := "/media/movies/Scary Movie Cut (2026)"
+	mustInsert := func(target string, outcome string) {
+		d := makeDecision()
+		d.TargetPath = target
+		d.OrganizeOutcome = outcome
+		_, err := db.InsertDecision(d)
+		require.NoError(t, err)
+	}
+	mustInsert(folder+"/Scary Movie Cut (2026).mkv", "success")
+	mustInsert(folder+"/Scary Movie Cut (2026)-extra.mkv", "success")
+	mustInsert(folder+"/sub/other.mkv", "success")
+	mustInsert("/media/movies/Other (2025)/Other (2025).mkv", "success")
+	mustInsert(folder+"-suffix/escape-trap.mkv", "success")
+	mustInsert(folder+"/failed.mkv", "error")
+
+	got, err := db.QueryDecisionsUnderFolder(folder)
+	require.NoError(t, err)
+	require.Len(t, got, 3, "only successful rows under the folder (incl. subdirs), no siblings or failures")
+	for _, d := range got {
+		assert.True(t, strings.HasPrefix(d.TargetPath, folder+string(filepath.Separator)),
+			"row %s not under folder", d.TargetPath)
+	}
 }

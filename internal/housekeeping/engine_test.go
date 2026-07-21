@@ -707,3 +707,43 @@ func TestParserDriftRenamePreservesTargetAt(t *testing.T) {
 	require.True(t, got.TargetAt.Equal(originalTargetAt), "TargetAt = %v, want preserved %v", got.TargetAt, originalTargetAt)
 	require.NotEmpty(t, rescanner.paths, "expected a targeted rescan, got none")
 }
+
+func TestVerifierRenameWritesVerifierTitleAndStamps(t *testing.T) {
+	db := openTestDB(t)
+
+	movieLib := t.TempDir()
+	srcDir := filepath.Join(movieLib, "Scary Movie Cut (2026)")
+	require.NoError(t, os.MkdirAll(srcDir, 0o755))
+	srcFile := filepath.Join(srcDir, "Scary Movie Cut (2026).mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("x"), 0o644))
+	dstFile := filepath.Join(movieLib, "Scary Movie (2026)", "Scary Movie (2026).mkv")
+
+	originalTargetAt := time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second)
+	id := insertDecisionForDriftTest(t, db, srcFile, originalTargetAt)
+
+	e := NewEngine(Config{MovieLibraries: []string{movieLib}}, db, nil)
+	rescanner := &fakeRescanner{}
+	e.SetMediaRescanner(rescanner)
+
+	task := &database.HousekeepingTask{
+		Kind: database.TaskKindVerifierRename,
+		Payload: map[string]any{
+			"parse_decision_id": float64(id),
+			"src_path":          srcFile,
+			"dst_path":          dstFile,
+			"new_title":         "Scary Movie",
+			"new_year":          "2026",
+			"tmdb_id":           "111",
+		},
+	}
+	require.NoError(t, e.execVerifierRename(task))
+
+	got, err := db.GetDecision(id)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "Scary Movie", got.ParsedTitle, "ParsedTitle should be verifier title, not re-parsed")
+	require.Equal(t, "verifier", got.ExistingMatchMethod, "ExistingMatchMethod should be stamped verifier")
+	require.NotNil(t, got.TargetAt, "TargetAt should be preserved")
+	require.True(t, got.TargetAt.Equal(originalTargetAt), "TargetAt = %v, want preserved %v", got.TargetAt, originalTargetAt)
+	require.NotEmpty(t, rescanner.paths, "expected a targeted rescan, got none")
+}

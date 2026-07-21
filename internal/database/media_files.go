@@ -734,3 +734,18 @@ WHERE (parse_method IS NULL OR parse_method != 'ai')
 
 	return files, rows.Err()
 }
+
+// RepointMediaFilesUnderFolder rewrites media_files paths rooted at srcDir to
+// dstDir after a folder rename. The library root is unchanged (same library).
+func (m *MediaDB) RepointMediaFilesUnderFolder(srcDir, dstDir string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, err := m.db.Exec(`
+		UPDATE media_files SET path = replace(path, ?, ?)
+		WHERE path LIKE ? ESCAPE '\'`,
+		srcDir, dstDir, escapeLike(srcDir)+string(filepath.Separator)+"%")
+	if err != nil {
+		return fmt.Errorf("RepointMediaFilesUnderFolder: %w", err)
+	}
+	return nil
+}

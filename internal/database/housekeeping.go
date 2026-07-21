@@ -41,6 +41,7 @@ const (
 	TaskKindFolderRename        = "folder_rename"          // auto, rename folder in-place to canonical case (no cross-volume work)
 	TaskKindParserDriftRename   = "parser_drift_rename"    // auto, repair Plex2Jellyfin-created movie path after parser fixes
 	TaskKindParserDriftTVRename = "parser_drift_tv_rename" // auto, repair Plex2Jellyfin-created TV episode path after parser fixes
+	TaskKindVerifierRename      = "verifier_rename"        // auto, rename movie folder to verifier-confirmed title (Phase 2 corrector)
 )
 
 // HousekeepingTask is a queued (or completed) housekeeping action.

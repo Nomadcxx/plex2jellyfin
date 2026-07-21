@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -1087,4 +1088,38 @@ func (m *MediaDB) AuditParseDecisionsPage(offset, limit int) (int, error) {
 		n++
 	}
 	return n, rows.Err()
+}
+
+// escapeLike escapes LIKE-pattern metacharacters (%, _, \) so a path prefix
+// can be used as a literal LIKE bound.
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+// QueryDecisionsUnderFolder returns successful parse_decisions whose target_path
+// is inside the given folder (prefix match on folder + separator). Used to
+// re-point every file under a folder that was renamed as a unit.
+func (m *MediaDB) QueryDecisionsUnderFolder(folder string) ([]*ParseDecision, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	rows, err := m.db.Query(`
+		SELECT `+decisionColumns+`
+		FROM parse_decisions
+		WHERE target_path LIKE ? ESCAPE '\'
+		  AND organize_outcome = 'success'`,
+		escapeLike(folder)+string(os.PathSeparator)+"%")
+	if err != nil {
+		return nil, fmt.Errorf("QueryDecisionsUnderFolder: %w", err)
+	}
+	defer rows.Close()
+	var out []*ParseDecision
+	for rows.Next() {
+		d, err := scanDecision(rows)
+		if err != nil {
+			return nil, fmt.Errorf("QueryDecisionsUnderFolder scan: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
