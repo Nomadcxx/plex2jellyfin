@@ -687,6 +687,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		// Either tier may be unavailable; the verifier degrades gracefully.
 		hkVerifier := tmdb.NewVerifier(db, jellyfinClient, cfg.TMDB.APIKey)
 		hkEngine.SetVerifier(hkVerifier)
+		if jellyfinClient != nil {
+			hkEngine.SetMediaRescanner(jellyfinClient)
+		}
+		hkEngine.SetPathTranslator(pathTranslator)
 
 		sched = scheduler.New(db, logger)
 		if err := sched.Register(scheduler.Job{

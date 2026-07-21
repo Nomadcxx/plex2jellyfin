@@ -32,6 +32,7 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
@@ -87,7 +88,15 @@ type Engine struct {
 	// registry is optional: when set, every executing task registers an
 	// IPC op named "hk-task-<id>" and emits FrameProgress events that the
 	// WebUI subscribes to for live progress bars. Nil-safe.
-	registry *ipc.OpRegistry
+	registry   *ipc.OpRegistry
+	rescanner  MediaRescanner
+	translator *jellyfin.PathTranslator
+}
+
+// MediaRescanner triggers a targeted Jellyfin rescan of specific paths after a
+// folder move, without a library-wide refresh. Satisfied by *jellyfin.Client.
+type MediaRescanner interface {
+	NotifyMediaUpdated(jellyfinPaths []string) error
 }
 
 // SetVerifier attaches a TMDB verifier so the detector can distinguish
@@ -97,6 +106,9 @@ func (e *Engine) SetVerifier(v *tmdb.Verifier) { e.verifier = v }
 // SetOpRegistry wires the daemon's IPC OpRegistry into the engine so
 // tasks can publish live progress frames consumable via SSE.
 func (e *Engine) SetOpRegistry(r *ipc.OpRegistry) { e.registry = r }
+
+func (e *Engine) SetMediaRescanner(r MediaRescanner)           { e.rescanner = r }
+func (e *Engine) SetPathTranslator(t *jellyfin.PathTranslator) { e.translator = t }
 func (e *Engine) renameWithFallback(src, dst string) error {
 	if err := os.Rename(src, dst); err == nil {
 		return nil
@@ -1220,10 +1232,13 @@ func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error)
 	}
 
 	if id, ok := payloadInt64(t.Payload, "parse_decision_id"); ok && id > 0 {
-		now := time.Now().UTC()
+		var preservedTargetAt *time.Time
+		if existing, err := e.db.GetDecision(id); err == nil && existing != nil {
+			preservedTargetAt = existing.TargetAt
+		}
 		_ = e.db.UpdateOrganize(id, database.OrganizeUpdate{
 			TargetPath:      dst,
-			TargetAt:        &now,
+			TargetAt:        preservedTargetAt,
 			OrganizeOutcome: "success",
 		})
 		if sourceFilename, _ := t.Payload["source_filename"].(string); sourceFilename != "" {
@@ -1250,9 +1265,28 @@ func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error)
 		}
 	}
 
+	e.rescanAfterMove(dst)
 	e.logf("info", "parser-drift renamed src=%s dst=%s", src, dst)
 	e.recordRepairEvent(database.TaskKindParserDriftRename, "auto_safe", 0.95, src, dst, "success", "", t.Payload)
 	return nil
+}
+
+// rescanAfterMove issues a targeted Jellyfin rescan for the destination path
+// after a folder move. Nil-safe: does nothing when no rescanner is configured.
+// The path is translated to Jellyfin's view; a library-wide refresh is never
+// used.
+func (e *Engine) rescanAfterMove(daemonDstPath string) {
+	if e == nil || e.rescanner == nil {
+		return
+	}
+	folder := filepath.Dir(daemonDstPath)
+	jellyfinPath := folder
+	if e.translator != nil {
+		jellyfinPath = e.translator.DaemonToJellyfin(folder)
+	}
+	if err := e.rescanner.NotifyMediaUpdated([]string{jellyfinPath}); err != nil {
+		e.logf("warn", "targeted rescan failed path=%s err=%v", jellyfinPath, err)
+	}
 }
 
 func (e *Engine) execParserDriftTVRename(t *database.HousekeepingTask) (err error) {

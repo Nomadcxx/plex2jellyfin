@@ -647,3 +647,63 @@ func TestDrainMergeMoveUpdatesParseDecisionTargetPaths(t *testing.T) {
 	require.NotNil(t, decision)
 	require.Equal(t, dstPath, decision.TargetPath)
 }
+
+type fakeRescanner struct{ paths []string }
+
+func (f *fakeRescanner) NotifyMediaUpdated(p []string) error {
+	f.paths = append(f.paths, p...)
+	return nil
+}
+
+func insertDecisionForDriftTest(t *testing.T, db *database.MediaDB, targetPath string, targetAt time.Time) int64 {
+	t.Helper()
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:       "/downloads/scary.movie.extended.cut.2026/scary.movie.extended.cut.2026.mkv",
+		SourceFilename:   "scary.movie.extended.cut.2026.1080p.x265.mkv",
+		EventAt:          targetAt,
+		MediaTypeGuessed: "movie",
+		ParseMethod:      "regex",
+		ParsedTitle:      "scary movie cut",
+		TargetPath:       targetPath,
+		TargetAt:         &targetAt,
+		OrganizeOutcome:  "success",
+	})
+	require.NoError(t, err)
+	return id
+}
+
+func TestParserDriftRenamePreservesTargetAt(t *testing.T) {
+	db := openTestDB(t)
+
+	movieLib := t.TempDir()
+	srcDir := filepath.Join(movieLib, "Scary Movie Cut (2026)")
+	require.NoError(t, os.MkdirAll(srcDir, 0o755))
+	srcFile := filepath.Join(srcDir, "Scary Movie Cut (2026).mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("x"), 0o644))
+	dstFile := filepath.Join(movieLib, "Scary Movie (2026)", "Scary Movie (2026).mkv")
+
+	originalTargetAt := time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second)
+	id := insertDecisionForDriftTest(t, db, srcFile, originalTargetAt)
+
+	e := NewEngine(Config{MovieLibraries: []string{movieLib}}, db, nil)
+	rescanner := &fakeRescanner{}
+	e.SetMediaRescanner(rescanner)
+
+	task := &database.HousekeepingTask{
+		Kind: database.TaskKindParserDriftRename,
+		Payload: map[string]any{
+			"parse_decision_id": float64(id),
+			"src_path":          srcFile,
+			"dst_path":          dstFile,
+			"source_filename":   "scary.movie.extended.cut.2026.1080p.x265.mkv",
+		},
+	}
+	require.NoError(t, e.execParserDriftRename(task))
+
+	got, err := db.GetDecision(id)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.NotNil(t, got.TargetAt, "TargetAt should be preserved")
+	require.True(t, got.TargetAt.Equal(originalTargetAt), "TargetAt = %v, want preserved %v", got.TargetAt, originalTargetAt)
+	require.NotEmpty(t, rescanner.paths, "expected a targeted rescan, got none")
+}
