@@ -139,6 +139,34 @@ func (v *Verifier) lookup(ctx context.Context, kind MediaKind, title, year strin
 	return nil
 }
 
+// LookupExact resolves a title to a TMDB match ONLY when there is an
+// exact-title candidate whose year integer-equals the requested year. Unlike
+// lookup it applies no ±1-year tolerance and no single-candidate fallback, so
+// it is safe to drive auto-apply renames (a mis-parse like "Avatar Fire and
+// Ash" trimmed to "Avatar" will not resolve to Avatar (2009) at the wrong
+// year). Returns nil when title or year is empty.
+func (v *Verifier) LookupExact(ctx context.Context, kind MediaKind, title, year string) *Match {
+	title = strings.TrimSpace(title)
+	year = strings.TrimSpace(year)
+	if title == "" || year == "" {
+		return nil
+	}
+	if m := v.lookupLocal(kind, title, year); m != nil && m.Year == year {
+		return m
+	}
+	matches := v.lookupCached(kind, title)
+	if matches == nil {
+		matches = v.fetchAll(ctx, kind, title)
+	}
+	exact := filterExactTitle(matches, title)
+	for i := range exact {
+		if exact[i].Year == year {
+			return &exact[i]
+		}
+	}
+	return nil
+}
+
 func filterExactTitle(matches []Match, title string) []Match {
 	want := strings.ToLower(strings.TrimSpace(title))
 	out := make([]Match, 0, len(matches))
