@@ -72,3 +72,27 @@ func (c *Client) GetPhysicalPaths() ([]string, error) {
 	}
 	return paths, nil
 }
+
+// NotifyMediaUpdated asks Jellyfin to rescan only the given paths via the
+// /Library/Media/Updated endpoint. Unlike RefreshLibrary this does not scan
+// every library and does not restamp DateCreated across the library, so it is
+// safe to call after moving a single folder. Paths must be Jellyfin's view of
+// the filesystem (translate daemon paths with PathTranslator.DaemonToJellyfin
+// before calling).
+func (c *Client) NotifyMediaUpdated(jellyfinPaths []string) error {
+	if len(jellyfinPaths) == 0 {
+		return nil
+	}
+	updates := make([]map[string]string, 0, len(jellyfinPaths))
+	for _, p := range jellyfinPaths {
+		updates = append(updates, map[string]string{
+			"Path":       p,
+			"UpdateType": "Created",
+		})
+	}
+	payload := map[string]any{"Updates": updates}
+	if err := c.post("/Library/Media/Updated", payload, nil); err != nil {
+		return fmt.Errorf("notifying media updated: %w", err)
+	}
+	return nil
+}
