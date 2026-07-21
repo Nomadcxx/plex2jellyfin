@@ -570,7 +570,7 @@ func (r *MetadataReconciler) computeCorrectedTargetPath(row *database.ParseDecis
 	}
 	srcDir := filepath.Dir(src)
 	parentDir := filepath.Dir(srcDir) // library root or intermediate folder
-	ext := filepath.Ext(src)
+	ext := strings.TrimPrefix(filepath.Ext(src), ".")
 	folderName := naming.NormalizeMediaName(newTitle, newYear)
 	fileName := naming.FormatMovieFilename(newTitle, newYear, ext)
 	return filepath.Join(parentDir, folderName, fileName), nil

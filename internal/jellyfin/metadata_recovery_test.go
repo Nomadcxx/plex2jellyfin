@@ -623,6 +623,8 @@ func TestPassiveCorrectionEnqueuesAndConsumesAttempt(t *testing.T) {
 	assert.Equal(t, "12345", enq.calls[0].tmdbID)
 	assert.Contains(t, enq.calls[0].srcPath, "Some Wrong Title (2023)")
 	assert.Contains(t, enq.calls[0].dstPath, "Correct Title (2023)")
+	assert.Contains(t, enq.calls[0].dstPath, "Correct Title (2023).mkv", "single dot before extension")
+	assert.NotContains(t, enq.calls[0].dstPath, "..mkv")
 
 	// One attempt consumed: UpdateMetadataRepairState called with non-nil repairedAt.
 	require.Len(t, store.repairs, 1)

@@ -1198,7 +1198,21 @@ func (e *Engine) moveOrganizedFolder(src, dst string) error {
 		return fmt.Errorf("source and destination both exist: %s -> %s", src, dst)
 	}
 	if !srcExists && !dstExists {
-		return fmt.Errorf("source and destination both missing: %s -> %s", src, dst)
+		// Self-heal a partial move: a previous run renamed the folder but
+		// failed the inner-file rename, leaving the file at the old basename
+		// inside dstDir. Complete that rename instead of erroring out.
+		movedPath := filepath.Join(dstDir, filepath.Base(src))
+		if filepath.Base(src) != filepath.Base(dst) {
+			if _, err := os.Stat(movedPath); err == nil {
+				if err := e.renameWithFallback(movedPath, dst); err != nil {
+					return fmt.Errorf("rename file %s -> %s: %w", movedPath, dst, err)
+				}
+				dstExists = true
+			}
+		}
+		if !dstExists {
+			return fmt.Errorf("source and destination both missing: %s -> %s", src, dst)
+		}
 	}
 	if srcExists {
 		dstDirExists := false
@@ -1264,6 +1278,12 @@ func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error)
 		if existing, err := e.db.GetDecision(id); err == nil && existing != nil {
 			preservedTargetAt = existing.TargetAt
 		}
+		if preservedTargetAt == nil {
+			// Never NULL out target_at: it drives the metadata 48h grace clock.
+			// Fall back to now when the row can't be re-read.
+			now := time.Now().UTC()
+			preservedTargetAt = &now
+		}
 		_ = e.db.UpdateOrganize(id, database.OrganizeUpdate{
 			TargetPath:      dst,
 			TargetAt:        preservedTargetAt,
@@ -1314,16 +1334,23 @@ func (e *Engine) execVerifierRename(t *database.HousekeepingTask) (err error) {
 	if src == "" || dst == "" || newTitle == "" {
 		return fmt.Errorf("payload missing src_path/dst_path/new_title")
 	}
-	if err := e.moveOrganizedFolder(src, dst); err != nil {
-		return err
-	}
 
 	srcDir := filepath.Dir(filepath.Clean(src))
 	dstDir := filepath.Dir(filepath.Clean(dst))
 
-	_ = e.db.RepointMediaFilesUnderFolder(srcDir, dstDir)
+	// DB-first ordering: a DB failure prevents the filesystem move, and a
+	// failed move after DB updates leaves rows pointing at the destination,
+	// which the metadata reconciler surfaces as target_file_missing.
+	// Retries are safe: already-repointed rows no longer match the srcDir
+	// prefix, and moveOrganizedFolder treats "src gone, dst present" as done.
+	if err := e.db.RepointMediaFilesUnderFolder(srcDir, dstDir); err != nil {
+		return fmt.Errorf("repoint media_files: %w", err)
+	}
 
-	rows, _ := e.db.QueryDecisionsUnderFolder(srcDir)
+	rows, err := e.db.QueryDecisionsUnderFolder(srcDir)
+	if err != nil {
+		return fmt.Errorf("query decisions under folder: %w", err)
+	}
 	var parsedYear *int
 	if newYear != "" {
 		y := 0
@@ -1333,18 +1360,28 @@ func (e *Engine) execVerifierRename(t *database.HousekeepingTask) (err error) {
 	}
 	for _, row := range rows {
 		newTarget := strings.Replace(row.TargetPath, srcDir, dstDir, 1)
-		_ = e.db.UpdateOrganize(row.ID, database.OrganizeUpdate{
+		// row.TargetAt passes through unchanged (nil == already NULL in DB,
+		// so the write is idempotent and never fabricates an import time).
+		if err := e.db.UpdateOrganize(row.ID, database.OrganizeUpdate{
 			TargetPath:          newTarget,
 			TargetAt:            row.TargetAt,
 			ExistingMatchMethod: "verifier",
 			OrganizeOutcome:     "success",
-		})
-		_ = e.db.UpdateParse(row.ID, database.ParseUpdate{
+		}); err != nil {
+			return fmt.Errorf("update organize row %d: %w", row.ID, err)
+		}
+		if err := e.db.UpdateParse(row.ID, database.ParseUpdate{
 			ParseMethod:      "verifier",
 			ParsedTitle:      newTitle,
 			ParsedYear:       parsedYear,
 			MediaTypeGuessed: "movie",
-		})
+		}); err != nil {
+			return fmt.Errorf("update parse row %d: %w", row.ID, err)
+		}
+	}
+
+	if err := e.moveOrganizedFolder(src, dst); err != nil {
+		return err
 	}
 
 	e.rescanAfterMove(dst)
