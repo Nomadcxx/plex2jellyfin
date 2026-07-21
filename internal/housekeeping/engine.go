@@ -728,6 +728,12 @@ func (e *Engine) parserDriftMovieRename(d *database.ParseDecision) (srcPath, dst
 	if d == nil || d.SourceFilename == "" || d.TargetPath == "" {
 		return "", "", false
 	}
+	if d.ExistingMatchMethod == "verifier" {
+		// This row's name came from the TMDB verifier, not the parser. The
+		// parser cannot re-derive it, so drift detection must not fight the
+		// corrector by renaming back to the parser's wrong title.
+		return "", "", false
+	}
 	libRoot := containingLibrary(d.TargetPath, e.cfg.MovieLibraries)
 	if libRoot == "" {
 		return "", "", false

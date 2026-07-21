@@ -747,3 +747,21 @@ func TestVerifierRenameWritesVerifierTitleAndStamps(t *testing.T) {
 	require.True(t, got.TargetAt.Equal(originalTargetAt), "TargetAt = %v, want preserved %v", got.TargetAt, originalTargetAt)
 	require.NotEmpty(t, rescanner.paths, "expected a targeted rescan, got none")
 }
+
+func TestParserDriftSkipsVerifierCorrectedRows(t *testing.T) {
+	db := openTestDB(t)
+	movieLib := t.TempDir()
+	srcDir := filepath.Join(movieLib, "Corrected Title (2026)")
+	require.NoError(t, os.MkdirAll(srcDir, 0o755))
+	srcPath := filepath.Join(srcDir, "Corrected Title (2026).mkv")
+	require.NoError(t, os.WriteFile(srcPath, []byte("x"), 0o644))
+	e := NewEngine(Config{MovieLibraries: []string{movieLib}}, db, nil)
+
+	d := &database.ParseDecision{
+		SourceFilename:      "some.obscure.release.2026.1080p.x265.mkv",
+		TargetPath:          srcPath,
+		ExistingMatchMethod: "verifier",
+	}
+	_, _, ok := e.parserDriftMovieRename(d)
+	require.False(t, ok, "parserDriftMovieRename returned ok=true for a verifier-corrected row; want skipped")
+}
