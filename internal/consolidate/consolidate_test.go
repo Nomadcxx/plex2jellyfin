@@ -166,7 +166,7 @@ func TestGeneratePlanSkipsMissingSourceLocation(t *testing.T) {
 	}
 }
 
-func TestGeneratePlanBlocksDestinationCollisions(t *testing.T) {
+func TestGeneratePlanBlocksWhenOnlyCollisions(t *testing.T) {
 	tempDir := t.TempDir()
 
 	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
@@ -213,13 +213,78 @@ func TestGeneratePlanBlocksDestinationCollisions(t *testing.T) {
 	}
 
 	if plan.CanProceed {
-		t.Fatalf("plan should not proceed when source files collide with existing target paths")
+		t.Fatalf("plan should not proceed when there is nothing to move (all files collide)")
 	}
 	if len(plan.Collisions) != 1 {
 		t.Fatalf("Collisions = %d, want 1", len(plan.Collisions))
 	}
-	if !strings.Contains(strings.Join(plan.Reasons, " "), "already exist at target") {
-		t.Fatalf("Reasons = %v, want destination collision reason", plan.Reasons)
+	if !strings.Contains(strings.Join(plan.Reasons, " "), "duplicates") {
+		t.Fatalf("Reasons = %v, want duplicates reason", plan.Reasons)
+	}
+}
+
+func TestGeneratePlanProceedsWithMovableFilesDespiteCollisions(t *testing.T) {
+	tempDir := t.TempDir()
+
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	target := filepath.Join(tempDir, "storage1", "Silo (2023)")
+	source := filepath.Join(tempDir, "storage2", "Silo (2023)")
+	if err := os.MkdirAll(filepath.Join(target, "Season 01"), 0755); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(source, "Season 01"), 0755); err != nil {
+		t.Fatalf("failed to create source: %v", err)
+	}
+
+	// One duplicate (collides) + one file that only exists at source (movable).
+	// Extra target-only files keep chooseTargetPath pointed at target.
+	for _, path := range []string{
+		filepath.Join(target, "Season 01", "Silo S01E01.mkv"),
+		filepath.Join(target, "Season 01", "Silo S01E03.mkv"),
+		filepath.Join(target, "Season 01", "Silo S01E04.mkv"),
+		filepath.Join(source, "Season 01", "Silo S01E01.mkv"),
+		filepath.Join(source, "Season 01", "Silo S01E02.mkv"),
+	} {
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatalf("failed to create file: %v", err)
+		}
+		if err := f.Truncate(MinConsolidationFileSize + 1); err != nil {
+			f.Close()
+			t.Fatalf("failed to size file: %v", err)
+		}
+		f.Close()
+	}
+
+	year := 2023
+	plan, err := NewConsolidator(db, &config.Config{}).GeneratePlan(&database.Conflict{
+		ID:              42,
+		MediaType:       "series",
+		Title:           "Silo",
+		TitleNormalized: "silo",
+		Year:            &year,
+		Locations:       []string{target, source},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan failed: %v", err)
+	}
+
+	if !plan.CanProceed {
+		t.Fatalf("plan should proceed with movable files despite collisions; reasons=%v", plan.Reasons)
+	}
+	if len(plan.Operations) != 1 {
+		t.Fatalf("Operations = %d, want 1", len(plan.Operations))
+	}
+	if len(plan.Collisions) != 1 {
+		t.Fatalf("Collisions = %d, want 1", len(plan.Collisions))
+	}
+	if !strings.Contains(strings.Join(plan.Reasons, " "), "left in place") {
+		t.Fatalf("Reasons = %v, want left-in-place note", plan.Reasons)
 	}
 }
 
@@ -748,5 +813,85 @@ func TestStats_SkippedConflicts_Field(t *testing.T) {
 	stats := Stats{}
 	if stats.SkippedConflicts != 0 {
 		t.Errorf("Expected SkippedConflicts to default to 0, got %d", stats.SkippedConflicts)
+	}
+}
+
+func TestGeneratePlanSkipsLegacyJellywatchQuarantineLocations(t *testing.T) {
+	tempDir := t.TempDir()
+
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tvRoot1 := filepath.Join(tempDir, "storage1", "TV")
+	tvRoot2 := filepath.Join(tempDir, "storage2", "TV")
+	target := filepath.Join(tvRoot1, "Farscape (1999)")
+	quarantine := filepath.Join(tvRoot2, "_jellywatch_quarantine_20260607", "Farscape (1999)")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+	if err := os.MkdirAll(quarantine, 0755); err != nil {
+		t.Fatalf("failed to create quarantine: %v", err)
+	}
+
+	year := 1999
+	plan, err := NewConsolidator(db, &config.Config{
+		Libraries: config.LibrariesConfig{TV: []string{tvRoot1, tvRoot2}},
+	}).GeneratePlan(&database.Conflict{
+		ID:              42,
+		MediaType:       "series",
+		Title:           "Farscape",
+		TitleNormalized: "farscape",
+		Year:            &year,
+		Locations:       []string{target, quarantine},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan failed: %v", err)
+	}
+	if plan.CanProceed {
+		t.Fatalf("plan should not proceed when only source candidate is legacy quarantine")
+	}
+	if len(plan.SourcePaths) != 1 || plan.SourcePaths[0] != target {
+		t.Fatalf("SourcePaths = %#v, want only non-quarantine target", plan.SourcePaths)
+	}
+}
+
+func TestGeneratePlanFiltersMovieQuarantineLocations(t *testing.T) {
+	tempDir := t.TempDir()
+
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	target := filepath.Join(tempDir, "movies", "Silo (2023)")
+	quarantine := filepath.Join(tempDir, "movies", "_jellywatch_quarantine_20260607", "Silo (2023)")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(quarantine, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	year := 2023
+	plan, err := NewConsolidator(db, &config.Config{}).GeneratePlan(&database.Conflict{
+		ID:              42,
+		MediaType:       "movie",
+		Title:           "Silo",
+		TitleNormalized: "silo",
+		Year:            &year,
+		Locations:       []string{target, quarantine},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan failed: %v", err)
+	}
+	if len(plan.SourcePaths) != 1 || plan.SourcePaths[0] != target {
+		t.Fatalf("SourcePaths = %#v, want quarantine location filtered", plan.SourcePaths)
+	}
+	if plan.CanProceed {
+		t.Fatalf("plan should not proceed with a single remaining location")
 	}
 }

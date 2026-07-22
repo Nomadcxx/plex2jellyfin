@@ -726,3 +726,37 @@ func setupTestDB(t *testing.T) *database.MediaDB {
 	}
 	return db
 }
+
+func TestScanPathSkipsQuarantineDirs(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	scanner := NewFileScanner(db)
+
+	tempDir := t.TempDir()
+	writeSized := func(path string, size int64) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := f.Truncate(size); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeSized(filepath.Join(tempDir, "Her (2013)", "Her (2013).mkv"), 600*1024*1024)
+	writeSized(filepath.Join(tempDir, "_jellywatch_quarantine_20260607", "Her (2013)", "Her (2013).mkv"), 600*1024*1024)
+	writeSized(filepath.Join(tempDir, "_plex2jellyfin_quarantine_20260701", "Other (2020)", "Other (2020).mkv"), 600*1024*1024)
+
+	result := &ScanResult{}
+	if err := scanner.scanPath(context.Background(), tempDir, "movie", result); err != nil {
+		t.Fatalf("scanPath failed: %v", err)
+	}
+	if result.FilesAdded != 1 {
+		t.Fatalf("FilesAdded = %d, want 1 (quarantine dirs must be skipped); result=%+v", result.FilesAdded, result)
+	}
+}

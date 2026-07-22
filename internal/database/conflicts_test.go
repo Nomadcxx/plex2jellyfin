@@ -215,3 +215,34 @@ func TestDetectConflicts_SameTitleDifferentYearNoConflict(t *testing.T) {
 		t.Fatalf("expected 0 conflicts (different years), got %d: %+v", len(conflicts), conflicts)
 	}
 }
+
+func TestDetectConflicts_DropsQuarantineLocations(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	dropUniqueConstraint(t, db, "movies")
+	dropUniqueConstraint(t, db, "series")
+
+	// Quarantine-only series: both locations quarantined -> conflict dropped entirely.
+	insertConflictRow(t, db, "series", "_jellywatch_quarantine_20260607", "_jellywatch_quarantine_20260607", 0, "/storage4/TVSHOWS/_jellywatch_quarantine_20260607")
+	insertConflictRow(t, db, "series", "_jellywatch_quarantine_20260607", "_jellywatch_quarantine_20260607", 0, "/storage5/TVSHOWS/_jellywatch_quarantine_20260607")
+
+	// Mixed movie: one real + one quarantine location -> dropped (only 1 kept).
+	insertConflictRow(t, db, "movies", "Silo", "silo", 2023, "/storage1/Silo (2023)")
+	insertConflictRow(t, db, "movies", "Silo", "silo", 2023, "/storage1/_plex2jellyfin_quarantine_20260607/Silo (2023)")
+
+	// Real conflict survives untouched.
+	insertConflictRow(t, db, "movies", "Dracula", "dracula", 2020, "/storage1/Dracula (2020)")
+	insertConflictRow(t, db, "movies", "Dracula", "dracula", 2020, "/storage5/Dracula (2020)")
+
+	conflicts, err := db.DetectConflicts()
+	if err != nil {
+		t.Fatalf("DetectConflicts failed: %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("expected only the real conflict, got %d: %+v", len(conflicts), conflicts)
+	}
+	if conflicts[0].Title != "Dracula" || len(conflicts[0].Locations) != 2 {
+		t.Fatalf("unexpected survivor: %+v", conflicts[0])
+	}
+}

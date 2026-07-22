@@ -5,8 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
+
+// isQuarantinePath reports whether a path lives under a plex2jellyfin
+// quarantine folder (current or legacy jellywatch naming).
+// ponytail: duplicate of the consolidate/scanner helpers — keep packages decoupled.
+func isQuarantinePath(path string) bool {
+	for _, part := range strings.Split(path, string(os.PathSeparator)) {
+		if strings.HasPrefix(part, "_plex2jellyfin_quarantine") || strings.HasPrefix(part, "_jellywatch_quarantine") {
+			return true
+		}
+	}
+	return false
+}
 
 // Conflict represents a media item existing in multiple locations
 type Conflict struct {
@@ -131,6 +144,18 @@ func (m *MediaDB) detectConflicts(tableName, mediaType string) ([]Conflict, erro
 		if err := json.Unmarshal([]byte(locationsJSON), &c.Locations); err != nil {
 			return nil, fmt.Errorf("failed to parse locations JSON: %w", err)
 		}
+
+		// Quarantine folders are set aside deliberately; never consolidate them.
+		kept := c.Locations[:0]
+		for _, loc := range c.Locations {
+			if !isQuarantinePath(loc) {
+				kept = append(kept, loc)
+			}
+		}
+		if len(kept) < 2 {
+			continue
+		}
+		c.Locations = kept
 
 		c.MediaType = mediaType
 		c.CreatedAt = time.Now()

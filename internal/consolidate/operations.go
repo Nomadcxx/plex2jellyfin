@@ -52,8 +52,10 @@ func (c *Consolidator) ExecutePlan(plan *Plan, dryRun bool) error {
 		return fmt.Errorf("%d operations failed: %v", len(failures), failures)
 	}
 
-	// Mark conflict as resolved in database
-	if !dryRun && len(failures) == 0 {
+	// Mark conflict as resolved in database. Skipped while collisions remain:
+	// the duplicate files still sit at the source location, so the conflict
+	// must stay open (next detect re-discovers it either way).
+	if !dryRun && len(failures) == 0 && len(plan.Collisions) == 0 {
 		if err := c.db.ResolveConflict(plan.ConflictID, plan.TargetPath); err != nil {
 			return fmt.Errorf("failed to mark conflict as resolved: %w", err)
 		}

@@ -176,3 +176,48 @@ func TestServerRequestSemaphoreRejectsOverflow(t *testing.T) {
 
 	close(blockCh)
 }
+
+func TestStreamingHandlerOutlivesRequestTimeout(t *testing.T) {
+	old := requestTimeout
+	requestTimeout = 50 * time.Millisecond
+	defer func() { requestTimeout = old }()
+
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "ctl.sock")
+	srv := NewServer(sock)
+	srv.SetRegistry(NewOpRegistry())
+
+	srv.RegisterStreaming(Command("SLOW"), func(ctx context.Context, args json.RawMessage, w FrameWriter, op *Op) {
+		select {
+		case <-time.After(300 * time.Millisecond):
+			w.Done(op.ID, json.RawMessage(`{"ok":true}`))
+		case <-ctx.Done():
+			w.Error(op.ID, ErrInternal, ctx.Err().Error())
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := srv.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+
+	c, _ := net.Dial("unix", sock)
+	defer c.Close()
+	c.Write([]byte(`{"v":1,"id":"op-slow","cmd":"SLOW"}` + "\n"))
+	dec := json.NewDecoder(c)
+	c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		var f Frame
+		if err := dec.Decode(&f); err != nil {
+			t.Fatal(err)
+		}
+		if f.Type == FrameDone {
+			return
+		}
+		if f.Type == FrameError {
+			t.Fatalf("streaming op killed by request timeout: %+v", f)
+		}
+	}
+}

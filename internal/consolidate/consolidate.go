@@ -140,11 +140,15 @@ func (c *Consolidator) GeneratePlan(conflict *database.Conflict) (*Plan, error) 
 	}
 	if plan.TotalFiles == 0 {
 		plan.CanProceed = false
-		plan.Reasons = append(plan.Reasons, "No files to move")
-	}
-	if len(plan.Collisions) > 0 {
-		plan.CanProceed = false
-		plan.Reasons = append(plan.Reasons, fmt.Sprintf("%d files already exist at target; resolve duplicates before consolidation", len(plan.Collisions)))
+		if len(plan.Collisions) > 0 {
+			plan.Reasons = append(plan.Reasons, fmt.Sprintf("nothing to move: all %d file(s) already exist at target (duplicates); resolve them via duplicates first", len(plan.Collisions)))
+		} else {
+			plan.Reasons = append(plan.Reasons, "No files to move")
+		}
+	} else if len(plan.Collisions) > 0 {
+		// ponytail: duplicates stay at source and the conflict stays open;
+		// they must not block moving everything else.
+		plan.Reasons = append(plan.Reasons, fmt.Sprintf("%d duplicate(s) left in place at source; resolve via duplicates", len(plan.Collisions)))
 	}
 
 	c.stats.PlansGenerated++
@@ -181,7 +185,7 @@ func (c *Consolidator) seriesIdentitySafetyReasons(conflict *database.Conflict) 
 
 func (c *Consolidator) normalizedConflictLocations(conflict *database.Conflict) []string {
 	if conflict.MediaType != "series" {
-		return cleanUniquePaths(conflict.Locations)
+		return cleanUniquePaths(filterQuarantinePaths(conflict.Locations))
 	}
 
 	locations := make([]string, 0, len(conflict.Locations))
@@ -202,6 +206,16 @@ func (c *Consolidator) normalizedConflictLocations(conflict *database.Conflict) 
 		locations = append(locations, root)
 	}
 	return locations
+}
+
+func filterQuarantinePaths(paths []string) []string {
+	kept := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if !isPlex2JellyfinQuarantinePath(p) {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }
 
 func cleanUniquePaths(paths []string) []string {
@@ -248,7 +262,7 @@ func (c *Consolidator) seriesRootForPath(path string) string {
 
 func isPlex2JellyfinQuarantinePath(path string) bool {
 	for _, part := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
-		if strings.HasPrefix(part, "_plex2jellyfin_quarantine") {
+		if strings.HasPrefix(part, "_plex2jellyfin_quarantine") || strings.HasPrefix(part, "_jellywatch_quarantine") {
 			return true
 		}
 	}

@@ -329,6 +329,9 @@ func (s *FileScanner) scanPathWithLibraryRoot(ctx context.Context, path string, 
 
 		// Skip directories
 		if info.IsDir() {
+			if isQuarantineDirName(info.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -375,6 +378,9 @@ func (s *FileScanner) scanPathWithProgress(ctx context.Context, path string, med
 		}
 
 		if info.IsDir() {
+			if isQuarantineDirName(info.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -850,6 +856,14 @@ func (s *FileScanner) isExtraContent(path string) bool {
 }
 
 // isVideoFile checks if file is a video based on extension
+// isQuarantineDirName reports whether a directory is a plex2jellyfin quarantine
+// folder (current or legacy jellywatch naming). Quarantined files are set aside
+// deliberately; indexing them would surface them as conflicts/duplicates.
+func isQuarantineDirName(name string) bool {
+	return strings.HasPrefix(name, "_plex2jellyfin_quarantine") ||
+		strings.HasPrefix(name, "_jellywatch_quarantine")
+}
+
 func isVideoFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	videoExts := map[string]bool{

@@ -85,7 +85,9 @@ func (s *Server) RegisterStreaming(cmd Command, h StreamingHandler) {
 		panic("ipc: RegisterStreaming requires a registry")
 	}
 	s.Register(cmd, func(ctx context.Context, req Request, w FrameWriter) {
-		opCtx, cancel := context.WithCancel(ctx)
+		// ponytail: detach from the 30s unary requestTimeout — streaming ops
+		// (rescan, dup scan, reset) run for minutes; cancel comes via registry.
+		opCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		op, err := s.registry.Start(req.ID, cmd, cancel)
 		if err != nil {
 			w.Error(req.ID, ErrBusy, err.Error())
