@@ -26,7 +26,7 @@ function Card({ item }: { item: RecentlyAddedItem }) {
       : null;
 
   return (
-    <figure className="flex w-[150px] shrink-0 flex-col overflow-hidden rounded-lg bg-zinc-900">
+    <figure className="flex w-[150px] shrink-0 flex-col overflow-hidden rounded-xl bg-zinc-900">
       <div className="flex h-[220px] w-[150px] items-center justify-center overflow-hidden bg-zinc-950">
         {/* eslint-disable-next-line @next/next/no-img-element -- same-origin API proxy; cookies required */}
         <img
@@ -65,7 +65,7 @@ export function RecentlyAdded() {
       {data.error ? (
         <p className="text-sm text-zinc-500">{data.error}</p>
       ) : (
-        <div className="recently-added-scroll min-h-[300px] overflow-x-auto rounded-lg bg-zinc-900/60 p-5">
+        <div className="recently-added-scroll min-h-[300px] overflow-x-auto vision-card p-5">
           <div className="flex gap-5">
             {items.map((item) => (
               <Card key={item.id} item={item} />

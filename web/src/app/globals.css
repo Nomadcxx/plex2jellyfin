@@ -26,6 +26,10 @@
   --input: 200 13% 19%;
   --ring: 189 65% 66%;
   --radius: 0.375rem;
+  --card-gradient-top: 195 20% 11%;
+  --card-gradient-bottom: 195 18% 9%;
+  --sidebar-gradient-top: 200 14% 7%;
+  --sidebar-gradient-bottom: 195 16% 5%;
 }
 
 body {
@@ -45,6 +49,45 @@ body {
 * {
   scrollbar-width: thin;
   scrollbar-color: #2a3236 transparent;
+}
+
+/* Vision-style gradient card: subtle top→bottom lift, soft accent shadow. */
+.vision-card {
+  background: linear-gradient(
+    135deg,
+    hsl(var(--card-gradient-top)) 0%,
+    hsl(var(--card-gradient-bottom)) 100%
+  );
+  border-radius: 0.75rem;
+}
+
+/* Icon inside a rounded colored circle, tinted with accent. */
+.vision-icon-circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.625rem;
+  background: hsl(var(--primary) / 0.12);
+}
+
+/* Sidebar subtle gradient bg. */
+.vision-sidebar {
+  background: linear-gradient(
+    180deg,
+    hsl(var(--sidebar-gradient-top)) 0%,
+    hsl(var(--sidebar-gradient-bottom)) 100%
+  );
+}
+
+/* Active nav item: soft gradient pill. */
+.vision-nav-active {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary) / 0.15) 0%,
+    hsl(var(--primary) / 0.05) 100%
+  );
 }
 
 /* Jellystat-style row: thicker horizontal thumb so it is easy to grab/drag. */

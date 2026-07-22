@@ -35,7 +35,7 @@ export function Sidebar() {
     href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/');
 
   return (
-    <aside className="hidden w-60 bg-zinc-950 border-r border-zinc-800 h-screen p-4 md:flex md:flex-col">
+    <aside className="hidden w-60 vision-sidebar border-r border-zinc-800 h-screen p-4 md:flex md:flex-col">
       <div className="mb-8 px-1">
         <Image
           src="/p2j-mark.png"
@@ -53,8 +53,8 @@ export function Sidebar() {
             href={item.href}
             className={
               isActive(item.href)
-                ? 'flex items-center gap-3 border-l-2 border-terminal-cyan bg-zinc-900 px-3 py-2 font-mono text-[13px] text-terminal-cyan'
-                : 'flex items-center gap-3 border-l-2 border-transparent px-3 py-2 font-mono text-[13px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'
+                ? 'flex items-center gap-3 rounded-lg vision-nav-active px-3 py-2 font-mono text-[13px] text-terminal-cyan'
+                : 'flex items-center gap-3 rounded-lg px-3 py-2 font-mono text-[13px] text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-100'
             }
             aria-current={isActive(item.href) ? 'page' : undefined}
           >
@@ -64,7 +64,7 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="mt-auto space-y-3 px-1 pb-1">
-        <LogoutButton className="flex w-full items-center gap-3 border-l-2 border-transparent px-3 py-2 font-mono text-[13px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-50" />
+        <LogoutButton className="flex w-full items-center gap-3 rounded-lg px-3 py-2 font-mono text-[13px] text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-100 disabled:opacity-50" />
         <p className="term-eyebrow">beta</p>
       </div>
     </aside>

@@ -6,21 +6,20 @@ import { AppShell } from '@/components/layout/AppShell';
 import { useDashboard, useJellyfinIdentification } from '@/hooks/useDashboard';
 import { useDuplicates } from '@/hooks/useDashboard';
 import { useJellystatOverview, mostViewedName, mostViewedPlays, JellystatRow } from '@/hooks/useJellystat';
+import { useDaemon } from '@/hooks/useDaemon';
 import { RecentlyAdded } from '@/components/dashboard/RecentlyAdded';
 import { formatBytes } from '@/lib/utils';
-import { Database, HardDrive, Copy, FolderTree, Film, Tv, ListVideo, AlertTriangle, CheckCircle2, HelpCircle, BarChart3 } from 'lucide-react';
+import { Database, HardDrive, Copy, FolderTree, Film, Tv, ListVideo, AlertTriangle, CheckCircle2, HelpCircle, BarChart3, Activity, Server } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function DashboardPage() {
   const { data, isLoading, isError, error } = useDashboard();
-  // The libraryStats.duplicateGroups field only updates after a duplicate
-  // scan persists results to the DB. The /duplicates endpoint computes
-  // groups live, so prefer its count when the DB stat is 0/missing.
   const { data: dupData } = useDuplicates();
   const liveDuplicateGroups = dupData?.groups?.length ?? 0;
   const dbDuplicateGroups = data?.libraryStats?.duplicateGroups ?? 0;
   const duplicateGroups = dbDuplicateGroups || liveDuplicateGroups;
   const { data: jfId, isLoading: jfLoading, isError: jfError } = useJellyfinIdentification();
+  const { status: daemonStatus } = useDaemon();
 
   return (
     <AppShell>
@@ -37,6 +36,12 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-bold">Dashboard</h1>
         </div>
 
+        <SystemHealthBanner
+          daemonStatus={daemonStatus}
+          totalFiles={data?.libraryStats?.totalFiles ?? 0}
+          totalSize={data?.libraryStats?.totalSize ?? 0}
+        />
+
         {isError && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
@@ -49,7 +54,7 @@ export default function DashboardPage() {
         {isLoading ? (
           <div className="grid grid-cols-4 gap-4">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-32 bg-zinc-900 rounded-lg animate-pulse" />
+              <div key={i} className="h-32 bg-zinc-900 rounded-xl animate-pulse" />
             ))}
           </div>
         ) : (
@@ -153,12 +158,12 @@ export default function DashboardPage() {
           <h2 className="text-xl font-semibold mb-4">Media Managers</h2>
           <div className="space-y-3">
             {data?.mediaManagers?.map((manager: any) => (
-              <div key={manager.id} className="flex items-center justify-between p-4 bg-zinc-900 rounded-lg border border-zinc-800">
+              <div key={manager.id} className="vision-card flex items-center justify-between p-4">
                 <div>
                   <p className="font-medium">{manager.name}</p>
                   <p className="text-sm text-zinc-400 capitalize">{manager.type}</p>
                 </div>
-                <span className={`text-sm ${manager.online ? 'text-green-400' : 'text-red-400'}`}>
+                <span className={`text-sm ${manager.online ? 'text-terminal-green' : 'text-terminal-red'}`}>
                   {manager.online ? '● Online' : '● Offline'}
                 </span>
               </div>
@@ -170,9 +175,52 @@ export default function DashboardPage() {
   );
 }
 
+function SystemHealthBanner({
+  daemonStatus,
+  totalFiles,
+  totalSize,
+}: {
+  daemonStatus: { state: string; uptime_seconds?: number; version?: string } | null;
+  totalFiles: number;
+  totalSize: number;
+}) {
+  const isRunning = daemonStatus?.state === 'running';
+  const statusColor = isRunning ? 'text-terminal-green' : 'text-terminal-red';
+  const statusDot = isRunning ? 'bg-terminal-green' : 'bg-terminal-red';
+
+  return (
+    <div className="vision-card flex flex-wrap items-center gap-x-6 gap-y-2 p-4">
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 rounded-full ${statusDot} ${isRunning ? 'animate-pulse' : ''}`} />
+        <span className={`font-mono text-sm ${statusColor}`}>
+          {isRunning ? 'daemon running' : 'daemon stopped'}
+        </span>
+      </div>
+      {daemonStatus?.uptime_seconds != null && isRunning && (
+        <span className="font-mono text-sm text-zinc-500">
+          uptime {formatUptime(daemonStatus.uptime_seconds)}
+        </span>
+      )}
+      <span className="font-mono text-sm text-zinc-400">
+        {totalFiles.toLocaleString()} files · {formatBytes(totalSize)}
+      </span>
+      {daemonStatus?.version && (
+        <span className="font-mono text-xs text-zinc-600">v{daemonStatus.version}</span>
+      )}
+    </div>
+  );
+}
+
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${Math.floor(seconds)}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
+}
+
 function MostViewedList({ title, rows }: { title: string; rows?: JellystatRow[] }) {
   return (
-    <div className="bg-zinc-900 p-6 rounded-lg border border-zinc-800">
+    <div className="vision-card p-6">
       <p className="text-sm text-zinc-400 mb-3">{title}</p>
       {rows && rows.length > 0 ? (
         <ol className="space-y-2">
@@ -227,13 +275,15 @@ function JellystatSection() {
 
 function StatCard({ title, value, icon: Icon }: { title: string; value: string | number; icon: any }) {
   return (
-    <div className="bg-zinc-900 p-6 rounded-lg">
+    <div className="vision-card p-6">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-zinc-400">{title}</p>
           <p className="text-2xl font-bold mt-1 tabular-nums">{value}</p>
         </div>
-        <Icon className="h-8 w-8 text-zinc-600" />
+        <div className="vision-icon-circle">
+          <Icon className="h-5 w-5 text-terminal-cyan" />
+        </div>
       </div>
     </div>
   );
