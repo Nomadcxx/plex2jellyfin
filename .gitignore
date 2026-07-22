@@ -142,3 +142,8 @@ __pycache__/
 
 # Unrelated scratch files
 /copilot-malformed-tool-calls-review.md
+
+# Playwright/screenshot artifacts (local only)
+.playwright-mcp/
+*.playwright.png
+webui-*.png

@@ -79,7 +79,7 @@ export function MobileNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-800 bg-zinc-950/95 px-2 py-2 backdrop-blur md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-800 bg-zinc-950 px-2 py-2 md:hidden"
       aria-label="Primary"
     >
       <div className="flex items-center gap-1 overflow-x-auto">

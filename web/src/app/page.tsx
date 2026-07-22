@@ -185,7 +185,7 @@ function MostViewedList({ title, rows }: { title: string; rows?: JellystatRow[] 
                   {mostViewedName(row)}
                 </span>
                 {plays != null && (
-                  <span className="text-zinc-500 whitespace-nowrap">{plays} plays</span>
+                  <span className="text-zinc-500 whitespace-nowrap tabular-nums">{plays} plays</span>
                 )}
               </li>
             );
@@ -227,11 +227,11 @@ function JellystatSection() {
 
 function StatCard({ title, value, icon: Icon }: { title: string; value: string | number; icon: any }) {
   return (
-    <div className="bg-zinc-900 p-6 rounded-lg border border-zinc-800">
+    <div className="bg-zinc-900 p-6 rounded-lg">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-zinc-400">{title}</p>
-          <p className="text-2xl font-bold mt-1">{value}</p>
+          <p className="text-2xl font-bold mt-1 tabular-nums">{value}</p>
         </div>
         <Icon className="h-8 w-8 text-zinc-600" />
       </div>

@@ -154,20 +154,20 @@ export function JobsTray() {
         aria-label={`Active jobs (${running.length} running)`}
       >
         {running.length > 0 ? (
-          <Loader2 className="h-4 w-4 animate-spin text-sky-400" />
+          <Loader2 className="h-4 w-4 animate-spin text-terminal-cyan" />
         ) : (
           <Activity className="h-4 w-4" />
         )}
         Jobs
         {running.length > 0 && (
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-sky-500 px-1.5 text-[11px] font-semibold text-zinc-950">
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-terminal-cyan px-1.5 text-[11px] font-semibold text-zinc-950">
             {running.length}
           </span>
         )}
       </Button>
 
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-2 w-96 max-h-[70vh] overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl">
+        <div className="absolute right-0 top-full z-40 mt-2 w-96 max-h-[70vh] overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 shadow-lg">
           <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
             <h3 className="text-sm font-semibold">Active Jobs</h3>
             <button
@@ -212,7 +212,7 @@ export function JobsTray() {
                       <div className="space-y-0.5">
                         <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
                           <div
-                            className="h-full bg-sky-500 transition-all"
+                            className="h-full bg-terminal-cyan transition-all"
                             style={{ width: `${pct}%` }}
                           />
                         </div>
@@ -228,7 +228,7 @@ export function JobsTray() {
                       </div>
                     ) : op.state === 'running' ? (
                       <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
-                        <div className="h-full w-1/3 animate-pulse bg-sky-500/60" />
+                        <div className="h-full w-1/3 animate-pulse bg-terminal-cyan/60" />
                       </div>
                     ) : null}
                   </li>

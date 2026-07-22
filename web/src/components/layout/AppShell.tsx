@@ -8,7 +8,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="flex items-center justify-between gap-3 px-6 py-3 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur">
+        <header className="flex items-center justify-between gap-3 px-6 py-3 border-b border-zinc-800 bg-zinc-950">
           <TermPrompt />
           <div className="flex items-center gap-3">
             <JobsTray />
