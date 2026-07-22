@@ -282,7 +282,7 @@ function StatCard({ title, value, icon: Icon }: { title: string; value: string |
           <p className="text-2xl font-bold mt-1 tabular-nums">{value}</p>
         </div>
         <div className="vision-icon-circle">
-          <Icon className="h-5 w-5 text-terminal-cyan" />
+          <Icon className="h-5 w-5 text-terminal-amber" />
         </div>
       </div>
     </div>

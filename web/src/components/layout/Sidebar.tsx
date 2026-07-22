@@ -53,7 +53,7 @@ export function Sidebar() {
             href={item.href}
             className={
               isActive(item.href)
-                ? 'flex items-center gap-3 rounded-lg vision-nav-active px-3 py-2 font-mono text-[13px] text-terminal-cyan'
+                ? 'flex items-center gap-3 rounded-lg vision-nav-active px-3 py-2 font-mono text-[13px] text-terminal-amber'
                 : 'flex items-center gap-3 rounded-lg px-3 py-2 font-mono text-[13px] text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-100'
             }
             aria-current={isActive(item.href) ? 'page' : undefined}
@@ -89,7 +89,7 @@ export function MobileNav() {
             href={item.href}
             className={
               isActive(item.href)
-                ? 'flex min-w-16 flex-col items-center gap-1 rounded-md bg-zinc-900 px-2 py-1.5 text-xs font-medium text-terminal-cyan'
+                ? 'flex min-w-16 flex-col items-center gap-1 rounded-md vision-nav-active px-2 py-1.5 text-xs font-medium text-terminal-amber'
                 : 'flex min-w-16 flex-col items-center gap-1 rounded-md px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'
             }
             aria-current={isActive(item.href) ? 'page' : undefined}
