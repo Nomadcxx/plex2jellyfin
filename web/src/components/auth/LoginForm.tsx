@@ -38,8 +38,8 @@ export function LoginForm() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 vision-ambient p-4">
+      <Card className="w-full max-w-md vision-card">
         <CardHeader className="space-y-1">
           <div className="mb-4 flex items-center justify-center">
             <Image

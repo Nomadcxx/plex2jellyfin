@@ -171,7 +171,7 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 vision-ambient">
       <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col lg:flex-row">
         <aside className="border-b border-zinc-800 px-5 py-4 lg:w-60 lg:shrink-0 lg:border-b-0 lg:border-r lg:px-6 lg:py-8">
           <div className="flex items-center justify-between gap-4 lg:block">
@@ -816,7 +816,7 @@ function SetupIndexing({
   }, [attempt]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-6 text-zinc-100">
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 vision-ambient p-6 text-zinc-100">
       <div className="w-full max-w-2xl border-y border-zinc-800 py-10">
         <Image src="/p2j-mark.png" alt="P2J" width={150} height={58} className="mx-auto h-auto w-[140px]" />
         <h1 className="mt-6 text-center text-2xl font-semibold">Initial library scan</h1>
@@ -869,7 +869,7 @@ function SetupComplete({
 }) {
   const duration = result?.duration_ms ? `${(result.duration_ms / 1000).toFixed(1)}s` : null;
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-6 text-zinc-100">
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 vision-ambient p-6 text-zinc-100">
       <div className="w-full max-w-xl border-y border-zinc-800 py-10 text-center">
         <CheckCircle2 className="mx-auto h-10 w-10 text-green-400" />
         <Image src="/p2j-mark.png" alt="P2J" width={150} height={58} className="mx-auto mt-6 h-auto w-[140px]" />

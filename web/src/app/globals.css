@@ -107,9 +107,9 @@ body {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 60% 50% at 80% 5%, hsl(38 60% 50% / 0.22) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 40% at 10% 95%, hsl(38 60% 50% / 0.15) 0%, transparent 55%),
-    radial-gradient(ellipse 40% 30% at 50% 50%, hsl(189 65% 50% / 0.06) 0%, transparent 50%);
+    radial-gradient(ellipse 60% 50% at 80% 5%, hsl(38 60% 50% / 0.15) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 10% 95%, hsl(38 60% 50% / 0.1) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 30% at 50% 50%, hsl(189 65% 50% / 0.04) 0%, transparent 50%);
 }
 
 /* Jellystat-style row: thicker horizontal thumb so it is easy to grab/drag. */

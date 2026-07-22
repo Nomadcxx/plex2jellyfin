@@ -7,9 +7,9 @@ const cardVariants = cva(
   {
     variants: {
       variant: {
-        default: "border-border",
+        default: "border-amber-500/10 bg-card/60 backdrop-blur-md",
         interactive:
-          "border-border hover:border-border/80 hover:bg-accent/5 transition-all duration-200 cursor-pointer",
+          "border-amber-500/10 bg-card/60 backdrop-blur-md hover:border-amber-500/20 hover:bg-accent/5 transition-all duration-200 cursor-pointer",
         gradient:
           "group border-border/50 bg-background/50 backdrop-blur-sm hover:bg-accent/5 hover:border-border transition-all duration-300",
       },

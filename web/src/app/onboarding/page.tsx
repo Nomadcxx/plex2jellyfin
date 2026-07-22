@@ -12,7 +12,7 @@ export default function OnboardingRedirect() {
   }, [router]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950">
+    <div className="flex min-h-screen items-center justify-center bg-zinc-950 vision-ambient">
       <Loader2 className="h-7 w-7 animate-spin text-amber-400" aria-label="Opening setup" />
     </div>
   );
