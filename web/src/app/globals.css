@@ -55,13 +55,13 @@ body {
 .vision-card {
   background: linear-gradient(
     135deg,
-    hsl(var(--card-gradient-top) / 0.85) 0%,
-    hsl(var(--card-gradient-bottom) / 0.7) 100%
+    hsl(var(--card-gradient-top) / 0.55) 0%,
+    hsl(var(--card-gradient-bottom) / 0.4) 100%
   );
-  border: 1px solid hsl(38 42% 44% / 0.12);
+  border: 1px solid hsl(38 42% 55% / 0.18);
   border-radius: 0.75rem;
-  box-shadow: 0 4px 24px -8px hsl(38 42% 44% / 0.08), inset 0 1px 0 0 hsl(38 42% 70% / 0.06);
-  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 24px -6px hsl(38 42% 44% / 0.12), inset 0 1px 0 0 hsl(38 42% 70% / 0.1);
+  backdrop-filter: blur(12px);
 }
 
 /* Icon inside a rounded colored circle, tinted with brand amber. */
@@ -75,14 +75,15 @@ body {
   background: hsl(38 42% 44% / 0.12);
 }
 
-/* Sidebar subtle gradient bg with amber tint. */
+/* Sidebar subtle gradient bg with amber tint — translucent for glass effect. */
 .vision-sidebar {
   background: linear-gradient(
     180deg,
-    hsl(var(--sidebar-gradient-top)) 0%,
-    hsl(var(--sidebar-gradient-bottom)) 100%
+    hsl(var(--sidebar-gradient-top) / 0.7) 0%,
+    hsl(var(--sidebar-gradient-bottom) / 0.5) 100%
   );
-  border-right: 1px solid hsl(38 42% 44% / 0.1);
+  border-right: 1px solid hsl(38 42% 44% / 0.12);
+  backdrop-filter: blur(10px);
 }
 
 /* Active nav item: soft amber gradient pill. */
@@ -106,8 +107,9 @@ body {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(circle at 85% 10%, hsl(38 42% 44% / 0.07) 0%, transparent 45%),
-    radial-gradient(circle at 15% 90%, hsl(38 42% 44% / 0.04) 0%, transparent 40%);
+    radial-gradient(ellipse 60% 50% at 80% 5%, hsl(38 60% 50% / 0.22) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 10% 95%, hsl(38 60% 50% / 0.15) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 30% at 50% 50%, hsl(189 65% 50% / 0.06) 0%, transparent 50%);
 }
 
 /* Jellystat-style row: thicker horizontal thumb so it is easy to grab/drag. */
