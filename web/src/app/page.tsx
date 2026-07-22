@@ -52,9 +52,9 @@ export default function DashboardPage() {
         )}
 
         {isLoading ? (
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-32 bg-zinc-900 rounded-xl animate-pulse" />
+              <div key={i} className="h-32 vision-card animate-pulse" />
             ))}
           </div>
         ) : (
@@ -158,7 +158,7 @@ export default function DashboardPage() {
           <h2 className="text-xl font-semibold mb-4">Media Managers</h2>
           <div className="space-y-3">
             {data?.mediaManagers?.map((manager: any) => (
-              <div key={manager.id} className="vision-card flex items-center justify-between p-4">
+              <div key={manager.id} className="vision-card-secondary flex items-center justify-between p-4">
                 <div>
                   <p className="font-medium">{manager.name}</p>
                   <p className="text-sm text-zinc-400 capitalize">{manager.type}</p>
@@ -189,7 +189,7 @@ function SystemHealthBanner({
   const statusDot = isRunning ? 'bg-terminal-green' : 'bg-terminal-red';
 
   return (
-    <div className="vision-card flex flex-wrap items-center gap-x-6 gap-y-2 p-4">
+    <div className="vision-banner flex flex-wrap items-center gap-x-6 gap-y-2 p-4">
       <div className="flex items-center gap-2">
         <span className={`h-2 w-2 rounded-full ${statusDot} ${isRunning ? 'animate-pulse' : ''}`} />
         <span className={`font-mono text-sm ${statusColor}`}>
@@ -220,7 +220,7 @@ function formatUptime(seconds: number): string {
 
 function MostViewedList({ title, rows }: { title: string; rows?: JellystatRow[] }) {
   return (
-    <div className="vision-card p-6">
+    <div className="vision-card-secondary p-6">
       <p className="text-sm text-zinc-400 mb-3">{title}</p>
       {rows && rows.length > 0 ? (
         <ol className="space-y-2">

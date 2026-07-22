@@ -27,11 +27,11 @@ export interface CardProps
 }
 
 const gradientMap = {
-  violet: "from-violet-500/10",
-  blue: "from-blue-500/10",
-  emerald: "from-emerald-500/10",
-  amber: "from-amber-500/10",
-  rose: "from-rose-500/10",
+  violet: "from-terminal-cyan/10",
+  blue: "from-terminal-cyan/10",
+  emerald: "from-terminal-green/10",
+  amber: "from-terminal-amber/10",
+  rose: "from-terminal-red/10",
 }
 
 const Card = React.forwardRef<HTMLDivElement, CardProps>(

@@ -12,7 +12,7 @@ const buttonVariants = ({
 }) => {
   const variants = {
     default: "bg-terminal-amber text-zinc-950 hover:bg-terminal-amber/90",
-    destructive: "bg-red-500 text-white hover:bg-red-600",
+    destructive: "bg-terminal-red text-zinc-950 hover:bg-terminal-red/90",
     outline: "border border-zinc-700 bg-transparent hover:bg-zinc-800",
     secondary: "bg-zinc-800 text-zinc-100 hover:bg-zinc-700",
     ghost: "hover:bg-zinc-800 hover:text-zinc-100",

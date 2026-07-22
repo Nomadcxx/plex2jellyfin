@@ -79,7 +79,7 @@ export function MobileNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-800 bg-zinc-950 px-2 py-2 md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-amber-500/10 bg-zinc-950/70 backdrop-blur-lg px-2 py-2 md:hidden"
       aria-label="Primary"
     >
       <div className="flex items-center gap-1 overflow-x-auto">
@@ -98,9 +98,9 @@ export function MobileNav() {
             <span>{item.name}</span>
           </Link>
         ))}
-        <LogoutButton
+          <LogoutButton
           iconOnly
-          className="flex min-w-16 flex-col items-center gap-1 rounded-md px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-50"
+          className="flex min-w-16 flex-col items-center gap-1 rounded-md px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-100 disabled:opacity-50"
         />
       </div>
     </nav>

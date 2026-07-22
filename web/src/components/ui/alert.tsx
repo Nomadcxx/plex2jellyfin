@@ -10,7 +10,7 @@ const alertVariants = ({
 }) => {
   const variants = {
     default: "bg-zinc-900 border-zinc-700 text-zinc-100",
-    destructive: "bg-red-500/10 border-red-500/30 text-red-400",
+    destructive: "bg-terminal-red/10 border-terminal-red/30 text-terminal-red",
   }
   
   return `relative w-full rounded-lg border p-4 ${variants[variant]} ${className}`
