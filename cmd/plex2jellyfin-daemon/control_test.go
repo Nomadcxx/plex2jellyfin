@@ -11,6 +11,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/reload"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 )
 
 type captureFrameWriter struct {
@@ -174,7 +175,7 @@ func TestRescanStreamsProgress(t *testing.T) {
 
 type fakeScannerForTest struct{}
 
-func (*fakeScannerForTest) FullRescan(ctx context.Context, paths []string, dry bool, p chan<- database.ProgressEvent) error {
+func (*fakeScannerForTest) FullRescan(ctx context.Context, roots []scanner.RescanRoot, dry bool, p chan<- database.ProgressEvent) error {
 	p <- database.ProgressEvent{Phase: "walking"}
 	p <- database.ProgressEvent{Phase: "indexing", Current: 1, Total: 1}
 	return nil

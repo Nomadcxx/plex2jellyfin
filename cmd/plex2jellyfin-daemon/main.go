@@ -454,10 +454,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}))
 
 	fileScanner := scanner.NewFileScanner(db)
-	rescanDefaults := func() []string {
-		paths := append([]string{}, cfg.Libraries.TV...)
-		paths = append(paths, cfg.Libraries.Movies...)
-		return paths
+	rescanDefaults := func() []scanner.RescanRoot {
+		var roots []scanner.RescanRoot
+		for _, p := range cfg.Libraries.TV {
+			roots = append(roots, scanner.RescanRoot{Path: p, MediaType: "episode"})
+		}
+		for _, p := range cfg.Libraries.Movies {
+			roots = append(roots, scanner.RescanRoot{Path: p, MediaType: "movie"})
+		}
+		return roots
 	}
 	// Construct Jellyfin sweeper up front so the IPC streaming handler can
 	// trigger it manually; the periodic ticker reuses the same instance.

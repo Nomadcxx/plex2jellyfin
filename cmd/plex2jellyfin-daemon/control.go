@@ -11,6 +11,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/reload"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 )
 
 // relayProgress forwards database.ProgressEvents from the channel to the
@@ -163,20 +164,25 @@ type rescanArgs struct {
 }
 
 type rescanScanner interface {
-	FullRescan(ctx context.Context, paths []string, dryRun bool, p chan<- database.ProgressEvent) error
+	FullRescan(ctx context.Context, roots []scanner.RescanRoot, dryRun bool, p chan<- database.ProgressEvent) error
 }
 
-func rescanHandler(scanner rescanScanner, defaultPaths func() []string, log *ipc.OpLog) ipc.StreamingHandler {
+func rescanHandler(sc rescanScanner, defaultRoots func() []scanner.RescanRoot, log *ipc.OpLog) ipc.StreamingHandler {
 	return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
 		var args rescanArgs
 		if len(raw) > 0 {
 			_ = json.Unmarshal(raw, &args)
 		}
-		if len(args.Paths) == 0 && defaultPaths != nil {
-			args.Paths = defaultPaths()
+		var roots []scanner.RescanRoot
+		if len(args.Paths) > 0 {
+			for _, p := range args.Paths {
+				roots = append(roots, scanner.RescanRoot{Path: p, MediaType: ""})
+			}
+		} else if defaultRoots != nil {
+			roots = defaultRoots()
 		}
 		_ = log.Begin(op.ID, ipc.CmdRescan, map[string]any{"paths": args.Paths, "dry_run": args.DryRun})
-		if len(args.Paths) == 0 {
+		if len(roots) == 0 {
 			w.Error(op.ID, ipc.ErrBadRequest, "no library paths configured; set libraries.tv or libraries.movies first")
 			_ = log.End(op.ID, "error", "no library paths configured")
 			return
@@ -184,7 +190,7 @@ func rescanHandler(scanner rescanScanner, defaultPaths func() []string, log *ipc
 		progress := make(chan database.ProgressEvent, 64)
 		doneCh := make(chan struct{})
 		go relayProgress(progress, w, op.ID, doneCh)
-		err := scanner.FullRescan(ctx, args.Paths, args.DryRun, progress)
+		err := sc.FullRescan(ctx, roots, args.DryRun, progress)
 		close(progress)
 		<-doneCh
 		if err != nil {
