@@ -2,54 +2,32 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
-const cardVariants = cva(
-  "rounded-md border bg-card text-card-foreground shadow-sm relative overflow-hidden",
-  {
-    variants: {
-      variant: {
-        default: "border-amber-500/10 bg-card/60 backdrop-blur-md",
-        interactive:
-          "border-amber-500/10 bg-card/60 backdrop-blur-md hover:border-amber-500/20 hover:bg-accent/5 transition-all duration-200 cursor-pointer",
-        gradient:
-          "group border-border/50 bg-background/50 backdrop-blur-sm hover:bg-accent/5 hover:border-border transition-all duration-300",
-      },
+const cardVariants = cva("text-card-foreground relative overflow-hidden", {
+  variants: {
+    variant: {
+      default: "vision-card",
+      secondary: "vision-card-secondary",
+      interactive:
+        "vision-card hover:border-amber-500/25 transition-colors duration-200 cursor-pointer",
     },
-    defaultVariants: {
-      variant: "default",
-    },
-  }
-)
+  },
+  defaultVariants: {
+    variant: "default",
+  },
+})
 
 export interface CardProps
   extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof cardVariants> {
-  gradientColor?: "violet" | "blue" | "emerald" | "amber" | "rose"
-}
-
-const gradientMap = {
-  violet: "from-terminal-cyan/10",
-  blue: "from-terminal-cyan/10",
-  emerald: "from-terminal-green/10",
-  amber: "from-terminal-amber/10",
-  rose: "from-terminal-red/10",
-}
+    VariantProps<typeof cardVariants> {}
 
 const Card = React.forwardRef<HTMLDivElement, CardProps>(
-  ({ className, variant, gradientColor, children, ...props }, ref) => (
+  ({ className, variant, children, ...props }, ref) => (
     <div
       ref={ref}
       className={cn(cardVariants({ variant }), className)}
       {...props}
     >
-      {variant === "gradient" && gradientColor && (
-        <div
-          className={cn(
-            "absolute inset-0 bg-gradient-to-br to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none",
-            gradientMap[gradientColor]
-          )}
-        />
-      )}
-      <div className="relative z-10 h-full">{children}</div>
+      {children}
     </div>
   )
 )

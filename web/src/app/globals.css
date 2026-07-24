@@ -12,7 +12,7 @@
   --card-foreground: 165 8% 95%;
   --popover: 195 18% 9%;
   --popover-foreground: 165 8% 95%;
-  --primary: 189 65% 66%;
+  --primary: 39 65% 58%;
   --primary-foreground: 200 12% 5%;
   --secondary: 196 14% 12%;
   --secondary-foreground: 165 8% 95%;
@@ -51,85 +51,99 @@ body {
   scrollbar-color: #2a3236 transparent;
 }
 
-/* Vision-style glass card: translucent surface over an ambient amber glow. */
-.vision-card {
-  background: linear-gradient(
-    135deg,
-    hsl(var(--card-gradient-top) / 0.55) 0%,
-    hsl(var(--card-gradient-bottom) / 0.4) 100%
-  );
-  border: 1px solid hsl(38 42% 55% / 0.18);
-  border-radius: 0.75rem;
-  box-shadow: 0 4px 24px -6px hsl(38 42% 44% / 0.12), inset 0 1px 0 0 hsl(38 42% 70% / 0.1);
-  backdrop-filter: blur(12px);
+/* Vision material system. Lives in the components layer so page-level
+   Tailwind utilities can still override individual properties. */
+@layer components {
+  /* Glass card: translucent surface over the ambient amber glow. */
+  .vision-card {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--card-gradient-top) / 0.55) 0%,
+      hsl(var(--card-gradient-bottom) / 0.4) 100%
+    );
+    border: 1px solid hsl(38 42% 55% / 0.18);
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 24px -6px hsl(38 42% 44% / 0.12), inset 0 1px 0 0 hsl(38 42% 70% / 0.1);
+    backdrop-filter: blur(12px);
+  }
+
+  /* Secondary card: less elevation for lists, rows, and contained data.
+     No backdrop blur — translucency alone is enough at this tier and
+     keeps the compositor budget for primary surfaces. */
+  .vision-card-secondary {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--card-gradient-top) / 0.32) 0%,
+      hsl(var(--card-gradient-bottom) / 0.24) 100%
+    );
+    border: 1px solid hsl(38 42% 55% / 0.10);
+    border-radius: 0.75rem;
+  }
+
+  /* Status banner: solid ground so it reads as a system strip, not a data card. */
+  .vision-banner {
+    background: hsl(var(--sidebar-gradient-top) / 0.85);
+    border: 1px solid hsl(38 42% 55% / 0.18);
+    border-radius: 0.75rem;
+    box-shadow: inset 0 1px 0 0 hsl(38 42% 70% / 0.08);
+  }
+
+  /* Icon inside a rounded colored circle, tinted with brand amber. */
+  .vision-icon-circle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.625rem;
+    background: hsl(38 42% 44% / 0.12);
+  }
+
+  /* Sidebar subtle gradient bg with amber tint — translucent for glass effect. */
+  .vision-sidebar {
+    background: linear-gradient(
+      180deg,
+      hsl(var(--sidebar-gradient-top) / 0.7) 0%,
+      hsl(var(--sidebar-gradient-bottom) / 0.5) 100%
+    );
+    border-right: 1px solid hsl(38 42% 44% / 0.12);
+    backdrop-filter: blur(10px);
+  }
+
+  /* Active nav item: soft amber gradient pill. */
+  .vision-nav-active {
+    background: linear-gradient(
+      90deg,
+      hsl(38 42% 44% / 0.15) 0%,
+      hsl(38 42% 44% / 0.04) 100%
+    );
+    border: 1px solid hsl(38 42% 44% / 0.12);
+  }
+
+  /* Ambient amber glow behind the app for glassmorphism to blur. */
+  .vision-ambient {
+    position: relative;
+  }
+  .vision-ambient::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 60% 50% at 80% 5%, hsl(38 60% 50% / 0.15) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 10% 95%, hsl(38 60% 50% / 0.1) 0%, transparent 55%),
+      radial-gradient(ellipse 40% 30% at 50% 50%, hsl(189 65% 50% / 0.04) 0%, transparent 50%);
+  }
 }
 
-/* Secondary card: less elevation for lists, rows, and contained data. */
-.vision-card-secondary {
-  background: linear-gradient(
-    135deg,
-    hsl(var(--card-gradient-top) / 0.32) 0%,
-    hsl(var(--card-gradient-bottom) / 0.24) 100%
-  );
-  border: 1px solid hsl(38 42% 55% / 0.10);
-  border-radius: 0.75rem;
-  backdrop-filter: blur(8px);
-}
-
-/* Status banner: solid ground so it reads as a system strip, not a data card. */
-.vision-banner {
-  background: hsl(var(--sidebar-gradient-top) / 0.85);
-  border: 1px solid hsl(38 42% 55% / 0.18);
-  border-radius: 0.75rem;
-  box-shadow: inset 0 1px 0 0 hsl(38 42% 70% / 0.08);
-}
-
-/* Icon inside a rounded colored circle, tinted with brand amber. */
-.vision-icon-circle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0.625rem;
-  background: hsl(38 42% 44% / 0.12);
-}
-
-/* Sidebar subtle gradient bg with amber tint — translucent for glass effect. */
-.vision-sidebar {
-  background: linear-gradient(
-    180deg,
-    hsl(var(--sidebar-gradient-top) / 0.7) 0%,
-    hsl(var(--sidebar-gradient-bottom) / 0.5) 100%
-  );
-  border-right: 1px solid hsl(38 42% 44% / 0.12);
-  backdrop-filter: blur(10px);
-}
-
-/* Active nav item: soft amber gradient pill. */
-.vision-nav-active {
-  background: linear-gradient(
-    90deg,
-    hsl(38 42% 44% / 0.15) 0%,
-    hsl(38 42% 44% / 0.04) 100%
-  );
-  border: 1px solid hsl(38 42% 44% / 0.12);
-}
-
-/* Ambient amber glow behind the app for glassmorphism to blur. */
-.vision-ambient {
-  position: relative;
-}
-.vision-ambient::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 60% 50% at 80% 5%, hsl(38 60% 50% / 0.15) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 40% at 10% 95%, hsl(38 60% 50% / 0.1) 0%, transparent 55%),
-    radial-gradient(ellipse 40% 30% at 50% 50%, hsl(189 65% 50% / 0.04) 0%, transparent 50%);
+/* Respect reduced-motion: decorative pulses and pings become static.
+   animate-spin is left alone — it signals in-flight work. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse,
+  .animate-ping {
+    animation: none;
+  }
 }
 
 /* Jellystat-style row: thicker horizontal thumb so it is easy to grab/drag. */

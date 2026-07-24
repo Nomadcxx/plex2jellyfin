@@ -49,7 +49,7 @@ export function QueueItem({ item, managerId }: QueueItemProps) {
       : 0);
 
   return (
-    <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
+    <div className="vision-card-secondary p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <h4 className="font-medium truncate" title={item.title}>

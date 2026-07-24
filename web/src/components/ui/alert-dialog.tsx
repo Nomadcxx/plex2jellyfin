@@ -34,7 +34,7 @@ export function AlertDialog({
 }: AlertDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-zinc-900 border-zinc-800 sm:max-w-sm">
+      <DialogContent className="bg-zinc-950/90 backdrop-blur-xl border-amber-500/10 sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && (

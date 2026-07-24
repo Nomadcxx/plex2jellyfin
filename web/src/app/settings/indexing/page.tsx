@@ -214,7 +214,7 @@ export default function IndexingPage() {
         ) : (
           <>
             {lastSuccess && (
-              <div className="mb-3 rounded bg-zinc-900 p-3 text-sm">
+              <div className="mb-3 rounded bg-zinc-900/60 p-3 text-sm">
                 <p>
                   <span className="text-zinc-400">Last successful scan:</span>{' '}
                   <span className="font-medium">{fmtRelative(lastSuccess.ended_at)}</span>

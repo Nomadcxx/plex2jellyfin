@@ -75,7 +75,7 @@ export default function ActivityPage() {
             </p>
           </div>
           
-          <div className="flex items-center gap-3 bg-zinc-900/50 px-4 py-2 rounded-full border border-zinc-800">
+          <div className="flex items-center gap-3 bg-zinc-900/40 px-4 py-2 rounded-full border border-zinc-700/50">
             <span className="relative flex h-3 w-3">
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${pingColor} opacity-75`}></span>
               <span className={`relative inline-flex rounded-full h-3 w-3 ${badgeColor}`}></span>
@@ -86,7 +86,7 @@ export default function ActivityPage() {
 
         {/* Content Section */}
         {events.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 bg-zinc-900/30 rounded-lg border border-zinc-800/50 text-center min-h-[400px]">
+          <div className="vision-card-secondary flex flex-col items-center justify-center p-12 text-center min-h-[400px]">
             <div className="h-48 w-48 mb-6 relative">
               <Image
                 src="/illustrations/empty-activity.svg"
@@ -119,7 +119,7 @@ export default function ActivityPage() {
                   
                   {/* Event Card */}
                   <div className="flex-1 pt-2">
-                    <Card className="overflow-hidden border-zinc-800/60 bg-zinc-950/50 hover:bg-zinc-900/50 hover:border-zinc-700/80 transition-all duration-300 shadow-sm">
+                    <Card variant="secondary" className="overflow-hidden transition-colors duration-300 hover:border-amber-500/20">
                       <CardContent className="p-4 sm:p-5">
                         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                           <div className="space-y-1">
@@ -133,7 +133,7 @@ export default function ActivityPage() {
                             </p>
                           </div>
                           
-                          <div className="flex items-center text-sm font-medium text-zinc-500 bg-zinc-900 px-3 py-1 rounded-full whitespace-nowrap self-start">
+                          <div className="flex items-center text-sm font-medium text-zinc-500 bg-zinc-900/60 px-3 py-1 rounded-full whitespace-nowrap self-start">
                             {timeAgo(event.timestamp)}
                           </div>
                         </div>
@@ -149,7 +149,7 @@ export default function ActivityPage() {
                   type="button"
                   onClick={() => void loadOlder()}
                   disabled={isLoadingMore}
-                  className="px-4 py-2 text-sm font-medium rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 hover:text-zinc-100 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  className="px-4 py-2 text-sm font-medium rounded-md border border-zinc-700/50 bg-zinc-900/40 text-zinc-300 hover:text-zinc-100 hover:border-amber-500/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {isLoadingMore ? 'Loading…' : 'Load older events'}
                 </button>

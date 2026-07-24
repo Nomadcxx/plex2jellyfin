@@ -177,8 +177,8 @@ function JellyfinPageInner() {
               onClick={() => selectTab(key)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${
                 status === key
-                  ? 'bg-zinc-100 text-zinc-900 border-zinc-100'
-                  : 'bg-zinc-900 text-zinc-200 border-zinc-800 hover:border-zinc-600'
+                  ? 'bg-terminal-amber text-zinc-950 border-terminal-amber'
+                  : 'bg-zinc-900/40 text-zinc-300 border-zinc-700/50 hover:border-amber-500/30 hover:text-zinc-100'
               }`}
             >
               <Icon className="h-4 w-4" />
@@ -192,7 +192,7 @@ function JellyfinPageInner() {
           <select
             value={metadataState}
             onChange={(event) => setMetadataState(event.target.value as MetadataState | 'all')}
-            className="h-10 rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none transition-colors hover:border-zinc-600 focus:border-zinc-500"
+            className="h-10 rounded-md border border-zinc-700/50 bg-zinc-900/40 px-3 text-sm text-zinc-100 backdrop-blur-sm transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/30"
           >
             {METADATA_STATE_OPTIONS.map((option) => (
               <option key={option.value || 'unknown'} value={option.value}>
@@ -204,7 +204,7 @@ function JellyfinPageInner() {
             type="button"
             onClick={() => reconcileMutation.mutate()}
             disabled={reconcileMutation.isPending}
-            className="flex h-10 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-4 text-sm text-zinc-200 transition-colors hover:border-zinc-600 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-10 items-center gap-2 rounded-md border border-zinc-700/50 bg-zinc-900/40 px-4 text-sm text-zinc-200 transition-colors hover:border-amber-500/30 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshCw className={`h-4 w-4 ${reconcileMutation.isPending ? 'animate-spin' : ''}`} />
             <span>Reconcile</span>
@@ -213,14 +213,14 @@ function JellyfinPageInner() {
             type="button"
             onClick={() => repairVisibleMutation.mutate()}
             disabled={repairVisibleMutation.isPending || repairVisibleDecisionIds.length === 0}
-            className="flex h-10 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-4 text-sm text-zinc-200 transition-colors hover:border-zinc-600 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-10 items-center gap-2 rounded-md border border-zinc-700/50 bg-zinc-900/40 px-4 text-sm text-zinc-200 transition-colors hover:border-amber-500/30 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Wrench className="h-4 w-4" />
             <span>Repair visible rows</span>
           </button>
         </div>
 
-        <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
+        <div className="vision-card-secondary overflow-hidden">
           {isLoading ? (
             <div className="p-6 text-zinc-500">Loading…</div>
           ) : !visibleItems.length ? (
@@ -228,7 +228,7 @@ function JellyfinPageInner() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1120px] text-sm">
-                <thead className="bg-zinc-950 text-zinc-400">
+                <thead className="bg-zinc-950/60 text-zinc-400">
                   <tr>
                     <th className="text-left p-3">Title</th>
                     <th className="text-left p-3">Type</th>

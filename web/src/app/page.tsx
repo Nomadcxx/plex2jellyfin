@@ -31,7 +31,7 @@ export default function DashboardPage() {
             width={160}
             height={58}
             priority
-            className="h-auto w-[140px]"
+            className="h-auto w-[140px] md:hidden"
           />
           <h1 className="text-3xl font-bold">Dashboard</h1>
         </div>
@@ -70,7 +70,7 @@ export default function DashboardPage() {
                 value={formatBytes(data?.libraryStats?.totalSize || 0)}
                 icon={HardDrive}
               />
-              <Link href="/duplicates" className="block hover:opacity-80 transition-opacity">
+              <Link href="/duplicates" className="block rounded-xl transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950">
                 <StatCard
                   title="Duplicates"
                   value={duplicateGroups.toLocaleString()}
@@ -112,28 +112,28 @@ export default function DashboardPage() {
           </p>
           {jfId ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Link href="/jellyfin?status=identified" className="block hover:opacity-80 transition-opacity">
+              <Link href="/jellyfin?status=identified" className="block rounded-xl transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950">
                 <StatCard
                   title="Resolved"
                   value={`${jfId.resolved.toLocaleString()} / ${jfId.total.toLocaleString()}`}
                   icon={CheckCircle2}
                 />
               </Link>
-              <Link href="/jellyfin?status=identified" className="block hover:opacity-80 transition-opacity">
+              <Link href="/jellyfin?status=identified" className="block rounded-xl transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950">
                 <StatCard
                   title="Identified"
                   value={`${jfId.identified.toLocaleString()} (${(jfId.identified_pct_x10 / 10).toFixed(1)}%)`}
                   icon={CheckCircle2}
                 />
               </Link>
-              <Link href="/jellyfin?status=unidentified" className="block hover:opacity-80 transition-opacity">
+              <Link href="/jellyfin?status=unidentified" className="block rounded-xl transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950">
                 <StatCard
                   title="Unidentified"
                   value={jfId.unidentified.toLocaleString()}
                   icon={HelpCircle}
                 />
               </Link>
-              <Link href="/jellyfin?status=failed" className="block hover:opacity-80 transition-opacity">
+              <Link href="/jellyfin?status=failed" className="block rounded-xl transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950">
                 <StatCard
                   title="Failed"
                   value={jfId.failed_auto_label.toLocaleString()}
@@ -205,7 +205,7 @@ function SystemHealthBanner({
         {totalFiles.toLocaleString()} files · {formatBytes(totalSize)}
       </span>
       {daemonStatus?.version && (
-        <span className="font-mono text-xs text-zinc-600">v{daemonStatus.version}</span>
+        <span className="font-mono text-xs text-zinc-500">v{daemonStatus.version}</span>
       )}
     </div>
   );
@@ -229,7 +229,7 @@ function MostViewedList({ title, rows }: { title: string; rows?: JellystatRow[] 
             return (
               <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
                 <span className="text-zinc-200 truncate">
-                  <span className="text-zinc-600 mr-2">{i + 1}.</span>
+                  <span className="text-zinc-500 mr-2">{i + 1}.</span>
                   {mostViewedName(row)}
                 </span>
                 {plays != null && (
@@ -240,7 +240,7 @@ function MostViewedList({ title, rows }: { title: string; rows?: JellystatRow[] 
           })}
         </ol>
       ) : (
-        <p className="text-sm text-zinc-600">No plays recorded in the last 30 days.</p>
+        <p className="text-sm text-zinc-400">No plays recorded in the last 30 days.</p>
       )}
     </div>
   );
@@ -257,7 +257,7 @@ function JellystatSection() {
       <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
         <BarChart3 className="h-5 w-5 text-zinc-500" />
         Watch Statistics
-        <span className="text-xs font-normal text-zinc-600">via Jellystat, last 30 days</span>
+        <span className="text-xs font-normal text-zinc-500">via Jellystat, last 30 days</span>
       </h2>
       {data.error && (
         <Alert variant="destructive" className="mb-4">

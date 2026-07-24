@@ -19,8 +19,8 @@ export default function DuplicatesPage() {
       <AppShell>
         <div className="space-y-4">
           <h1 className="text-3xl font-bold">Duplicates</h1>
-          <div className="h-32 bg-zinc-900 rounded-lg animate-pulse" />
-          <div className="h-32 bg-zinc-900 rounded-lg animate-pulse" />
+          <div className="h-32 vision-card animate-pulse" />
+          <div className="h-32 vision-card animate-pulse" />
         </div>
       </AppShell>
     );
@@ -29,8 +29,8 @@ export default function DuplicatesPage() {
   if (error) {
     return (
       <AppShell>
-        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-          <p className="text-red-400">Failed to load duplicates</p>
+        <div className="p-4 bg-terminal-red/10 border border-terminal-red/30 rounded-lg">
+          <p className="text-terminal-red">Failed to load duplicates</p>
         </div>
       </AppShell>
     );
@@ -71,7 +71,7 @@ export default function DuplicatesPage() {
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as DuplicateSort)}
-              className="h-10 rounded-md border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100"
+              className="h-10 rounded-md border border-zinc-700/50 bg-zinc-900/40 px-3 text-sm text-zinc-100 backdrop-blur-sm transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/30"
               aria-label="Sort duplicates"
             >
               <option value="reclaimable">Most reclaimable</option>
@@ -82,7 +82,7 @@ export default function DuplicatesPage() {
         </div>
 
         {groups.length === 0 ? (
-          <div className="p-8 bg-zinc-900 rounded-lg border border-zinc-800 text-center">
+          <div className="vision-card-secondary p-8 text-center">
             <AlertTriangle className="h-12 w-12 text-zinc-600 mx-auto mb-4" />
             <p className="text-zinc-400">No duplicates found</p>
             <p className="text-sm text-zinc-500 mt-2">
@@ -90,7 +90,7 @@ export default function DuplicatesPage() {
             </p>
           </div>
         ) : visibleGroups.length === 0 ? (
-          <div className="rounded border border-zinc-800 bg-zinc-950/50 p-6 text-sm text-zinc-400">
+          <div className="vision-card-secondary p-6 text-sm text-zinc-400">
             No duplicate groups match the current filter.
           </div>
         ) : (
