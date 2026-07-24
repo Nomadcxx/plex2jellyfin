@@ -97,10 +97,10 @@ export function DuplicateGroup({ group }: DuplicateGroupProps) {
   };
 
   return (
-    <Card className="overflow-hidden group hover:border-zinc-700 transition-colors">
-      <CardHeader className="bg-zinc-900/50 pb-4 border-b border-zinc-800">
+    <Card className="overflow-hidden group transition-colors hover:border-amber-500/25">
+      <CardHeader className="bg-zinc-900/40 pb-4 border-b border-zinc-800/60">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-md bg-terminal-cyan/10 text-terminal-cyan">
+          <div className="p-2.5 rounded-md bg-terminal-amber/10 text-terminal-amber">
             {group.mediaType === 'movie' ? (
               <Film className="h-5 w-5" />
             ) : (

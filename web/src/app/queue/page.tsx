@@ -59,7 +59,7 @@ export default function QueuePage() {
           <div
             role="tablist"
             aria-label="Media manager"
-            className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1"
+            className="inline-flex items-center gap-1 vision-card-secondary p-1"
           >
             {queueManagers.map((m) => {
               const isActive = m.id === selectedManagerId;
@@ -73,7 +73,7 @@ export default function QueuePage() {
                   className={
                     'px-3 py-1.5 rounded-md text-sm font-medium transition ' +
                     (isActive
-                      ? 'bg-terminal-cyan/10 text-terminal-cyan'
+                      ? 'bg-terminal-amber/10 text-terminal-amber'
                       : 'text-zinc-400 hover:text-zinc-200')
                   }
                 >
@@ -88,7 +88,7 @@ export default function QueuePage() {
         )}
 
         {!managerId ? (
-          <div className="p-8 bg-zinc-900 rounded-lg border border-zinc-800 text-center">
+          <div className="vision-card-secondary p-8 text-center">
             <AlertTriangle className="h-12 w-12 text-zinc-600 mx-auto mb-4" />
             <p className="text-zinc-400">No active media manager</p>
             <p className="text-sm text-zinc-500 mt-2">
@@ -118,7 +118,7 @@ export default function QueuePage() {
 
             <TabsContent value="active" className="space-y-4">
               {queueLoading ? (
-                <div className="h-32 bg-zinc-900 rounded-lg animate-pulse" />
+                <div className="h-32 vision-card animate-pulse" />
               ) : queueError ? (
                 <Alert variant="destructive">
                   <AlertTriangle className="h-4 w-4" />
@@ -139,7 +139,7 @@ export default function QueuePage() {
 
             <TabsContent value="stuck" className="space-y-4">
               {stuckLoading ? (
-                <div className="h-32 bg-zinc-900 rounded-lg animate-pulse" />
+                <div className="h-32 vision-card animate-pulse" />
               ) : stuckError ? (
                 <Alert variant="destructive">
                   <AlertTriangle className="h-4 w-4" />

@@ -541,7 +541,7 @@ export default function SchedulerPage() {
                       onBlur={(e) => {
                         if (e.target.value !== j.schedule) updateJob(j.name, e.target.value, j.enabled);
                       }}
-                      className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm font-mono"
+                      className="bg-zinc-900/40 border border-zinc-700/50 rounded px-2 py-1 text-sm font-mono transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/30"
                     />
                     <Button
                       size="sm"
@@ -639,7 +639,7 @@ export default function SchedulerPage() {
               <select
                 value={kindFilter}
                 onChange={(e) => setKindFilter(e.target.value)}
-                className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm"
+                className="bg-zinc-900/40 border border-zinc-700/50 rounded px-2 py-1 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/30"
               >
                 <option value="">All kinds</option>
                 {allKinds.map((k) => (
@@ -652,8 +652,8 @@ export default function SchedulerPage() {
 
             {/* Bulk action bar (only when selection) */}
             {selectedIds.length > 0 && (
-              <div className="flex items-center gap-2 bg-zinc-900 border border-terminal-cyan/30 rounded px-3 py-2 text-sm">
-                <span className="text-terminal-cyan font-medium">{selectedIds.length} selected</span>
+              <div className="flex items-center gap-2 bg-zinc-900/60 border border-terminal-amber/30 rounded px-3 py-2 text-sm">
+                <span className="text-terminal-amber font-medium">{selectedIds.length} selected</span>
                 <div className="flex-1" />
                 <Button
                   size="sm"
@@ -740,7 +740,7 @@ export default function SchedulerPage() {
                         <tr
                           key={t.id}
                           className={`border-b border-zinc-900 hover:bg-zinc-900/40 ${
-                            isSelected ? 'bg-terminal-cyan/10' : ''
+                            isSelected ? 'bg-terminal-amber/10' : ''
                           }`}
                         >
                           <td className="p-2">
@@ -885,7 +885,7 @@ export default function SchedulerPage() {
 
       {/* Task detail modal */}
       <Dialog open={detail !== null} onOpenChange={(o) => { if (!o) { setDetail(null); setDetailGroup(null); } }}>
-        <DialogContent className="bg-zinc-900 border-zinc-800 max-w-3xl">
+        <DialogContent className="bg-zinc-950/90 backdrop-blur-xl border-amber-500/10 max-w-3xl">
           <DialogHeader>
             <DialogTitle>
               Task #{detail?.id} — {detail?.kind}
@@ -946,7 +946,7 @@ export default function SchedulerPage() {
                     </div>
                   )}
                   <table className="w-full text-xs border border-zinc-800 rounded">
-                    <thead className="bg-zinc-900 text-zinc-400">
+                    <thead className="bg-zinc-900/60 text-zinc-400">
                       <tr>
                         <th className="p-2 text-left">Action</th>
                         <th className="p-2 text-left">Path</th>

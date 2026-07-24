@@ -125,7 +125,7 @@ export default function DaemonPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Daemon</h1>
-      <Card className="border-zinc-800 bg-zinc-950/60">
+      <Card>
         <CardContent className="pt-6 space-y-2">
           <p className="flex items-center gap-2">
             <StatusDot state={status.state} />

@@ -35,7 +35,7 @@ export function Sidebar() {
     href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/');
 
   return (
-    <aside className="hidden w-60 vision-sidebar border-r border-zinc-800 h-screen p-4 md:flex md:flex-col">
+    <aside className="hidden w-60 vision-sidebar h-screen p-4 md:flex md:flex-col">
       <div className="mb-8 px-1">
         <Image
           src="/p2j-mark.png"

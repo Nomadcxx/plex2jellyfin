@@ -112,7 +112,7 @@ function TraceCard({ item }: { item: TraceItem }) {
     : item.source_path;
 
   return (
-    <Card className="border-zinc-800/60 bg-zinc-950/50">
+    <Card>
       <CardContent className="p-4 sm:p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <p className="font-mono text-sm text-zinc-100 break-all">{item.source_filename}</p>

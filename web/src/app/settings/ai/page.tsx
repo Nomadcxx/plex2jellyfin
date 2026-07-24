@@ -73,7 +73,7 @@ export default function AISettingsPage() {
         <p className="mt-1 text-sm text-zinc-400">Ollama model and AI enhancement settings.</p>
       </div>
 
-      <Card className="border-zinc-800 bg-zinc-950/60">
+      <Card>
         <CardHeader>
           <CardTitle>AI</CardTitle>
           <CardDescription>Ollama model and AI enhancement settings.</CardDescription>

@@ -83,7 +83,7 @@ function daemonDotColor(state?: string) {
     case 'interrupted':
       return 'bg-yellow-500';
     case 'stopped':
-      return 'bg-red-500';
+      return 'bg-terminal-red';
     default:
       return 'bg-zinc-500';
   }
@@ -103,7 +103,7 @@ function NavLink({
     <Link
       href={item.href}
       className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-        active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+        active ? 'vision-nav-active text-terminal-amber' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
       }`}
       aria-current={active ? 'page' : undefined}
     >
@@ -180,7 +180,7 @@ function SettingsMobileNav({ daemonState }: { daemonState?: string }) {
               key={item.href}
               href={item.href}
               className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs ${
-                active ? 'bg-zinc-800 text-terminal-cyan' : 'text-zinc-400'
+                active ? 'vision-nav-active text-terminal-amber' : 'text-zinc-400'
               }`}
               aria-current={active ? 'page' : undefined}
             >

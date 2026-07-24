@@ -49,7 +49,7 @@ export function PathListEditor({
   };
 
   return (
-    <Card className="border-zinc-800 bg-zinc-950/60">
+    <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>

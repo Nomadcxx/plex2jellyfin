@@ -9,7 +9,7 @@ const alertVariants = ({
   className?: string
 }) => {
   const variants = {
-    default: "bg-zinc-900 border-zinc-700 text-zinc-100",
+    default: "bg-zinc-900/60 border-zinc-700/60 text-zinc-100",
     destructive: "bg-terminal-red/10 border-terminal-red/30 text-terminal-red",
   }
   

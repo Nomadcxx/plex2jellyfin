@@ -96,12 +96,12 @@ export default function ConsolidationPage() {
       <AppShell>
         <div className="space-y-8 max-w-5xl mx-auto">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 bg-zinc-900 rounded-lg animate-pulse" />
-            <div className="h-8 w-48 bg-zinc-900 rounded animate-pulse" />
+            <div className="h-10 w-10 bg-zinc-900/60 rounded-lg animate-pulse" />
+            <div className="h-8 w-48 bg-zinc-900/60 rounded animate-pulse" />
           </div>
           <div className="space-y-6">
-            <div className="h-64 bg-zinc-900/50 rounded-md animate-pulse" />
-            <div className="h-64 bg-zinc-900/50 rounded-md animate-pulse" />
+            <div className="h-64 vision-card animate-pulse" />
+            <div className="h-64 vision-card animate-pulse" />
           </div>
         </div>
       </AppShell>
@@ -166,7 +166,7 @@ export default function ConsolidationPage() {
         </div>
 
         {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 bg-zinc-900/30 rounded-lg border border-zinc-800/50 text-center min-h-[400px]">
+          <div className="vision-card-secondary flex flex-col items-center justify-center p-12 text-center min-h-[400px]">
             <div className="h-48 w-48 mb-6 relative">
               <Image
                 src="/illustrations/empty-consolidation.svg"
@@ -227,7 +227,7 @@ export default function ConsolidationPage() {
                               <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Current Locations</p>
                               <div className="space-y-1.5">
                                 {item.locations?.map((loc, idx) => (
-                                  <div key={idx} className="flex items-center gap-2 text-sm text-zinc-400 font-mono bg-zinc-900 p-1.5 px-3 rounded">
+                                  <div key={idx} className="flex items-center gap-2 text-sm text-zinc-400 font-mono bg-zinc-900/60 p-1.5 px-3 rounded">
                                     <span className="text-rose-400 shrink-0">{"-"}</span>
                                     <span className="truncate">{loc}</span>
                                   </div>
