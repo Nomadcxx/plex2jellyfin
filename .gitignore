@@ -81,6 +81,7 @@ docs/audit/
 # Bug reports and session transcripts
 PLEX2JELLYFIN_BUG_REPORT_*.md
 2026-*.txt
+/AUDIT-*.md
 
 # Demo/experimental binaries
 demo-ui
