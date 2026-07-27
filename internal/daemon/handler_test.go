@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
 	"github.com/Nomadcxx/plex2jellyfin/internal/ai"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
@@ -18,6 +19,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/library"
 	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/notify"
 	"github.com/Nomadcxx/plex2jellyfin/internal/organizer"
 	"github.com/Nomadcxx/plex2jellyfin/internal/watcher"
 	"github.com/stretchr/testify/assert"
@@ -242,6 +244,46 @@ func TestHandleFileEventDebouncesOnNormalizedPath(t *testing.T) {
 	if _, exists := handler.pending["/watch/movies/movie.mkv"]; !exists {
 		t.Fatalf("expected normalized path key in pending map")
 	}
+}
+
+func TestMediaHandlerSameSourceSingleFlight(t *testing.T) {
+	handler := &MediaHandler{processing: make(map[string]struct{})}
+	path := filepath.Join(t.TempDir(), "release", "..", "episode.mkv")
+	cleanPath := filepath.Clean(path)
+
+	if !handler.beginProcessing(path) {
+		t.Fatal("first worker should claim the source path")
+	}
+	if handler.beginProcessing(cleanPath) {
+		t.Fatal("second worker should not claim the same normalized source path")
+	}
+
+	handler.finishProcessing(path)
+	if !handler.beginProcessing(cleanPath) {
+		t.Fatal("source path should be claimable after the first worker exits")
+	}
+	handler.finishProcessing(cleanPath)
+}
+
+func TestLogEntryTreatsAlreadyOrganizedAsSuccess(t *testing.T) {
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = activityLogger.Close() })
+
+	handler := &MediaHandler{activityLogger: activityLogger, logger: logging.Nop()}
+	handler.logEntry(&organizer.OrganizationResult{
+		Success:    false,
+		SourcePath: "/watch/show.mkv",
+		TargetPath: "/library/show.mkv",
+		Skipped:    true,
+		SkipReason: "already_organized",
+	}, notify.MediaTypeTVEpisode, "Show", nil, activity.MethodRegex, 0, time.Second, false, false)
+
+	entries, err := activityLogger.GetRecentEntries(1)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.True(t, entries[0].Success)
+	assert.Empty(t, entries[0].Error)
 }
 
 func TestProcessFile_SkipsUnpackPaths(t *testing.T) {

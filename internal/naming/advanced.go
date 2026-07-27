@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -801,9 +802,11 @@ func titleCaseWithOrdinals(s string) string {
 		s = strings.ReplaceAll(s, acr, placeholder)
 	}
 
-	// Apply title case (special symbols survive unchanged)
+	// Apply title case (special symbols survive unchanged).
+	preCase := s
 	caser := cases.Title(language.English)
 	s = caser.String(s)
+	s = applyStopwordCasing(preCase, s)
 
 	// Restore ordinals with lowercase suffix
 	for i, ord := range ordinals {
@@ -823,6 +826,62 @@ func titleCaseWithOrdinals(s string) string {
 	}
 
 	return s
+}
+
+var titleCaseStopwords = map[string]bool{
+	"a": true, "an": true, "and": true, "as": true, "at": true,
+	"but": true, "by": true, "for": true, "from": true, "in": true,
+	"into": true, "nor": true, "of": true, "on": true, "onto": true,
+	"or": true, "over": true, "the": true, "to": true, "up": true,
+	"via": true, "vs": true, "with": true,
+}
+
+func hasUpper(s string) bool {
+	for _, r := range s {
+		if unicode.IsUpper(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasLetter(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyStopwordCasing restores intentional mixed-case input and applies
+// English stopword casing to lowercase release names.
+//
+// ponytail: mixed-case release names remain source-authoritative because the
+// parser does not carry title provenance. Upgrade this when parsed and
+// authoritative titles have distinct normalization paths.
+func applyStopwordCasing(preCase, cased string) string {
+	orig := strings.Fields(preCase)
+	words := strings.Fields(cased)
+	if len(words) < 3 || len(orig) != len(words) {
+		return cased
+	}
+
+	informative := hasUpper(preCase)
+	for i := 1; i < len(words)-1; i++ {
+		if strings.ContainsRune(words[i], '\u00a7') || !titleCaseStopwords[strings.ToLower(words[i])] {
+			continue
+		}
+		if informative {
+			words[i] = orig[i]
+			continue
+		}
+		if strings.HasSuffix(words[i-1], ":") || !hasLetter(words[i-1]) {
+			continue
+		}
+		words[i] = strings.ToLower(words[i])
+	}
+	return strings.Join(words, " ")
 }
 
 // NormalizeName normalizes a media name for fuzzy matching

@@ -80,7 +80,7 @@ func (c *Client) GetItemsByIDs(ctx context.Context, ids []string) (*ItemsRespons
 	}
 	query := url.Values{}
 	query.Set("Ids", strings.Join(ids, ","))
-	query.Set("Fields", "Path,ProviderIds,SeriesId,ParentId,IndexNumber,ParentIndexNumber,Overview,ImageTags,PremiereDate")
+	query.Set("Fields", "Path,ProviderIds,SeriesId,SeriesName,ParentId,IndexNumber,ParentIndexNumber,Overview,ImageTags,PremiereDate")
 
 	var resp ItemsResponse
 	if err := c.getCtx(ctx, "/Items?"+query.Encode(), &resp); err != nil {

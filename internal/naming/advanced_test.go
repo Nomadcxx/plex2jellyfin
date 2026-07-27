@@ -11,11 +11,11 @@ func TestCleanMovieName(t *testing.T) {
 		expected string
 	}{
 		// Hyphen preservation
-		{"The.Count.of.Monte-Cristo.2024.WEB-DL.1080p.x264-GROUP", "The Count Of Monte-Cristo (2024)"},
+		{"The.Count.of.Monte-Cristo.2024.WEB-DL.1080p.x264-GROUP", "The Count of Monte-Cristo (2024)"},
 		{"Monte-Cristo.2024.1080p.BluRay.x264-RARBG", "Monte-Cristo (2024)"},
 
 		// Abbreviations
-		{"R.I.P.D.2.Rise.of.the.Damned.2022.1080p.BluRay.x264-GROUP", "R.I.P.D. 2 Rise Of The Damned (2022)"},
+		{"R.I.P.D.2.Rise.of.the.Damned.2022.1080p.BluRay.x264-GROUP", "R.I.P.D. 2 Rise of the Damned (2022)"},
 		{"D.E.B.S.2004.1080p.WEB-DL.AAC2.0.H.264", "D.E.B.S. (2004)"},
 		{"U.S.Marshals.1998.1080p.BluRay.x264-SPARKS", "U.S. Marshals (1998)"},
 
@@ -117,7 +117,7 @@ func TestParseMovieNameAdvanced(t *testing.T) {
 		// Simple parser handles most cases (hyphen converted to space is acceptable)
 		{"The.Count.of.Monte-Cristo.2024.WEB-DL.1080p.x264-GROUP.mkv", "The Count of Monte Cristo", "2024"},
 		// R.I.P.D. triggers advanced parser because simple parser produces garbage
-		{"R.I.P.D.2.Rise.of.the.Damned.2022.1080p.BluRay.x264-GROUP.mkv", "R.I.P.D. 2 Rise Of The Damned", "2022"},
+		{"R.I.P.D.2.Rise.of.the.Damned.2022.1080p.BluRay.x264-GROUP.mkv", "R.I.P.D. 2 Rise of the Damned", "2022"},
 		{"Blade.Runner.2049.2017.1080p.BluRay.x264.mkv", "Blade Runner 2049", "2017"},
 	}
 

@@ -94,6 +94,12 @@ auto_trigger_threshold = 0.6
 # jellyfin = "/movies"
 # daemon   = "/mnt/STORAGE2/MOVIES"
 
+# Optional TMDB direct-lookup tier for canonical movie-title correction.
+# Create a free API key at https://www.themoviedb.org/settings/api.
+[tmdb]
+enabled = true
+api_key = ""
+
 # Metadata recovery — passive classification + active repair of Jellyfin items.
 [metadata_recovery]
 # correction_enabled: when true, the reconciler enqueues a verifier_rename

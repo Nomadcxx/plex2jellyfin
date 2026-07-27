@@ -16,10 +16,10 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/ai"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/correction"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon"
 	daemonipc "github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	daemonreload "github.com/Nomadcxx/plex2jellyfin/internal/daemon/reload"
-	"github.com/Nomadcxx/plex2jellyfin/internal/correction"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/housekeeping"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
@@ -529,7 +529,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				}
 				return "", err
 			}
-			return item.Name, nil
+			return labelComparisonName(item), nil
 		})
 		labeler := labeling.NewRunner(db, fetcher)
 		startBackground("parse-decision labeler", func() {
@@ -701,6 +701,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 		// Wire verifier-driven movie name correction into the metadata reconciler.
 		if metadataReconciler != nil && cfg.MetadataRecovery.CorrectionEnabled {
+			if shouldWarnMissingTMDBCorrectionKey(cfg.MetadataRecovery.CorrectionEnabled, cfg.TMDB.APIKey) {
+				logger.Warn("daemon",
+					"movie name correction has no TMDB API key; direct canonical-title lookup is unavailable",
+					logging.F("fix", "set [tmdb] api_key in config.toml"))
+			}
 			metadataReconciler.SetCorrector(&correctorAdapter{c: correction.NewCorrector(hkVerifier)})
 			metadataReconciler.SetEnqueuer(&enqueuerAdapter{db: db})
 		}
@@ -824,6 +829,20 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		shutdownServices()
 		return nil
 	}
+}
+
+func labelComparisonName(item *jellyfin.Item) string {
+	if item == nil {
+		return ""
+	}
+	if strings.EqualFold(item.Type, "Episode") && strings.TrimSpace(item.SeriesName) != "" {
+		return item.SeriesName
+	}
+	return item.Name
+}
+
+func shouldWarnMissingTMDBCorrectionKey(correctionEnabled bool, apiKey string) bool {
+	return correctionEnabled && strings.TrimSpace(apiKey) == ""
 }
 
 func resolveHealthAddr(configured, flagValue string, flagChanged bool) string {

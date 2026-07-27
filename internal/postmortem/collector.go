@@ -271,7 +271,11 @@ func (c Collector) housekeeping() housekeepingSnapshot {
 func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousItem, []SuspiciousItem) {
 	suspicious := make([]SuspiciousItem, 0)
 	pathFalsePositives := make([]SuspiciousItem, 0)
-	targetSources := make(map[string]map[string]string)
+	type targetSource struct {
+		name   string
+		writes int
+	}
+	targetSources := make(map[string]map[string]targetSource)
 	for _, d := range decisions {
 		if d == nil {
 			continue
@@ -279,10 +283,13 @@ func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousI
 		if strings.EqualFold(strings.TrimSpace(d.OrganizeOutcome), "success") && strings.TrimSpace(d.TargetPath) != "" && strings.TrimSpace(d.SourcePath) != "" {
 			sources := targetSources[d.TargetPath]
 			if sources == nil {
-				sources = make(map[string]string)
+				sources = make(map[string]targetSource)
 				targetSources[d.TargetPath] = sources
 			}
-			sources[d.SourcePath] = d.SourceFilename
+			source := sources[d.SourcePath]
+			source.name = d.SourceFilename
+			source.writes++
+			sources[d.SourcePath] = source
 		}
 		name := strings.TrimSpace(d.ParsedTitle)
 		if name == "" && d.TargetPath != "" {
@@ -290,6 +297,11 @@ func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousI
 		}
 		if item := ClassifySuspiciousName(name, d.TargetPath); item.Category != "" {
 			suspicious = append(suspicious, item)
+		} else if d.TargetPath != "" {
+			visibleName := strings.TrimSuffix(filepath.Base(d.TargetPath), filepath.Ext(d.TargetPath))
+			if item := ClassifySuspiciousName(visibleName, d.TargetPath); item.Category != "" {
+				suspicious = append(suspicious, item)
+			}
 		}
 		if item := classifyParserDrift(d); item.Category != "" {
 			suspicious = append(suspicious, item)
@@ -309,13 +321,21 @@ func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousI
 		}
 	}
 	for target, sources := range targetSources {
-		if len(sources) < 2 {
+		totalWrites := 0
+		for _, source := range sources {
+			totalWrites += source.writes
+		}
+		if totalWrites < 2 {
 			continue
 		}
 		names := make([]string, 0, len(sources))
-		for source, name := range sources {
+		for path, source := range sources {
+			name := source.name
 			if strings.TrimSpace(name) == "" {
-				name = filepath.Base(source)
+				name = filepath.Base(path)
+			}
+			if source.writes > 1 {
+				name = fmt.Sprintf("%s (%d writes)", name, source.writes)
 			}
 			names = append(names, name)
 		}

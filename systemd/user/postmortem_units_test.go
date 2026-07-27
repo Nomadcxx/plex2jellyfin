@@ -21,7 +21,7 @@ func TestPostmortemUserUnits(t *testing.T) {
 
 	for _, want := range []string{
 		"WorkingDirectory=/home/nomadx/Documents/plex2jellyfin",
-		"ExecStart=/usr/local/bin/plex2jellyfin postmortem collect --since 96h",
+		"ExecStart=/usr/bin/plex2jellyfin postmortem collect --since 96h",
 		"ExecStartPost=/home/nomadx/Documents/plex2jellyfin/scripts/plex2jellyfin-postmortem-terminal.sh",
 	} {
 		if !strings.Contains(service, want) {

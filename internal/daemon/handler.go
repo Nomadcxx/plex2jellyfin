@@ -37,6 +37,7 @@ type MediaHandler struct {
 	movieWatchPaths  []string // Movie watch folders for source hint
 	debounceTime     time.Duration
 	pending          map[string]*time.Timer
+	processing       map[string]struct{}
 	transientRetries map[string]int
 	transientWarned  map[string]bool
 	seasonPackActive map[string]struct{}
@@ -355,6 +356,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		movieWatchPaths:   cfg.MovieWatchPaths,
 		debounceTime:      cfg.DebounceTime,
 		pending:           make(map[string]*time.Timer),
+		processing:        make(map[string]struct{}),
 		pendingGen:        make(map[string]int64),
 		transientRetries:  make(map[string]int),
 		transientWarned:   make(map[string]bool),
@@ -551,6 +553,8 @@ func (h *MediaHandler) logEntry(
 		target = result.TargetPath
 	}
 
+	activitySuccess := result.Success ||
+		(result.Skipped && result.SkipReason == "already_organized")
 	entry := activity.Entry{
 		Action:         "organize",
 		Source:         result.SourcePath,
@@ -560,14 +564,14 @@ func (h *MediaHandler) logEntry(
 		ParsedTitle:    parsedTitle,
 		ParsedYear:     parsedYear,
 		AIConfidence:   aiConf,
-		Success:        result.Success,
+		Success:        activitySuccess,
 		Bytes:          result.BytesCopied,
 		DurationMs:     duration.Milliseconds(),
 		SonarrNotified: sonarrNotified,
 		RadarrNotified: radarrNotified,
 	}
 
-	if !result.Success && result.Error != nil {
+	if !activitySuccess && result.Error != nil {
 		entry.Error = result.Error.Error()
 		if errors.Is(result.Error, naming.ErrParseFailed) || IsDeterministicUnparseable(entry.Error) {
 			entry.Deterministic = true
@@ -739,7 +743,35 @@ func hasNamedVideoSibling(path string) bool {
 	return false
 }
 
+func (h *MediaHandler) beginProcessing(path string) bool {
+	path = filepath.Clean(path)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.processing == nil {
+		h.processing = make(map[string]struct{})
+	}
+	if _, exists := h.processing[path]; exists {
+		return false
+	}
+	h.processing[path] = struct{}{}
+	return true
+}
+
+func (h *MediaHandler) finishProcessing(path string) {
+	h.mu.Lock()
+	delete(h.processing, filepath.Clean(path))
+	h.mu.Unlock()
+}
+
 func (h *MediaHandler) processFile(path string) {
+	path = filepath.Clean(path)
+	if !h.beginProcessing(path) {
+		h.logger.Debug("handler", "Skipping source path already being processed",
+			logging.F("path", path))
+		return
+	}
+	defer h.finishProcessing(path)
+
 	// Skip files still inside Sabnzbd's transient unpack staging folders.
 	// After extraction, Sabnzbd renames the folder and the watcher/scanner picks up the real path.
 	if isSABTransientUnpackPath(path) {

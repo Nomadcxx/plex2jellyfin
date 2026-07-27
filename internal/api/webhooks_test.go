@@ -370,6 +370,31 @@ func TestWebhookTestNotificationIsLoggedAndAccepted(t *testing.T) {
 	}
 }
 
+func TestHandleItemRemovedLogsSuccessfulEvent(t *testing.T) {
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	if err != nil {
+		t.Fatalf("activity.NewLogger() failed: %v", err)
+	}
+	defer activityLogger.Close()
+
+	s := &Server{activityLogger: activityLogger}
+	s.handleItemRemoved(jellyfin.WebhookEvent{
+		ItemPath: "/movies/Old Movie (2020)/Old Movie (2020).mkv",
+		ItemName: "Old Movie",
+	})
+
+	entries, err := activityLogger.GetRecentEntries(1)
+	if err != nil {
+		t.Fatalf("GetRecentEntries() failed: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one activity entry, got %d", len(entries))
+	}
+	if !entries[0].Success || entries[0].Error != "" {
+		t.Fatalf("removal event logged as failure: %+v", entries[0])
+	}
+}
+
 func TestHandleItemAdded_UpdatesParseDecision(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "api-decision.db")
 	db, err := database.OpenPath(dbPath)

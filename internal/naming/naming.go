@@ -72,7 +72,7 @@ func init() {
 		`\b(Blu[ .-]?Ray|BDRip|REMUX|WEB-DL|WEBDL|WEBRip|WEB|DCP)\b`,
 		`\b(HDTV|HDRip|DVDRip|DVD)\b`,
 		// Streaming rip sources (not release groups): Peacock=PCOK, etc.
-		`\b(AMZN|NF|ATVP|HULU|DSNP|HMAX|MAX|PCOK|PMTP|TOD)\b`,
+		`\b(AMZN|NF|ATVP|HULU|DSNP|HMAX|MAX|PCOK|PMTP|TOD|TUBI)\b`,
 		`\b[xh][ .]?26[45]\b`,
 		`\b(HEVC|AVC|AV1)\b`,
 		`\b(PROPER|REPACK|iNTERNAL|LIMITED|EXTENDED|REMASTERED|REMASTER|Up[ .-]?Scaled)\b`,
@@ -141,9 +141,8 @@ func parseMovieFromBaseName(baseName string) (*MovieInfo, error) {
 }
 
 func parseMovieSimple(baseName string) (*MovieInfo, error) {
-	cleaned := stripReleaseMarkers(baseName)
-
 	year := extractYear(baseName)
+	cleaned := stripReleaseMarkers(truncateMovieReleaseTail(baseName, year))
 
 	if year != "" {
 		cleaned = removeYear(cleaned, year)
@@ -160,6 +159,35 @@ func parseMovieSimple(baseName string) (*MovieInfo, error) {
 		Title: cleaned,
 		Year:  year,
 	}, nil
+}
+
+// truncateMovieReleaseTail drops everything after the selected release year
+// when the remaining suffix contains an unambiguous quality marker. This
+// removes metadata that is unsafe to strip as a global word, such as "Hybrid"
+// and the two-letter language tag "iT", without damaging those words in a
+// title before the year.
+func truncateMovieReleaseTail(baseName, year string) string {
+	if year == "" {
+		return baseName
+	}
+
+	matches := yearRegex.FindAllStringIndex(baseName, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		match := matches[i]
+		if baseName[match[0]:match[1]] != year {
+			continue
+		}
+
+		suffixStart := match[1]
+		if suffixStart < len(baseName) && (baseName[suffixStart] == ')' || baseName[suffixStart] == ']') {
+			suffixStart++
+		}
+		if qualityMarkerDetect.MatchString(baseName[suffixStart:]) {
+			return strings.TrimRight(baseName[:match[0]], " ._-([")
+		}
+		break
+	}
+	return baseName
 }
 
 func parseMovieAdvanced(baseName string) (*MovieInfo, error) {
@@ -362,7 +390,7 @@ var qualityMarkerDetect = regexp.MustCompile(`(?i)(x264|x265|h264|h265|hevc|avc|
 // episodeTitleStopToken marks tokens that begin the release-metadata tail of a
 // filename (quality, source, codec, audio). Episode-title extraction stops at
 // the first such token.
-var episodeTitleStopToken = regexp.MustCompile(`(?i)^(480p|720p|1080p|2160p|4k|uhd|web|web-dl|webdl|webrip|hdtv|bluray|blu-ray|bdrip|remux|dsnp|nf|amzn|hulu|max|atvp|pcok|dvdrip|repack|proper|internal|limited|extended|uncut|multi|10bit|8bit|hdr|hdr10|dv|x264|x265|h264|h265|hevc|avc|aac|aac2|ac3|eac3|ddp|dd5|dts|truehd|atmos)$`)
+var episodeTitleStopToken = regexp.MustCompile(`(?i)^(480p|720p|1080p|2160p|4k|uhd|web|web-dl|webdl|webrip|hdtv|bluray|blu-ray|bdrip|remux|dsnp|nf|amzn|hulu|max|atvp|pcok|tubi|dvdrip|repack|proper|internal|limited|extended|uncut|multi|10bit|8bit|hdr|hdr10|dv|x264|x265|h264|h265|hevc|avc|aac|aac2|ac3|eac3|ddp|dd5|dts|truehd|atmos)$`)
 
 // episodeTitleYearToken matches a standalone year token. A bare year in the
 // tail after the episode marker is release metadata (see the parser rule that

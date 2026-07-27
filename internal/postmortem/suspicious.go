@@ -48,6 +48,8 @@ var pollutedMarkers = []string{
 	"ATVP",
 	"MAX",
 	"PCOK",
+	"TUBI",
+	"Hybrid",
 	"iT",
 	"VOSTFR",
 	"DCPRIP",

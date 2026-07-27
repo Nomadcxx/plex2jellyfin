@@ -51,7 +51,7 @@ func TestGetItemsByIDsUsesSingleRequest(t *testing.T) {
 		require.Equal(t, http.MethodGet, r.Method)
 		require.Equal(t, "/Items", r.URL.Path)
 		require.Equal(t, "id1,id2", r.URL.Query().Get("Ids"))
-		require.Equal(t, "Path,ProviderIds,SeriesId,ParentId,IndexNumber,ParentIndexNumber,Overview,ImageTags,PremiereDate", r.URL.Query().Get("Fields"))
+		require.Equal(t, "Path,ProviderIds,SeriesId,SeriesName,ParentId,IndexNumber,ParentIndexNumber,Overview,ImageTags,PremiereDate", r.URL.Query().Get("Fields"))
 
 		response := ItemsResponse{
 			Items: []Item{

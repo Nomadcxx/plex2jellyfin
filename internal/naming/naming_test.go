@@ -136,6 +136,34 @@ func TestParseMovieName(t *testing.T) {
 			wantErr:   false,
 		},
 		{
+			name:      "Truncates release metadata after movie year",
+			input:     "The.Mandalorian.and.Grogu.2026.2160p.HDR10.DV.Hybrid.iT.Webrip.x265.10bit.EAC3.5.1.Atmos-Goki-TAoE.mkv",
+			wantTitle: "The Mandalorian and Grogu",
+			wantYear:  "2026",
+			wantErr:   false,
+		},
+		{
+			name:      "Truncates retail subtitle metadata after movie year",
+			input:     "Masters.of.the.Universe.2026.RETAIL.DKSUBS.1080p.WEB-DL.x264-GROUP.mkv",
+			wantTitle: "Masters of the Universe",
+			wantYear:  "2026",
+			wantErr:   false,
+		},
+		{
+			name:      "Preserves two letter word before movie year",
+			input:     "The.Half.of.It.2020.1080p.WEB-DL.x264-GROUP.mkv",
+			wantTitle: "The Half of It",
+			wantYear:  "2020",
+			wantErr:   false,
+		},
+		{
+			name:      "Preserves release-like word before movie year",
+			input:     "Hybrid.2007.1080p.WEB-DL.x264-GROUP.mkv",
+			wantTitle: "Hybrid",
+			wantYear:  "2007",
+			wantErr:   false,
+		},
+		{
 			name:      "Preserves all as title word",
 			input:     "Bones.And.All.2022.2160p.4K.WEB.x265.10bit.AAC5.1-YTS.MX.mkv",
 			wantTitle: "Bones And All",
@@ -690,6 +718,7 @@ func TestParseTVShowExtractsEpisodeTitle(t *testing.T) {
 		{"The.New.Adventures.S03E05.Whats.the.Score.Pooh.1080p.DSNP.WEB-DL.AAC2.0.x264-AndreMor.mkv", "Whats the Score Pooh"},
 		{"Show.S01E03.Maximum.Effort.1080p.WEB.mkv", "Maximum Effort"},
 		{"Show.S01E04.Properly.Done.1080p.WEB.mkv", "Properly Done"},
+		{"Breaking.Bear.S01E01.TUBI.WEB.H264-DARK.mp4", ""},
 		// A bare year after the episode marker is release metadata, never an
 		// episode title (matches the parser's post-marker-year rule).
 		{"Upload.S04E03.2025.1080p.Amazon.WEB-DL.AVC.DDP.5.1-DBTV.mkv", ""},

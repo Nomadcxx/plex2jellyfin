@@ -37,7 +37,7 @@ func TestParseMovieNameChainedReleaseGroups(t *testing.T) {
 	}{
 		{"2.Guns.2013.1080p.BluRay.x264-SPARKS-postbot.mkv", "2 Guns", "2013"},
 		{"Sinister.2012.720p.BluRay.x264-AMIABLE-WhiteRevtmp.mkv", "Sinister", "2012"},
-		{"masters.of.the.universe.2026.720p.vostfr.dcprip.h264-jff.mkv", "Masters Of The Universe", "2026"},
+		{"masters.of.the.universe.2026.720p.vostfr.dcprip.h264-jff.mkv", "Masters of the Universe", "2026"},
 		{"The.Sheep.Detectives.2026.2160p.AMZN.WEB-DL.DV.HDR10+.MULTi-Ben.The.Men.mp4", "The Sheep Detectives", "2026"},
 	}
 

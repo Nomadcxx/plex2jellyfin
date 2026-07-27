@@ -45,6 +45,13 @@ func TestClassifySuspiciousNameFlagsHDRipToken(t *testing.T) {
 	}
 }
 
+func TestClassifySuspiciousNameFlagsTUBIToken(t *testing.T) {
+	got := ClassifySuspiciousName("Breaking Bear S01E01 - TUBI", "")
+	if got.Category != "polluted_name" || got.Marker != "TUBI" {
+		t.Fatalf("got %#v, want TUBI polluted_name", got)
+	}
+}
+
 func TestClassifyPathTranslationMismatch(t *testing.T) {
 	got := ClassifyPathMismatch("/mnt/STORAGE5/TVSHOWS/The Daily Show/file.mkv", "/tv5/The Daily Show/file.mkv")
 	if got.Category != "path_translation_false_positive" {
@@ -114,4 +121,44 @@ func TestSuspiciousFromDecisionsFlagsTargetCollision(t *testing.T) {
 	if suspicious[0].Path != target {
 		t.Fatalf("Path = %q, want %q", suspicious[0].Path, target)
 	}
+}
+
+func TestSuspiciousFromDecisionsFlagsRepeatedSameSourceWrite(t *testing.T) {
+	source := "/downloads/Seeking.Persephone.S01E04/Seeking.Persephone.S01E04.mkv"
+	target := "/mnt/STORAGE4/TVSHOWS/Seeking Persephone/Season 01/Seeking Persephone S01E04.mkv"
+	decision := database.ParseDecision{
+		SourcePath:       source,
+		SourceFilename:   "Seeking.Persephone.S01E04.mkv",
+		MediaTypeGuessed: "tv",
+		ParsedTitle:      "Seeking Persephone",
+		ParsedSeason:     intPtr(1),
+		ParsedEpisode:    intPtr(4),
+		TargetPath:       target,
+		OrganizeOutcome:  "success",
+	}
+
+	suspicious, _ := suspiciousFromDecisions([]*database.ParseDecision{&decision, &decision})
+	if len(suspicious) != 1 || suspicious[0].Category != "target_collision" {
+		t.Fatalf("suspicious = %#v, want repeated target_collision", suspicious)
+	}
+}
+
+func TestSuspiciousFromDecisionsChecksVisibleTargetName(t *testing.T) {
+	suspicious, _ := suspiciousFromDecisions([]*database.ParseDecision{{
+		SourcePath:       "/downloads/Breaking.Bear.S01E01.TUBI.WEB.H264-DARK.mp4",
+		SourceFilename:   "Breaking.Bear.S01E01.TUBI.WEB.H264-DARK.mp4",
+		MediaTypeGuessed: "tv",
+		ParsedTitle:      "Breaking Bear",
+		ParsedSeason:     intPtr(1),
+		ParsedEpisode:    intPtr(1),
+		TargetPath:       "/mnt/STORAGE4/TVSHOWS/Breaking Bear/Season 01/Breaking Bear S01E01 - TUBI.mp4",
+		OrganizeOutcome:  "success",
+	}})
+	if len(suspicious) != 1 || suspicious[0].Marker != "TUBI" {
+		t.Fatalf("suspicious = %#v, want visible TUBI pollution", suspicious)
+	}
+}
+
+func intPtr(v int) *int {
+	return &v
 }

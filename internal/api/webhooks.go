@@ -183,13 +183,18 @@ func (s *Server) handleItemUpdated(event jellyfin.WebhookEvent) {
 }
 
 // handleItemRemoved clears Jellyfin resolution on the matching parse_decision
-// and flags identified=0. A removal of a file we organized is a strong signal
-// something went wrong (NFO mismatch, duplicate detection, manual cleanup).
+// and flags identified=0. The event itself is successful when it is accepted
+// and persisted; expected replacement scans remove old Jellyfin rows too.
 func (s *Server) handleItemRemoved(event jellyfin.WebhookEvent) {
 	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
 
 	if s.db != nil && path != "" {
-		if dec, err := s.db.GetDecisionByTargetPath(path); err == nil && dec != nil {
+		dec, err := s.db.GetDecisionByTargetPath(path)
+		if err != nil {
+			s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, false, err.Error())
+			return
+		}
+		if dec != nil {
 			if clearErr := s.db.ClearOutcome(dec.ID); clearErr != nil {
 				s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, false, clearErr.Error())
 				return
@@ -197,8 +202,7 @@ func (s *Server) handleItemRemoved(event jellyfin.WebhookEvent) {
 		}
 	}
 
-	s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, false,
-		"jellyfin removed item that plex2jellyfin organized")
+	s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, true, "")
 }
 
 func (s *Server) handleTaskCompleted(event jellyfin.WebhookEvent) {
