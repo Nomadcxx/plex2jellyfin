@@ -50,7 +50,6 @@ var pollutedMarkers = []string{
 	"PCOK",
 	"TUBI",
 	"Hybrid",
-	"iT",
 	"VOSTFR",
 	"DCPRIP",
 	"HDLight",

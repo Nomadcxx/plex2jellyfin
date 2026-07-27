@@ -23,6 +23,7 @@ func TestClassifySuspiciousNameDoesNotMatchMarkersInsideWords(t *testing.T) {
 		"Maximum Pleasure Guaranteed",
 		"My Adventures with Superman",
 		"Last Week Tonight with John Oliver",
+		"Project Runway S22E03 - In It to Win It",
 	}
 
 	for _, name := range tests {
