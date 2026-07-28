@@ -3,6 +3,7 @@ package transfer
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -26,6 +27,21 @@ func TestRsyncTransfererInterface(t *testing.T) {
 	}
 	if !tr.CanResume() {
 		t.Error("rsync should support resume")
+	}
+}
+
+func TestRsyncMoveDoesNotDeleteSourceBeforeAtomicPublish(t *testing.T) {
+	tr := NewRsyncTransferer("/usr/bin/rsync")
+	if args := tr.buildArgs(DefaultOptions()); slices.Contains(args, "--remove-source-files") {
+		t.Fatalf("rsync move deletes the source before Plex2Jellyfin publishes the final name: %v", args)
+	}
+	dst := filepath.Join("/library", "Movie (2026)", "Movie (2026).mkv")
+	staged := tr.stagingPath("/downloads/release-a/movie.mkv", dst)
+	if filepath.Ext(staged) == filepath.Ext(dst) || filepath.Dir(staged) != filepath.Dir(dst) {
+		t.Fatalf("staging path %q must be non-media in the destination directory", staged)
+	}
+	if other := tr.stagingPath("/downloads/release-b/movie.mkv", dst); other == staged {
+		t.Fatalf("different sources share staging path %q", staged)
 	}
 }
 

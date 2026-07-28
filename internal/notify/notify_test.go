@@ -86,7 +86,14 @@ func TestManagerNotifyAsync(t *testing.T) {
 		t.Error("async notify should return nil")
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case result := <-mgr.Results():
+		if !result.Success {
+			t.Fatalf("async notification failed: %v", result.Error)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for async notification")
+	}
 
 	if notifier.notifyCalls != 1 {
 		t.Errorf("expected 1 notify call, got %d", notifier.notifyCalls)

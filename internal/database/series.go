@@ -152,6 +152,18 @@ func (m *MediaDB) UpsertSeries(s *Series) (shouldUpdateExternal bool, err error)
 				if err != nil {
 					return false, err
 				}
+			} else {
+				_, err = m.db.Exec(`
+					UPDATE series SET
+						tvdb_id = COALESCE(?, tvdb_id),
+						imdb_id = COALESCE(?, imdb_id),
+						sonarr_id = COALESCE(?, sonarr_id)
+					WHERE id = ?`,
+					s.TvdbID, s.ImdbID, s.SonarrID, existingID,
+				)
+				if err != nil {
+					return false, err
+				}
 			}
 
 			s.ID = existingID
@@ -239,8 +251,20 @@ func (m *MediaDB) UpsertSeries(s *Series) (shouldUpdateExternal bool, err error)
 			return true, nil
 		}
 	} else {
-		// Lower priority - don't update but set ID
+		// Lower-priority sources may identify the canonical row, but never own it.
+		_, err = m.db.Exec(`
+			UPDATE series SET
+				tvdb_id = COALESCE(?, tvdb_id),
+				imdb_id = COALESCE(?, imdb_id),
+				sonarr_id = COALESCE(?, sonarr_id)
+			WHERE id = ?`,
+			s.TvdbID, s.ImdbID, s.SonarrID, existingID,
+		)
+		if err != nil {
+			return false, err
+		}
 		s.ID = existingID
+		return s.SonarrID != nil && s.CanonicalPath != existingPath, nil
 	}
 
 	return false, nil

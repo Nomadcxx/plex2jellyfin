@@ -2,8 +2,11 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -229,6 +232,126 @@ func TestSyncFromRadarrMock(t *testing.T) {
 	err := svc.RunFullSync(context.Background())
 	if err != nil {
 		t.Errorf("expected nil error when Radarr not configured, got %v", err)
+	}
+}
+
+func TestSyncFromRadarr_ReconcilesCanonicalPathWithoutImport(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	canonical := &database.Movie{
+		Title:          "Canonical Movie",
+		Year:           2026,
+		CanonicalPath:  "/media/Canonical Movie (2026)",
+		LibraryRoot:    "/media",
+		Source:         "filesystem",
+		SourcePriority: 50,
+	}
+	if _, err := db.UpsertMovie(canonical); err != nil {
+		t.Fatalf("insert canonical movie: %v", err)
+	}
+
+	var putPath, commandName string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		movie := radarr.Movie{ID: 42, Title: canonical.Title, Year: canonical.Year, TmdbID: 1234, Path: "/radarr/Canonical Movie (2026)"}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/movie":
+			_ = json.NewEncoder(w).Encode([]radarr.Movie{movie})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/movie/42":
+			_ = json.NewEncoder(w).Encode(movie)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v3/movie/42":
+			var updated radarr.Movie
+			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+				t.Errorf("decode Radarr update: %v", err)
+			}
+			putPath = updated.Path
+			_ = json.NewEncoder(w).Encode(updated)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/command":
+			var command map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&command); err != nil {
+				t.Errorf("decode Radarr command: %v", err)
+			}
+			commandName, _ = command["name"].(string)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	svc := NewSyncService(SyncConfig{
+		DB:     db,
+		Radarr: radarr.NewClient(radarr.Config{URL: server.URL}),
+		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	})
+	if err := svc.SyncFromRadarr(context.Background()); err != nil {
+		t.Fatalf("sync Radarr: %v", err)
+	}
+	if putPath != canonical.CanonicalPath {
+		t.Fatalf("Radarr path = %q, want %q", putPath, canonical.CanonicalPath)
+	}
+	if commandName != "RescanMovie" {
+		t.Fatalf("Radarr command = %q, want RescanMovie", commandName)
+	}
+}
+
+func TestSyncFromSonarr_ReconcilesCanonicalPathWithoutImport(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	canonical := &database.Series{
+		Title:          "Canonical Series",
+		Year:           2026,
+		CanonicalPath:  "/tv/Canonical Series (2026)",
+		LibraryRoot:    "/tv",
+		Source:         "filesystem",
+		SourcePriority: 50,
+	}
+	if _, err := db.UpsertSeries(canonical); err != nil {
+		t.Fatalf("insert canonical series: %v", err)
+	}
+
+	var putPath, commandName string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		series := sonarr.Series{ID: 42, Title: canonical.Title, Year: canonical.Year, TvdbID: 1234, Path: "/sonarr/Canonical Series (2026)"}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/series":
+			_ = json.NewEncoder(w).Encode([]sonarr.Series{series})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/series/42":
+			_ = json.NewEncoder(w).Encode(series)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v3/series/42":
+			var updated sonarr.Series
+			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+				t.Errorf("decode Sonarr update: %v", err)
+			}
+			putPath = updated.Path
+			_ = json.NewEncoder(w).Encode(updated)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/command":
+			var command map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&command); err != nil {
+				t.Errorf("decode Sonarr command: %v", err)
+			}
+			commandName, _ = command["name"].(string)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	svc := NewSyncService(SyncConfig{
+		DB:     db,
+		Sonarr: sonarr.NewClient(sonarr.Config{URL: server.URL}),
+		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	})
+	if err := svc.SyncFromSonarr(context.Background()); err != nil {
+		t.Fatalf("sync Sonarr: %v", err)
+	}
+	if putPath != canonical.CanonicalPath {
+		t.Fatalf("Sonarr path = %q, want %q", putPath, canonical.CanonicalPath)
+	}
+	if commandName != "RescanSeries" {
+		t.Fatalf("Sonarr command = %q, want RescanSeries", commandName)
 	}
 }
 

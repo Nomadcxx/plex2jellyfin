@@ -47,12 +47,12 @@ func CheckSonarrConfig(client *sonarr.Client) ([]HealthIssue, error) {
 	if err != nil {
 		return nil, fmt.Errorf("checking sonarr naming config: %w", err)
 	}
-	if !nameCfg.RenameEpisodes {
+	if nameCfg.RenameEpisodes {
 		issues = append(issues, HealthIssue{
 			Service:  "sonarr",
 			Setting:  "renameEpisodes",
-			Current:  "false",
-			Expected: "true",
+			Current:  "true",
+			Expected: "false",
 			Severity: "warning",
 			FixCmd:   "plex2jellyfin health --fix",
 		})
@@ -84,12 +84,12 @@ func CheckRadarrConfig(client *radarr.Client) ([]HealthIssue, error) {
 	if err != nil {
 		return nil, fmt.Errorf("checking radarr naming config: %w", err)
 	}
-	if !nameCfg.RenameMovies {
+	if nameCfg.RenameMovies {
 		issues = append(issues, HealthIssue{
 			Service:  "radarr",
 			Setting:  "renameMovies",
-			Current:  "false",
-			Expected: "true",
+			Current:  "true",
+			Expected: "false",
 			Severity: "warning",
 			FixCmd:   "plex2jellyfin health --fix",
 		})
@@ -131,12 +131,12 @@ func FixSonarrIssues(client *sonarr.Client, issues []HealthIssue, dryRun bool) (
 			if err != nil {
 				return fixed, err
 			}
-			cfg.RenameEpisodes = true
+			cfg.RenameEpisodes = false
 			if err := client.UpdateNamingConfig(cfg); err != nil {
 				return fixed, fmt.Errorf("fixing %s: %w", issue.Setting, err)
 			}
 			fixed = append(fixed, issue)
-			slog.Info("fixed", "service", "sonarr", "setting", issue.Setting, "value", true)
+			slog.Info("fixed", "service", "sonarr", "setting", issue.Setting, "value", false)
 		}
 	}
 
@@ -176,12 +176,12 @@ func FixRadarrIssues(client *radarr.Client, issues []HealthIssue, dryRun bool) (
 			if err != nil {
 				return fixed, err
 			}
-			cfg.RenameMovies = true
+			cfg.RenameMovies = false
 			if err := client.UpdateNamingConfig(cfg); err != nil {
 				return fixed, fmt.Errorf("fixing %s: %w", issue.Setting, err)
 			}
 			fixed = append(fixed, issue)
-			slog.Info("fixed", "service", "radarr", "setting", issue.Setting, "value", true)
+			slog.Info("fixed", "service", "radarr", "setting", issue.Setting, "value", false)
 		}
 	}
 

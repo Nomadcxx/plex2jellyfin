@@ -25,7 +25,7 @@ func newHealthCmd() *cobra.Command {
 
 Checks:
   - enableCompletedDownloadHandling should be false (plex2jellyfin manages imports)
-  - renameEpisodes/renameMovies should be true (canonical naming)
+  - renameEpisodes/renameMovies should be false (plex2jellyfin owns naming)
 
 Examples:
   plex2jellyfin health                    # Check configuration

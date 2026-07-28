@@ -451,7 +451,7 @@ function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest,
   return (
     <div className="divide-y divide-zinc-800 border-y border-zinc-800">
       <p className="pb-5 text-sm text-zinc-400">
-        Optional. Connect Sonarr/Radarr so completed downloads can be imported with the right quality profile behavior, and Jellyfin for library refresh plus the companion plugin feedback loop. When Jellyfin runs in Docker (or any bind mount), configure path mappings so webhook paths match host library roots — see{' '}
+        Optional. Connect Sonarr/Radarr for download scheduling and path rescans. Plex2Jellyfin keeps the final path and naming. Connect Jellyfin for scoped library updates and the companion plugin feedback loop. When Jellyfin runs in Docker or another bind mount, configure path mappings so webhook paths match host library roots. See{' '}
         <a className="text-amber-400 underline decoration-amber-400/40 underline-offset-2 hover:text-amber-300" href="https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/path-mappings/" target="_blank" rel="noreferrer">
           path mappings guide
         </a>
@@ -647,7 +647,7 @@ function RuntimeStep({ draft, setDraft, setChecks, runtime, uid, gid }: {
         <fieldset className="border border-zinc-800 p-4">
           <legend className="px-2 font-mono text-sm text-zinc-300">Transferred file ownership</legend>
           <p className="mb-3 text-xs leading-relaxed text-zinc-500">
-            Group is the critical setting: Sonarr, Radarr, and Jellyfin need a shared group (and group-writable modes) to rename/upgrade/delete after import. Recommended: group=media (or jellyfin), file_mode=0664, dir_mode=0775.
+            Plex2Jellyfin and Jellyfin need a shared group for library updates and cleanup. Recommended: group=media (or jellyfin), file_mode=0664, dir_mode=0775.
           </p>
           <div className="grid gap-4 sm:grid-cols-2"><LabeledInput label="User" value={draft.runtime.permissions.user} onChange={(user) => updatePermissions({ user })} placeholder="jellyfin" /><LabeledInput label="Group" value={draft.runtime.permissions.group} onChange={(group) => updatePermissions({ group })} placeholder="media" /><LabeledInput label="File mode" value={draft.runtime.permissions.file_mode} onChange={(file_mode) => updatePermissions({ file_mode })} placeholder="0664" /><LabeledInput label="Directory mode" value={draft.runtime.permissions.dir_mode} onChange={(dir_mode) => updatePermissions({ dir_mode })} placeholder="0775" /></div>
         </fieldset>

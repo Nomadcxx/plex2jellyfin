@@ -159,8 +159,20 @@ func (m *MediaDB) UpsertMovie(mov *Movie) (shouldUpdateExternal bool, err error)
 			return true, nil
 		}
 	} else {
-		// Lower priority - don't update but set ID
+		// Lower-priority sources may identify the canonical row, but never own it.
+		_, err = m.db.Exec(`
+			UPDATE movies SET
+				tmdb_id = COALESCE(?, tmdb_id),
+				imdb_id = COALESCE(?, imdb_id),
+				radarr_id = COALESCE(?, radarr_id)
+			WHERE id = ?`,
+			mov.TmdbID, mov.ImdbID, mov.RadarrID, existingID,
+		)
+		if err != nil {
+			return false, err
+		}
 		mov.ID = existingID
+		return mov.RadarrID != nil && mov.CanonicalPath != existingPath, nil
 	}
 
 	return false, nil

@@ -7,7 +7,7 @@ import (
 
 func TestBuildArgsAddsNoTimesByDefault(t *testing.T) {
 	r := &RsyncTransferer{}
-	args := r.buildArgs(TransferOptions{}, false)
+	args := r.buildArgs(TransferOptions{})
 	if !slices.Contains(args, "--no-times") {
 		t.Fatalf("expected --no-times in default args, got %v", args)
 	}
@@ -15,7 +15,7 @@ func TestBuildArgsAddsNoTimesByDefault(t *testing.T) {
 
 func TestBuildArgsOmitsNoTimesWhenPreserveTimes(t *testing.T) {
 	r := &RsyncTransferer{}
-	args := r.buildArgs(TransferOptions{PreserveTimes: true}, false)
+	args := r.buildArgs(TransferOptions{PreserveTimes: true})
 	if slices.Contains(args, "--no-times") {
 		t.Fatalf("expected no --no-times when PreserveTimes=true, got %v", args)
 	}

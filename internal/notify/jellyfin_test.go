@@ -24,17 +24,13 @@ func jsonResponse(status int, body string) *http.Response {
 func TestJellyfinNotifierTargetedRefresh(t *testing.T) {
 	n := NewJellyfinNotifier("http://jf.local", "key", true)
 
-	var calledSearch bool
-	var calledItemRefresh bool
+	var calledMediaUpdate bool
 	var calledLibraryRefresh bool
 
 	n.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
-		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/Items"):
-			calledSearch = true
-			return jsonResponse(200, `{"Items":[{"Id":"it-1","Name":"The Matrix","Path":"/library/Movies/The Matrix (1999)/The Matrix (1999).mkv","ProductionYear":1999}]}`), nil
-		case req.Method == http.MethodPost && req.URL.Path == "/Items/it-1/Refresh":
-			calledItemRefresh = true
+		case req.Method == http.MethodPost && req.URL.Path == "/Library/Media/Updated":
+			calledMediaUpdate = true
 			return jsonResponse(204, ``), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/Library/Refresh":
 			calledLibraryRefresh = true
@@ -54,23 +50,33 @@ func TestJellyfinNotifierTargetedRefresh(t *testing.T) {
 	if !res.Success {
 		t.Fatalf("expected success, got error: %v", res.Error)
 	}
-	if !calledSearch || !calledItemRefresh {
-		t.Fatalf("expected search and item refresh calls")
+	if !calledMediaUpdate {
+		t.Fatal("expected scoped media update")
 	}
 	if calledLibraryRefresh {
-		t.Fatalf("did not expect library refresh fallback")
+		t.Fatal("did not expect library refresh")
 	}
 }
 
-func TestJellyfinNotifierFallsBackToLibraryRefresh(t *testing.T) {
+func TestJellyfinNotifierNotifiesOnlyCommittedFolder(t *testing.T) {
 	n := NewJellyfinNotifier("http://jf.local", "key", true)
 
+	var updatedPath string
 	var calledLibraryRefresh bool
 
 	n.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/Items"):
 			return jsonResponse(200, `{"Items":[]}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/Library/Media/Updated":
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read media update: %v", err)
+			}
+			if strings.Contains(string(body), "/library/Movies/Unknown Movie (2025)") {
+				updatedPath = "/library/Movies/Unknown Movie (2025)"
+			}
+			return jsonResponse(204, ``), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/Library/Refresh":
 			calledLibraryRefresh = true
 			return jsonResponse(204, ``), nil
@@ -80,16 +86,20 @@ func TestJellyfinNotifierFallsBackToLibraryRefresh(t *testing.T) {
 	})}
 
 	res := n.Notify(OrganizationEvent{
-		MediaType:  MediaTypeMovie,
-		Title:      "Unknown Movie",
-		TargetPath: "/library/Movies/Unknown Movie (2025)/Unknown Movie (2025).mkv",
+		MediaType:         MediaTypeMovie,
+		Title:             "Unknown Movie",
+		TargetPath:        "/mnt/movies/Unknown Movie (2025)/Unknown Movie (2025).mkv",
+		JellyfinTargetDir: "/library/Movies/Unknown Movie (2025)",
 	})
 
 	if !res.Success {
 		t.Fatalf("expected success, got error: %v", res.Error)
 	}
-	if !calledLibraryRefresh {
-		t.Fatalf("expected library refresh fallback")
+	if updatedPath == "" {
+		t.Fatal("expected scoped /Library/Media/Updated notification")
+	}
+	if calledLibraryRefresh {
+		t.Fatal("must not trigger a whole-library refresh")
 	}
 }
 

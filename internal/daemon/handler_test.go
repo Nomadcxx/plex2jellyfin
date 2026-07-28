@@ -21,6 +21,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/Nomadcxx/plex2jellyfin/internal/notify"
 	"github.com/Nomadcxx/plex2jellyfin/internal/organizer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 	"github.com/Nomadcxx/plex2jellyfin/internal/watcher"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -44,6 +45,18 @@ func newTestAIMatcher(t *testing.T, handler http.HandlerFunc) (*ai.Matcher, *htt
 	return matcher, server, &calls
 }
 
+type fixedNotifyResult struct {
+	service string
+	success bool
+}
+
+func (n fixedNotifyResult) Name() string  { return n.service }
+func (n fixedNotifyResult) Enabled() bool { return true }
+func (n fixedNotifyResult) Ping() error   { return nil }
+func (n fixedNotifyResult) Notify(notify.OrganizationEvent) *notify.NotifyResult {
+	return &notify.NotifyResult{Service: n.service, Success: n.success}
+}
+
 func TestMediaHandler_SeparateLibraries(t *testing.T) {
 	cfg := MediaHandlerConfig{
 		TVLibraries:     []string{"/tv/lib1"},
@@ -64,6 +77,47 @@ func TestMediaHandler_SeparateLibraries(t *testing.T) {
 	if len(handler.movieLibs) != 1 || handler.movieLibs[0] != "/movies/lib1" {
 		t.Error("Movie libraries not set correctly")
 	}
+}
+
+func TestMediaHandlerRecordsOrganizedMovieAsP2JTruth(t *testing.T) {
+	movieLib := t.TempDir()
+	watchDir := t.TempDir()
+	src := filepath.Join(watchDir, "Truthers.2026.1080p.WEB-DL.mkv")
+	require.NoError(t, os.WriteFile(src, []byte("movie"), 0644))
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:     []string{t.TempDir()},
+		MovieLibs:       []string{movieLib},
+		MovieWatchPaths: []string{watchDir},
+		Backend:         transfer.BackendNative,
+		Database:        db,
+		Logger:          logging.Nop(),
+	})
+	require.NoError(t, err)
+
+	handler.processFile(src)
+
+	movie, err := db.GetMovieByTitle("Truthers", 2026)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+	assert.Equal(t, "plex2jellyfin", movie.Source)
+	assert.Equal(t, filepath.Join(movieLib, "Truthers (2026)"), movie.CanonicalPath)
+}
+
+func TestMediaHandlerTracksOnlySuccessfulArrHandoffs(t *testing.T) {
+	manager := notify.NewManager(false)
+	manager.Register(fixedNotifyResult{service: "radarr", success: false})
+	handler := &MediaHandler{notifyManager: manager}
+
+	_, radarrNotified := handler.sendNotificationsWithTracking(&organizer.OrganizationResult{
+		TargetPath: "/movies/Truthers (2026)/Truthers (2026).mkv",
+	}, notify.MediaTypeMovie, "Truthers", "2026", 0, 0)
+
+	assert.False(t, radarrNotified)
 }
 
 // TestYearAwareMatching_DifferentYears verifies that shows with different years

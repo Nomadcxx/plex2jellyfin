@@ -30,16 +30,18 @@ func (m MediaType) String() string {
 
 // OrganizationEvent contains information about a successfully organized file
 type OrganizationEvent struct {
-	MediaType   MediaType
-	SourcePath  string
-	TargetPath  string
-	TargetDir   string
-	Title       string
-	Year        string
-	Season      int
-	Episode     int
-	BytesCopied int64
-	Duration    time.Duration
+	MediaType  MediaType
+	SourcePath string
+	TargetPath string
+	TargetDir  string
+	// JellyfinTargetDir is TargetDir translated into Jellyfin's filesystem view.
+	JellyfinTargetDir string
+	Title             string
+	Year              string
+	Season            int
+	Episode           int
+	BytesCopied       int64
+	Duration          time.Duration
 }
 
 // NotifyResult represents the result of a notification attempt
@@ -126,7 +128,7 @@ func (m *Manager) notifySync(notifiers []Notifier, event OrganizationEvent) []*N
 		if result.Skipped {
 			log.Printf("[%s] Notification skipped (wrong media type)", n.Name())
 		} else if result.Success {
-			log.Printf("[%s] Notification sent successfully (command ID: %d)", n.Name(), result.CommandID)
+			log.Printf("[%s] Handoff accepted (command ID: %d)", n.Name(), result.CommandID)
 		} else {
 			log.Printf("[%s] Notification failed: %v", n.Name(), result.Error)
 		}
@@ -156,7 +158,7 @@ func (m *Manager) notifyAsync(notifiers []Notifier, event OrganizationEvent) {
 			if result.Skipped {
 				log.Printf("[%s] Notification skipped (wrong media type)", notifier.Name())
 			} else if result.Success {
-				log.Printf("[%s] Notification sent successfully (command ID: %d)", notifier.Name(), result.CommandID)
+				log.Printf("[%s] Handoff accepted (command ID: %d)", notifier.Name(), result.CommandID)
 			} else {
 				log.Printf("[%s] Notification failed: %v", notifier.Name(), result.Error)
 			}

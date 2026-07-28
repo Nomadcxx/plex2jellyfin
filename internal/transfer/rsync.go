@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,19 +68,31 @@ func (r *RsyncTransferer) transfer(src, dst string, opts TransferOptions, remove
 	}
 
 	var lastErr error
+	stagedDst := r.stagingPath(src, dst)
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result.Attempts = attempt
 
-		err := r.runRsync(src, dst, opts, removeSource)
+		err := r.runRsync(src, stagedDst, opts)
 		if err == nil {
-			result.Success = true
-			result.BytesCopied = result.BytesTotal
-			result.Duration = time.Since(startTime)
-			result.SourceRemoved = removeSource
-			return result, nil
+			if err := os.Rename(stagedDst, dst); err != nil {
+				lastErr = fmt.Errorf("publishing completed transfer: %w", err)
+			} else {
+				if removeSource {
+					if err := RemoveWithTimeout(src, 30*time.Second); err != nil {
+						result.Error = fmt.Errorf("transfer published but failed to remove source: %w", err)
+						result.Duration = time.Since(startTime)
+						return result, result.Error
+					}
+					result.SourceRemoved = true
+				}
+				result.Success = true
+				result.BytesCopied = result.BytesTotal
+				result.Duration = time.Since(startTime)
+				return result, nil
+			}
+		} else {
+			lastErr = err
 		}
-
-		lastErr = err
 
 		if attempt < maxAttempts {
 			time.Sleep(opts.RetryDelay)
@@ -91,8 +104,14 @@ func (r *RsyncTransferer) transfer(src, dst string, opts TransferOptions, remove
 	return result, result.Error
 }
 
-func (r *RsyncTransferer) runRsync(src, dst string, opts TransferOptions, removeSource bool) error {
-	args := r.buildArgs(opts, removeSource)
+func (r *RsyncTransferer) stagingPath(src, dst string) string {
+	hash := fnv.New64a()
+	_, _ = hash.Write([]byte(filepath.Clean(src)))
+	return filepath.Join(filepath.Dir(dst), fmt.Sprintf(".%s.p2j-partial-%x", filepath.Base(dst), hash.Sum64()))
+}
+
+func (r *RsyncTransferer) runRsync(src, dst string, opts TransferOptions) error {
+	args := r.buildArgs(opts)
 	args = append(args, src, dst)
 
 	timeout := opts.Timeout
@@ -154,7 +173,7 @@ func (r *RsyncTransferer) runRsync(src, dst string, opts TransferOptions, remove
 	return nil
 }
 
-func (r *RsyncTransferer) buildArgs(opts TransferOptions, removeSource bool) []string {
+func (r *RsyncTransferer) buildArgs(opts TransferOptions) []string {
 	args := []string{
 		"--progress",
 		"--partial",
@@ -171,10 +190,6 @@ func (r *RsyncTransferer) buildArgs(opts TransferOptions, removeSource bool) []s
 
 	if opts.Checksum {
 		args = append(args, "--checksum")
-	}
-
-	if removeSource {
-		args = append(args, "--remove-source-files")
 	}
 
 	if !opts.PreserveAttrs {

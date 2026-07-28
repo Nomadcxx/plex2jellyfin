@@ -1,12 +1,11 @@
 package notify
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -56,10 +55,7 @@ func (n *JellyfinNotifier) Notify(event OrganizationEvent) *NotifyResult {
 		return result
 	}
 
-	err := n.targetedRefresh(event)
-	if err != nil {
-		err = n.refreshLibrary()
-	}
+	err := n.notifyMediaUpdated(event)
 
 	result.Success = err == nil
 	result.Error = err
@@ -67,90 +63,41 @@ func (n *JellyfinNotifier) Notify(event OrganizationEvent) *NotifyResult {
 	return result
 }
 
-type jellyfinSearchResponse struct {
-	Items []struct {
-		ID             string `json:"Id"`
-		Name           string `json:"Name"`
-		Path           string `json:"Path"`
-		ProductionYear int    `json:"ProductionYear"`
-	} `json:"Items"`
-}
-
-func (n *JellyfinNotifier) targetedRefresh(event OrganizationEvent) error {
-	term := strings.TrimSpace(event.Title)
-	if term == "" {
-		term = deriveSearchTermFromPath(event.TargetPath)
+func (n *JellyfinNotifier) notifyMediaUpdated(event OrganizationEvent) error {
+	targetDir := strings.TrimSpace(event.JellyfinTargetDir)
+	if targetDir == "" {
+		targetDir = strings.TrimSpace(event.TargetDir)
 	}
-	if term == "" {
-		return fmt.Errorf("unable to determine search term for targeted refresh")
+	if targetDir == "" && strings.TrimSpace(event.TargetPath) != "" {
+		targetDir = filepath.Dir(event.TargetPath)
+	}
+	if targetDir == "" || targetDir == "." {
+		return fmt.Errorf("unable to determine committed Jellyfin folder")
 	}
 
-	items, err := n.searchItems(term)
+	payload, err := json.Marshal(map[string]any{
+		"Updates": []map[string]string{{
+			"Path":       targetDir,
+			"UpdateType": "Created",
+		}},
+	})
 	if err != nil {
 		return err
 	}
-
-	eventPath := normalizePath(event.TargetPath)
-	eventYear, _ := strconv.Atoi(strings.TrimSpace(event.Year))
-
-	for _, item := range items {
-		if eventPath != "" && normalizePath(item.Path) == eventPath {
-			return n.refreshItem(item.ID)
-		}
-		if event.Title != "" && strings.EqualFold(strings.TrimSpace(item.Name), strings.TrimSpace(event.Title)) {
-			if eventYear == 0 || item.ProductionYear == 0 || item.ProductionYear == eventYear {
-				return n.refreshItem(item.ID)
-			}
-		}
-	}
-
-	return n.refreshLibrary()
-}
-
-func (n *JellyfinNotifier) searchItems(term string) ([]struct {
-	ID             string `json:"Id"`
-	Name           string `json:"Name"`
-	Path           string `json:"Path"`
-	ProductionYear int    `json:"ProductionYear"`
-}, error) {
-	q := url.Values{}
-	q.Set("SearchTerm", term)
-	q.Set("Recursive", "true")
-	q.Set("Fields", "Path,ProductionYear")
-
-	body, err := n.doJSONRequest(http.MethodGet, "/Items?"+q.Encode(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var resp jellyfinSearchResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("failed to decode jellyfin search response: %w", err)
-	}
-
-	return resp.Items, nil
-}
-
-func (n *JellyfinNotifier) refreshItem(itemID string) error {
-	if strings.TrimSpace(itemID) == "" {
-		return fmt.Errorf("item id is required")
-	}
-	_, err := n.doJSONRequest(http.MethodPost, "/Items/"+url.PathEscape(itemID)+"/Refresh", nil)
-	return err
-}
-
-func (n *JellyfinNotifier) refreshLibrary() error {
-	_, err := n.doJSONRequest(http.MethodPost, "/Library/Refresh", nil)
+	_, err = n.doJSONRequest(http.MethodPost, "/Library/Media/Updated", payload)
 	return err
 }
 
 func (n *JellyfinNotifier) doJSONRequest(method, path string, body []byte) ([]byte, error) {
-	req, err := http.NewRequest(method, n.baseURL+path, nil)
+	req, err := http.NewRequest(method, n.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", n.authHeader())
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := n.client.Do(req)
 	if err != nil {
@@ -169,19 +116,4 @@ func (n *JellyfinNotifier) doJSONRequest(method, path string, body []byte) ([]by
 
 func (n *JellyfinNotifier) authHeader() string {
 	return fmt.Sprintf(`MediaBrowser Token="%s", Client="plex2jellyfin", Device="plex2jellyfin-daemon", DeviceId="plex2jellyfin-daemon", Version="1.0.0"`, n.apiKey)
-}
-
-func deriveSearchTermFromPath(path string) string {
-	base := strings.TrimSpace(filepath.Base(path))
-	if base == "" {
-		return ""
-	}
-	base = strings.TrimSuffix(base, filepath.Ext(base))
-	base = strings.ReplaceAll(base, ".", " ")
-	base = strings.ReplaceAll(base, "_", " ")
-	return strings.TrimSpace(base)
-}
-
-func normalizePath(path string) string {
-	return filepath.Clean(strings.TrimSpace(path))
 }

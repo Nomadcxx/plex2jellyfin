@@ -128,7 +128,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	notifyMgr := notify.NewManager(true)
+	notifyMgr := notify.NewManager(false)
 
 	var targetUID, targetGID int = -1, -1
 	var fileMode, dirMode os.FileMode
@@ -186,18 +186,17 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				logging.F("error", err.Error()))
 			sonarrClient = nil // Don't use if connection fails
 		} else {
-			notifyMgr.Register(notify.NewSonarrNotifier(sonarrClient, cfg.Sonarr.NotifyOnImport))
 			logger.Info("daemon", "Sonarr integration enabled", logging.F("url", cfg.Sonarr.URL))
 		}
 	}
 
+	var radarrClient *radarr.Client
 	if cfg.Radarr.Enabled && cfg.Radarr.APIKey != "" && cfg.Radarr.URL != "" {
-		radarrClient := radarr.NewClient(radarr.Config{
+		radarrClient = radarr.NewClient(radarr.Config{
 			URL:     cfg.Radarr.URL,
 			APIKey:  cfg.Radarr.APIKey,
 			Timeout: 30 * time.Second,
 		})
-		notifyMgr.Register(notify.NewRadarrNotifier(radarrClient, cfg.Radarr.NotifyOnImport))
 		logger.Info("daemon", "Radarr integration enabled", logging.F("url", cfg.Radarr.URL))
 	}
 
@@ -224,7 +223,6 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			organizerJellyfinClient = jellyfinClient
 			logger.Info("daemon", "Jellyfin integration enabled", logging.F("url", cfg.Jellyfin.URL))
 		}
-		notifyMgr.Register(notify.NewJellyfinNotifier(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, cfg.Jellyfin.NotifyOnImport))
 	}
 
 	var playbackLocks *jellyfin.PlaybackLockManager
@@ -239,6 +237,16 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
+
+	if sonarrClient != nil {
+		notifyMgr.Register(notify.NewSonarrNotifier(sonarrClient, db, cfg.Sonarr.NotifyOnImport))
+	}
+	if radarrClient != nil {
+		notifyMgr.Register(notify.NewRadarrNotifier(radarrClient, db, cfg.Radarr.NotifyOnImport))
+	}
+	if jellyfinClient != nil {
+		notifyMgr.Register(notify.NewJellyfinNotifier(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, cfg.Jellyfin.NotifyOnImport))
+	}
 
 	if cfg.Jellyfin.PlaybackSafety {
 		deferredQueue = jellyfin.NewDeferredQueueWithDB(db)

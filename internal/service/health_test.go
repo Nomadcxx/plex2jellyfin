@@ -24,7 +24,7 @@ func TestCheckSonarrConfig_AllGood(t *testing.T) {
 		case "/api/v3/config/naming":
 			json.NewEncoder(w).Encode(sonarr.NamingConfig{
 				ID:             1,
-				RenameEpisodes: true,
+				RenameEpisodes: false,
 			})
 		}
 	}))
@@ -48,7 +48,7 @@ func TestCheckSonarrConfig_CompletedDownloadEnabled(t *testing.T) {
 		case "/api/v3/config/naming":
 			json.NewEncoder(w).Encode(sonarr.NamingConfig{
 				ID:             1,
-				RenameEpisodes: true,
+				RenameEpisodes: false,
 			})
 		}
 	}))
@@ -63,7 +63,7 @@ func TestCheckSonarrConfig_CompletedDownloadEnabled(t *testing.T) {
 	assert.Equal(t, "critical", issues[0].Severity)
 }
 
-func TestCheckSonarrConfig_RenameDisabled(t *testing.T) {
+func TestCheckSonarrConfig_RenameEnabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -75,7 +75,7 @@ func TestCheckSonarrConfig_RenameDisabled(t *testing.T) {
 		case "/api/v3/config/naming":
 			json.NewEncoder(w).Encode(sonarr.NamingConfig{
 				ID:             1,
-				RenameEpisodes: false,
+				RenameEpisodes: true,
 			})
 		}
 	}))
@@ -102,7 +102,7 @@ func TestCheckSonarrConfig_BothBad(t *testing.T) {
 		case "/api/v3/config/naming":
 			json.NewEncoder(w).Encode(sonarr.NamingConfig{
 				ID:             1,
-				RenameEpisodes: false,
+				RenameEpisodes: true,
 			})
 		}
 	}))
@@ -126,7 +126,7 @@ func TestCheckRadarrConfig_AllGood(t *testing.T) {
 		case "/api/v3/config/naming":
 			json.NewEncoder(w).Encode(radarr.NamingConfig{
 				ID:           1,
-				RenameMovies: true,
+				RenameMovies: false,
 			})
 		}
 	}))
@@ -150,7 +150,7 @@ func TestCheckRadarrConfig_CompletedDownloadEnabled(t *testing.T) {
 		case "/api/v3/config/naming":
 			json.NewEncoder(w).Encode(radarr.NamingConfig{
 				ID:           1,
-				RenameMovies: true,
+				RenameMovies: false,
 			})
 		}
 	}))
@@ -165,7 +165,7 @@ func TestCheckRadarrConfig_CompletedDownloadEnabled(t *testing.T) {
 	assert.Equal(t, "critical", issues[0].Severity)
 }
 
-func TestCheckRadarrConfig_RenameDisabled(t *testing.T) {
+func TestCheckRadarrConfig_RenameEnabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -177,7 +177,7 @@ func TestCheckRadarrConfig_RenameDisabled(t *testing.T) {
 		case "/api/v3/config/naming":
 			json.NewEncoder(w).Encode(radarr.NamingConfig{
 				ID:           1,
-				RenameMovies: false,
+				RenameMovies: true,
 			})
 		}
 	}))
@@ -247,7 +247,7 @@ func TestFixSonarrIssues_RealFix(t *testing.T) {
 	assert.True(t, putCalled)
 }
 
-func TestFixSonarrIssues_RenamePreservesSpecialsFolderFormat(t *testing.T) {
+func TestFixSonarrIssues_DisablesRenameAndPreservesSpecialsFolderFormat(t *testing.T) {
 	var putBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -258,7 +258,7 @@ func TestFixSonarrIssues_RenamePreservesSpecialsFolderFormat(t *testing.T) {
 		if r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(map[string]any{
 				"id":                   1,
-				"renameEpisodes":       false,
+				"renameEpisodes":       true,
 				"specialsFolderFormat": "Specials",
 			})
 			return
@@ -283,7 +283,7 @@ func TestFixSonarrIssues_RenamePreservesSpecialsFolderFormat(t *testing.T) {
 	}, false)
 	require.NoError(t, err)
 	assert.Len(t, fixed, 1)
-	assert.Equal(t, true, putBody["renameEpisodes"])
+	assert.Equal(t, false, putBody["renameEpisodes"])
 	assert.Equal(t, "Specials", putBody["specialsFolderFormat"])
 }
 
@@ -308,4 +308,32 @@ func TestFixRadarrIssues_DryRun(t *testing.T) {
 	fixed, err := FixRadarrIssues(client, issues, true)
 	require.NoError(t, err)
 	assert.Len(t, fixed, 1)
+}
+
+func TestFixRadarrIssues_DisablesRename(t *testing.T) {
+	var renamed any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v3/config/naming" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "renameMovies": true})
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		renamed = body["renameMovies"]
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	defer server.Close()
+
+	client := radarr.NewClient(radarr.Config{URL: server.URL, APIKey: "test"})
+	fixed, err := FixRadarrIssues(client, []HealthIssue{
+		{Service: "radarr", Setting: "renameMovies"},
+	}, false)
+	require.NoError(t, err)
+	assert.Len(t, fixed, 1)
+	assert.Equal(t, false, renamed)
 }

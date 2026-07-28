@@ -275,3 +275,50 @@ func TestGetAllSeries_Empty(t *testing.T) {
 		t.Errorf("expected 0 series, got %d", len(allSeries))
 	}
 }
+
+func TestUpsertSeries_LowerPriorityEnrichesIDsAndReportsPathMismatch(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	canonical := &Series{
+		Title:          "Canonical Series",
+		Year:           2026,
+		CanonicalPath:  "/tv/Canonical Series (2026)",
+		LibraryRoot:    "/tv",
+		Source:         "filesystem",
+		SourcePriority: 50,
+	}
+	if _, err := db.UpsertSeries(canonical); err != nil {
+		t.Fatalf("insert canonical series: %v", err)
+	}
+
+	sonarrID, tvdbID := 42, 1234
+	incoming := &Series{
+		Title:          canonical.Title,
+		Year:           canonical.Year,
+		TvdbID:         &tvdbID,
+		SonarrID:       &sonarrID,
+		CanonicalPath:  "/sonarr/Canonical Series (2026)",
+		LibraryRoot:    "/sonarr",
+		Source:         "sonarr",
+		SourcePriority: 25,
+	}
+	reconcile, err := db.UpsertSeries(incoming)
+	if err != nil {
+		t.Fatalf("upsert lower-priority series: %v", err)
+	}
+	if !reconcile {
+		t.Fatal("expected canonical path mismatch to require Sonarr reconciliation")
+	}
+
+	got, err := db.GetSeriesByID(canonical.ID)
+	if err != nil {
+		t.Fatalf("get canonical series: %v", err)
+	}
+	if got.CanonicalPath != canonical.CanonicalPath || got.Source != canonical.Source {
+		t.Fatalf("lower-priority source replaced canonical state: path=%q source=%q", got.CanonicalPath, got.Source)
+	}
+	if got.SonarrID == nil || *got.SonarrID != sonarrID || got.TvdbID == nil || *got.TvdbID != tvdbID {
+		t.Fatalf("lower-priority IDs were not retained: sonarr=%v tvdb=%v", got.SonarrID, got.TvdbID)
+	}
+}

@@ -26,7 +26,7 @@ func TestArrCompatibilityCheckAndFixUseDraftCredentials(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var puts atomic.Int32
-			completed, renamed := true, false
+			completed, renamed := true, true
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("X-Api-Key") != "draft-key" {
 					t.Errorf("missing draft API key: %q", r.Header.Get("X-Api-Key"))
@@ -41,7 +41,7 @@ func TestArrCompatibilityCheckAndFixUseDraftCredentials(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "enableCompletedDownloadHandling": completed})
 				case r.URL.Path == "/api/v3/config/naming":
 					if r.Method == http.MethodPut {
-						renamed = true
+						renamed = false
 						puts.Add(1)
 					}
 					_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, tt.renameField: renamed})

@@ -82,6 +82,53 @@ func TestUpsertMovie_ScansNewColumns(t *testing.T) {
 	}
 }
 
+func TestUpsertMovie_LowerPriorityEnrichesIDsAndReportsPathMismatch(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	canonical := &Movie{
+		Title:          "Canonical Movie",
+		Year:           2026,
+		CanonicalPath:  "/media/Canonical Movie (2026)",
+		LibraryRoot:    "/media",
+		Source:         "filesystem",
+		SourcePriority: 50,
+	}
+	if _, err := db.UpsertMovie(canonical); err != nil {
+		t.Fatalf("insert canonical movie: %v", err)
+	}
+
+	radarrID, tmdbID := 42, 1234
+	incoming := &Movie{
+		Title:          canonical.Title,
+		Year:           canonical.Year,
+		TmdbID:         &tmdbID,
+		RadarrID:       &radarrID,
+		CanonicalPath:  "/radarr/Canonical Movie (2026)",
+		LibraryRoot:    "/radarr",
+		Source:         "radarr",
+		SourcePriority: 25,
+	}
+	reconcile, err := db.UpsertMovie(incoming)
+	if err != nil {
+		t.Fatalf("upsert lower-priority movie: %v", err)
+	}
+	if !reconcile {
+		t.Fatal("expected canonical path mismatch to require Radarr reconciliation")
+	}
+
+	got, err := db.GetMovieByID(canonical.ID)
+	if err != nil {
+		t.Fatalf("get canonical movie: %v", err)
+	}
+	if got.CanonicalPath != canonical.CanonicalPath || got.Source != canonical.Source {
+		t.Fatalf("lower-priority source replaced canonical state: path=%q source=%q", got.CanonicalPath, got.Source)
+	}
+	if got.RadarrID == nil || *got.RadarrID != radarrID || got.TmdbID == nil || *got.TmdbID != tmdbID {
+		t.Fatalf("lower-priority IDs were not retained: radarr=%v tmdb=%v", got.RadarrID, got.TmdbID)
+	}
+}
+
 func TestGetAllMovies_IncludesDirtyFlags(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

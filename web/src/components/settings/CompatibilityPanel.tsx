@@ -54,7 +54,7 @@ export function CompatibilityPanel({ service }: Props) {
         <div>
           <h2 className="font-mono text-sm font-semibold text-zinc-200">Arr compatibility</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Completed Download Handling and rename settings must match plex2jellyfin.
+            Plex2Jellyfin disables Arr importing and renaming so it can own the final path.
           </p>
         </div>
         <div className="flex gap-2">
@@ -115,7 +115,7 @@ export function CompatibilityPanel({ service }: Props) {
         onCancel={() => setConfirmFix(false)}
         onConfirm={() => run(true)}
       >
-        This will change Completed Download Handling and rename settings on the remote {service} instance.
+        This disables Completed Download Handling and renaming on the remote {service} instance.
       </ConfirmReversible>
     </div>
   );

@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -43,6 +44,7 @@ func (s *SyncService) SyncFromRadarr(ctx context.Context) (retErr error) {
 	}
 
 	var processed, added, updated int
+	var reconcileErr error
 
 	for _, movie := range movies {
 		select {
@@ -77,10 +79,36 @@ func (s *SyncService) SyncFromRadarr(ctx context.Context) (retErr error) {
 		isNew := (existing == nil)
 
 		// UpsertMovie respects source priority - won't overwrite plex2jellyfin paths
-		_, err := s.db.UpsertMovie(record)
+		reconcile, err := s.db.UpsertMovie(record)
 		if err != nil {
 			s.logger.Warn("failed to upsert movie", "title", movie.Title, "error", err)
 			continue
+		}
+		if reconcile {
+			canonical, getErr := s.db.GetMovieByID(record.ID)
+			if getErr != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("load canonical movie %q: %w", movie.Title, getErr))
+				continue
+			}
+			if canonical == nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("load canonical movie %q: record disappeared", movie.Title))
+				continue
+			}
+			if err := s.db.SetMovieDirty(canonical.ID); err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("mark movie %q dirty: %w", movie.Title, err))
+				continue
+			}
+			if err := s.radarr.UpdateMoviePathContext(ctx, movie.ID, canonical.CanonicalPath); err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("reconcile Radarr movie %q: %w", movie.Title, err))
+				continue
+			}
+			if _, err := s.radarr.RescanMovie(movie.ID); err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("rescan Radarr movie %q: %w", movie.Title, err))
+				continue
+			}
+			if err := s.db.MarkMovieSynced(canonical.ID); err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("mark movie %q synced: %w", movie.Title, err))
+			}
 		}
 
 		if isNew {
@@ -90,10 +118,14 @@ func (s *SyncService) SyncFromRadarr(ctx context.Context) (retErr error) {
 		}
 	}
 
-	if logErr := s.db.CompleteSyncLog(logID, "success", processed, added, updated, ""); logErr != nil {
+	status, detail := "success", ""
+	if reconcileErr != nil {
+		status, detail = "failed", reconcileErr.Error()
+	}
+	if logErr := s.db.CompleteSyncLog(logID, status, processed, added, updated, detail); logErr != nil {
 		s.logger.Error("sync", "Failed to complete sync log", logErr)
 	}
 	s.logger.Info("radarr sync completed", "processed", processed, "added", added, "updated", updated)
 
-	return nil
+	return reconcileErr
 }

@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -43,6 +44,7 @@ func (s *SyncService) SyncFromSonarr(ctx context.Context) (retErr error) {
 	}
 
 	var processed, added, updated int
+	var reconcileErr error
 
 	for _, show := range series {
 		select {
@@ -84,10 +86,36 @@ func (s *SyncService) SyncFromSonarr(ctx context.Context) (retErr error) {
 		isNew := (existing == nil)
 
 		// UpsertSeries respects source priority - won't overwrite plex2jellyfin paths
-		_, err := s.db.UpsertSeries(record)
+		reconcile, err := s.db.UpsertSeries(record)
 		if err != nil {
 			s.logger.Warn("failed to upsert series", "title", show.Title, "error", err)
 			continue
+		}
+		if reconcile {
+			canonical, getErr := s.db.GetSeriesByID(record.ID)
+			if getErr != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("load canonical series %q: %w", show.Title, getErr))
+				continue
+			}
+			if canonical == nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("load canonical series %q: record disappeared", show.Title))
+				continue
+			}
+			if err := s.db.SetSeriesDirty(canonical.ID); err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("mark series %q dirty: %w", show.Title, err))
+				continue
+			}
+			if err := s.sonarr.UpdateSeriesPath(show.ID, canonical.CanonicalPath); err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("reconcile Sonarr series %q: %w", show.Title, err))
+				continue
+			}
+			if _, err := s.sonarr.RescanSeries(show.ID); err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("rescan Sonarr series %q: %w", show.Title, err))
+				continue
+			}
+			if err := s.db.MarkSeriesSynced(canonical.ID); err != nil {
+				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("mark series %q synced: %w", show.Title, err))
+			}
 		}
 
 		if isNew {
@@ -97,10 +125,14 @@ func (s *SyncService) SyncFromSonarr(ctx context.Context) (retErr error) {
 		}
 	}
 
-	if logErr := s.db.CompleteSyncLog(logID, "success", processed, added, updated, ""); logErr != nil {
+	status, detail := "success", ""
+	if reconcileErr != nil {
+		status, detail = "failed", reconcileErr.Error()
+	}
+	if logErr := s.db.CompleteSyncLog(logID, status, processed, added, updated, detail); logErr != nil {
 		s.logger.Error("sync", "Failed to complete sync log", logErr)
 	}
 	s.logger.Info("sonarr sync completed", "processed", processed, "added", added, "updated", updated)
 
-	return nil
+	return reconcileErr
 }

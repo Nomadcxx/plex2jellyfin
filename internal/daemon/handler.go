@@ -310,6 +310,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithTransferer(tvTransferer),
+		organizer.WithDatabase(cfg.Database),
 		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
 		organizer.WithDeferredQueue(cfg.DeferredQueue),
 	}
@@ -332,6 +333,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithTransferer(movieTransferer),
+		organizer.WithDatabase(cfg.Database),
 		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
 		organizer.WithDeferredQueue(cfg.DeferredQueue),
 	}
@@ -1356,15 +1358,20 @@ func (h *MediaHandler) sendNotificationsWithTracking(result *organizer.Organizat
 		BytesCopied: result.BytesCopied,
 		Duration:    result.Duration,
 	}
+	if h.pathTranslator != nil {
+		event.JellyfinTargetDir = h.pathTranslator.DaemonToJellyfin(event.TargetDir)
+	}
 
-	h.notifyManager.Notify(event)
-
-	// Track which notifiers would have been called based on media type
-	// Sonarr handles TV episodes, Radarr handles movies
-	if mediaType == notify.MediaTypeTVEpisode {
-		sonarrNotified = true
-	} else if mediaType == notify.MediaTypeMovie {
-		radarrNotified = true
+	for _, result := range h.notifyManager.Notify(event) {
+		if result == nil || !result.Success {
+			continue
+		}
+		switch result.Service {
+		case "sonarr":
+			sonarrNotified = true
+		case "radarr":
+			radarrNotified = true
+		}
 	}
 
 	return sonarrNotified, radarrNotified
