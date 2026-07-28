@@ -87,14 +87,15 @@ func (m *MediaDB) UpsertMovie(mov *Movie) (shouldUpdateExternal bool, err error)
 	// Check existing record
 	var existingID int64
 	var existingPath string
+	var existingSource string
 	var existingPriority int
 	var existingRadarrID *int
 
 	err = m.db.QueryRow(
-		`SELECT id, canonical_path, source_priority, radarr_id FROM movies 
+		`SELECT id, canonical_path, source, source_priority, radarr_id FROM movies
 		 WHERE title_normalized = ? AND year = ?`,
 		mov.TitleNormalized, mov.Year,
-	).Scan(&existingID, &existingPath, &existingPriority, &existingRadarrID)
+	).Scan(&existingID, &existingPath, &existingSource, &existingPriority, &existingRadarrID)
 
 	if err == sql.ErrNoRows {
 		// Insert new record
@@ -172,7 +173,7 @@ func (m *MediaDB) UpsertMovie(mov *Movie) (shouldUpdateExternal bool, err error)
 			return false, err
 		}
 		mov.ID = existingID
-		return mov.RadarrID != nil && mov.CanonicalPath != existingPath, nil
+		return existingSource == "plex2jellyfin" && mov.RadarrID != nil && mov.CanonicalPath != existingPath, nil
 	}
 
 	return false, nil

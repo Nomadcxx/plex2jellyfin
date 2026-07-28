@@ -276,7 +276,7 @@ func TestGetAllSeries_Empty(t *testing.T) {
 	}
 }
 
-func TestUpsertSeries_LowerPriorityEnrichesIDsAndReportsPathMismatch(t *testing.T) {
+func TestUpsertSeries_LowerPriorityEnrichesIDsWithoutTrustingFilesystemPath(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
@@ -307,8 +307,8 @@ func TestUpsertSeries_LowerPriorityEnrichesIDsAndReportsPathMismatch(t *testing.
 	if err != nil {
 		t.Fatalf("upsert lower-priority series: %v", err)
 	}
-	if !reconcile {
-		t.Fatal("expected canonical path mismatch to require Sonarr reconciliation")
+	if reconcile {
+		t.Fatal("filesystem-discovered path must not drive Sonarr reconciliation")
 	}
 
 	got, err := db.GetSeriesByID(canonical.ID)
@@ -320,5 +320,37 @@ func TestUpsertSeries_LowerPriorityEnrichesIDsAndReportsPathMismatch(t *testing.
 	}
 	if got.SonarrID == nil || *got.SonarrID != sonarrID || got.TvdbID == nil || *got.TvdbID != tvdbID {
 		t.Fatalf("lower-priority IDs were not retained: sonarr=%v tvdb=%v", got.SonarrID, got.TvdbID)
+	}
+}
+
+func TestUpsertSeries_P2JCanonicalPathDrivesReconciliation(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	canonical := &Series{
+		Title:          "Organized Series",
+		Year:           2026,
+		CanonicalPath:  "/tv/Organized Series (2026)",
+		LibraryRoot:    "/tv",
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
+	}
+	if _, err := db.UpsertSeries(canonical); err != nil {
+		t.Fatalf("insert P2J series: %v", err)
+	}
+	sonarrID := 42
+	reconcile, err := db.UpsertSeries(&Series{
+		Title:          canonical.Title,
+		Year:           canonical.Year,
+		SonarrID:       &sonarrID,
+		CanonicalPath:  "/sonarr/Organized Series (2026)",
+		Source:         "sonarr",
+		SourcePriority: 25,
+	})
+	if err != nil {
+		t.Fatalf("upsert Sonarr series: %v", err)
+	}
+	if !reconcile {
+		t.Fatal("P2J-committed path mismatch should require Sonarr reconciliation")
 	}
 }

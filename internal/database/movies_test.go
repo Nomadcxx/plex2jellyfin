@@ -82,7 +82,7 @@ func TestUpsertMovie_ScansNewColumns(t *testing.T) {
 	}
 }
 
-func TestUpsertMovie_LowerPriorityEnrichesIDsAndReportsPathMismatch(t *testing.T) {
+func TestUpsertMovie_LowerPriorityEnrichesIDsWithoutTrustingFilesystemPath(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
@@ -113,8 +113,8 @@ func TestUpsertMovie_LowerPriorityEnrichesIDsAndReportsPathMismatch(t *testing.T
 	if err != nil {
 		t.Fatalf("upsert lower-priority movie: %v", err)
 	}
-	if !reconcile {
-		t.Fatal("expected canonical path mismatch to require Radarr reconciliation")
+	if reconcile {
+		t.Fatal("filesystem-discovered path must not drive Radarr reconciliation")
 	}
 
 	got, err := db.GetMovieByID(canonical.ID)
@@ -126,6 +126,38 @@ func TestUpsertMovie_LowerPriorityEnrichesIDsAndReportsPathMismatch(t *testing.T
 	}
 	if got.RadarrID == nil || *got.RadarrID != radarrID || got.TmdbID == nil || *got.TmdbID != tmdbID {
 		t.Fatalf("lower-priority IDs were not retained: radarr=%v tmdb=%v", got.RadarrID, got.TmdbID)
+	}
+}
+
+func TestUpsertMovie_P2JCanonicalPathDrivesReconciliation(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	canonical := &Movie{
+		Title:          "Organized Movie",
+		Year:           2026,
+		CanonicalPath:  "/media/Organized Movie (2026)",
+		LibraryRoot:    "/media",
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
+	}
+	if _, err := db.UpsertMovie(canonical); err != nil {
+		t.Fatalf("insert P2J movie: %v", err)
+	}
+	radarrID := 42
+	reconcile, err := db.UpsertMovie(&Movie{
+		Title:          canonical.Title,
+		Year:           canonical.Year,
+		RadarrID:       &radarrID,
+		CanonicalPath:  "/radarr/Organized Movie (2026)",
+		Source:         "radarr",
+		SourcePriority: 25,
+	})
+	if err != nil {
+		t.Fatalf("upsert Radarr movie: %v", err)
+	}
+	if !reconcile {
+		t.Fatal("P2J-committed path mismatch should require Radarr reconciliation")
 	}
 }
 

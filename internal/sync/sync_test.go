@@ -244,8 +244,8 @@ func TestSyncFromRadarr_ReconcilesCanonicalPathWithoutImport(t *testing.T) {
 		Year:           2026,
 		CanonicalPath:  "/media/Canonical Movie (2026)",
 		LibraryRoot:    "/media",
-		Source:         "filesystem",
-		SourcePriority: 50,
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
 	}
 	if _, err := db.UpsertMovie(canonical); err != nil {
 		t.Fatalf("insert canonical movie: %v", err)
@@ -304,8 +304,8 @@ func TestSyncFromSonarr_ReconcilesCanonicalPathWithoutImport(t *testing.T) {
 		Year:           2026,
 		CanonicalPath:  "/tv/Canonical Series (2026)",
 		LibraryRoot:    "/tv",
-		Source:         "filesystem",
-		SourcePriority: 50,
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
 	}
 	if _, err := db.UpsertSeries(canonical); err != nil {
 		t.Fatalf("insert canonical series: %v", err)
