@@ -100,8 +100,6 @@ func (m model) View() string {
 		mainContent = m.renderUninstallConfirm()
 	case stepInstalling:
 		mainContent = m.renderInstalling()
-	case stepArrIssues:
-		mainContent = m.renderArrIssues()
 	case stepScanning:
 		mainContent = m.renderScanning()
 	case stepComplete:
@@ -178,8 +176,6 @@ func (m model) getHelpText() string {
 		return "↑/↓: Navigate  •  Enter: Uninstall  •  Esc: Back"
 	case stepInstalling:
 		return "Please wait..."
-	case stepArrIssues:
-		return "↑/↓: Navigate  •  F: Fix issues  •  S: Skip  •  Enter: Continue"
 	case stepScanning:
 		return "Scanning libraries..."
 	case stepComplete:

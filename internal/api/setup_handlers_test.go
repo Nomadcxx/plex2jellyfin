@@ -180,6 +180,48 @@ func TestApplySetupRejectsMissingPathBeforeSaving(t *testing.T) {
 	}
 }
 
+func TestApplySetupRejectsArrWhenCompatibilityCannotBeEnforced(t *testing.T) {
+	setupTestHome(t)
+	cfg := config.DefaultConfig()
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	launcher := &setupTestLauncher{}
+	s := NewServer(nil, cfg)
+	s.ipc = &setupTestIPC{}
+	s.launcher = launcher
+	var checked bool
+	s.setupEnsureArr = func(candidate *config.Config) error {
+		checked = true
+		if !candidate.Sonarr.Enabled || candidate.Sonarr.APIKey != "sonarr-key" {
+			t.Fatalf("compatibility check received wrong candidate: %+v", candidate.Sonarr)
+		}
+		return errors.New("sonarr retained renameEpisodes=true")
+	}
+	draft := validSetupDraft(t.TempDir(), t.TempDir())
+	draft.Sonarr = setupdomain.ServiceDraft{
+		Enabled: true, URL: "http://sonarr.example", APIKey: "sonarr-key",
+	}
+
+	w := applySetupRequest(t, s, draft)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if !checked {
+		t.Fatal("Arr compatibility was not enforced")
+	}
+	if launcher.called || launcher.enableCalled {
+		t.Fatal("daemon activation started despite incompatible Arr")
+	}
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Sonarr.Enabled || loaded.Setup.Version != 0 {
+		t.Fatalf("incompatible candidate was saved: %+v setup=%+v", loaded.Sonarr, loaded.Setup)
+	}
+}
+
 func TestApplySetupLaunchesStoppedDaemonAndMarksComplete(t *testing.T) {
 	setupTestHome(t)
 	cfg := config.DefaultConfig()

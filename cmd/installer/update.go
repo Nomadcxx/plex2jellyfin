@@ -171,12 +171,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case arrIssuesMsg:
 		if msg.err != nil {
 			m.errors = append(m.errors, msg.err.Error())
+			m.step = stepComplete
+			return m, nil
 		}
 		if len(msg.issues) > 0 {
 			m.arrIssues = msg.issues
-			m.step = stepArrIssues
-			m.arrIssuesChoice = 0
-			return m, nil
+			return m, m.fixArrSettings()
 		}
 		// No issues found, proceed to scan
 		m.step = stepScanning
@@ -185,6 +185,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case arrFixMsg:
 		if msg.err != nil {
 			m.errors = append(m.errors, fmt.Sprintf("fixing arr settings: %v", msg.err))
+			m.step = stepComplete
 			return m, nil
 		}
 		m.arrIssues = nil
@@ -243,8 +244,6 @@ func (m model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKeys(key)
 	case stepUninstallConfirm:
 		return m.handleUninstallConfirmKeys(key)
-	case stepArrIssues:
-		return m.handleArrIssuesKeys(key)
 	case stepComplete:
 		return m.handleCompleteKeys(key)
 	}
@@ -607,35 +606,6 @@ func (m model) handleConfirmKeys(key string) (tea.Model, tea.Cmd) {
 		return m.startInstallation()
 	case "esc":
 		return m.prevStep()
-	}
-	return m, nil
-}
-
-func (m model) handleArrIssuesKeys(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "up", "k":
-		if m.arrIssuesChoice > 0 {
-			m.arrIssuesChoice--
-		}
-	case "down", "j":
-		if m.arrIssuesChoice < 1 {
-			m.arrIssuesChoice++
-		}
-	case "f", "F":
-		// Fix issues
-		return m, m.fixArrSettings()
-	case "s", "S":
-		// Skip / proceed without fixing
-		m.step = stepScanning
-		return m, m.runInitialScan()
-	case "enter":
-		if m.arrIssuesChoice == 0 {
-			// Fix
-			return m, m.fixArrSettings()
-		}
-		// Skip
-		m.step = stepScanning
-		return m, m.runInitialScan()
 	}
 	return m, nil
 }

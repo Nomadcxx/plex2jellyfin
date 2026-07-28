@@ -8,6 +8,7 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 )
 
 type RadarrNotifier struct {
@@ -47,6 +48,17 @@ func (n *RadarrNotifier) Notify(event OrganizationEvent) *NotifyResult {
 
 	if event.MediaType != MediaTypeMovie {
 		result.Skipped = true
+		result.Duration = time.Since(start)
+		return result
+	}
+	issues, err := service.CheckRadarrConfig(n.client)
+	if err != nil {
+		result.Error = fmt.Errorf("checking Radarr compatibility: %w", err)
+		result.Duration = time.Since(start)
+		return result
+	}
+	if len(issues) > 0 {
+		result.Error = fmt.Errorf("Radarr is incompatible: %s=%s", issues[0].Setting, issues[0].Current)
 		result.Duration = time.Since(start)
 		return result
 	}

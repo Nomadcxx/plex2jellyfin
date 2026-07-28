@@ -3,6 +3,8 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,6 +14,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 	"github.com/Nomadcxx/plex2jellyfin/internal/watcher"
 )
 
@@ -98,6 +101,63 @@ func TestPeriodicScanner_StartStopsOnContextCancel(t *testing.T) {
 
 	if startErr != nil {
 		t.Errorf("expected nil error on clean shutdown, got %v", startErr)
+	}
+}
+
+func TestPeriodicScannerArrDriftIsUnhealthyBeforeFirstTick(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/config/downloadClient":
+			_ = json.NewEncoder(w).Encode(radarr.DownloadClientConfig{
+				ID: 1, EnableCompletedDownloadHandling: false,
+			})
+		case "/api/v3/config/naming":
+			_ = json.NewEncoder(w).Encode(radarr.NamingConfig{ID: 1, RenameMovies: true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s := NewPeriodicScanner(ScannerConfig{
+		Interval:     time.Hour,
+		Handler:      &recordingHandler{},
+		Logger:       logging.Nop(),
+		RadarrClient: radarr.NewClient(radarr.Config{URL: server.URL, APIKey: "key"}),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s.IsHealthy() {
+		t.Fatal("Arr drift was not reflected before the first periodic tick")
+	}
+}
+
+func TestPeriodicScannerArrDriftRemainsUnhealthyAfterScan(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/config/downloadClient":
+			_ = json.NewEncoder(w).Encode(radarr.DownloadClientConfig{
+				ID: 1, EnableCompletedDownloadHandling: true,
+			})
+		case "/api/v3/config/naming":
+			_ = json.NewEncoder(w).Encode(radarr.NamingConfig{ID: 1, RenameMovies: false})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s := NewPeriodicScanner(ScannerConfig{
+		Handler:      &recordingHandler{},
+		Logger:       logging.Nop(),
+		RadarrClient: radarr.NewClient(radarr.Config{URL: server.URL, APIKey: "key"}),
+	})
+	s.tick()
+	if s.IsHealthy() {
+		t.Fatal("successful file scan overwrote incompatible Arr health")
 	}
 }
 

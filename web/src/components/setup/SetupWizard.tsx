@@ -285,7 +285,7 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
       </div>
 
       <ConfirmReversible open={fixTarget !== null} title={`Update ${fixTarget ? label(fixTarget) : ''} settings`} onCancel={() => setFixTarget(null)} onConfirm={fixCompatibility}>
-        Plex2Jellyfin will disable completed download handling and enable media renaming where required.
+        Plex2Jellyfin will disable completed download handling and media renaming so P2J remains the source of truth.
       </ConfirmReversible>
     </div>
   );

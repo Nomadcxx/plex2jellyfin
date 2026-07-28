@@ -16,8 +16,11 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin/plugininstall"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
+	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
 	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 	setupdomain "github.com/Nomadcxx/plex2jellyfin/internal/setup"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 type SetupStatusResponse struct {
@@ -97,6 +100,10 @@ func (s *Server) ApplySetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	candidate := setupdomain.ApplyDraft(current, draft)
+	if err := s.ensureSetupArrCompatibility(candidate); err != nil {
+		writeError(w, http.StatusBadGateway, "arr_compatibility_error", err.Error())
+		return
+	}
 	if candidate.Jellyfin.Enabled && candidate.Jellyfin.WebhookSecret == "" {
 		secret, err := generateToken()
 		if err != nil {
@@ -138,7 +145,7 @@ func (s *Server) ApplySetup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, setupApplyResponse{
 			Applied: true, Complete: true, DaemonState: "running",
 			PluginWarning: pluginWarning,
-			ScanWarning:  "config ownership fix failed: " + err.Error(),
+			ScanWarning:   "config ownership fix failed: " + err.Error(),
 		})
 		return
 	}
@@ -153,6 +160,29 @@ func (s *Server) ApplySetup(w http.ResponseWriter, r *http.Request) {
 		Applied: true, Complete: true, DaemonState: "running",
 		PluginWarning: pluginWarning,
 	})
+}
+
+func (s *Server) ensureSetupArrCompatibility(candidate *config.Config) error {
+	if s.setupEnsureArr != nil {
+		return s.setupEnsureArr(candidate)
+	}
+	if candidate.Sonarr.Enabled {
+		client := sonarr.NewClient(sonarr.Config{
+			URL: candidate.Sonarr.URL, APIKey: candidate.Sonarr.APIKey, Timeout: 30 * time.Second,
+		})
+		if _, err := service.EnsureSonarrConfig(client); err != nil {
+			return fmt.Errorf("Sonarr compatibility: %w", err)
+		}
+	}
+	if candidate.Radarr.Enabled {
+		client := radarr.NewClient(radarr.Config{
+			URL: candidate.Radarr.URL, APIKey: candidate.Radarr.APIKey, Timeout: 30 * time.Second,
+		})
+		if _, err := service.EnsureRadarrConfig(client); err != nil {
+			return fmt.Errorf("Radarr compatibility: %w", err)
+		}
+	}
+	return nil
 }
 
 func validateSetupPaths(draft setupdomain.Draft) []setupdomain.FieldError {
@@ -311,21 +341,21 @@ func ValidateSetupPaths(draft setupdomain.Draft) []setupdomain.FieldError {
 }
 
 type setupIndexEvent struct {
-	Type            string `json:"type"` // progress | status | done | error
-	Phase           string `json:"phase,omitempty"`
-	Msg             string `json:"msg,omitempty"`
-	Library         string `json:"library,omitempty"`
-	LibrariesDone   int    `json:"libraries_done,omitempty"`
-	LibrariesTotal  int    `json:"libraries_total,omitempty"`
-	FilesScanned    int    `json:"files_scanned,omitempty"`
-	FilesAdded      int    `json:"files_added,omitempty"`
-	FilesUpdated    int    `json:"files_updated,omitempty"`
-	FilesSkipped    int    `json:"files_skipped,omitempty"`
-	EpisodeRows     int    `json:"episode_rows,omitempty"`
-	MovieRows       int    `json:"movie_rows,omitempty"`
-	DurationMS      int64  `json:"duration_ms,omitempty"`
-	ScanWarning     string `json:"scan_warning,omitempty"`
-	DaemonState     string `json:"daemon_state,omitempty"`
+	Type           string `json:"type"` // progress | status | done | error
+	Phase          string `json:"phase,omitempty"`
+	Msg            string `json:"msg,omitempty"`
+	Library        string `json:"library,omitempty"`
+	LibrariesDone  int    `json:"libraries_done,omitempty"`
+	LibrariesTotal int    `json:"libraries_total,omitempty"`
+	FilesScanned   int    `json:"files_scanned,omitempty"`
+	FilesAdded     int    `json:"files_added,omitempty"`
+	FilesUpdated   int    `json:"files_updated,omitempty"`
+	FilesSkipped   int    `json:"files_skipped,omitempty"`
+	EpisodeRows    int    `json:"episode_rows,omitempty"`
+	MovieRows      int    `json:"movie_rows,omitempty"`
+	DurationMS     int64  `json:"duration_ms,omitempty"`
+	ScanWarning    string `json:"scan_warning,omitempty"`
+	DaemonState    string `json:"daemon_state,omitempty"`
 }
 
 // SetupIndexStream runs the post-apply library index over SSE so the web wizard

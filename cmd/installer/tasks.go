@@ -992,6 +992,7 @@ func (m model) validateArrSettings() tea.Cmd {
 
 	return func() tea.Msg {
 		var issues []ArrIssue
+		var errs []error
 
 		if sonarrEnabled && sonarrURL != "" && sonarrAPIKey != "" {
 			client := sonarr.NewClient(sonarr.Config{
@@ -1000,7 +1001,9 @@ func (m model) validateArrSettings() tea.Cmd {
 				Timeout: 30 * time.Second,
 			})
 			svcIssues, err := service.CheckSonarrConfig(client)
-			if err == nil {
+			if err != nil {
+				errs = append(errs, fmt.Errorf("checking Sonarr compatibility: %w", err))
+			} else {
 				for _, i := range svcIssues {
 					issues = append(issues, ArrIssue{
 						Service:  i.Service,
@@ -1020,7 +1023,9 @@ func (m model) validateArrSettings() tea.Cmd {
 				Timeout: 30 * time.Second,
 			})
 			svcIssues, err := service.CheckRadarrConfig(client)
-			if err == nil {
+			if err != nil {
+				errs = append(errs, fmt.Errorf("checking Radarr compatibility: %w", err))
+			} else {
 				for _, i := range svcIssues {
 					issues = append(issues, ArrIssue{
 						Service:  i.Service,
@@ -1033,7 +1038,7 @@ func (m model) validateArrSettings() tea.Cmd {
 			}
 		}
 
-		return arrIssuesMsg{issues: issues}
+		return arrIssuesMsg{issues: issues, err: errors.Join(errs...)}
 	}
 }
 
@@ -1075,7 +1080,7 @@ func (m model) fixArrSettings() tea.Cmd {
 				APIKey:  sonarrAPIKey,
 				Timeout: 30 * time.Second,
 			})
-			fixed, err := service.FixSonarrIssues(client, sonarrIssues, false)
+			fixed, err := service.EnsureSonarrConfig(client)
 			fixedCount += len(fixed)
 			if err != nil {
 				errs = append(errs, err)
@@ -1088,7 +1093,7 @@ func (m model) fixArrSettings() tea.Cmd {
 				APIKey:  radarrAPIKey,
 				Timeout: 30 * time.Second,
 			})
-			fixed, err := service.FixRadarrIssues(client, radarrIssues, false)
+			fixed, err := service.EnsureRadarrConfig(client)
 			fixedCount += len(fixed)
 			if err != nil {
 				errs = append(errs, err)

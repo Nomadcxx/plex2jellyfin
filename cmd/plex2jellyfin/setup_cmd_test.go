@@ -50,6 +50,9 @@ func wizardTestDeps(t *testing.T) (setupDeps, *wizardState) {
 			return nil, nil
 		},
 		checkSonarr: func(url, apiKey string) ([]service.HealthIssue, error) {
+			if state.sonarrFixed {
+				return nil, nil
+			}
 			return []service.HealthIssue{{
 				Service: "sonarr", Setting: "enableCompletedDownloadHandling",
 				Current: "true", Expected: "false", Severity: "critical",
@@ -129,9 +132,11 @@ type failingEngine struct{}
 func (f *failingEngine) Inspect(ctx context.Context) (*plugininstall.Inspection, error) {
 	return nil, errors.New("jellyfin exploded")
 }
-func (f *failingEngine) RegisterRepo(ctx context.Context) (bool, error) { return false, errors.New("no") }
-func (f *failingEngine) Install(ctx context.Context) error              { return errors.New("no") }
-func (f *failingEngine) Restart(ctx context.Context) error              { return errors.New("no") }
+func (f *failingEngine) RegisterRepo(ctx context.Context) (bool, error) {
+	return false, errors.New("no")
+}
+func (f *failingEngine) Install(ctx context.Context) error { return errors.New("no") }
+func (f *failingEngine) Restart(ctx context.Context) error { return errors.New("no") }
 func (f *failingEngine) WaitReady(ctx context.Context, d time.Duration) error {
 	return errors.New("no")
 }
@@ -177,7 +182,7 @@ func TestSetupWizardShowsBannerAndIntro(t *testing.T) {
 	if !strings.Contains(out, "periodic catch-up") {
 		t.Fatalf("expected runtime guidance text:\n%s", out)
 	}
-	if !strings.Contains(out, "Group is the critical setting") {
+	if !strings.Contains(out, "Plex2Jellyfin and Jellyfin need a shared group") {
 		t.Fatalf("expected permissions group guidance:\n%s", out)
 	}
 	if !strings.Contains(out, "Initial library scan") && !strings.Contains(out, "Setup complete") {
@@ -192,31 +197,30 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 	deps, state := wizardTestDeps(t)
 
 	answers := []string{
-		"/downloads/tv",  // TV incoming
-		"/media/tv",      // TV library
-		"",               // Movie incoming (skip)
-		"",               // Movie library (skip)
-		"y",              // connect Sonarr?
-		"",               // Sonarr URL (default)
-		"sonarr-key",     // Sonarr API key
-		"y",              // apply sonarr fixes?
-		"n",              // connect Radarr?
-		"y",              // connect Jellyfin?
-		"",               // Jellyfin URL (default)
-		"jf-key",         // Jellyfin API key
-		"y",              // install companion plugin?
-		"y",              // restart Jellyfin?
-		"n",              // use Ollama?
-		"10m",            // scan frequency
-		"y",              // move files?
-		"n",              // verify checksums?
-		"",               // owner user
-		"",               // owner group (default media)
-		"",               // file mode
-		"",               // dir mode
-		"y",              // confirm write
-		"y",              // start web UI
-		"",               // webhook URL (accept detected default)
+		"/downloads/tv", // TV incoming
+		"/media/tv",     // TV library
+		"",              // Movie incoming (skip)
+		"",              // Movie library (skip)
+		"y",             // connect Sonarr?
+		"",              // Sonarr URL (default)
+		"sonarr-key",    // Sonarr API key
+		"n",             // connect Radarr?
+		"y",             // connect Jellyfin?
+		"",              // Jellyfin URL (default)
+		"jf-key",        // Jellyfin API key
+		"y",             // install companion plugin?
+		"y",             // restart Jellyfin?
+		"n",             // use Ollama?
+		"10m",           // scan frequency
+		"y",             // move files?
+		"n",             // verify checksums?
+		"",              // owner user
+		"",              // owner group (default media)
+		"",              // file mode
+		"",              // dir mode
+		"y",             // confirm write
+		"y",             // start web UI
+		"",              // webhook URL (accept detected default)
 	}
 	out, err := runWizard(t, deps, answers)
 	if err != nil {
@@ -233,7 +237,7 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 		t.Error("initial scan was not run")
 	}
 	if !state.sonarrFixed {
-		t.Error("sonarr fix was confirmed but not applied")
+		t.Error("sonarr compatibility was not enforced")
 	}
 	if !state.pluginInstalled || !state.pluginRestarted {
 		t.Error("plugin was not installed+restarted during the Jellyfin step")
@@ -322,29 +326,28 @@ func TestSetupWizardPromptsPathMappingsWhenUnmapped(t *testing.T) {
 	}
 }
 
-func TestSetupWizardDecliningFixLeavesArrAlone(t *testing.T) {
+func TestSetupWizardAutomaticallyEnforcesArrCompatibility(t *testing.T) {
 	deps, state := wizardTestDeps(t)
 
 	answers := []string{
 		"/downloads/tv", "/media/tv", "", "", // paths
 		"y", "", "sonarr-key", // sonarr
-		"n",      // decline fixes
 		"n", "n", // radarr, jellyfin off
-		"n",             // no ollama
-		"5m", "n", "n",  // runtime
-		"", "", "", "",  // permissions (defaults)
-		"y",             // confirm
-		"y",             // start web UI
+		"n",            // no ollama
+		"5m", "n", "n", // runtime
+		"", "", "", "", // permissions (defaults)
+		"y", // confirm
+		"y", // start web UI
 	}
 	out, err := runWizard(t, deps, answers)
 	if err != nil {
 		t.Fatalf("wizard error: %v\n---\n%s", err, out)
 	}
-	if state.sonarrFixed {
-		t.Error("sonarr fix ran without consent")
+	if !state.sonarrFixed {
+		t.Error("sonarr compatibility was not enforced")
 	}
-	if !strings.Contains(out, "health --fix") {
-		t.Errorf("expected pointer to health --fix, got:\n%s", out)
+	if strings.Contains(out, "Apply these Sonarr fixes now?") {
+		t.Errorf("compatibility must not be optional during setup:\n%s", out)
 	}
 }
 
@@ -504,8 +507,8 @@ func TestSetupWizardAINumberedModelPick(t *testing.T) {
 		"",             // fallback empty
 		"5m", "n", "n", // runtime
 		"", "", "", "", // permissions (defaults)
-		"y",            // confirm
-		"y",            // start web UI
+		"y", // confirm
+		"y", // start web UI
 	}
 	out, err := runWizard(t, deps, answers)
 	if err != nil {

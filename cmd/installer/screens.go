@@ -976,61 +976,6 @@ func (m model) renderComplete() string {
 	return b.String()
 }
 
-func (m model) renderArrIssues() string {
-	var b strings.Builder
-
-	bold := fgBold(Primary)
-	warn := fgBold(WarningColor)
-	muted := fg(FgMuted)
-
-	b.WriteString(warn.Render("Sonarr/Radarr Configuration Issues"))
-	b.WriteString("\n\n")
-
-	b.WriteString(muted.Render("The following settings may conflict with Plex2Jellyfin operation:"))
-	b.WriteString("\n\n")
-
-	if len(m.errors) > 0 {
-		for _, err := range m.errors {
-			b.WriteString(fg(ErrorColor).Render("  " + err))
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-
-	for _, issue := range m.arrIssues {
-		icon := "!"
-		if issue.Severity == "critical" {
-			icon = "X"
-		}
-		b.WriteString(fmt.Sprintf("  %s [%s] %s\n", icon, issue.Service, issue.Setting))
-		b.WriteString(fmt.Sprintf("      Current: %s  →  Expected: %s\n\n",
-			fg(ErrorColor).Render(issue.Current),
-			fg(Primary).Render(issue.Expected)))
-	}
-
-	b.WriteString("\n")
-	b.WriteString(bold.Render("What would you like to do?"))
-	b.WriteString("\n\n")
-
-	// Fix option
-	prefix := "  "
-	if m.arrIssuesChoice == 0 {
-		prefix = fg(Primary).Render("▸ ")
-	}
-	b.WriteString(prefix + "Fix automatically\n")
-	b.WriteString("    " + muted.Render("Update settings via API to match Plex2Jellyfin requirements") + "\n\n")
-
-	// Skip option
-	prefix = "  "
-	if m.arrIssuesChoice == 1 {
-		prefix = fg(Primary).Render("▸ ")
-	}
-	b.WriteString(prefix + "Skip and continue\n")
-	b.WriteString("    " + muted.Render("Proceed without changes (may cause import conflicts)") + "\n")
-
-	return b.String()
-}
-
 func boolToYesNo(b bool) string {
 	if b {
 		return "Yes"

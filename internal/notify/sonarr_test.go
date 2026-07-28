@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
@@ -17,6 +18,12 @@ func TestSonarrNotifierAdoptsP2JPathWithoutImport(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/config/downloadClient":
+			_ = json.NewEncoder(w).Encode(sonarr.DownloadClientConfig{
+				ID: 1, EnableCompletedDownloadHandling: false,
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/config/naming":
+			_ = json.NewEncoder(w).Encode(sonarr.NamingConfig{ID: 1, RenameEpisodes: false})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/series":
 			_ = json.NewEncoder(w).Encode([]sonarr.Series{{
 				ID: 7, Title: "Pluribus", Year: 2025, Path: "/mnt/STORAGE10/TVSHOWS/Pluribus (2025)",
@@ -98,5 +105,40 @@ func TestMatchSonarrSeriesFailsClosedOnAmbiguousTitle(t *testing.T) {
 	}, "The Office", 0)
 	if err == nil {
 		t.Fatal("expected ambiguous title to fail")
+	}
+}
+
+func TestSonarrNotifierStopsWhenHandsOffPolicyDrifts(t *testing.T) {
+	var operationalCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/config/downloadClient":
+			_ = json.NewEncoder(w).Encode(sonarr.DownloadClientConfig{
+				ID: 1, EnableCompletedDownloadHandling: false,
+			})
+		case "/api/v3/config/naming":
+			_ = json.NewEncoder(w).Encode(sonarr.NamingConfig{ID: 1, RenameEpisodes: true})
+		default:
+			operationalCalls++
+			http.Error(w, "must not reach Sonarr operations", http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	client := sonarr.NewClient(sonarr.Config{URL: server.URL, APIKey: "key"})
+	result := NewSonarrNotifier(client, db, true).Notify(OrganizationEvent{
+		MediaType: MediaTypeTVEpisode, Title: "Pluribus", Year: "2025",
+	})
+
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "incompatible") {
+		t.Fatalf("result error = %v, want incompatible policy", result.Error)
+	}
+	if operationalCalls != 0 {
+		t.Fatalf("made %d operational Sonarr calls after policy drift", operationalCalls)
 	}
 }

@@ -173,31 +173,39 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Create Sonarr client (used for both notifications AND library selection)
 	var sonarrClient *sonarr.Client
+	var sonarrHealthClient *sonarr.Client
 	if cfg.Sonarr.Enabled && cfg.Sonarr.APIKey != "" && cfg.Sonarr.URL != "" {
-		sonarrClient = sonarr.NewClient(sonarr.Config{
+		sonarrHealthClient = sonarr.NewClient(sonarr.Config{
 			URL:     cfg.Sonarr.URL,
 			APIKey:  cfg.Sonarr.APIKey,
 			Timeout: 30 * time.Second,
 		})
 
-		// Test connection
-		if err := sonarrClient.Ping(); err != nil {
+		if err := sonarrHealthClient.Ping(); err != nil {
 			logger.Warn("daemon", "Sonarr connection failed, will continue without intelligent library selection",
 				logging.F("error", err.Error()))
-			sonarrClient = nil // Don't use if connection fails
+		} else if _, err := service.EnsureSonarrConfig(sonarrHealthClient); err != nil {
+			logger.Error("daemon", "Sonarr hands-off policy could not be enforced; integration disabled", err)
 		} else {
+			sonarrClient = sonarrHealthClient
 			logger.Info("daemon", "Sonarr integration enabled", logging.F("url", cfg.Sonarr.URL))
 		}
 	}
 
 	var radarrClient *radarr.Client
+	var radarrHealthClient *radarr.Client
 	if cfg.Radarr.Enabled && cfg.Radarr.APIKey != "" && cfg.Radarr.URL != "" {
-		radarrClient = radarr.NewClient(radarr.Config{
+		radarrHealthClient = radarr.NewClient(radarr.Config{
 			URL:     cfg.Radarr.URL,
 			APIKey:  cfg.Radarr.APIKey,
 			Timeout: 30 * time.Second,
 		})
-		logger.Info("daemon", "Radarr integration enabled", logging.F("url", cfg.Radarr.URL))
+		if _, err := service.EnsureRadarrConfig(radarrHealthClient); err != nil {
+			logger.Error("daemon", "Radarr hands-off policy could not be enforced; integration disabled", err)
+		} else {
+			radarrClient = radarrHealthClient
+			logger.Info("daemon", "Radarr integration enabled", logging.F("url", cfg.Radarr.URL))
+		}
 	}
 
 	var jellyfinClient *jellyfin.Client
@@ -356,12 +364,14 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Create periodic scanner
 	periodicScanner := scanner.NewPeriodicScanner(scanner.ScannerConfig{
-		Interval:    scanInterval,
-		WatchPaths:  watchPaths,
-		Handler:     handler,
-		Logger:      logger,
-		ActivityDir: filepath.Join(configDir, "activity"),
-		OrphanCheck: jellyfinClient,
+		Interval:     scanInterval,
+		WatchPaths:   watchPaths,
+		Handler:      handler,
+		Logger:       logger,
+		ActivityDir:  filepath.Join(configDir, "activity"),
+		OrphanCheck:  jellyfinClient,
+		SonarrClient: sonarrHealthClient,
+		RadarrClient: radarrHealthClient,
 	})
 
 	healthServer := daemon.NewServer(handler, periodicScanner, healthAddr, logger, cfg.Jellyfin.WebhookSecret)

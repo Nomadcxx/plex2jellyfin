@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,8 +40,9 @@ type PeriodicScanner struct {
 	skippedTicks int64
 
 	// Health tracking
-	healthy         bool
-	lastHealthCheck time.Time
+	healthy            bool
+	lastHealthCheck    time.Time
+	lastArrHealthError error
 
 	// Live event subscribers
 	subMu       sync.Mutex
@@ -159,6 +161,12 @@ func (s *PeriodicScanner) Start(ctx context.Context) error {
 	s.logger.Info("scanner", "Periodic scanner starting",
 		logging.F("interval", s.interval.String()),
 		logging.F("watch_paths", len(s.watchPaths)))
+	if err := s.checkArrHealth(); err != nil {
+		s.mu.Lock()
+		s.healthy = false
+		s.lastError = err
+		s.mu.Unlock()
+	}
 
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
@@ -201,8 +209,8 @@ func (s *PeriodicScanner) tick() {
 	} else {
 		s.mu.Lock()
 		s.lastSuccess = time.Now()
-		s.lastError = nil
-		s.healthy = true
+		s.lastError = s.lastArrHealthError
+		s.healthy = s.lastArrHealthError == nil
 		s.mu.Unlock()
 	}
 
@@ -234,7 +242,7 @@ func (s *PeriodicScanner) runScan() (err error) {
 	}
 
 	s.checkOrphans()
-	s.checkArrHealth()
+	_ = s.checkArrHealth()
 
 	elapsed := time.Since(start)
 	s.logger.Info("scanner", "Periodic scan complete",
@@ -336,21 +344,24 @@ func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
 
 // checkArrHealth checks Sonarr/Radarr configuration health and logs warnings.
 // Rate-limited to once per hour to avoid log spam.
-func (s *PeriodicScanner) checkArrHealth() {
+func (s *PeriodicScanner) checkArrHealth() error {
 	s.mu.Lock()
 	if time.Since(s.lastHealthCheck) < time.Hour {
+		err := s.lastArrHealthError
 		s.mu.Unlock()
-		return
+		return err
 	}
 	s.lastHealthCheck = time.Now()
 	s.mu.Unlock()
 
 	var hasCritical bool
+	var errs []error
 
 	if s.sonarrClient != nil {
 		issues, err := service.CheckSonarrConfig(s.sonarrClient)
 		if err != nil {
 			s.logger.Error("scanner", "Sonarr health check failed", err)
+			errs = append(errs, fmt.Errorf("Sonarr health check: %w", err))
 		} else {
 			for _, issue := range issues {
 				s.logger.Warn("scanner", "Sonarr configuration issue",
@@ -370,6 +381,7 @@ func (s *PeriodicScanner) checkArrHealth() {
 		issues, err := service.CheckRadarrConfig(s.radarrClient)
 		if err != nil {
 			s.logger.Error("scanner", "Radarr health check failed", err)
+			errs = append(errs, fmt.Errorf("Radarr health check: %w", err))
 		} else {
 			for _, issue := range issues {
 				s.logger.Warn("scanner", "Radarr configuration issue",
@@ -386,9 +398,12 @@ func (s *PeriodicScanner) checkArrHealth() {
 	}
 
 	if hasCritical {
-		s.mu.Lock()
-		s.healthy = false
-		s.mu.Unlock()
-		s.logger.Error("scanner", "Arr health check found critical issues — marking scanner unhealthy. Run 'plex2jellyfin health --fix' to resolve.", nil)
+		s.logger.Error("scanner", "Arr health check found critical issues — marking scanner unhealthy. Run 'plex2jellyfin health --fix --dry-run=false' to resolve.", nil)
+		errs = append(errs, errors.New("Arr hands-off policy is incompatible"))
 	}
+	err := errors.Join(errs...)
+	s.mu.Lock()
+	s.lastArrHealthError = err
+	s.mu.Unlock()
+	return err
 }

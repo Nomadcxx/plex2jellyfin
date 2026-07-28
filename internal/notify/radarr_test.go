@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
@@ -17,6 +18,12 @@ func TestRadarrNotifierAdoptsP2JPathWithoutImport(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/config/downloadClient":
+			_ = json.NewEncoder(w).Encode(radarr.DownloadClientConfig{
+				ID: 1, EnableCompletedDownloadHandling: false,
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/config/naming":
+			_ = json.NewEncoder(w).Encode(radarr.NamingConfig{ID: 1, RenameMovies: false})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/movie":
 			_ = json.NewEncoder(w).Encode([]radarr.Movie{{
 				ID: 42, Title: "Truthers", Year: 2026, Path: "/mnt/STORAGE5/MOVIES/Truthers (2026)",
@@ -96,5 +103,40 @@ func TestMatchRadarrMovieFailsClosedOnAmbiguousTitle(t *testing.T) {
 	}, "Crash", 0)
 	if err == nil {
 		t.Fatal("expected ambiguous title to fail")
+	}
+}
+
+func TestRadarrNotifierStopsWhenHandsOffPolicyDrifts(t *testing.T) {
+	var operationalCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/config/downloadClient":
+			_ = json.NewEncoder(w).Encode(radarr.DownloadClientConfig{
+				ID: 1, EnableCompletedDownloadHandling: true,
+			})
+		case "/api/v3/config/naming":
+			_ = json.NewEncoder(w).Encode(radarr.NamingConfig{ID: 1, RenameMovies: false})
+		default:
+			operationalCalls++
+			http.Error(w, "must not reach Radarr operations", http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	client := radarr.NewClient(radarr.Config{URL: server.URL, APIKey: "key"})
+	result := NewRadarrNotifier(client, db, true).Notify(OrganizationEvent{
+		MediaType: MediaTypeMovie, Title: "Truthers", Year: "2026",
+	})
+
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "incompatible") {
+		t.Fatalf("result error = %v, want incompatible policy", result.Error)
+	}
+	if operationalCalls != 0 {
+		t.Fatalf("made %d operational Radarr calls after policy drift", operationalCalls)
 	}
 }

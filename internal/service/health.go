@@ -39,7 +39,7 @@ func CheckSonarrConfig(client *sonarr.Client) ([]HealthIssue, error) {
 			Current:  "true",
 			Expected: "false",
 			Severity: "critical",
-			FixCmd:   "plex2jellyfin health --fix",
+			FixCmd:   "plex2jellyfin health --fix --dry-run=false",
 		})
 	}
 
@@ -53,8 +53,8 @@ func CheckSonarrConfig(client *sonarr.Client) ([]HealthIssue, error) {
 			Setting:  "renameEpisodes",
 			Current:  "true",
 			Expected: "false",
-			Severity: "warning",
-			FixCmd:   "plex2jellyfin health --fix",
+			Severity: "critical",
+			FixCmd:   "plex2jellyfin health --fix --dry-run=false",
 		})
 	}
 
@@ -76,7 +76,7 @@ func CheckRadarrConfig(client *radarr.Client) ([]HealthIssue, error) {
 			Current:  "true",
 			Expected: "false",
 			Severity: "critical",
-			FixCmd:   "plex2jellyfin health --fix",
+			FixCmd:   "plex2jellyfin health --fix --dry-run=false",
 		})
 	}
 
@@ -90,8 +90,8 @@ func CheckRadarrConfig(client *radarr.Client) ([]HealthIssue, error) {
 			Setting:  "renameMovies",
 			Current:  "true",
 			Expected: "false",
-			Severity: "warning",
-			FixCmd:   "plex2jellyfin health --fix",
+			Severity: "critical",
+			FixCmd:   "plex2jellyfin health --fix --dry-run=false",
 		})
 	}
 
@@ -185,5 +185,45 @@ func FixRadarrIssues(client *radarr.Client, issues []HealthIssue, dryRun bool) (
 		}
 	}
 
+	return fixed, nil
+}
+
+// EnsureSonarrConfig applies the hands-off policy and verifies Sonarr retained it.
+func EnsureSonarrConfig(client *sonarr.Client) ([]HealthIssue, error) {
+	issues, err := CheckSonarrConfig(client)
+	if err != nil {
+		return nil, err
+	}
+	fixed, err := FixSonarrIssues(client, issues, false)
+	if err != nil {
+		return fixed, err
+	}
+	remaining, err := CheckSonarrConfig(client)
+	if err != nil {
+		return fixed, fmt.Errorf("verifying sonarr compatibility: %w", err)
+	}
+	if len(remaining) > 0 {
+		return fixed, fmt.Errorf("sonarr still incompatible: %s=%s", remaining[0].Setting, remaining[0].Current)
+	}
+	return fixed, nil
+}
+
+// EnsureRadarrConfig applies the hands-off policy and verifies Radarr retained it.
+func EnsureRadarrConfig(client *radarr.Client) ([]HealthIssue, error) {
+	issues, err := CheckRadarrConfig(client)
+	if err != nil {
+		return nil, err
+	}
+	fixed, err := FixRadarrIssues(client, issues, false)
+	if err != nil {
+		return fixed, err
+	}
+	remaining, err := CheckRadarrConfig(client)
+	if err != nil {
+		return fixed, fmt.Errorf("verifying radarr compatibility: %w", err)
+	}
+	if len(remaining) > 0 {
+		return fixed, fmt.Errorf("radarr still incompatible: %s=%s", remaining[0].Setting, remaining[0].Current)
+	}
 	return fixed, nil
 }

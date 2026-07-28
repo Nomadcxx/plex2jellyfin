@@ -28,8 +28,7 @@ const (
 	stepConfirm
 	stepUninstallConfirm // Confirm uninstall and choose to delete config/db
 	stepInstalling
-	stepArrIssues // Show arr configuration issues and offer to fix
-	stepScanning  // Library scan with progress
+	stepScanning // Library scan with progress
 	stepComplete
 )
 
@@ -207,8 +206,7 @@ type model struct {
 	scanCancel   context.CancelFunc
 
 	// Arr configuration issues
-	arrIssues       []ArrIssue
-	arrIssuesChoice int // 0=fix, 1=skip
+	arrIssues []ArrIssue
 
 	// Timing config
 	inputDelay time.Duration

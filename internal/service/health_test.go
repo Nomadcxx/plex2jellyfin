@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/radarr"
@@ -87,7 +88,7 @@ func TestCheckSonarrConfig_RenameEnabled(t *testing.T) {
 	require.Len(t, issues, 1)
 	assert.Equal(t, "sonarr", issues[0].Service)
 	assert.Equal(t, "renameEpisodes", issues[0].Setting)
-	assert.Equal(t, "warning", issues[0].Severity)
+	assert.Equal(t, "critical", issues[0].Severity)
 }
 
 func TestCheckSonarrConfig_BothBad(t *testing.T) {
@@ -189,7 +190,7 @@ func TestCheckRadarrConfig_RenameEnabled(t *testing.T) {
 	require.Len(t, issues, 1)
 	assert.Equal(t, "radarr", issues[0].Service)
 	assert.Equal(t, "renameMovies", issues[0].Setting)
-	assert.Equal(t, "warning", issues[0].Severity)
+	assert.Equal(t, "critical", issues[0].Severity)
 }
 
 func TestFixSonarrIssues_DryRun(t *testing.T) {
@@ -336,4 +337,65 @@ func TestFixRadarrIssues_DisablesRename(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, fixed, 1)
 	assert.Equal(t, false, renamed)
+}
+
+func TestEnsureSonarrConfigRepairsAndVerifies(t *testing.T) {
+	completed, renamed := true, true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/v3/config/downloadClient"):
+			if r.Method == http.MethodPut {
+				var cfg sonarr.DownloadClientConfig
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&cfg))
+				completed = cfg.EnableCompletedDownloadHandling
+			}
+			_ = json.NewEncoder(w).Encode(sonarr.DownloadClientConfig{
+				ID: 1, EnableCompletedDownloadHandling: completed,
+			})
+		case r.URL.Path == "/api/v3/config/naming":
+			if r.Method == http.MethodPut {
+				var cfg sonarr.NamingConfig
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&cfg))
+				renamed = cfg.RenameEpisodes
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 1, "renameEpisodes": renamed, "specialsFolderFormat": "Specials",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := sonarr.NewClient(sonarr.Config{URL: server.URL, APIKey: "test"})
+	fixed, err := EnsureSonarrConfig(client)
+	require.NoError(t, err)
+	assert.Len(t, fixed, 2)
+	assert.False(t, completed)
+	assert.False(t, renamed)
+}
+
+func TestEnsureRadarrConfigRejectsFailedReadback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v3/config/downloadClient":
+			_ = json.NewEncoder(w).Encode(radarr.DownloadClientConfig{
+				ID: 1, EnableCompletedDownloadHandling: false,
+			})
+		case "/api/v3/config/naming":
+			// Simulate an Arr instance accepting PUT but retaining the old value.
+			_ = json.NewEncoder(w).Encode(radarr.NamingConfig{ID: 1, RenameMovies: true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := radarr.NewClient(radarr.Config{URL: server.URL, APIKey: "test"})
+	fixed, err := EnsureRadarrConfig(client)
+	assert.Len(t, fixed, 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "still incompatible")
 }

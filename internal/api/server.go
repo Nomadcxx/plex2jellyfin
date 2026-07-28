@@ -45,6 +45,7 @@ type Server struct {
 	// Optional hooks for tests; nil uses production index/chown helpers.
 	setupIndexLibraries func(ctx context.Context, draft setupdomain.Draft, onProgress func(scanner.ScanProgress)) (*scanner.ScanResult, error)
 	setupChownConfig    func(user, group string) error
+	setupEnsureArr      func(candidate *config.Config) error
 	setupIndexMu        sync.Mutex
 }
 

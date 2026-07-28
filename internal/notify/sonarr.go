@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
@@ -47,6 +48,17 @@ func (n *SonarrNotifier) Notify(event OrganizationEvent) *NotifyResult {
 
 	if event.MediaType != MediaTypeTVEpisode {
 		result.Skipped = true
+		result.Duration = time.Since(start)
+		return result
+	}
+	issues, err := service.CheckSonarrConfig(n.client)
+	if err != nil {
+		result.Error = fmt.Errorf("checking Sonarr compatibility: %w", err)
+		result.Duration = time.Since(start)
+		return result
+	}
+	if len(issues) > 0 {
+		result.Error = fmt.Errorf("Sonarr is incompatible: %s=%s", issues[0].Setting, issues[0].Current)
 		result.Duration = time.Since(start)
 		return result
 	}

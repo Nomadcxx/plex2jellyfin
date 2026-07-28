@@ -528,7 +528,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		return err
 	}
 	if draft.Sonarr.Enabled {
-		if err := promptArrCompatibility(p, stdout, "Sonarr", draft.Sonarr, deps.checkSonarr, deps.fixSonarr); err != nil {
+		if err := promptArrCompatibility(stdout, "Sonarr", draft.Sonarr, deps.checkSonarr, deps.fixSonarr); err != nil {
 			return err
 		}
 	}
@@ -536,7 +536,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		return err
 	}
 	if draft.Radarr.Enabled {
-		if err := promptArrCompatibility(p, stdout, "Radarr", draft.Radarr, deps.checkRadarr, deps.fixRadarr); err != nil {
+		if err := promptArrCompatibility(stdout, "Radarr", draft.Radarr, deps.checkRadarr, deps.fixRadarr); err != nil {
 			return err
 		}
 	}
@@ -603,8 +603,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		if ms := setupdomain.DetectedMediaServerName(); ms != "" {
 			clitheme.Muted(stdout, fmt.Sprintf("Detected media server user/group defaults from %s.", ms))
 		}
-		clitheme.Muted(stdout, "Group is the critical setting: Sonarr, Radarr, and Jellyfin need a shared")
-		clitheme.Muted(stdout, "group (and group-writable modes) to rename/upgrade/delete after import.")
+		clitheme.Muted(stdout, "Plex2Jellyfin and Jellyfin need a shared group for library updates and cleanup.")
 		clitheme.Muted(stdout, "User may be blank (daemon/root owns) or your media server user.")
 		clitheme.Muted(stdout, "Recommended: group=media (or jellyfin), file_mode=0664, dir_mode=0775.")
 		clitheme.Muted(stdout, "Full guide: https://github.com/Nomadcxx/plex2jellyfin/blob/main/docs/permissions.md")
@@ -928,15 +927,13 @@ func promptService(p *prompter, name, defaultURL string, svc *setupdomain.Servic
 	return nil
 }
 
-// promptArrCompatibility reports incompatible arr settings and only changes
-// them after an explicit confirmation.
-func promptArrCompatibility(p *prompter, out io.Writer, name string, svc setupdomain.ServiceDraft,
+// promptArrCompatibility enforces the hands-off Arr policy before setup can continue.
+func promptArrCompatibility(out io.Writer, name string, svc setupdomain.ServiceDraft,
 	check func(url, apiKey string) ([]service.HealthIssue, error),
 	fix func(url, apiKey string, issues []service.HealthIssue) error) error {
 	issues, err := check(svc.URL, svc.APIKey)
 	if err != nil {
-		clitheme.Warn(out, fmt.Sprintf("%s compatibility check failed: %v", name, err))
-		return nil
+		return fmt.Errorf("%s compatibility check failed: %w", name, err)
 	}
 	if len(issues) == 0 {
 		clitheme.OK(out, name+" settings are compatible")
@@ -946,19 +943,18 @@ func promptArrCompatibility(p *prompter, out io.Writer, name string, svc setupdo
 	for _, issue := range issues {
 		clitheme.Muted(out, fmt.Sprintf("%s: %s (currently %s, needs %s)", issue.Severity, issue.Setting, issue.Current, issue.Expected))
 	}
-	apply, err := p.askBool("Apply these "+name+" fixes now?", false)
-	if err != nil {
-		return err
-	}
-	if !apply {
-		clitheme.Muted(out, fmt.Sprintf("leaving %s unchanged; run 'plex2jellyfin health --fix' later", name))
-		return nil
-	}
+	clitheme.Muted(out, "Applying the required hands-off settings...")
 	if err := fix(svc.URL, svc.APIKey, issues); err != nil {
-		clitheme.Err(out, fmt.Sprintf("fixing %s failed: %v", name, err))
-		return nil
+		return fmt.Errorf("fixing %s compatibility: %w", name, err)
 	}
-	clitheme.OK(out, name+" updated")
+	remaining, err := check(svc.URL, svc.APIKey)
+	if err != nil {
+		return fmt.Errorf("verifying %s compatibility: %w", name, err)
+	}
+	if len(remaining) > 0 {
+		return fmt.Errorf("%s remains incompatible after repair: %s=%s", name, remaining[0].Setting, remaining[0].Current)
+	}
+	clitheme.OK(out, name+" updated and verified")
 	return nil
 }
 

@@ -190,10 +190,10 @@ func TestConfigurePluginFeedback_SkipsWhenListenerDidNotStart(t *testing.T) {
 
 func TestGenerateConfigString_WritesPathMappings(t *testing.T) {
 	m := &model{
-		watchFolders:    []WatchFolder{{Type: "movies", Paths: "/watch/movies"}},
+		watchFolders:      []WatchFolder{{Type: "movies", Paths: "/watch/movies"}},
 		movieLibraryPaths: "/mnt/STORAGE1/MOVIES",
-		jellyfinEnabled: true,
-		webhookSecret:   "secret-1",
+		jellyfinEnabled:   true,
+		webhookSecret:     "secret-1",
 		pathMappings: []configpkg.JellyfinPathMapping{
 			{Jellyfin: "/movies1", Daemon: "/mnt/STORAGE1/MOVIES"},
 		},
@@ -564,18 +564,33 @@ func TestDefaultConfig_MetadataRecoveryDefaults(t *testing.T) {
 	}
 }
 
-func TestArrFixMsg_ErrorStaysOnIssuesStep(t *testing.T) {
+func TestArrIssuesAreRepairedWithoutSkipPath(t *testing.T) {
 	m := model{
-		step:      stepArrIssues,
+		step:          stepInstalling,
+		sonarrEnabled: true,
+		arrIssues:     nil,
+	}
+	next, cmd := m.Update(arrIssuesMsg{issues: []ArrIssue{{
+		Service: "sonarr", Setting: "renameEpisodes",
+	}}})
+	got := next.(model)
+	if got.step != stepInstalling {
+		t.Fatalf("step = %v, want repair to remain in installation flow", got.step)
+	}
+	if cmd == nil {
+		t.Fatal("installer did not start automatic compatibility repair")
+	}
+}
+
+func TestArrFixMsg_ErrorStopsInstallation(t *testing.T) {
+	m := model{
+		step:      stepInstalling,
 		arrIssues: []ArrIssue{{Service: "sonarr", Setting: "renameEpisodes"}},
 	}
 	next, cmd := m.Update(arrFixMsg{fixed: 0, err: fmt.Errorf("fixing renameEpisodes: 400")})
 	got := next.(model)
-	if got.step != stepArrIssues {
-		t.Fatalf("step = %v, want stepArrIssues so user can retry/skip", got.step)
-	}
-	if len(got.arrIssues) == 0 {
-		t.Fatal("arrIssues cleared on failure; user loses context")
+	if got.step != stepComplete {
+		t.Fatalf("step = %v, want stepComplete so incompatible setup cannot activate", got.step)
 	}
 	if len(got.errors) == 0 {
 		t.Fatal("expected fix error surfaced in m.errors")
