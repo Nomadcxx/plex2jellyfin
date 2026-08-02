@@ -697,16 +697,21 @@ func HasEpisodeMetadata(item *Item) bool {
 
 // isValidatedDateEpisode accepts date-based imports when the parse decision
 // encodes YYYY/MMDD, path identity already matched, premiere metadata exists,
-// and the premiere date is the *same* calendar day.
+// and the premiere falls on the *same* calendar day.
 //
 // The match must be exact. Date-based numbering is used almost exclusively by
 // daily shows, whose consecutive episodes are exactly one day apart, so any
 // tolerance window validates the neighbouring episode just as readily as the
 // right one — which is precisely the off-by-one mis-mapping this check exists
-// to catch. Both sides are already reduced to a fixed-zone calendar date
-// (parsedDateEpisode parses YYYY-MM-DD as UTC; parseJellyfinPremiereDate
-// truncates every layout to UTC midnight), so no skew window is needed to
-// compare them.
+// to catch.
+//
+// Exactness only works because both sides are reduced to the same calendar:
+// parseJellyfinPremiereDate resolves zone-bearing timestamps in the local zone
+// before taking the date. Jellyfin stores an air date as local midnight
+// expressed as a UTC instant (a Sydney server emits "…T14:00:00Z" for an
+// air date of the following day), so reading that date in UTC would shift
+// every episode a day earlier for any host east of UTC and reject the correct
+// file. See TestParseJellyfinPremiereDate_LocalMidnightEncoding.
 //
 // A date that does not line up simply fails to validate here and the episode
 // falls through to a review state; nothing is deleted or rewritten on the
@@ -752,35 +757,51 @@ func parsedDateEpisode(row *database.ParseDecision) (time.Time, bool) {
 	return t, true
 }
 
+// parseJellyfinPremiereDate reduces a Jellyfin premiere timestamp to a bare
+// calendar date, normalised as UTC midnight so it can be compared with
+// parsedDateEpisode.
+//
+// Zone-bearing timestamps are resolved in the local zone first. Jellyfin
+// records an air date as local midnight expressed as a UTC instant, so a host
+// at UTC+10 receives "2026-07-14T14:00:00Z" for an air date of 2026-07-15;
+// taking the UTC date there yields the previous day and silently rejects the
+// correct episode. Layouts that carry no zone are already wall-clock dates and
+// are taken as written.
 func parseJellyfinPremiereDate(raw string) (time.Time, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return time.Time{}, false
 	}
-	layouts := []string{
+	zoned := []string{
 		time.RFC3339Nano,
 		time.RFC3339,
-		"2006-01-02T15:04:05",
 		"2006-01-02T15:04:05.0000000Z",
-		"2006-01-02",
+		"2006-01-02T15:04:05.9999999Z",
 	}
-	for _, layout := range layouts {
+	for _, layout := range zoned {
 		if t, err := time.Parse(layout, raw); err == nil {
-			y, m, d := t.Date()
-			return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), true
+			return civilDate(t.In(time.Local)), true
 		}
 	}
-	// Jellyfin sometimes emits fractional seconds without a recognized zone.
-	if t, err := time.Parse("2006-01-02T15:04:05.9999999Z", raw); err == nil {
-		y, m, d := t.Date()
-		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), true
+	// No zone information: the timestamp is already a wall-clock date.
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return civilDate(t), true
+		}
 	}
 	if len(raw) >= 10 {
 		if t, err := time.Parse("2006-01-02", raw[:10]); err == nil {
-			return t, true
+			return civilDate(t), true
 		}
 	}
 	return time.Time{}, false
+}
+
+// civilDate strips a timestamp down to its calendar date, represented as UTC
+// midnight so two dates compare with Equal regardless of origin zone.
+func civilDate(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 func recentlyImported(row *database.ParseDecision, now time.Time) bool {

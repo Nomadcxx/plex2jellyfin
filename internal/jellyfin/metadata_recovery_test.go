@@ -128,7 +128,7 @@ func TestClassifyMetadata(t *testing.T) {
 				Type:         "Episode",
 				Path:         "/media/The Daily Show/The Daily Show 2026-07-29.mkv",
 				SeriesID:     "series-daily",
-				PremiereDate: "2026-07-29T04:00:00.0000000Z",
+				PremiereDate: "2026-07-29",
 				Overview:     "Guest episode.",
 			},
 			series:     &Item{ID: "series-daily", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "71256"}},
@@ -150,7 +150,7 @@ func TestClassifyMetadata(t *testing.T) {
 				Type:         "Episode",
 				Path:         "/media/The Daily Show/The Daily Show 2026-07-30.mkv",
 				SeriesID:     "series-daily",
-				PremiereDate: "2026-07-31T02:00:00.0000000Z", // next calendar day
+				PremiereDate: "2026-07-31", // next calendar day
 				Overview:     "The following night's episode.",
 			},
 			series:    &Item{ID: "series-daily", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "71256"}},
@@ -168,7 +168,7 @@ func TestClassifyMetadata(t *testing.T) {
 				Type:         "Episode",
 				Path:         "/media/The Daily Show/The Daily Show 2026-07-30.mkv",
 				SeriesID:     "series-daily",
-				PremiereDate: "2026-07-29T22:00:00.0000000Z",
+				PremiereDate: "2026-07-29",
 				Overview:     "The previous night's episode.",
 			},
 			series:    &Item{ID: "series-daily", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "71256"}},
@@ -190,7 +190,7 @@ func TestClassifyMetadata(t *testing.T) {
 				Path:         "/media/The Daily Show/The Daily Show 2026-07-29.mkv",
 				SeriesID:     "series-daily",
 				ProviderIDs:  map[string]string{"Tvdb": "99887"},
-				PremiereDate: "2026-07-29T04:00:00.0000000Z",
+				PremiereDate: "2026-07-29",
 				Overview:     "Guest episode.",
 			},
 			series:    &Item{ID: "series-daily", Type: "Series"},
@@ -208,7 +208,7 @@ func TestClassifyMetadata(t *testing.T) {
 				Path:         "/media/The Daily Show/The Daily Show 2026-07-29.mkv",
 				SeriesID:     "series-daily",
 				ProviderIDs:  map[string]string{"Tvdb": "99887"},
-				PremiereDate: "2026-07-29T04:00:00.0000000Z",
+				PremiereDate: "2026-07-29",
 				Overview:     "Guest episode.",
 			},
 			series:     &Item{ID: "series-daily", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "71256"}},
@@ -890,4 +890,67 @@ func TestPassiveCorrectionSkipsAtAttemptCap(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, enq.calls, "should not enqueue at attempt cap")
 	assert.Empty(t, store.repairs)
+}
+
+// Jellyfin stores an air date as local midnight expressed as a UTC instant, so
+// the calendar date must be read back in the local zone. Reading it as UTC
+// shifts every episode a day earlier on any host east of UTC.
+//
+// The zoned fixtures are verbatim from a live Jellyfin 10.11.11 server running
+// alongside a UTC+10 host: "…T14:00:00Z" is midnight Sydney the next day.
+func TestParseJellyfinPremiereDate_LocalMidnightEncoding(t *testing.T) {
+	orig := time.Local
+	t.Cleanup(func() { time.Local = orig })
+
+	tests := []struct {
+		name string
+		zone *time.Location
+		raw  string
+		want string
+	}{
+		{"UTC+10 local midnight", time.FixedZone("AEST", 10*3600), "2026-07-14T14:00:00.0000000Z", "2026-07-15"},
+		{"UTC+10 local midnight RFC3339", time.FixedZone("AEST", 10*3600), "2026-07-29T14:00:00Z", "2026-07-30"},
+		{"UTC host reads the same instant as written", time.UTC, "2026-07-14T14:00:00.0000000Z", "2026-07-14"},
+		{"UTC-5 host", time.FixedZone("EST", -5*3600), "2026-07-15T04:00:00.0000000Z", "2026-07-14"},
+		{"explicit offset is honoured", time.FixedZone("AEST", 10*3600), "2026-07-15T00:00:00+10:00", "2026-07-15"},
+		// Zoneless layouts are already wall-clock dates and must not shift.
+		{"date only is taken as written", time.FixedZone("AEST", 10*3600), "2026-07-15", "2026-07-15"},
+		{"zoneless timestamp is taken as written", time.FixedZone("AEST", 10*3600), "2026-07-15T09:30:00", "2026-07-15"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			time.Local = tc.zone
+			got, ok := parseJellyfinPremiereDate(tc.raw)
+			require.True(t, ok, "parse %q", tc.raw)
+			assert.Equal(t, tc.want, got.Format("2006-01-02"))
+		})
+	}
+}
+
+// The live Daily Show rows: a UTC+10 host must validate the file whose name
+// matches the local air date, and still reject its neighbours.
+func TestIsValidatedDateEpisode_ProductionDailyShowFixture(t *testing.T) {
+	orig := time.Local
+	t.Cleanup(func() { time.Local = orig })
+	time.Local = time.FixedZone("AEST", 10*3600)
+
+	targetAt := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	item := &Item{
+		ID:           "episode-daily-prod",
+		Type:         "Episode",
+		Path:         "/mnt/STORAGE5/TVSHOWS/The Daily Show (1996)/Season 2026/The Daily Show 2026-07-30.mkv",
+		SeriesID:     "series-daily",
+		PremiereDate: "2026-07-29T14:00:00.0000000Z", // midnight AEST on 2026-07-30
+		Overview:     "Daily Show episode.",
+	}
+
+	row := dateEpisodeDecision(item.Path, targetAt, 2026, 730)
+	assert.True(t, isValidatedDateEpisode(row, item), "the matching air date must validate")
+
+	prev := dateEpisodeDecision(item.Path, targetAt, 2026, 729)
+	assert.False(t, isValidatedDateEpisode(prev, item), "the previous day's file must not validate")
+
+	next := dateEpisodeDecision(item.Path, targetAt, 2026, 731)
+	assert.False(t, isValidatedDateEpisode(next, item), "the next day's file must not validate")
 }
