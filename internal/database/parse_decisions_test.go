@@ -752,3 +752,161 @@ func TestQueryDecisionsUnderFolder(t *testing.T) {
 			"row %s not under folder", d.TargetPath)
 	}
 }
+
+func TestClearOutcomesByTargetPathClearsAllSuccessfulRows(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	targetPath := "/library/Movies/Shared (2026)/Shared (2026).mkv"
+	var ids []int64
+	for i := 0; i < 2; i++ {
+		d := makeDecision()
+		d.SourcePath = filepath.Join("/downloads", string(rune('a'+i))+".mkv")
+		d.SourceFilename = filepath.Base(d.SourcePath)
+		d.TargetPath = targetPath
+		d.OrganizeOutcome = "success"
+		id, err := db.InsertDecision(d)
+		require.NoError(t, err)
+		ids = append(ids, id)
+		resolvedAt := time.Now().UTC()
+		identified := true
+		require.NoError(t, db.UpdateOutcome(id, OutcomeUpdate{
+			JellyfinItemID:     "jf-shared",
+			JellyfinResolvedAt: &resolvedAt,
+			JellyfinIdentified: &identified,
+		}))
+	}
+
+	require.NoError(t, db.ClearOutcomesByTargetPath(targetPath))
+
+	for _, id := range ids {
+		decision, err := db.GetDecision(id)
+		require.NoError(t, err)
+		assert.Empty(t, decision.JellyfinItemID)
+		assert.Nil(t, decision.JellyfinResolvedAt)
+		require.NotNil(t, decision.JellyfinIdentified)
+		assert.False(t, *decision.JellyfinIdentified)
+		assert.Empty(t, decision.MetadataState)
+		assert.Empty(t, decision.MetadataError)
+	}
+}
+
+func TestUpgradeOutcomePromotesMetadataAtomically(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	id, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(id, OrganizeUpdate{
+		TargetPath:      "/library/show/Season 01/show S01E01.mkv",
+		TargetAt:        &now,
+		OrganizeOutcome: "success",
+	}))
+	identified := false
+	require.NoError(t, db.UpdateOutcome(id, OutcomeUpdate{
+		JellyfinItemID:      "item-bare",
+		JellyfinResolvedAt:  &now,
+		JellyfinIdentified:  &identified,
+		JellyfinFirstSeenAt: &now,
+	}))
+	next := now.Add(2 * time.Hour)
+	require.NoError(t, db.UpdateMetadataCheckState(id, "missing_provider_ids", "waiting on providers", &next))
+	require.NoError(t, db.UpdateAutoLabel(id, "FAIL"))
+
+	promoted := true
+	require.NoError(t, db.UpgradeOutcome(id, OutcomeUpdate{
+		JellyfinItemID:      "item-ready",
+		JellyfinImdbID:      "tt123",
+		JellyfinTmdbID:      "456",
+		JellyfinTvdbID:      "789",
+		JellyfinResolvedAt:  &now,
+		JellyfinIdentified:  &promoted,
+		JellyfinFirstSeenAt: &now,
+	}))
+
+	got, err := db.GetDecision(id)
+	require.NoError(t, err)
+	assert.Equal(t, "item-ready", got.JellyfinItemID)
+	assert.Equal(t, "tt123", got.JellyfinImdbID)
+	assert.Equal(t, "456", got.JellyfinTmdbID)
+	assert.Equal(t, "789", got.JellyfinTvdbID)
+	require.NotNil(t, got.JellyfinIdentified)
+	assert.True(t, *got.JellyfinIdentified)
+	assert.Equal(t, "identified", got.MetadataState)
+	assert.Empty(t, got.MetadataError)
+	assert.Nil(t, got.NextMetadataCheckAt)
+	assert.Empty(t, got.AutoLabel)
+	assert.Nil(t, got.AutoLabelAt)
+}
+
+func TestUpgradeOutcomeEmptyUpdateDoesNotDowngradeIdentified(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	id, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+	identified := true
+	require.NoError(t, db.UpdateOutcome(id, OutcomeUpdate{
+		JellyfinItemID:     "item-1",
+		JellyfinImdbID:     "tt999",
+		JellyfinResolvedAt: &now,
+		JellyfinIdentified: &identified,
+	}))
+	require.NoError(t, db.UpgradeOutcome(id, OutcomeUpdate{
+		JellyfinItemID:     "item-1",
+		JellyfinResolvedAt: &now,
+		JellyfinIdentified: &identified,
+	}))
+	// Force metadata_state via a second promote after setting stale state would
+	// be unrealistic; assert identified row stays identified under empty update.
+	got, err := db.GetDecision(id)
+	require.NoError(t, err)
+	require.NotNil(t, got.JellyfinIdentified)
+	assert.True(t, *got.JellyfinIdentified)
+
+	downgrade := false
+	require.NoError(t, db.UpgradeOutcome(id, OutcomeUpdate{
+		JellyfinItemID:     "item-1",
+		JellyfinResolvedAt: &now,
+		JellyfinIdentified: &downgrade,
+	}))
+
+	got, err = db.GetDecision(id)
+	require.NoError(t, err)
+	require.NotNil(t, got.JellyfinIdentified)
+	assert.True(t, *got.JellyfinIdentified, "empty/negative UpgradeOutcome must not clear identified")
+	assert.Equal(t, "tt999", got.JellyfinImdbID)
+}
+
+func TestClearOutcomeResetsMetadataState(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	id, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+	identified := true
+	require.NoError(t, db.UpdateOutcome(id, OutcomeUpdate{
+		JellyfinItemID:     "item-1",
+		JellyfinImdbID:     "tt1",
+		JellyfinResolvedAt: &now,
+		JellyfinIdentified: &identified,
+	}))
+	next := now.Add(time.Hour)
+	require.NoError(t, db.UpdateMetadataCheckState(id, "identified", "stale contradiction", &next))
+
+	require.NoError(t, db.ClearOutcome(id))
+
+	got, err := db.GetDecision(id)
+	require.NoError(t, err)
+	assert.Empty(t, got.JellyfinItemID)
+	assert.Empty(t, got.JellyfinImdbID)
+	assert.Nil(t, got.JellyfinResolvedAt)
+	require.NotNil(t, got.JellyfinIdentified)
+	assert.False(t, *got.JellyfinIdentified)
+	assert.Empty(t, got.MetadataState)
+	assert.Empty(t, got.MetadataError)
+	assert.Nil(t, got.NextMetadataCheckAt)
+}

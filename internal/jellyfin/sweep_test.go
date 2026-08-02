@@ -3,8 +3,10 @@ package jellyfin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync/atomic"
@@ -90,6 +92,13 @@ func TestSweep_RecentRowIsSweepedWithinLookback(t *testing.T) {
 	}
 	if dec.JellyfinResolvedAt == nil {
 		t.Errorf("expected JellyfinResolvedAt to be set")
+	}
+	item, err := db.GetJellyfinItemByPath(targetPath)
+	if err != nil {
+		t.Fatalf("GetJellyfinItemByPath: %v", err)
+	}
+	if item == nil || item.JellyfinItemID != "jf-1" {
+		t.Fatalf("expected live path cached from inventory, got %+v", item)
 	}
 }
 
@@ -181,8 +190,8 @@ func TestSweep_OldRowSkippedByNormalSweep(t *testing.T) {
 	if dec.AutoLabel != "" {
 		t.Errorf("expected old row not yet TTL-labeled, got auto_label=%q", dec.AutoLabel)
 	}
-	if atomic.LoadInt32(calls) != 0 {
-		t.Errorf("expected no Jellyfin API calls when no rows in window, got %d", *calls)
+	if atomic.LoadInt32(calls) != 1 {
+		t.Errorf("expected one complete inventory request, got %d", *calls)
 	}
 }
 
@@ -315,6 +324,443 @@ func TestSweep_APIErrorDoesNotMarkRows(t *testing.T) {
 	}
 	if dec.AutoLabel != "" {
 		t.Errorf("row should not be auto-labeled on API error, got %q", dec.AutoLabel)
+	}
+}
+
+func TestSweep_CompleteInventoryInvalidatesCachedPathMissingFromJellyfin(t *testing.T) {
+	db := newSweepDB(t)
+	libraryDir := t.TempDir()
+	targetPath := filepath.Join(libraryDir, "Still On Disk (2026).mkv")
+	if err := os.WriteFile(targetPath, []byte("movie"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var ids []int64
+	for _, source := range []string{"/dl/older.still.on.disk.2026.mkv", "/dl/still.on.disk.2026.mkv"} {
+		id, err := db.InsertDecision(database.ParseDecision{
+			SourcePath:      source,
+			SourceFilename:  filepath.Base(source),
+			EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+			TargetPath:      targetPath,
+			OrganizeOutcome: "success",
+		})
+		if err != nil {
+			t.Fatalf("InsertDecision: %v", err)
+		}
+		ids = append(ids, id)
+		resolvedAt := time.Now().UTC()
+		identified := true
+		if err := db.UpdateOutcome(id, database.OutcomeUpdate{
+			JellyfinItemID:      "jf-stale",
+			JellyfinResolvedAt:  &resolvedAt,
+			JellyfinIdentified:  &identified,
+			JellyfinFirstSeenAt: &resolvedAt,
+		}); err != nil {
+			t.Fatalf("UpdateOutcome: %v", err)
+		}
+	}
+	// The library is not just this one file: seed survivors so the sweep sees
+	// a genuine single-item deletion rather than an empty inventory, which is
+	// indistinguishable from a Jellyfin that has not finished starting up.
+	survivors := make([]Item, 0, 8)
+	cache := []database.JellyfinItem{{
+		Path: targetPath, JellyfinItemID: "jf-stale", ItemName: "Still On Disk", ItemType: "Movie",
+	}}
+	for i := 0; i < 8; i++ {
+		p := fmt.Sprintf("/library/Movies/Survivor %d (2026)/Survivor %d (2026).mkv", i, i)
+		survivors = append(survivors, Item{ID: fmt.Sprintf("jf-survivor-%d", i), Path: p, Name: fmt.Sprintf("Survivor %d", i), Type: "Movie"})
+		cache = append(cache, database.JellyfinItem{
+			Path: p, JellyfinItemID: fmt.Sprintf("jf-survivor-%d", i),
+			ItemName: fmt.Sprintf("Survivor %d", i), ItemType: "Movie",
+		})
+	}
+	if _, err := db.ReconcileJellyfinItems(cache); err != nil {
+		t.Fatalf("ReconcileJellyfinItems: %v", err)
+	}
+
+	// Jellyfin now returns every survivor but not targetPath.
+	srv, calls := newFakeJellyfinServer(t, survivors)
+	sweeper := NewSweeper(NewClient(Config{URL: srv.URL, APIKey: "k"}), db)
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if atomic.LoadInt32(calls) != 1 {
+		t.Fatalf("expected complete inventory request, got %d calls", *calls)
+	}
+	if _, err := os.Stat(targetPath); err != nil {
+		t.Fatalf("on-disk file should remain: %v", err)
+	}
+
+	item, err := db.GetJellyfinItemByPath(targetPath)
+	if err != nil {
+		t.Fatalf("GetJellyfinItemByPath: %v", err)
+	}
+	if item != nil {
+		t.Fatalf("expected stale cache row invalidated, got %+v", item)
+	}
+	for _, id := range ids {
+		dec, err := db.GetDecision(id)
+		if err != nil {
+			t.Fatalf("GetDecision: %v", err)
+		}
+		if dec.JellyfinItemID != "" || dec.JellyfinResolvedAt != nil {
+			t.Fatalf("expected stale parse outcome cleared, got %+v", dec)
+		}
+	}
+
+	// The survivors must be untouched by the single-item invalidation.
+	for _, s := range survivors {
+		cached, err := db.GetJellyfinItemByPath(s.Path)
+		if err != nil {
+			t.Fatalf("GetJellyfinItemByPath(%s): %v", s.Path, err)
+		}
+		if cached == nil {
+			t.Fatalf("survivor %s must remain cached", s.Path)
+		}
+	}
+}
+
+// A reachable-but-empty Jellyfin (still scanning, storage not mounted, API key
+// without library access) must never reconcile as "everything was deleted".
+func TestSweep_EmptyInventoryPreservesCachedConfirmations(t *testing.T) {
+	db := newSweepDB(t)
+
+	var ids []int64
+	var cache []database.JellyfinItem
+	for i := 0; i < 5; i++ {
+		p := fmt.Sprintf("/library/Movies/Film %d (2026)/Film %d (2026).mkv", i, i)
+		id, err := db.InsertDecision(database.ParseDecision{
+			SourcePath:      fmt.Sprintf("/dl/film.%d.2026.mkv", i),
+			SourceFilename:  fmt.Sprintf("film.%d.2026.mkv", i),
+			EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+			TargetPath:      p,
+			OrganizeOutcome: "success",
+		})
+		if err != nil {
+			t.Fatalf("InsertDecision: %v", err)
+		}
+		ids = append(ids, id)
+		now := time.Now().UTC()
+		identified := true
+		if err := db.UpdateOutcome(id, database.OutcomeUpdate{
+			JellyfinItemID:      fmt.Sprintf("jf-%d", i),
+			JellyfinResolvedAt:  &now,
+			JellyfinIdentified:  &identified,
+			JellyfinFirstSeenAt: &now,
+		}); err != nil {
+			t.Fatalf("UpdateOutcome: %v", err)
+		}
+		cache = append(cache, database.JellyfinItem{
+			Path: p, JellyfinItemID: fmt.Sprintf("jf-%d", i),
+			ItemName: fmt.Sprintf("Film %d", i), ItemType: "Movie",
+		})
+	}
+	if _, err := db.ReconcileJellyfinItems(cache); err != nil {
+		t.Fatalf("ReconcileJellyfinItems: %v", err)
+	}
+
+	srv, _ := newFakeJellyfinServer(t, nil)
+	sweeper := NewSweeper(NewClient(Config{URL: srv.URL, APIKey: "k"}), db)
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err == nil {
+		t.Fatal("expected empty inventory to be rejected as implausible")
+	}
+
+	items, err := db.ListJellyfinItems()
+	if err != nil {
+		t.Fatalf("ListJellyfinItems: %v", err)
+	}
+	if len(items) != len(cache) {
+		t.Fatalf("empty inventory must preserve cache, got %d of %d", len(items), len(cache))
+	}
+	for _, id := range ids {
+		dec, err := db.GetDecision(id)
+		if err != nil {
+			t.Fatalf("GetDecision: %v", err)
+		}
+		if dec.JellyfinItemID == "" || dec.JellyfinResolvedAt == nil {
+			t.Fatalf("empty inventory must preserve outcome, got %+v", dec)
+		}
+	}
+}
+
+// A partial inventory that is well-formed but far smaller than the cached
+// snapshot is equally untrustworthy.
+func TestSweep_ImplausiblyShrunkInventoryPreservesCachedConfirmations(t *testing.T) {
+	db := newSweepDB(t)
+
+	var cache []database.JellyfinItem
+	var live []Item
+	for i := 0; i < 20; i++ {
+		p := fmt.Sprintf("/library/Movies/Film %d (2026)/Film %d (2026).mkv", i, i)
+		cache = append(cache, database.JellyfinItem{
+			Path: p, JellyfinItemID: fmt.Sprintf("jf-%d", i),
+			ItemName: fmt.Sprintf("Film %d", i), ItemType: "Movie",
+		})
+		// Jellyfin reports only 4 of the 20 cached paths (20% — under the floor).
+		if i < 4 {
+			live = append(live, Item{ID: fmt.Sprintf("jf-%d", i), Path: p, Name: fmt.Sprintf("Film %d", i), Type: "Movie"})
+		}
+	}
+	if _, err := db.ReconcileJellyfinItems(cache); err != nil {
+		t.Fatalf("ReconcileJellyfinItems: %v", err)
+	}
+
+	srv, _ := newFakeJellyfinServer(t, live)
+	sweeper := NewSweeper(NewClient(Config{URL: srv.URL, APIKey: "k"}), db)
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err == nil {
+		t.Fatal("expected implausibly shrunk inventory to be rejected")
+	}
+
+	items, err := db.ListJellyfinItems()
+	if err != nil {
+		t.Fatalf("ListJellyfinItems: %v", err)
+	}
+	if len(items) != len(cache) {
+		t.Fatalf("shrunk inventory must preserve cache, got %d of %d", len(items), len(cache))
+	}
+	complete, err := db.IsJellyfinInventoryComplete()
+	if err != nil {
+		t.Fatalf("IsJellyfinInventoryComplete: %v", err)
+	}
+	if complete {
+		t.Fatal("rejected inventory must leave the snapshot incomplete")
+	}
+}
+
+// Ordinary attrition stays above the floor and still reconciles.
+func TestSweep_ModestShrinkStillReconciles(t *testing.T) {
+	db := newSweepDB(t)
+
+	var cache []database.JellyfinItem
+	var live []Item
+	for i := 0; i < 20; i++ {
+		p := fmt.Sprintf("/library/Movies/Film %d (2026)/Film %d (2026).mkv", i, i)
+		cache = append(cache, database.JellyfinItem{
+			Path: p, JellyfinItemID: fmt.Sprintf("jf-%d", i),
+			ItemName: fmt.Sprintf("Film %d", i), ItemType: "Movie",
+		})
+		if i < 16 {
+			live = append(live, Item{ID: fmt.Sprintf("jf-%d", i), Path: p, Name: fmt.Sprintf("Film %d", i), Type: "Movie"})
+		}
+	}
+	if _, err := db.ReconcileJellyfinItems(cache); err != nil {
+		t.Fatalf("ReconcileJellyfinItems: %v", err)
+	}
+
+	srv, _ := newFakeJellyfinServer(t, live)
+	sweeper := NewSweeper(NewClient(Config{URL: srv.URL, APIKey: "k"}), db)
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	items, err := db.ListJellyfinItems()
+	if err != nil {
+		t.Fatalf("ListJellyfinItems: %v", err)
+	}
+	if len(items) != len(live) {
+		t.Fatalf("expected cache reconciled to %d live items, got %d", len(live), len(items))
+	}
+}
+
+func TestSweep_FailedInventoryPreservesCachedConfirmations(t *testing.T) {
+	db := newSweepDB(t)
+	targetPath := "/library/Movies/Cached (2026)/Cached (2026).mkv"
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/dl/cached.2026.mkv",
+		SourceFilename:  "cached.2026.mkv",
+		EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+	})
+	if err != nil {
+		t.Fatalf("InsertDecision: %v", err)
+	}
+	resolvedAt := time.Now().UTC()
+	identified := true
+	if err := db.UpdateOutcome(id, database.OutcomeUpdate{
+		JellyfinItemID:      "jf-cached",
+		JellyfinResolvedAt:  &resolvedAt,
+		JellyfinIdentified:  &identified,
+		JellyfinFirstSeenAt: &resolvedAt,
+	}); err != nil {
+		t.Fatalf("UpdateOutcome: %v", err)
+	}
+	if err := db.UpsertJellyfinItem(targetPath, "jf-cached", "Cached", "Movie"); err != nil {
+		t.Fatalf("UpsertJellyfinItem: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	sweeper := NewSweeper(NewClient(Config{URL: srv.URL, APIKey: "k"}), db)
+	sweeper.SetPageDelay(0)
+	if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err == nil {
+		t.Fatal("expected failed inventory error")
+	}
+
+	item, err := db.GetJellyfinItemByPath(targetPath)
+	if err != nil {
+		t.Fatalf("GetJellyfinItemByPath: %v", err)
+	}
+	if item == nil || item.JellyfinItemID != "jf-cached" {
+		t.Fatalf("failed inventory must preserve cache, got %+v", item)
+	}
+	dec, err := db.GetDecision(id)
+	if err != nil {
+		t.Fatalf("GetDecision: %v", err)
+	}
+	if dec.JellyfinItemID != "jf-cached" || dec.JellyfinResolvedAt == nil {
+		t.Fatalf("failed inventory must preserve outcome, got %+v", dec)
+	}
+}
+
+func TestSweep_MalformedInventoryPreservesCachedConfirmations(t *testing.T) {
+	tests := []struct {
+		name string
+		item Item
+	}{
+		{name: "missing path", item: Item{ID: "jf-malformed"}},
+		{name: "missing id", item: Item{Path: "/library/Movies/Malformed (2026)/Malformed (2026).mkv"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newSweepDB(t)
+			targetPath := "/library/Movies/Cached (2026)/Cached (2026).mkv"
+			id, err := db.InsertDecision(database.ParseDecision{
+				SourcePath:      "/dl/cached.2026.mkv",
+				SourceFilename:  "cached.2026.mkv",
+				EventAt:         time.Now().UTC().Add(-1 * time.Hour),
+				TargetPath:      targetPath,
+				OrganizeOutcome: "success",
+			})
+			if err != nil {
+				t.Fatalf("InsertDecision: %v", err)
+			}
+			resolvedAt := time.Now().UTC()
+			identified := true
+			if err := db.UpdateOutcome(id, database.OutcomeUpdate{
+				JellyfinItemID:      "jf-cached",
+				JellyfinResolvedAt:  &resolvedAt,
+				JellyfinIdentified:  &identified,
+				JellyfinFirstSeenAt: &resolvedAt,
+			}); err != nil {
+				t.Fatalf("UpdateOutcome: %v", err)
+			}
+			if _, err := db.ReconcileJellyfinItems([]database.JellyfinItem{{
+				Path:           targetPath,
+				JellyfinItemID: "jf-cached",
+				ItemName:       "Cached",
+				ItemType:       "Movie",
+			}}); err != nil {
+				t.Fatalf("ReconcileJellyfinItems: %v", err)
+			}
+
+			srv, _ := newFakeJellyfinServer(t, []Item{tt.item})
+			sweeper := NewSweeper(NewClient(Config{URL: srv.URL, APIKey: "k"}), db)
+			sweeper.SetPageDelay(0)
+			if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err == nil {
+				t.Fatal("expected malformed inventory error")
+			}
+
+			item, err := db.GetJellyfinItemByPath(targetPath)
+			if err != nil {
+				t.Fatalf("GetJellyfinItemByPath: %v", err)
+			}
+			if item == nil || item.JellyfinItemID != "jf-cached" {
+				t.Fatalf("malformed inventory must preserve cache, got %+v", item)
+			}
+			decision, err := db.GetDecision(id)
+			if err != nil {
+				t.Fatalf("GetDecision: %v", err)
+			}
+			if decision.JellyfinItemID != "jf-cached" || decision.JellyfinResolvedAt == nil {
+				t.Fatalf("malformed inventory must preserve outcome, got %+v", decision)
+			}
+			complete, err := db.IsJellyfinInventoryComplete()
+			if err != nil {
+				t.Fatalf("IsJellyfinInventoryComplete: %v", err)
+			}
+			if complete {
+				t.Fatal("malformed inventory must mark prior snapshot incomplete")
+			}
+		})
+	}
+}
+
+func TestSweep_InconsistentPaginationPreservesCachedConfirmations(t *testing.T) {
+	live := Item{ID: "jf-live", Path: "/library/Movies/Live (2026)/Live (2026).mkv"}
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{
+			name: "negative total",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(ItemsResponse{TotalRecordCount: -1})
+			},
+		},
+		{
+			name: "duplicate items",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(ItemsResponse{
+					Items:            []Item{live, live},
+					TotalRecordCount: 2,
+				})
+			},
+		},
+		{
+			name: "repeating page",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(ItemsResponse{
+					Items:            []Item{live},
+					TotalRecordCount: 2,
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newSweepDB(t)
+			cachedPath := "/library/Movies/Cached (2026)/Cached (2026).mkv"
+			if _, err := db.ReconcileJellyfinItems([]database.JellyfinItem{{
+				Path:           cachedPath,
+				JellyfinItemID: "jf-cached",
+				ItemName:       "Cached",
+				ItemType:       "Movie",
+			}}); err != nil {
+				t.Fatalf("ReconcileJellyfinItems: %v", err)
+			}
+
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
+			sweeper := NewSweeper(NewClient(Config{URL: srv.URL, APIKey: "k"}), db)
+			sweeper.SetPageDelay(0)
+			if err := sweeper.RunOnce(context.Background(), 24*time.Hour, 7*24*time.Hour); err == nil {
+				t.Fatal("expected inconsistent pagination error")
+			}
+
+			item, err := db.GetJellyfinItemByPath(cachedPath)
+			if err != nil {
+				t.Fatalf("GetJellyfinItemByPath: %v", err)
+			}
+			if item == nil || item.JellyfinItemID != "jf-cached" {
+				t.Fatalf("inconsistent inventory must preserve cache, got %+v", item)
+			}
+			complete, err := db.IsJellyfinInventoryComplete()
+			if err != nil {
+				t.Fatalf("IsJellyfinInventoryComplete: %v", err)
+			}
+			if complete {
+				t.Fatal("inconsistent inventory must remain incomplete")
+			}
+		})
 	}
 }
 

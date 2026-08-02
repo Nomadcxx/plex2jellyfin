@@ -9,6 +9,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
 type UnknownSeasonClass string
@@ -88,6 +91,13 @@ type UnknownSeasonAction struct {
 	Error      string `json:"error,omitempty"`
 }
 
+// UnknownSeasonRefreshStore persists per-series unknown-season refresh attempts
+// so automated retries honor repair_cooldown_hours.
+type UnknownSeasonRefreshStore interface {
+	GetUnknownSeasonRefresh(seriesID string) (*database.UnknownSeasonRefreshState, error)
+	RecordUnknownSeasonRefresh(state database.UnknownSeasonRefreshState) error
+}
+
 func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
 	var users []User
 	if err := c.getCtx(ctx, "/Users", &users); err != nil {
@@ -142,7 +152,9 @@ func (c *Client) AuditUnknownSeasons(ctx context.Context, userID string) (*Unkno
 		issue.SeriesID = season.SeriesID
 		issue.SeriesName = firstNonEmpty(season.SeriesName, season.Name)
 		issue.DateCreated = season.DateCreated
-		if issue.RefreshRepairable || issue.SxxEyyPathCount > 0 {
+		// Only strict refresh_repairable seasons are automated candidates.
+		// Mixed seasons (partial SxxEyy evidence) stay manual review.
+		if issue.RefreshRepairable {
 			issue.RefreshTargetSeries = season.SeriesID
 		}
 		report.add(issue)
@@ -157,13 +169,14 @@ func (c *Client) AuditUnknownSeasons(ctx context.Context, userID string) (*Unkno
 	return report, nil
 }
 
-func (c *Client) RepairUnknownSeasons(ctx context.Context, userID string, maxRefresh int, dryRun bool) (*UnknownSeasonRepairReport, error) {
+func (c *Client) RepairUnknownSeasons(ctx context.Context, userID string, maxRefresh int, dryRun bool, store UnknownSeasonRefreshStore, cooldown time.Duration) (*UnknownSeasonRepairReport, error) {
 	audit, err := c.AuditUnknownSeasons(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	report := &UnknownSeasonRepairReport{Audit: *audit, DryRun: dryRun}
 	seen := map[string]struct{}{}
+	now := time.Now().UTC()
 
 	for _, issue := range audit.Issues {
 		if strings.TrimSpace(issue.RefreshTargetSeries) == "" {
@@ -181,6 +194,20 @@ func (c *Client) RepairUnknownSeasons(ctx context.Context, userID string, maxRef
 		seen[issue.RefreshTargetSeries] = struct{}{}
 
 		action := UnknownSeasonAction{SeriesID: issue.RefreshTargetSeries, SeriesName: issue.SeriesName}
+		prev, err := unknownSeasonPrevState(store, issue.RefreshTargetSeries)
+		if err != nil {
+			action.Action = "failed"
+			action.Error = err.Error()
+			report.Errors++
+			report.Actions = append(report.Actions, action)
+			continue
+		}
+		if !dryRun && cooldown > 0 && prev != nil && prev.NextAttemptAt != nil && now.Before(prev.NextAttemptAt.UTC()) {
+			action.Action = "cooldown"
+			report.Skipped++
+			report.Actions = append(report.Actions, action)
+			continue
+		}
 		if dryRun {
 			action.Action = "would_refresh"
 			report.Refreshed++
@@ -191,14 +218,46 @@ func (c *Client) RepairUnknownSeasons(ctx context.Context, userID string, maxRef
 			action.Action = "failed"
 			action.Error = err.Error()
 			report.Errors++
+			_ = recordUnknownSeasonAttempt(store, prev, issue, action.Action, action.Error, now, cooldown)
 		} else {
 			action.Action = "refreshed"
 			report.Refreshed++
+			_ = recordUnknownSeasonAttempt(store, prev, issue, action.Action, "", now, cooldown)
 		}
 		report.Actions = append(report.Actions, action)
 	}
 
 	return report, nil
+}
+
+func unknownSeasonPrevState(store UnknownSeasonRefreshStore, seriesID string) (*database.UnknownSeasonRefreshState, error) {
+	if store == nil {
+		return nil, nil
+	}
+	return store.GetUnknownSeasonRefresh(seriesID)
+}
+
+func recordUnknownSeasonAttempt(store UnknownSeasonRefreshStore, prev *database.UnknownSeasonRefreshState, issue UnknownSeasonIssue, outcome, errMsg string, now time.Time, cooldown time.Duration) error {
+	if store == nil {
+		return nil
+	}
+	attempts := 1
+	if prev != nil {
+		attempts = prev.AttemptCount + 1
+	}
+	next := now
+	if cooldown > 0 {
+		next = now.Add(cooldown)
+	}
+	return store.RecordUnknownSeasonRefresh(database.UnknownSeasonRefreshState{
+		SeriesID:      issue.RefreshTargetSeries,
+		SeriesName:    issue.SeriesName,
+		AttemptCount:  attempts,
+		LastAttemptAt: &now,
+		NextAttemptAt: &next,
+		LastOutcome:   outcome,
+		LastError:     errMsg,
+	})
 }
 
 func ClassifyUnknownSeasonEpisodes(episodes []Item) UnknownSeasonIssue {
@@ -208,15 +267,26 @@ func ClassifyUnknownSeasonEpisodes(episodes []Item) UnknownSeasonIssue {
 		return issue
 	}
 
+	nullWithSxx := 0
+	nullWithoutSxx := 0
 	for _, episode := range episodes {
-		if episode.IndexNumber == nil || episode.ParentIndexNumber == nil {
+		nullIndexed := episode.IndexNumber == nil || episode.ParentIndexNumber == nil
+		if nullIndexed {
 			issue.NullNumberCount++
+		}
+		hasSxx := pathHasSxxEyy(episode.Path)
+		if hasSxx {
+			issue.SxxEyyPathCount++
+		}
+		if nullIndexed {
+			if hasSxx {
+				nullWithSxx++
+			} else {
+				nullWithoutSxx++
+			}
 		}
 		if pathHasSeasonFolder(episode.Path) {
 			issue.SeasonPathCount++
-		}
-		if pathHasSxxEyy(episode.Path) {
-			issue.SxxEyyPathCount++
 		}
 		if pathHasRandomishBasename(episode.Path) {
 			issue.RandomishBasenameCount++
@@ -231,10 +301,11 @@ func ClassifyUnknownSeasonEpisodes(episodes []Item) UnknownSeasonIssue {
 	switch {
 	case issue.NullNumberCount == 0:
 		issue.Class = UnknownSeasonIndexed
-	case issue.SxxEyyPathCount == issue.EpisodeCount:
+	case nullWithoutSxx == 0 && nullWithSxx > 0:
+		// Every relevant null-index episode has strict SxxEyy evidence.
 		issue.Class = UnknownSeasonRefreshRepairable
 		issue.RefreshRepairable = true
-	case issue.SxxEyyPathCount > 0:
+	case nullWithSxx > 0:
 		issue.Class = UnknownSeasonMixed
 	case issue.SeasonPathCount == issue.EpisodeCount:
 		issue.Class = UnknownSeasonFolderContext

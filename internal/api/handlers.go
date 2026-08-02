@@ -358,9 +358,13 @@ func (s *Server) runBackgroundScan() {
 
 // HealthCheck implements api.ServerInterface
 func (s *Server) HealthCheck(w http.ResponseWriter, r *http.Request) {
+	version := s.version
+	if version == "" {
+		version = "dev"
+	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
-		"version": "1.0.0",
+		"version": version,
 	})
 }
 

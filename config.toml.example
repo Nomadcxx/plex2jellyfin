@@ -109,7 +109,11 @@ api_key = ""
 # a rename; attempts are capped by needs_review_after.
 correction_enabled = true
 # passive_enabled = true
+# repair_enabled gates MetadataReconciler.RunRepair (default false).
+# Compatibility: before 2026-08 this flag gated unknown-season refreshes;
+# those now use unknown_season_repair_enabled (also default false).
 # repair_enabled = false
+# unknown_season_repair_enabled = false
 # passive_interval_minutes = 60
 # passive_batch_size = 25
 # repair_batch_size = 5

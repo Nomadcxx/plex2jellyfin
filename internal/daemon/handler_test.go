@@ -1517,6 +1517,169 @@ func TestHandleJellyfinWebhookEvent_ItemAddedReturnsDBError(t *testing.T) {
 	assert.Contains(t, err.Error(), "upsert Jellyfin item")
 }
 
+func TestHandleJellyfinWebhookEvent_ItemRemovedClearsOutcomeAndCache(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	targetPath := "/library/Movies/Old Movie (2020)/Old Movie (2020).mkv"
+	var ids []int64
+	for _, source := range []string{"/downloads/older.old.movie.2020.mkv", "/downloads/old.movie.2020.mkv"} {
+		id, err := db.InsertDecision(database.ParseDecision{
+			SourcePath:      source,
+			SourceFilename:  filepath.Base(source),
+			EventAt:         time.Now().UTC(),
+			TargetPath:      targetPath,
+			OrganizeOutcome: "success",
+		})
+		require.NoError(t, err)
+		ids = append(ids, id)
+		resolvedAt := time.Now().UTC()
+		identified := true
+		require.NoError(t, db.UpdateOutcome(id, database.OutcomeUpdate{
+			JellyfinItemID:      "jf-old",
+			JellyfinResolvedAt:  &resolvedAt,
+			JellyfinIdentified:  &identified,
+			JellyfinFirstSeenAt: &resolvedAt,
+		}))
+	}
+	require.NoError(t, db.UpsertJellyfinItem(targetPath, "jf-old", "Old Movie", "Movie"))
+
+	handler := &MediaHandler{db: db}
+	require.NoError(t, handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventItemRemoved,
+		ItemPath:         targetPath,
+		ItemName:         "Old Movie",
+		ItemType:         "Movie",
+	}))
+
+	for _, id := range ids {
+		dec, err := db.GetDecision(id)
+		require.NoError(t, err)
+		assert.Empty(t, dec.JellyfinItemID)
+		assert.Nil(t, dec.JellyfinResolvedAt)
+		require.NotNil(t, dec.JellyfinIdentified)
+		assert.False(t, *dec.JellyfinIdentified)
+	}
+
+	item, err := db.GetJellyfinItemByPath(targetPath)
+	require.NoError(t, err)
+	assert.Nil(t, item)
+}
+
+func TestJellyfinVerificationUsesSuccessfulParseDecisions(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	targetPath := "/library/Movies/Not In Jellyfin (2026)/Not In Jellyfin (2026).mkv"
+	_, err = db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/not.in.jellyfin.2026.mkv",
+		SourceFilename:  "not.in.jellyfin.2026.mkv",
+		EventAt:         time.Now().UTC(),
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+		ParsedTitle:     "Not In Jellyfin",
+	})
+	require.NoError(t, err)
+	_, err = db.ReconcileJellyfinItems(nil)
+	require.NoError(t, err)
+
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	require.NoError(t, err)
+	defer activityLogger.Close()
+	handler := &MediaHandler{db: db, activityLogger: activityLogger, logger: logging.Nop()}
+
+	handler.runJellyfinVerificationPass()
+
+	entries, err := activityLogger.GetRecentEntries(10)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	summary := entries[0]
+	assert.Equal(t, "jellyfin_verification_summary", summary.Action)
+	assert.Equal(t, "checked=1", summary.Source)
+	assert.Equal(t, "mismatches=1", summary.Target)
+	assert.False(t, summary.Success)
+}
+
+func TestJellyfinVerificationRejectsWebhookOnlyPartialCache(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	targetPath := "/library/Movies/Partial (2026)/Partial (2026).mkv"
+	_, err = db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/partial.2026.mkv",
+		SourceFilename:  "partial.2026.mkv",
+		EventAt:         time.Now().UTC(),
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.UpsertJellyfinItem(targetPath, "jf-partial", "Partial", "Movie"))
+
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	require.NoError(t, err)
+	defer activityLogger.Close()
+	handler := &MediaHandler{db: db, activityLogger: activityLogger, logger: logging.Nop()}
+
+	handler.runJellyfinVerificationPass()
+
+	entries, err := activityLogger.GetRecentEntries(1)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.False(t, entries[0].Success)
+	assert.Contains(t, entries[0].Error, "incomplete")
+}
+
+func TestJellyfinVerificationRejectsMidPassInventoryInvalidation(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	targetPath := "/library/Movies/Race (2026)/Race (2026).mkv"
+	_, err = db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/race.2026.mkv",
+		SourceFilename:  "race.2026.mkv",
+		EventAt:         time.Now().UTC(),
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+		ParsedTitle:     "Race",
+	})
+	require.NoError(t, err)
+	_, err = db.ReconcileJellyfinItems([]database.JellyfinItem{{
+		Path:           targetPath,
+		JellyfinItemID: "jf-race",
+		ItemName:       "Race",
+		ItemType:       "Movie",
+	}})
+	require.NoError(t, err)
+
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	require.NoError(t, err)
+	defer activityLogger.Close()
+	handler := &MediaHandler{
+		db:             db,
+		activityLogger: activityLogger,
+		logger:         logging.Nop(),
+		verificationMidPass: func() {
+			require.NoError(t, db.MarkJellyfinInventoryIncomplete())
+		},
+	}
+
+	handler.runJellyfinVerificationPass()
+
+	entries, err := activityLogger.GetRecentEntries(1)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.False(t, entries[0].Success)
+	assert.Contains(t, entries[0].Error, "incomplete")
+}
+
 func TestHandleJellyfinWebhookEvent_ItemAddedSkipsResolved(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
 	db, err := database.OpenPath(dbPath)
@@ -1618,6 +1781,53 @@ func TestHandleJellyfinWebhookEvent_ItemUpdatedUpgradesIdentification(t *testing
 	assert.True(t, *dec.JellyfinIdentified)
 	assert.NotNil(t, dec.JellyfinResolvedAt)
 	assert.NotNil(t, dec.JellyfinFirstSeenAt)
+}
+
+func TestHandleJellyfinWebhookEvent_ItemUpdatedEmptyProvidersDoNotDowngrade(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "handler-empty-update.db")
+	db, err := database.OpenPath(dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	targetPath := "/mnt/STORAGE1/MOVIES/Ready (2026)/Ready (2026).mkv"
+	now := time.Now().UTC()
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/ready.2026.mkv",
+		SourceFilename:  "ready.2026.mkv",
+		EventAt:         now,
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+	})
+	require.NoError(t, err)
+	identified := true
+	require.NoError(t, db.UpdateOutcome(id, database.OutcomeUpdate{
+		JellyfinItemID:     "jf-ready",
+		JellyfinImdbID:     "tt111",
+		JellyfinResolvedAt: &now,
+		JellyfinIdentified: &identified,
+	}))
+
+	handler := &MediaHandler{
+		db: db,
+		pathTranslator: jellyfin.NewPathTranslator([]jellyfin.PathMapping{
+			{Jellyfin: "/movies1", Daemon: "/mnt/STORAGE1/MOVIES"},
+		}),
+	}
+
+	err = handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventItemUpdated,
+		ItemID:           "jf-ready",
+		ItemPath:         "/movies1/Ready (2026)/Ready (2026).mkv",
+		ItemName:         "Ready",
+		ItemType:         "Movie",
+	})
+	require.NoError(t, err)
+
+	dec, err := db.GetDecision(id)
+	require.NoError(t, err)
+	require.NotNil(t, dec.JellyfinIdentified)
+	assert.True(t, *dec.JellyfinIdentified)
+	assert.Equal(t, "tt111", dec.JellyfinImdbID)
 }
 
 func TestProcessFileWithGen_StaleCallbackNoOp(t *testing.T) {

@@ -1,9 +1,11 @@
 package postmortem
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,14 +33,8 @@ var journalctlExcerpt = func(since time.Time) (string, error) {
 	if since.IsZero() {
 		since = time.Now().Add(-96 * time.Hour)
 	}
-	out, err := exec.Command(
-		"journalctl",
-		"-u", "plex2jellyfin-daemon",
-		"-u", "plex2jellyfin-web",
-		"--since", since.Local().Format("2006-01-02 15:04:05"),
-		"-n", "200",
-		"--no-pager",
-	).CombinedOutput()
+	args := journalctlDaemonArgs(since)
+	out, err := exec.Command("journalctl", args...).CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
 		if text != "" {
@@ -52,10 +48,20 @@ var journalctlExcerpt = func(since time.Time) (string, error) {
 	return text, nil
 }
 
+func journalctlDaemonArgs(since time.Time) []string {
+	return []string{
+		"-u", "plex2jellyfin-daemon",
+		"--since", since.Local().Format("2006-01-02 15:04:05"),
+		"--no-pager",
+	}
+}
+
 type housekeepingSnapshot struct {
-	Counts map[string]int              `json:"counts"`
-	Recent []database.HousekeepingTask `json:"recent"`
-	Error  string                      `json:"error,omitempty"`
+	Counts          map[string]int              `json:"counts"` // alias of outstanding for older consumers
+	CreatedInWindow map[string]int              `json:"created_in_window"`
+	Outstanding     map[string]int              `json:"outstanding"`
+	Recent          []database.HousekeepingTask `json:"recent"`
+	Error           string                      `json:"error,omitempty"`
 }
 
 type jellyfinDiffSnapshot struct {
@@ -96,16 +102,24 @@ func (c Collector) Collect() (BundlePaths, error) {
 	hk := c.housekeeping()
 	unknownSeasons := c.unknownSeasonEvidence()
 	suspicious, pathFalsePositives := suspiciousFromDecisions(decisions)
+	metrics := SummarizeDecisionMetrics(decisions, now)
 	summary := Summary{
-		RunID:                   bundle.RunID,
-		GeneratedAt:             now,
-		Since:                   c.Since,
-		ProcessedDecisions:      len(decisions),
-		RepairEvents:            len(repairs),
-		SuspiciousItems:         len(suspicious),
-		HousekeepingFailed:      hk.Counts[database.TaskStatusFailed],
-		ManualReview:            hk.Counts[database.TaskStatusFlagged],
-		UnknownSeasonActionable: unknownSeasons.ActionablePollutionEpisodes,
+		RunID:                         bundle.RunID,
+		GeneratedAt:                   now,
+		Since:                         c.Since,
+		ProcessedDecisions:            metrics.ProcessedDecisions,
+		RepairEvents:                  len(repairs),
+		SuspiciousItems:               len(suspicious),
+		MetadataProblems:              metrics.MetadataProblems,
+		DriftLabels:                   metrics.DriftLabels,
+		FailLabels:                    metrics.FailLabels,
+		PendingLabels:                 metrics.PendingLabels,
+		OverdueUnlabeled:              metrics.OverdueUnlabeled,
+		HousekeepingFailed:            hk.CreatedInWindow[database.TaskStatusFailed],
+		ManualReview:                  hk.CreatedInWindow[database.TaskStatusFlagged],
+		HousekeepingOutstandingFailed: hk.Outstanding[database.TaskStatusFailed],
+		HousekeepingOutstandingReview: hk.Outstanding[database.TaskStatusFlagged],
+		UnknownSeasonActionable:       unknownSeasons.ActionablePollutionEpisodes,
 	}
 
 	if err := writeJSON(bundle.File("summary.json"), summary); err != nil {
@@ -257,15 +271,36 @@ func parseDecisionEvidenceList(decisions []*database.ParseDecision) []parseDecis
 }
 
 func (c Collector) housekeeping() housekeepingSnapshot {
-	counts, err := c.DB.CountHousekeepingTasks()
+	outstanding, err := c.DB.CountHousekeepingTasks()
 	if err != nil {
-		return housekeepingSnapshot{Counts: map[string]int{}, Error: err.Error()}
+		return housekeepingSnapshot{
+			Counts:          map[string]int{},
+			CreatedInWindow: map[string]int{},
+			Outstanding:     map[string]int{},
+			Error:           err.Error(),
+		}
 	}
-	recent, err := c.DB.ListHousekeepingTasks("", 200)
+	// ponytail: ceiling ~10k recent tasks; upgrade to COUNT(... WHERE created_at>=?) if backlog grows.
+	recent, err := c.DB.ListHousekeepingTasks("", 10000)
 	if err != nil {
-		return housekeepingSnapshot{Counts: counts, Error: err.Error()}
+		return housekeepingSnapshot{
+			Counts:          outstanding,
+			CreatedInWindow: map[string]int{},
+			Outstanding:     outstanding,
+			Error:           err.Error(),
+		}
 	}
-	return housekeepingSnapshot{Counts: counts, Recent: recent}
+	window := CountHousekeepingWindow(recent, c.Since, outstanding)
+	recentOut := recent
+	if len(recentOut) > 200 {
+		recentOut = recentOut[:200]
+	}
+	return housekeepingSnapshot{
+		Counts:          window.Outstanding,
+		CreatedInWindow: window.CreatedInWindow,
+		Outstanding:     window.Outstanding,
+		Recent:          recentOut,
+	}
 }
 
 func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousItem, []SuspiciousItem) {
@@ -535,13 +570,17 @@ func (c Collector) daemonLogExcerpt() string {
 				if entry.IsDir() {
 					continue
 				}
+				name := entry.Name()
+				if isNoisyWebLogName(name) {
+					continue
+				}
 				info, err := entry.Info()
 				if err != nil {
-					failures = append(failures, fmt.Sprintf("stat %s: %v", filepath.Join(c.LogDir, entry.Name()), err))
+					failures = append(failures, fmt.Sprintf("stat %s: %v", filepath.Join(c.LogDir, name), err))
 					continue
 				}
 				candidates = append(candidates, candidate{
-					path: filepath.Join(c.LogDir, entry.Name()),
+					path: filepath.Join(c.LogDir, name),
 					mod:  info.ModTime(),
 				})
 			}
@@ -550,36 +589,143 @@ func (c Collector) daemonLogExcerpt() string {
 		failures = append(failures, "no configured file log path")
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].mod.After(candidates[j].mod)
+		return candidates[i].mod.Before(candidates[j].mod)
 	})
+
+	var lines []string
+	var webWarns, webErrs int
+	scanWeb := func(data string) {
+		w, e := countWebWarnings(data, c.Since)
+		webWarns += w
+		webErrs += e
+	}
 	for _, cand := range candidates {
-		data, err := os.ReadFile(cand.path)
+		data, err := readLogFile(cand.path)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("read %s: %v", cand.path, err))
 			continue
 		}
-		if strings.TrimSpace(string(data)) == "" {
+		if strings.TrimSpace(data) == "" {
 			failures = append(failures, fmt.Sprintf("read %s: empty log file", cand.path))
 			continue
 		}
-		return lastLines(string(data), 200)
+		scanWeb(data)
+		lines = append(lines, filterDaemonLogLines(data, c.Since)...)
+	}
+	// Also scan noisy web/access siblings for warning totals only.
+	if c.LogDir != "" {
+		if entries, err := os.ReadDir(c.LogDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() || !isNoisyWebLogName(entry.Name()) {
+					continue
+				}
+				data, err := readLogFile(filepath.Join(c.LogDir, entry.Name()))
+				if err != nil {
+					continue
+				}
+				scanWeb(data)
+			}
+		}
+	}
+	if len(lines) > 0 {
+		text := strings.Join(lines, "\n")
+		if webWarns > 0 || webErrs > 0 {
+			text += fmt.Sprintf("\n\nweb warnings: warn=%d error=%d (excluded from daemon excerpt)", webWarns, webErrs)
+		}
+		return text
 	}
 
 	if text, err := journalctlExcerpt(c.Since); err == nil {
-		return lastLines(text, 200)
+		return text
 	} else {
-		failures = append(failures, fmt.Sprintf("journalctl plex2jellyfin-daemon/plex2jellyfin-web: %v", err))
+		failures = append(failures, fmt.Sprintf("journalctl plex2jellyfin-daemon: %v", err))
 	}
 
 	return "daemon log unavailable\n" + strings.Join(failures, "\n")
 }
 
-func lastLines(s string, n int) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) <= n {
-		return s
+func isNoisyWebLogName(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.Contains(lower, "web") || strings.Contains(lower, "access")
+}
+
+func readLogFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
 	}
-	return strings.Join(lines[len(lines)-n:], "\n")
+	defer f.Close()
+
+	var r io.Reader = f
+	if strings.HasSuffix(path, ".gz") {
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			return "", err
+		}
+		defer gz.Close()
+		r = gz
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func filterDaemonLogLines(content string, since time.Time) []string {
+	raw := strings.Split(content, "\n")
+	out := make([]string, 0, len(raw))
+	for _, line := range raw {
+		if line == "" {
+			continue
+		}
+		if isWebAccessLogLine(line) {
+			continue
+		}
+		if !since.IsZero() {
+			if ts, ok := parseLogLineTimestamp(line); ok && ts.Before(since) {
+				continue
+			}
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func isWebAccessLogLine(line string) bool {
+	return strings.Contains(line, "] [web] ")
+}
+
+func countWebWarnings(content string, since time.Time) (warns, errs int) {
+	for _, line := range strings.Split(content, "\n") {
+		if line == "" || !isWebAccessLogLine(line) {
+			continue
+		}
+		if !since.IsZero() {
+			if ts, ok := parseLogLineTimestamp(line); ok && ts.Before(since) {
+				continue
+			}
+		}
+		switch {
+		case strings.Contains(line, " [ERROR] "):
+			errs++
+		case strings.Contains(line, " [WARN] "):
+			warns++
+		}
+	}
+	return warns, errs
+}
+
+func parseLogLineTimestamp(line string) (time.Time, bool) {
+	space := strings.IndexByte(line, ' ')
+	if space < 1 {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, line[:space])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts, true
 }
 
 func writeJSON(path string, v any) error {

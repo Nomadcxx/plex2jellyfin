@@ -86,4 +86,20 @@ func TestDeriveLabel(t *testing.T) {
 			t.Errorf("got %q just past ttl, want FAIL", got)
 		}
 	})
+
+	t.Run("long release title vs short provider alias returns PASS", func(t *testing.T) {
+		dec := decWithProviderID("Life Larry And The Pursuit Of Unhappiness An Almost History Of America")
+		got := labeling.DeriveLabel(dec, "Life Larry", testTTL)
+		if got != "PASS" {
+			t.Errorf("got %q, want PASS", got)
+		}
+	})
+
+	t.Run("genuine unrelated rename remains DRIFT", func(t *testing.T) {
+		dec := decWithProviderID("Tracker")
+		got := labeling.DeriveLabel(dec, "Breaking Bad", testTTL)
+		if got != "DRIFT" {
+			t.Errorf("got %q, want DRIFT", got)
+		}
+	})
 }

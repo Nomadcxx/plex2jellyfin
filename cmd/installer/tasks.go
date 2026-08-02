@@ -412,8 +412,11 @@ dir_mode = "%s"
 [metadata_recovery]
 # Passive recovery checks Jellyfin for metadata that arrives after import.
 passive_enabled = true
-# Active repair is disabled by default because it asks Jellyfin to refresh items.
+# repair_enabled drives MetadataReconciler.RunRepair. Compatibility: before
+# 2026-08 this gated unknown-season refreshes; those now use
+# unknown_season_repair_enabled (default off).
 repair_enabled = false
+unknown_season_repair_enabled = false
 passive_interval_minutes = 60
 passive_batch_size = 25
 repair_batch_size = 5

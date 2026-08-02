@@ -39,27 +39,40 @@ func originalTokens(s string) []string {
 	return strings.Fields(b.String())
 }
 
-// FuzzyTitleEqual returns true when a and b represent the same title under a
-// conservative comparison:
+// FuzzyTitleEqual reports whether the parsed title and the Jellyfin item name
+// represent the same title. The comparison is deliberately conservative:
 //   - Exact token equality after normalisation.
 //   - One title may extend the other only when the extra tokens begin with a
 //     lowercase function-word "with" (e.g. "The Daily Show with Trevor Noah"
 //     vs "The Daily Show").  A capitalised "With" is treated as part of the
 //     title proper so that "Hunting With Dogs" does NOT match "Hunting".
-func FuzzyTitleEqual(a, b string) bool {
-	ta := titleTokens(a)
-	tb := titleTokens(b)
+//   - Long-release/short-canonical alias: a verbose release title may carry a
+//     connector-led subtitle the provider drops (e.g. parsed "Life Larry And
+//     The Pursuit Of Unhappiness…" vs Jellyfin "Life Larry").
+//
+// The alias rule is directional, and that direction is the whole safeguard.
+// It applies only when the *parsed* title is the longer one, because the
+// Jellyfin name is provider-canonical: a messy filename carrying extra
+// subtitle text is ordinary, whereas the provider naming a work *more*
+// specifically than we parsed ("Harry Potter" vs "Harry Potter and the
+// Philosopher's Stone") is the signal that we matched the wrong or an
+// over-generic title — exactly the DRIFT this labeller exists to catch.
+func FuzzyTitleEqual(parsed, jellyfinName string) bool {
+	tp := titleTokens(parsed)
+	tj := titleTokens(jellyfinName)
 
-	if tokensEqual(ta, tb) {
+	if tokensEqual(tp, tj) {
 		return true
 	}
 
 	// Determine which is longer; the longer must extend the shorter via "with …"
-	short, long := ta, tb
-	longOrig := originalTokens(b)
-	if len(ta) > len(tb) {
-		short, long = tb, ta
-		longOrig = originalTokens(a)
+	short, long := tp, tj
+	longOrig := originalTokens(jellyfinName)
+	parsedIsLong := false
+	if len(tp) > len(tj) {
+		short, long = tj, tp
+		longOrig = originalTokens(parsed)
+		parsedIsLong = true
 	}
 
 	if len(long) <= len(short) {
@@ -77,13 +90,41 @@ func FuzzyTitleEqual(a, b string) bool {
 	// "With" with a capital W is treated as part of the title and disqualifies
 	// the match.
 	idx := len(short)
-	if long[idx] != "with" {
+	if long[idx] == "with" {
+		if idx < len(longOrig) && longOrig[idx] == "with" {
+			return true
+		}
+	}
+
+	if !parsedIsLong {
 		return false
 	}
-	if idx >= len(longOrig) || longOrig[idx] != "with" {
+	return longReleaseShortCanonical(short, long)
+}
+
+// longReleaseShortCanonical accepts a provider-canonical short title as a
+// proper prefix of a verbose parsed release title when the continuation is a
+// connector-led subtitle of real substance.
+//
+// Requires ≥2 shared tokens so single-word prefixes ("Hunting", "Maximum")
+// never alias, and ≥3 trailing tokens so a connector plus one word ("Blue
+// Planet and Beyond") stays a distinct title rather than a dropped subtitle.
+func longReleaseShortCanonical(short, long []string) bool {
+	const minSubtitleTokens = 3 // connector + at least two subtitle words
+	if len(short) < 2 || len(long) < len(short)+minSubtitleTokens {
 		return false
 	}
-	return true
+	for i, tok := range short {
+		if tok != long[i] {
+			return false
+		}
+	}
+	switch long[len(short)] {
+	case "and", "or", "a", "an", "the":
+		return true
+	default:
+		return false
+	}
 }
 
 func tokensEqual(a, b []string) bool {

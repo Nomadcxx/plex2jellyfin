@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
@@ -14,6 +15,10 @@ const (
 	sweepAutoLabelFail  = "FAIL"
 	sweepDefaultDelay   = 50 * time.Millisecond
 	sweepRequestTimeout = 30 * time.Second
+
+	// sweepMinInventoryRatio is the fraction of the cached snapshot a fresh
+	// Jellyfin inventory must still cover before it is trusted as complete.
+	sweepMinInventoryRatio = 0.5
 )
 
 // Sweeper reconciles unresolved parse_decisions rows against the Jellyfin
@@ -82,10 +87,18 @@ func (s *Sweeper) RunOnce(ctx context.Context, lookback, ttl time.Duration) erro
 		pathMap[row.TargetPath] = append(pathMap[row.TargetPath], row)
 	}
 
-	if len(pathMap) > 0 {
-		if err := s.sweepByPath(ctx, pathMap); err != nil {
-			return err
-		}
+	if err := s.db.MarkJellyfinInventoryIncomplete(); err != nil {
+		return fmt.Errorf("mark Jellyfin inventory incomplete: %w", err)
+	}
+	inventory, err := s.fetchInventory(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.guardInventoryPlausible(len(inventory)); err != nil {
+		return err
+	}
+	if err := s.reconcileInventory(pathMap, inventory); err != nil {
+		return err
 	}
 
 	ttlRows, err := s.db.QueryDecisions(database.QueryFilter{
@@ -134,7 +147,6 @@ func (s *Sweeper) sweepUnidentified(ctx context.Context) error {
 		return fmt.Errorf("GetVirtualFolders: %w", err)
 	}
 
-	identified := false
 	for _, folder := range folders {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -154,12 +166,7 @@ func (s *Sweeper) sweepUnidentified(ctx context.Context) error {
 				continue
 			}
 			now := time.Now().UTC()
-			if err := s.db.UpgradeOutcome(dec.ID, database.OutcomeUpdate{
-				JellyfinItemID:      m.ItemID,
-				JellyfinResolvedAt:  &now,
-				JellyfinIdentified:  &identified,
-				JellyfinFirstSeenAt: &now,
-			}); err != nil {
+			if err := s.db.MarkOutcomeUnidentified(dec.ID, m.ItemID, &now); err != nil {
 				return fmt.Errorf("downgrade id=%d: %w", dec.ID, err)
 			}
 		}
@@ -167,53 +174,57 @@ func (s *Sweeper) sweepUnidentified(ctx context.Context) error {
 	return nil
 }
 
-func (s *Sweeper) sweepByPath(ctx context.Context, pathMap map[string][]*database.ParseDecision) error {
+func (s *Sweeper) fetchInventory(ctx context.Context) ([]Item, error) {
 	startIndex := 0
 	pageSize := sweepPageSize
+	total := -1
+	var inventory []Item
+	seenIDs := make(map[string]struct{})
+	seenPaths := make(map[string]struct{})
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 
 		page, err := s.fetchPage(ctx, startIndex, pageSize)
 		if err != nil {
-			return fmt.Errorf("ListItemsPage(start=%d): %w", startIndex, err)
+			return nil, fmt.Errorf("ListItemsPage(start=%d): %w", startIndex, err)
+		}
+		if total == -1 {
+			total = page.TotalRecordCount
+		} else if page.TotalRecordCount != total {
+			return nil, fmt.Errorf("incomplete Jellyfin inventory: total changed from %d to %d", total, page.TotalRecordCount)
+		}
+		if total < 0 {
+			return nil, fmt.Errorf("incomplete Jellyfin inventory: negative total %d", total)
+		}
+		for i, item := range page.Items {
+			path := strings.TrimSpace(item.Path)
+			id := strings.TrimSpace(item.ID)
+			if path == "" || id == "" {
+				return nil, fmt.Errorf("incomplete Jellyfin inventory: unusable item at index %d", startIndex+i)
+			}
+			if _, exists := seenIDs[id]; exists {
+				return nil, fmt.Errorf("incomplete Jellyfin inventory: duplicate item id %q", id)
+			}
+			if _, exists := seenPaths[path]; exists {
+				return nil, fmt.Errorf("incomplete Jellyfin inventory: duplicate item path %q", path)
+			}
+			seenIDs[id] = struct{}{}
+			seenPaths[path] = struct{}{}
 		}
 
-		for _, item := range page.Items {
-			if item.Path == "" {
-				continue
-			}
-			lookup := s.translator.JellyfinToDaemon(item.Path)
-			rows, ok := pathMap[lookup]
-			if !ok {
-				continue
-			}
-			now := time.Now().UTC()
-			imdb := item.ProviderIDs["Imdb"]
-			tmdb := item.ProviderIDs["Tmdb"]
-			tvdb := item.ProviderIDs["Tvdb"]
-			identified := imdb != "" || tmdb != "" || tvdb != ""
-			for _, row := range rows {
-				if err := s.db.UpdateOutcome(row.ID, database.OutcomeUpdate{
-					JellyfinItemID:      item.ID,
-					JellyfinImdbID:      imdb,
-					JellyfinTmdbID:      tmdb,
-					JellyfinTvdbID:      tvdb,
-					JellyfinResolvedAt:  &now,
-					JellyfinIdentified:  &identified,
-					JellyfinFirstSeenAt: &now,
-				}); err != nil {
-					return fmt.Errorf("UpdateOutcome id=%d: %w", row.ID, err)
-				}
-			}
-			delete(pathMap, lookup)
-		}
-
+		inventory = append(inventory, page.Items...)
 		startIndex += len(page.Items)
-		if len(page.Items) == 0 || startIndex >= page.TotalRecordCount {
-			break
+		if startIndex > total {
+			return nil, fmt.Errorf("incomplete Jellyfin inventory: received %d items for total %d", startIndex, total)
+		}
+		if startIndex == total {
+			return inventory, nil
+		}
+		if len(page.Items) == 0 {
+			return nil, fmt.Errorf("incomplete Jellyfin inventory: received 0 of %d remaining items", total-startIndex)
 		}
 
 		// Rate-limit pagination to avoid hammering the Jellyfin server.
@@ -221,12 +232,90 @@ func (s *Sweeper) sweepByPath(ctx context.Context, pathMap map[string][]*databas
 		if s.pageDelay > 0 {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			case <-time.After(s.pageDelay):
 			}
 		}
 	}
+}
 
+// guardInventoryPlausible refuses to treat a suspiciously small Jellyfin
+// inventory as an authoritative snapshot. A server that is reachable but
+// still warming up (library scan in progress, storage not yet mounted, API
+// key scoped to a user with no library access) answers 200 OK with zero or
+// very few items; without this guard that answer reconciles as "everything
+// was deleted" and clears every cached confirmation and successful outcome.
+//
+// Refusing leaves the previous confirmations in place and marks the snapshot
+// incomplete, so verification reports inconclusive rather than fabricating a
+// library-wide mismatch. A genuine bulk deletion below the floor therefore
+// needs operator attention: clear jellyfin_items to re-baseline.
+func (s *Sweeper) guardInventoryPlausible(count int) error {
+	cached, err := s.db.CountJellyfinItems()
+	if err != nil {
+		return fmt.Errorf("count cached Jellyfin items: %w", err)
+	}
+	if cached == 0 {
+		// Nothing to protect; an empty library is a legitimate first snapshot.
+		return nil
+	}
+	if count == 0 {
+		return fmt.Errorf("implausible Jellyfin inventory: reported 0 items while %d paths are cached; refusing to treat as authoritative", cached)
+	}
+	if float64(count) < float64(cached)*sweepMinInventoryRatio {
+		return fmt.Errorf("implausible Jellyfin inventory: reported %d items, down from %d cached (below %.0f%% floor); refusing to treat as authoritative", count, cached, sweepMinInventoryRatio*100)
+	}
+	return nil
+}
+
+func (s *Sweeper) reconcileInventory(pathMap map[string][]*database.ParseDecision, inventory []Item) error {
+	cacheItems := make([]database.JellyfinItem, 0, len(inventory))
+	for _, item := range inventory {
+		if item.Path == "" || item.ID == "" {
+			continue
+		}
+		path := s.translator.JellyfinToDaemon(item.Path)
+		cacheItems = append(cacheItems, database.JellyfinItem{
+			Path:           path,
+			JellyfinItemID: item.ID,
+			ItemName:       item.Name,
+			ItemType:       item.Type,
+		})
+
+		rows, ok := pathMap[path]
+		if !ok {
+			continue
+		}
+		now := time.Now().UTC()
+		imdb := item.ProviderIDs["Imdb"]
+		tmdb := item.ProviderIDs["Tmdb"]
+		tvdb := item.ProviderIDs["Tvdb"]
+		identified := imdb != "" || tmdb != "" || tvdb != ""
+		for _, row := range rows {
+			if err := s.db.UpdateOutcome(row.ID, database.OutcomeUpdate{
+				JellyfinItemID:      item.ID,
+				JellyfinImdbID:      imdb,
+				JellyfinTmdbID:      tmdb,
+				JellyfinTvdbID:      tvdb,
+				JellyfinResolvedAt:  &now,
+				JellyfinIdentified:  &identified,
+				JellyfinFirstSeenAt: &now,
+			}); err != nil {
+				return fmt.Errorf("UpdateOutcome id=%d: %w", row.ID, err)
+			}
+		}
+		delete(pathMap, path)
+	}
+
+	removed, err := s.db.ReconcileJellyfinItems(cacheItems)
+	if err != nil {
+		return fmt.Errorf("reconcile Jellyfin items: %w", err)
+	}
+	for _, path := range removed {
+		if err := s.db.ClearOutcomesByTargetPath(path); err != nil {
+			return fmt.Errorf("clear stale outcomes for path %q: %w", path, err)
+		}
+	}
 	return nil
 }
 

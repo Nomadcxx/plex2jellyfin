@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/spf13/cobra"
 )
@@ -22,9 +23,13 @@ func newRepairUnknownSeasonsCmd() *cobra.Command {
 		Short: "Audit and repair Jellyfin Season Unknown null-index cases",
 		Long: `Audit Jellyfin virtual "Season Unknown" containers.
 
-Dry-run is the default. Execute refreshes series with unknown-season episode
-paths that include SxxEyy evidence. Pure obfuscated folder-context cases are
-reported for manual, source-history, or parse-metadata repair.`,
+Dry-run is the default. Execute refreshes only series where every null-index
+episode path has strict SxxEyy evidence. Mixed seasons and folder-context /
+obfuscated cases stay manual. Per-series cooldowns use
+metadata_recovery.repair_cooldown_hours (shared with daemon automation).
+
+Daemon automation stays behind metadata_recovery.unknown_season_repair_enabled
+(default off). Dogfood with dry-run, then one --execute --max-refresh 1.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRepairUnknownSeasons(cmd, userID, limit, maxRefresh, execute)
 		},
@@ -56,7 +61,14 @@ func runRepairUnknownSeasons(cmd *cobra.Command, userID string, limit, maxRefres
 	defer cancel()
 
 	if execute {
-		report, err := client.RepairUnknownSeasons(ctx, userID, maxRefresh, false)
+		db, err := database.Open()
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+
+		cooldown := time.Duration(cfg.MetadataRecovery.RepairCooldownHours) * time.Hour
+		report, err := client.RepairUnknownSeasons(ctx, userID, maxRefresh, false, db, cooldown)
 		if err != nil {
 			return err
 		}
@@ -72,7 +84,7 @@ func runRepairUnknownSeasons(cmd *cobra.Command, userID string, limit, maxRefres
 	}
 	printUnknownSeasonReport(cmd.OutOrStdout(), report, limit)
 	if report.RefreshCandidateSeasons > 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "\nRun 'plex2jellyfin repair unknown-seasons --execute' to refresh series with parseable unknown-season paths.")
+		fmt.Fprintln(cmd.OutOrStdout(), "\nRun 'plex2jellyfin repair unknown-seasons --execute --max-refresh 1' for one strict candidate.")
 	}
 	return nil
 }

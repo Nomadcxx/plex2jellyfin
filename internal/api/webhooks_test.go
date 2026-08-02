@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -395,6 +396,239 @@ func TestHandleItemRemovedLogsSuccessfulEvent(t *testing.T) {
 	}
 }
 
+func TestHandleItemRemovedClearsOutcomeAndCache(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "api-removal.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+
+	targetPath := "/library/Movies/Old Movie (2020)/Old Movie (2020).mkv"
+	var ids []int64
+	for _, source := range []string{"/downloads/older.old.movie.2020.mkv", "/downloads/old.movie.2020.mkv"} {
+		id, err := db.InsertDecision(database.ParseDecision{
+			SourcePath:      source,
+			SourceFilename:  filepath.Base(source),
+			EventAt:         time.Now().UTC(),
+			TargetPath:      targetPath,
+			OrganizeOutcome: "success",
+		})
+		if err != nil {
+			t.Fatalf("InsertDecision: %v", err)
+		}
+		ids = append(ids, id)
+		resolvedAt := time.Now().UTC()
+		identified := true
+		if err := db.UpdateOutcome(id, database.OutcomeUpdate{
+			JellyfinItemID:      "jf-old",
+			JellyfinResolvedAt:  &resolvedAt,
+			JellyfinIdentified:  &identified,
+			JellyfinFirstSeenAt: &resolvedAt,
+		}); err != nil {
+			t.Fatalf("UpdateOutcome: %v", err)
+		}
+	}
+	if err := db.UpsertJellyfinItem(targetPath, "jf-old", "Old Movie", "Movie"); err != nil {
+		t.Fatalf("UpsertJellyfinItem: %v", err)
+	}
+
+	s := &Server{db: db}
+	s.handleItemRemoved(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventItemRemoved,
+		ItemPath:         targetPath,
+		ItemName:         "Old Movie",
+		ItemType:         "Movie",
+	})
+
+	for _, id := range ids {
+		dec, err := db.GetDecision(id)
+		if err != nil {
+			t.Fatalf("GetDecision: %v", err)
+		}
+		if dec.JellyfinItemID != "" || dec.JellyfinResolvedAt != nil {
+			t.Fatalf("expected parse outcome cleared, got %+v", dec)
+		}
+	}
+
+	item, err := db.GetJellyfinItemByPath(targetPath)
+	if err != nil {
+		t.Fatalf("GetJellyfinItemByPath: %v", err)
+	}
+	if item != nil {
+		t.Fatalf("expected jellyfin cache row deleted, got %+v", item)
+	}
+}
+
+func TestJellyfinVerificationWithNoCandidatesIsInconclusive(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "api-verification.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	if err != nil {
+		t.Fatalf("activity.NewLogger: %v", err)
+	}
+	defer activityLogger.Close()
+
+	s := &Server{db: db, activityLogger: activityLogger}
+	s.runJellyfinVerificationPass()
+
+	entries, err := activityLogger.GetRecentEntries(1)
+	if err != nil {
+		t.Fatalf("GetRecentEntries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected verification summary, got %d entries", len(entries))
+	}
+	if entries[0].Success || entries[0].Error == "" {
+		t.Fatalf("zero checked must be inconclusive, got %+v", entries[0])
+	}
+}
+
+func TestJellyfinVerificationWithIncompleteCacheIsInconclusive(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "api-verification.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+	_, err = db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/movie.2026.mkv",
+		SourceFilename:  "movie.2026.mkv",
+		EventAt:         time.Now().UTC(),
+		TargetPath:      "/library/Movies/Movie (2026)/Movie (2026).mkv",
+		OrganizeOutcome: "success",
+	})
+	if err != nil {
+		t.Fatalf("InsertDecision: %v", err)
+	}
+	if _, err := db.DB().Exec(`DROP TABLE jellyfin_items`); err != nil {
+		t.Fatalf("drop jellyfin_items: %v", err)
+	}
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	if err != nil {
+		t.Fatalf("activity.NewLogger: %v", err)
+	}
+	defer activityLogger.Close()
+
+	s := &Server{db: db, activityLogger: activityLogger}
+	s.runJellyfinVerificationPass()
+
+	entries, err := activityLogger.GetRecentEntries(10)
+	if err != nil {
+		t.Fatalf("GetRecentEntries: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected verification summary")
+	}
+	summary := entries[0]
+	if summary.Success || !strings.Contains(summary.Error, "incomplete") {
+		t.Fatalf("incomplete cache must be inconclusive, got %+v", summary)
+	}
+}
+
+func TestJellyfinVerificationRejectsWebhookOnlyPartialCache(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "api-verification.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+	targetPath := "/library/Movies/Partial (2026)/Partial (2026).mkv"
+	_, err = db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/partial.2026.mkv",
+		SourceFilename:  "partial.2026.mkv",
+		EventAt:         time.Now().UTC(),
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+	})
+	if err != nil {
+		t.Fatalf("InsertDecision: %v", err)
+	}
+	if err := db.UpsertJellyfinItem(targetPath, "jf-partial", "Partial", "Movie"); err != nil {
+		t.Fatalf("UpsertJellyfinItem: %v", err)
+	}
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	if err != nil {
+		t.Fatalf("activity.NewLogger: %v", err)
+	}
+	defer activityLogger.Close()
+
+	s := &Server{db: db, activityLogger: activityLogger}
+	s.runJellyfinVerificationPass()
+
+	entries, err := activityLogger.GetRecentEntries(1)
+	if err != nil {
+		t.Fatalf("GetRecentEntries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected verification summary, got %d entries", len(entries))
+	}
+	if entries[0].Success || !strings.Contains(entries[0].Error, "incomplete") {
+		t.Fatalf("partial cache must be inconclusive, got %+v", entries[0])
+	}
+}
+
+func TestJellyfinVerificationRejectsMidPassInventoryInvalidation(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "api-verification.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+
+	targetPath := "/library/Movies/Race (2026)/Race (2026).mkv"
+	_, err = db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/race.2026.mkv",
+		SourceFilename:  "race.2026.mkv",
+		EventAt:         time.Now().UTC(),
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+		ParsedTitle:     "Race",
+	})
+	if err != nil {
+		t.Fatalf("InsertDecision: %v", err)
+	}
+	if _, err := db.ReconcileJellyfinItems([]database.JellyfinItem{{
+		Path:           targetPath,
+		JellyfinItemID: "jf-race",
+		ItemName:       "Race",
+		ItemType:       "Movie",
+	}}); err != nil {
+		t.Fatalf("ReconcileJellyfinItems: %v", err)
+	}
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	if err != nil {
+		t.Fatalf("activity.NewLogger: %v", err)
+	}
+	defer activityLogger.Close()
+
+	s := &Server{
+		db:             db,
+		activityLogger: activityLogger,
+		verificationMidPass: func() {
+			if err := db.MarkJellyfinInventoryIncomplete(); err != nil {
+				t.Fatalf("MarkJellyfinInventoryIncomplete: %v", err)
+			}
+		},
+	}
+	s.runJellyfinVerificationPass()
+
+	entries, err := activityLogger.GetRecentEntries(1)
+	if err != nil {
+		t.Fatalf("GetRecentEntries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected verification summary, got %d entries", len(entries))
+	}
+	if entries[0].Success || !strings.Contains(entries[0].Error, "incomplete") {
+		t.Fatalf("mid-pass invalidation must be inconclusive, got %+v", entries[0])
+	}
+}
+
 func TestHandleItemAdded_UpdatesParseDecision(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "api-decision.db")
 	db, err := database.OpenPath(dbPath)
@@ -448,5 +682,60 @@ func TestHandleItemAdded_UpdatesParseDecision(t *testing.T) {
 	}
 	if dec.JellyfinResolvedAt == nil {
 		t.Fatalf("expected JellyfinResolvedAt to be set")
+	}
+}
+
+func TestHandleItemUpdated_EmptyProvidersDoNotDowngradeIdentified(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "api-empty-update.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+
+	targetPath := "/library/Movies/Ready (2026)/Ready (2026).mkv"
+	now := time.Now().UTC()
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:      "/downloads/ready.2026.mkv",
+		SourceFilename:  "ready.2026.mkv",
+		EventAt:         now,
+		TargetPath:      targetPath,
+		OrganizeOutcome: "success",
+	})
+	if err != nil {
+		t.Fatalf("InsertDecision: %v", err)
+	}
+	identified := true
+	if err := db.UpdateOutcome(id, database.OutcomeUpdate{
+		JellyfinItemID:     "jf-ready",
+		JellyfinImdbID:     "tt111",
+		JellyfinResolvedAt: &now,
+		JellyfinIdentified: &identified,
+	}); err != nil {
+		t.Fatalf("UpdateOutcome: %v", err)
+	}
+
+	s := &Server{db: db}
+	s.handleItemUpdated(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventItemUpdated,
+		ItemID:           "jf-ready",
+		ItemPath:         targetPath,
+		ItemName:         "Ready",
+		ItemType:         "Movie",
+		// no provider IDs — empty update
+	})
+
+	dec, err := db.GetDecision(id)
+	if err != nil {
+		t.Fatalf("GetDecision: %v", err)
+	}
+	if dec.JellyfinIdentified == nil || !*dec.JellyfinIdentified {
+		t.Fatalf("empty ItemUpdated must not clear identified")
+	}
+	if dec.JellyfinImdbID != "tt111" {
+		t.Fatalf("provider IDs must be preserved, got imdb=%q", dec.JellyfinImdbID)
+	}
+	if dec.MetadataState != "identified" {
+		t.Fatalf("metadata_state=%q, want identified", dec.MetadataState)
 	}
 }

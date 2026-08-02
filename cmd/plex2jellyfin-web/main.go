@@ -21,8 +21,9 @@ import (
 )
 
 var (
-	port string
-	host string
+	version = "dev" // Set by build flags: -ldflags="-X main.version=..."
+	port    string
+	host    string
 )
 
 func main() {
@@ -77,6 +78,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	server := api.NewServer(db, cfg)
+	server.SetVersion(version)
 	if binary, err := os.Executable(); err == nil {
 		logPath := ""
 		if dir, derr := paths.Plex2JellyfinDir(); derr == nil {

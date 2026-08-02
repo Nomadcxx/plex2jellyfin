@@ -162,14 +162,15 @@ type KeepaliveConfig struct {
 }
 
 type MetadataRecoveryConfig struct {
-	PassiveEnabled         bool `mapstructure:"passive_enabled" toml:"passive_enabled"`
-	RepairEnabled          bool `mapstructure:"repair_enabled" toml:"repair_enabled"`
-	PassiveIntervalMinutes int  `mapstructure:"passive_interval_minutes" toml:"passive_interval_minutes"`
-	PassiveBatchSize       int  `mapstructure:"passive_batch_size" toml:"passive_batch_size"`
-	RepairBatchSize        int  `mapstructure:"repair_batch_size" toml:"repair_batch_size"`
-	RepairCooldownHours    int  `mapstructure:"repair_cooldown_hours" toml:"repair_cooldown_hours"`
-	NeedsReviewAfter       int  `mapstructure:"needs_review_after" toml:"needs_review_after"`
-	CorrectionEnabled      bool `mapstructure:"correction_enabled" toml:"correction_enabled"`
+	PassiveEnabled              bool `mapstructure:"passive_enabled" toml:"passive_enabled"`
+	RepairEnabled               bool `mapstructure:"repair_enabled" toml:"repair_enabled"`
+	UnknownSeasonRepairEnabled  bool `mapstructure:"unknown_season_repair_enabled" toml:"unknown_season_repair_enabled"`
+	PassiveIntervalMinutes      int  `mapstructure:"passive_interval_minutes" toml:"passive_interval_minutes"`
+	PassiveBatchSize            int  `mapstructure:"passive_batch_size" toml:"passive_batch_size"`
+	RepairBatchSize             int  `mapstructure:"repair_batch_size" toml:"repair_batch_size"`
+	RepairCooldownHours         int  `mapstructure:"repair_cooldown_hours" toml:"repair_cooldown_hours"`
+	NeedsReviewAfter            int  `mapstructure:"needs_review_after" toml:"needs_review_after"`
+	CorrectionEnabled           bool `mapstructure:"correction_enabled" toml:"correction_enabled"`
 }
 
 // AIConfig contains AI title matching configuration
@@ -375,15 +376,16 @@ func DefaultConfig() *Config {
 			AllowedOrigins: []string{"http://localhost:3000"},
 		},
 		MetadataRecovery: MetadataRecoveryConfig{
-			PassiveEnabled:         true,
-			RepairEnabled:          false,
-			PassiveIntervalMinutes: 60,
-			PassiveBatchSize:       25,
-			RepairBatchSize:        5,
-		RepairCooldownHours:    6,
-		NeedsReviewAfter:       4,
-		CorrectionEnabled:      true,
-	},
+			PassiveEnabled:             true,
+			RepairEnabled:              false,
+			UnknownSeasonRepairEnabled: false,
+			PassiveIntervalMinutes:     60,
+			PassiveBatchSize:           25,
+			RepairBatchSize:            5,
+			RepairCooldownHours:        6,
+			NeedsReviewAfter:           4,
+			CorrectionEnabled:          true,
+		},
 	}
 }
 
@@ -670,11 +672,14 @@ plugin_daemon_url = "%s"
 # ============================================================================
 # METADATA RECOVERY
 # Passive recovery checks Jellyfin for metadata that arrived after import.
-# Active repair is disabled by default because it asks Jellyfin to refresh items.
+# repair_enabled drives MetadataReconciler.RunRepair (movie/TV parse-decision
+# active repair). Compatibility: before 2026-08 this flag gated unknown-season
+# series refreshes; those now use unknown_season_repair_enabled (default off).
 # ============================================================================
 [metadata_recovery]
 passive_enabled = %v
 repair_enabled = %v
+unknown_season_repair_enabled = %v
 passive_interval_minutes = %d
 passive_batch_size = %d
 repair_batch_size = %d
@@ -771,6 +776,7 @@ allowed_origins = %s
 		c.Jellyfin.PluginDaemonURL,
 		c.MetadataRecovery.PassiveEnabled,
 		c.MetadataRecovery.RepairEnabled,
+		c.MetadataRecovery.UnknownSeasonRepairEnabled,
 		c.MetadataRecovery.PassiveIntervalMinutes,
 		c.MetadataRecovery.PassiveBatchSize,
 		c.MetadataRecovery.RepairBatchSize,

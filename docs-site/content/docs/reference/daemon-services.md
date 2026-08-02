@@ -86,8 +86,7 @@ systemctl --user status plex2jellyfin-postmortem.timer
 ```ini
 # plex2jellyfin-postmortem.timer
 [Timer]
-OnBootSec=20m
-OnUnitActiveSec=96h
+OnCalendar=daily
 Persistent=true
 Unit=plex2jellyfin-postmortem.service
 ```
@@ -96,10 +95,10 @@ Unit=plex2jellyfin-postmortem.service
 # plex2jellyfin-postmortem.service
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/plex2jellyfin postmortem collect --since 96h
+ExecStart=/usr/local/bin/plex2jellyfin postmortem collect --since 96h --if-due
 ```
 
-A **user** unit (not system-wide), installed under `systemd/user/`. Runs every 4 days (`OnUnitActiveSec=96h`), starting 20 minutes after boot if the previous run was missed (`Persistent=true`). Each run collects parse decisions, repair events, housekeeping state, and suspicious items into an evidence bundle at `~/.config/plex2jellyfin/reports/latest/`.
+A **user** unit (not system-wide), installed under `systemd/user/`. Wakes daily (`OnCalendar=daily`); `Persistent=true` catches up after downtime. The service passes `--if-due`, so collection only proceeds when the latest successful bundle is at least 96 hours old — preserving a rolling 96-hour cadence without collecting after every boot. Manual `plex2jellyfin postmortem collect` (without `--if-due`) remains unconditional. Each successful run writes an evidence bundle at `~/.config/plex2jellyfin/reports/latest/`.
 
 Review the bundle yourself, or hand `agent-prompt.md` from the bundle to an LLM for a summarized health check. See `plex2jellyfin postmortem collect --help` and the [CLI Reference](/docs/reference/cli#postmortem) for manual invocation.
 

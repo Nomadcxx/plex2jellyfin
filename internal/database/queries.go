@@ -31,7 +31,11 @@ type ConsolidationStats struct {
 func (m *MediaDB) FindDuplicateMovies() ([]DuplicateGroup, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.findDuplicateMoviesLocked()
+}
 
+// findDuplicateMoviesLocked assumes m.mu is already held.
+func (m *MediaDB) findDuplicateMoviesLocked() ([]DuplicateGroup, error) {
 	query := `
 		SELECT normalized_title, year
 		FROM media_files
@@ -57,12 +61,7 @@ func (m *MediaDB) FindDuplicateMovies() ([]DuplicateGroup, error) {
 			return nil, fmt.Errorf("failed to scan duplicate movie: %w", err)
 		}
 
-		// Get all files for this movie
-		var yearVal int
-		if year != nil {
-			yearVal = *year
-		}
-		files, err := m.getMediaFilesForGroup(title, yearVal, nil, nil)
+		files, err := m.getMediaFilesForGroup(title, year, nil, nil, "movie")
 		if err != nil {
 			return nil, err
 		}
@@ -73,11 +72,8 @@ func (m *MediaDB) FindDuplicateMovies() ([]DuplicateGroup, error) {
 			Files:           files,
 		}
 
-		// Find best file (highest quality score)
 		if len(files) > 0 {
-			group.BestFile = files[0] // Already sorted by quality_score DESC
-
-			// Calculate space reclaimable
+			group.BestFile = files[0]
 			for _, f := range files[1:] {
 				group.SpaceReclaimable += f.Size
 			}
@@ -93,7 +89,11 @@ func (m *MediaDB) FindDuplicateMovies() ([]DuplicateGroup, error) {
 func (m *MediaDB) FindDuplicateEpisodes() ([]DuplicateGroup, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.findDuplicateEpisodesLocked()
+}
 
+// findDuplicateEpisodesLocked assumes m.mu is already held.
+func (m *MediaDB) findDuplicateEpisodesLocked() ([]DuplicateGroup, error) {
 	query := `
 		SELECT normalized_title, year, season, episode
 		FROM media_files
@@ -119,12 +119,7 @@ func (m *MediaDB) FindDuplicateEpisodes() ([]DuplicateGroup, error) {
 			return nil, fmt.Errorf("failed to scan duplicate episode: %w", err)
 		}
 
-		// Get all files for this episode
-		var yearVal int
-		if year != nil {
-			yearVal = *year
-		}
-		files, err := m.getMediaFilesForGroup(title, yearVal, season, episode)
+		files, err := m.getMediaFilesForGroup(title, year, season, episode, "episode")
 		if err != nil {
 			return nil, err
 		}
@@ -137,11 +132,8 @@ func (m *MediaDB) FindDuplicateEpisodes() ([]DuplicateGroup, error) {
 			Files:           files,
 		}
 
-		// Find best file (highest quality score)
 		if len(files) > 0 {
-			group.BestFile = files[0] // Already sorted by quality_score DESC
-
-			// Calculate space reclaimable
+			group.BestFile = files[0]
 			for _, f := range files[1:] {
 				group.SpaceReclaimable += f.Size
 			}
@@ -153,8 +145,9 @@ func (m *MediaDB) FindDuplicateEpisodes() ([]DuplicateGroup, error) {
 	return groups, rows.Err()
 }
 
-// getMediaFilesForGroup retrieves all files for a duplicate group
-func (m *MediaDB) getMediaFilesForGroup(title string, year int, season, episode *int) ([]*MediaFile, error) {
+// getMediaFilesForGroup retrieves all files for a duplicate group.
+// year nil matches year IS NULL; mediaType constrains retrieval.
+func (m *MediaDB) getMediaFilesForGroup(title string, year, season, episode *int, mediaType string) ([]*MediaFile, error) {
 	var files []*MediaFile
 
 	query := `
@@ -167,10 +160,16 @@ func (m *MediaDB) getMediaFilesForGroup(title string, year int, season, episode 
 			source, source_priority, library_root,
 			created_at, updated_at
 		FROM media_files
-		WHERE normalized_title = ? AND year = ?
+		WHERE normalized_title = ? AND media_type = ?
 	`
+	args := []interface{}{title, mediaType}
 
-	args := []interface{}{title, year}
+	if year != nil {
+		query += " AND year = ?"
+		args = append(args, *year)
+	} else {
+		query += " AND year IS NULL"
+	}
 
 	if season != nil {
 		query += " AND season = ?"
@@ -211,7 +210,6 @@ func (m *MediaDB) getMediaFilesForGroup(title string, year int, season, episode 
 			return nil, fmt.Errorf("failed to scan media file: %w", err)
 		}
 
-		// Deserialize compliance issues
 		if complianceJSON != "" {
 			if err := json.Unmarshal([]byte(complianceJSON), &file.ComplianceIssues); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal compliance issues: %w", err)
@@ -286,27 +284,24 @@ func (m *MediaDB) FindInferiorDuplicates() ([]*MediaFile, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// Get all duplicate groups
-	movieGroups, err := m.FindDuplicateMovies()
+	movieGroups, err := m.findDuplicateMoviesLocked()
 	if err != nil {
 		return nil, err
 	}
 
-	episodeGroups, err := m.FindDuplicateEpisodes()
+	episodeGroups, err := m.findDuplicateEpisodesLocked()
 	if err != nil {
 		return nil, err
 	}
 
 	var inferiorFiles []*MediaFile
 
-	// Collect all non-best files from movie groups
 	for _, group := range movieGroups {
 		if len(group.Files) > 1 {
 			inferiorFiles = append(inferiorFiles, group.Files[1:]...)
 		}
 	}
 
-	// Collect all non-best files from episode groups
 	for _, group := range episodeGroups {
 		if len(group.Files) > 1 {
 			inferiorFiles = append(inferiorFiles, group.Files[1:]...)
@@ -342,13 +337,13 @@ func (m *MediaDB) GetConsolidationStats() (*ConsolidationStats, error) {
 		return nil, fmt.Errorf("failed to get non-compliant count: %w", err)
 	}
 
-	// Get duplicate stats
-	movieGroups, err := m.FindDuplicateMovies()
+	// Get duplicate stats via no-lock helpers (caller already holds RLock).
+	movieGroups, err := m.findDuplicateMoviesLocked()
 	if err != nil {
 		return nil, err
 	}
 
-	episodeGroups, err := m.FindDuplicateEpisodes()
+	episodeGroups, err := m.findDuplicateEpisodesLocked()
 	if err != nil {
 		return nil, err
 	}

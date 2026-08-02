@@ -266,3 +266,26 @@ func TestPluginDaemonURLSurvivesRoundTrip(t *testing.T) {
 		t.Fatalf("plugin_daemon_url lost on reload: %q", loaded.Jellyfin.PluginDaemonURL)
 	}
 }
+
+func TestDefaultConfig_MetadataRecoveryRepairFlags(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.MetadataRecovery.PassiveEnabled {
+		t.Fatal("expected passive_enabled default true")
+	}
+	if cfg.MetadataRecovery.RepairEnabled {
+		t.Fatal("expected repair_enabled default false")
+	}
+	if cfg.MetadataRecovery.UnknownSeasonRepairEnabled {
+		t.Fatal("expected unknown_season_repair_enabled default false")
+	}
+}
+
+func TestConfigToTOMLIncludesUnknownSeasonRepairFlag(t *testing.T) {
+	toml := DefaultConfig().ToTOML()
+	if !strings.Contains(toml, "unknown_season_repair_enabled = false") {
+		t.Fatal("expected unknown_season_repair_enabled in ToTOML output")
+	}
+	if !strings.Contains(toml, "repair_enabled = false") {
+		t.Fatal("expected repair_enabled in ToTOML output")
+	}
+}

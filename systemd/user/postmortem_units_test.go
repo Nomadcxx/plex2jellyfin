@@ -21,7 +21,7 @@ func TestPostmortemUserUnits(t *testing.T) {
 
 	for _, want := range []string{
 		"WorkingDirectory=/home/nomadx/Documents/plex2jellyfin",
-		"ExecStart=/usr/bin/plex2jellyfin postmortem collect --since 96h",
+		"ExecStart=/usr/bin/plex2jellyfin postmortem collect --since 96h --if-due",
 		"ExecStartPost=/home/nomadx/Documents/plex2jellyfin/scripts/plex2jellyfin-postmortem-terminal.sh",
 	} {
 		if !strings.Contains(service, want) {
@@ -29,12 +29,19 @@ func TestPostmortemUserUnits(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"OnUnitActiveSec=96h",
-		"OnBootSec=20m",
+		"OnCalendar=daily",
 		"Persistent=true",
 	} {
 		if !strings.Contains(timer, want) {
 			t.Fatalf("timer missing %q", want)
+		}
+	}
+	for _, refuse := range []string{
+		"OnBootSec=",
+		"OnUnitActiveSec=",
+	} {
+		if strings.Contains(timer, refuse) {
+			t.Fatalf("timer still has %q; daily OnCalendar + --if-due owns cadence", refuse)
 		}
 	}
 }

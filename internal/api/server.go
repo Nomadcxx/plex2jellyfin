@@ -47,6 +47,9 @@ type Server struct {
 	setupChownConfig    func(user, group string) error
 	setupEnsureArr      func(candidate *config.Config) error
 	setupIndexMu        sync.Mutex
+	// ponytail: test-only seam for mid-pass inventory invalidation
+	verificationMidPass func()
+	version             string
 }
 
 // NewServer creates a new API server
@@ -91,6 +94,11 @@ func NewServer(db *database.MediaDB, cfg *config.Config) *Server {
 // SetLauncher attaches a daemon Launcher used by /daemon/{start,restart} routes.
 func (s *Server) SetLauncher(l DaemonLauncher) {
 	s.launcher = l
+}
+
+// SetVersion sets the release version reported by /health.
+func (s *Server) SetVersion(v string) {
+	s.version = v
 }
 
 // Close releases server resources (stops SessionStore cleanup goroutine, etc.)

@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -36,6 +37,11 @@ type OrganizationResult struct {
 	SkipReason      string
 	SourceQuality   *quality.QualityInfo
 	ExistingQuality *quality.QualityInfo
+	// InventoryError records a post-move media_files indexing failure. The
+	// move itself completed, so Success stays true and TargetPath is set;
+	// this only reports that the inventory did not catch up. Callers must
+	// not treat it as a failed organize — the bytes are already on disk.
+	InventoryError error
 }
 
 type SeasonPackResult struct {
@@ -67,6 +73,7 @@ type Organizer struct {
 	playbackSafety bool
 	db             *database.MediaDB
 	syncService    *syncsvc.SyncService
+	pathIndexer    PathIndexer
 	pluginClient   *jellyfin.PluginClient
 	pauseOnScan    bool
 	paused         bool
@@ -74,6 +81,11 @@ type Organizer struct {
 	playbackLocks  *jellyfin.PlaybackLockManager
 	deferredQueue  *jellyfin.DeferredQueue
 }
+
+// PathIndexer indexes a destination path into media_files after a successful move.
+// Prefer injecting FileScanner.ScanPath (or a thin wrapper) to avoid organizer↔scanner cycles.
+type PathIndexer func(ctx context.Context, path, libraryRoot, mediaType string) error
+
 
 func NewOrganizer(libraries []string, options ...func(*Organizer)) (*Organizer, error) {
 	transferer, err := transfer.New(transfer.BackendAuto)
@@ -209,6 +221,13 @@ func WithSyncService(svc *syncsvc.SyncService) func(*Organizer) {
 	}
 }
 
+// WithPathIndexer injects post-move media_files indexing (typically FileScanner.ScanPath).
+func WithPathIndexer(index PathIndexer) func(*Organizer) {
+	return func(o *Organizer) {
+		o.pathIndexer = index
+	}
+}
+
 // WithPlaybackLockManager enables playback safety checks against webhook lock state.
 func WithPlaybackLockManager(mgr *jellyfin.PlaybackLockManager) func(*Organizer) {
 	return func(o *Organizer) {
@@ -277,6 +296,50 @@ func (o *Organizer) applyDirOwnership(path string) error {
 				return nil
 			}
 			return err
+		}
+	}
+	return nil
+}
+
+// inventoryIndexTimeout bounds a single post-move ScanPath so a stalled
+// filesystem or database cannot wedge the organize pipeline indefinitely.
+const inventoryIndexTimeout = 2 * time.Minute
+
+// refreshInventoryAfterMove indexes the destination via PathIndexer and then
+// removes the stale source/replaced media_files rows it supersedes. Returns a
+// consistency error the caller reports alongside an otherwise successful move.
+func (o *Organizer) refreshInventoryAfterMove(sourcePath, targetPath, replacedPath, libraryRoot, mediaType string) error {
+	if o.db == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), inventoryIndexTimeout)
+	defer cancel()
+	if o.pathIndexer == nil {
+		// Legacy fallback when callers have not wired ScanPath yet.
+		if mediaFile, err := o.db.GetMediaFile(sourcePath); err == nil && mediaFile != nil {
+			mediaFile.Path = targetPath
+			if err := o.db.UpdateMediaFile(mediaFile); err != nil {
+				log.Printf("[organizer] warning: failed to update media file path after move: %v", err)
+			}
+		}
+		return nil
+	}
+
+	// Index the destination before dropping the rows it replaces. If indexing
+	// fails, the stale rows are the only remaining record of the file, so
+	// deleting them first would leave the moved file absent from media_files
+	// entirely — invisible to the sweep, verification, and duplicate analysis.
+	if err := o.pathIndexer(ctx, targetPath, libraryRoot, mediaType); err != nil {
+		return fmt.Errorf("index destination: %w", err)
+	}
+	if !o.keepSource {
+		if err := o.db.DeleteMediaFile(sourcePath); err != nil {
+			return fmt.Errorf("remove stale source row: %w", err)
+		}
+	}
+	if replacedPath != "" && replacedPath != targetPath && replacedPath != sourcePath {
+		if err := o.db.DeleteMediaFile(replacedPath); err != nil {
+			return fmt.Errorf("remove stale replaced row: %w", err)
 		}
 	}
 	return nil
@@ -492,14 +555,11 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 		}
 	}
 
-	if o.db != nil {
-		if mediaFile, err := o.db.GetMediaFile(sourcePath); err == nil && mediaFile != nil {
-			mediaFile.Path = targetPath
-			if err := o.db.UpdateMediaFile(mediaFile); err != nil {
-				log.Printf("[organizer] warning: failed to update media file path after move: %v", err)
-			}
-		}
-	}
+	// The bytes have already landed at targetPath. An indexing failure is a
+	// consistency problem to report, not a failed organize: reporting failure
+	// here would drop target_path from the decision and hide a file that is
+	// genuinely on disk.
+	inventoryErr := o.refreshInventoryAfterMove(sourcePath, targetPath, existingFile, libraryPath, "movie")
 
 	// HOLDEN Phase 3: Self-learning - update database with organized movie
 	if o.db != nil {
@@ -543,6 +603,7 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 		Attempts:        result.Attempts,
 		SourceQuality:   sourceQuality,
 		ExistingQuality: existingQuality,
+		InventoryError:  inventoryErr,
 	}, nil
 }
 
@@ -737,14 +798,9 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		}
 	}
 
-	if o.db != nil {
-		if mediaFile, err := o.db.GetMediaFile(sourcePath); err == nil && mediaFile != nil {
-			mediaFile.Path = targetPath
-			if err := o.db.UpdateMediaFile(mediaFile); err != nil {
-				log.Printf("[organizer] warning: failed to update media file path after move: %v", err)
-			}
-		}
-	}
+	// See OrganizeMovieWithParsed: the move already completed, so an indexing
+	// failure is reported without demoting the organize to failed.
+	inventoryErr := o.refreshInventoryAfterMove(sourcePath, targetPath, existingFile, libraryPath, "episode")
 
 	// HOLDEN Phase 3: Self-learning - update database with organized TV show
 	if o.db != nil {
@@ -789,6 +845,7 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		Attempts:        result.Attempts,
 		SourceQuality:   sourceQuality,
 		ExistingQuality: existingQuality,
+		InventoryError:  inventoryErr,
 	}, nil
 }
 

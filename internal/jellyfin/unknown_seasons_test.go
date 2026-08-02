@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,6 +37,14 @@ func TestClassifyUnknownSeasonEpisodes(t *testing.T) {
 			in: []Item{
 				ep("/tv/Show/Season 01/Show S01E01.mkv", nil, nil),
 				ep("/tv/Show/Season 01/Show.S01E02.mkv", nil, nil),
+			},
+			want: UnknownSeasonRefreshRepairable,
+		},
+		{
+			name: "null-index episodes with sxxeyy stay repairable even if indexed siblings lack markers",
+			in: []Item{
+				ep("/tv/Show/Season 01/Show S01E01.mkv", nil, nil),
+				ep("/tv/Show/Season 01/already-indexed.mkv", n(1), n(2)),
 			},
 			want: UnknownSeasonRefreshRepairable,
 		},
@@ -134,7 +144,7 @@ func TestAuditUnknownSeasonsUsesUserScopedChildren(t *testing.T) {
 	assert.True(t, strings.HasPrefix(requested[1], "/Users/admin/Items?"), "expected admin user scoped query")
 }
 
-func TestRepairUnknownSeasonsRefreshesSeriesWithAnySxxEyyEvidence(t *testing.T) {
+func TestRepairUnknownSeasonsRefreshesOnlyStrictRepairable(t *testing.T) {
 	t.Parallel()
 
 	var refreshed []string
@@ -148,7 +158,7 @@ func TestRepairUnknownSeasonsRefreshesSeriesWithAnySxxEyyEvidence(t *testing.T) 
 				{"Id":"season-1","Name":"Season Unknown","SeriesId":"series-1","SeriesName":"Clear Show"},
 				{"Id":"season-2","Name":"Season Unknown","SeriesId":"series-2","SeriesName":"Obfuscated Show"},
 				{"Id":"season-3","Name":"Season Unknown","SeriesId":"series-3","SeriesName":"Mixed Show"}
-			],"TotalRecordCount":2}`))
+			],"TotalRecordCount":3}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/Users/admin/Items" && r.URL.Query().Get("ParentId") == "season-1":
 			_, _ = w.Write([]byte(`{"Items":[{"Id":"ep-1","Type":"Episode","Path":"/tv/Clear Show/Season 01/Clear Show S01E01.mkv","SeriesId":"series-1"}],"TotalRecordCount":1}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/Users/admin/Items" && r.URL.Query().Get("ParentId") == "season-2":
@@ -162,8 +172,7 @@ func TestRepairUnknownSeasonsRefreshesSeriesWithAnySxxEyyEvidence(t *testing.T) 
 			refreshed = append(refreshed, r.URL.RawQuery)
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == "/Items/series-3/Refresh":
-			refreshed = append(refreshed, r.URL.RawQuery)
-			w.WriteHeader(http.StatusNoContent)
+			t.Fatalf("mixed season must not be refreshed")
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -171,16 +180,79 @@ func TestRepairUnknownSeasonsRefreshesSeriesWithAnySxxEyyEvidence(t *testing.T) 
 	defer server.Close()
 
 	client := NewClient(Config{URL: server.URL, APIKey: "test"})
-	report, err := client.RepairUnknownSeasons(context.Background(), "", 10, false)
+	report, err := client.RepairUnknownSeasons(context.Background(), "", 10, false, nil, 0)
 
 	require.NoError(t, err)
-	assert.Equal(t, 2, report.Audit.RefreshCandidateSeasons)
-	assert.Equal(t, 2, report.Audit.RefreshCandidateEpisodes)
-	assert.Equal(t, 2, report.Refreshed)
-	assert.Equal(t, 1, report.Skipped)
-	require.Len(t, refreshed, 2)
-	for _, rawQuery := range refreshed {
-		assert.Contains(t, rawQuery, "Recursive=true")
-		assert.Contains(t, rawQuery, "ReplaceAllImages=false")
+	assert.Equal(t, 1, report.Audit.RefreshCandidateSeasons)
+	assert.Equal(t, 1, report.Audit.RefreshCandidateEpisodes)
+	assert.Equal(t, 1, report.Refreshed)
+	assert.Equal(t, 2, report.Skipped)
+	require.Len(t, refreshed, 1)
+	assert.Contains(t, refreshed[0], "Recursive=true")
+	assert.Contains(t, refreshed[0], "ReplaceAllImages=false")
+}
+
+func TestRepairUnknownSeasonsRespectsPerSeriesCooldown(t *testing.T) {
+	t.Parallel()
+
+	var refreshCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/Users":
+			_, _ = w.Write([]byte(`[{"Id":"admin","Name":"admin","Policy":{"IsAdministrator":true}}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/admin/Items" && r.URL.Query().Get("IncludeItemTypes") == "Season":
+			_, _ = w.Write([]byte(`{"Items":[
+				{"Id":"season-1","Name":"Season Unknown","SeriesId":"series-1","SeriesName":"Clear Show"}
+			],"TotalRecordCount":1}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/admin/Items" && r.URL.Query().Get("ParentId") == "season-1":
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"ep-1","Type":"Episode","Path":"/tv/Clear Show/Season 01/Clear Show S01E01.mkv","SeriesId":"series-1"}],"TotalRecordCount":1}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Items/series-1/Refresh":
+			refreshCount++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	store := &memoryUnknownSeasonStore{}
+	client := NewClient(Config{URL: server.URL, APIKey: "test"})
+
+	first, err := client.RepairUnknownSeasons(context.Background(), "", 10, false, store, time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, 1, first.Refreshed)
+	assert.Equal(t, 1, refreshCount)
+
+	second, err := client.RepairUnknownSeasons(context.Background(), "", 10, false, store, time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, 0, second.Refreshed)
+	assert.Equal(t, 1, second.Skipped)
+	assert.Equal(t, 1, refreshCount)
+	require.Len(t, second.Actions, 1)
+	assert.Equal(t, "cooldown", second.Actions[0].Action)
+}
+
+type memoryUnknownSeasonStore struct {
+	byID map[string]database.UnknownSeasonRefreshState
+}
+
+func (s *memoryUnknownSeasonStore) GetUnknownSeasonRefresh(seriesID string) (*database.UnknownSeasonRefreshState, error) {
+	if s.byID == nil {
+		return nil, nil
 	}
+	rec, ok := s.byID[seriesID]
+	if !ok {
+		return nil, nil
+	}
+	cp := rec
+	return &cp, nil
+}
+
+func (s *memoryUnknownSeasonStore) RecordUnknownSeasonRefresh(rec database.UnknownSeasonRefreshState) error {
+	if s.byID == nil {
+		s.byID = map[string]database.UnknownSeasonRefreshState{}
+	}
+	s.byID[rec.SeriesID] = rec
+	return nil
 }

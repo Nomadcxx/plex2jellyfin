@@ -136,11 +136,12 @@ Passive recovery checks Jellyfin for metadata that arrives after import. Active 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `passive_enabled` | bool | `true` | Periodically reconcile missing metadata from Jellyfin. |
-| `repair_enabled` | bool | `false` | Actively request Jellyfin refreshes. |
-| `passive_interval_minutes` | int | `60` | Minutes between passive passes. |
+| `repair_enabled` | bool | `false` | Run `MetadataReconciler.RunRepair` on a timer (parse-decision active repair). Compatibility: before 2026-08 this gated unknown-season refreshes. |
+| `unknown_season_repair_enabled` | bool | `false` | Periodically refresh Jellyfin series for strict Season Unknown candidates (every null-index episode has SxxEyy evidence). Default off; dogfood via CLI dry-run / `--execute --max-refresh 1` first. |
+| `passive_interval_minutes` | int | `60` | Minutes between passive passes (also used by repair timers). |
 | `passive_batch_size` | int | `25` | Max items per passive pass. |
-| `repair_batch_size` | int | `5` | Max items per repair pass. |
-| `repair_cooldown_hours` | int | `6` | Hours before re-repairing the same item. |
+| `repair_batch_size` | int | `5` | Max items / series per repair pass. |
+| `repair_cooldown_hours` | int | `6` | Hours before re-repairing the same parse-decision item or unknown-season series. |
 | `needs_review_after` | int | `4` | Failures before an item is marked needs-review. |
 
 ## `[daemon]`
@@ -328,13 +329,14 @@ jellyfin = "/tv"
 daemon   = "/mnt/storage1/TVSHOWS"
 
 [metadata_recovery]
-passive_enabled          = true
-repair_enabled           = false
-passive_interval_minutes = 60
-passive_batch_size       = 25
-repair_batch_size        = 5
-repair_cooldown_hours    = 6
-needs_review_after       = 4
+passive_enabled               = true
+repair_enabled                = false
+unknown_season_repair_enabled = false
+passive_interval_minutes      = 60
+passive_batch_size            = 25
+repair_batch_size             = 5
+repair_cooldown_hours         = 6
+needs_review_after            = 4
 
 [logging]
 level        = "info"

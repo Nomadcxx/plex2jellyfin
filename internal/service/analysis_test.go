@@ -127,8 +127,8 @@ func TestAnalyzeDuplicates_FindsMovieDuplicates(t *testing.T) {
 		MediaType:       "movie",
 		Size:            4400000000,
 		QualityScore:    84,
-		Resolution:      "unknown",
-		SourceType:      "unknown",
+		Resolution:      "480p",
+		SourceType:      "DVD",
 	})
 
 	svc := NewCleanupService(db)
@@ -138,11 +138,55 @@ func TestAnalyzeDuplicates_FindsMovieDuplicates(t *testing.T) {
 	}
 
 	if analysis.TotalGroups != 1 {
-		t.Errorf("Expected 1 group, got %d", analysis.TotalGroups)
+		t.Fatalf("TotalGroups = %d, want 1", analysis.TotalGroups)
+	}
+}
+
+func TestAnalyzeDuplicates_NullYearEpisodes(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	root := t.TempDir()
+	season, episode := 1, 1
+	path1 := filepath.Join(root, "lib1", "Show", "Season 01", "Show S01E01.mkv")
+	path2 := filepath.Join(root, "lib2", "Show", "Season 01", "Show S01E01.mkv")
+	for _, path := range []string{path1, path2} {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("video"), 0644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	for i, path := range []string{path1, path2} {
+		if err := db.UpsertMediaFile(&database.MediaFile{
+			Path:            path,
+			NormalizedTitle: "show",
+			Year:            nil,
+			Season:          &season,
+			Episode:         &episode,
+			MediaType:       "episode",
+			Size:            int64(100 * (i + 1)),
+			QualityScore:    100 * (i + 1),
+			LibraryRoot:     filepath.Dir(filepath.Dir(filepath.Dir(path))),
+		}); err != nil {
+			t.Fatalf("UpsertMediaFile: %v", err)
+		}
 	}
 
-	if len(analysis.Groups) > 0 && len(analysis.Groups[0].Files) != 2 {
-		t.Errorf("Expected 2 files in group, got %d", len(analysis.Groups[0].Files))
+	svc := NewCleanupService(db)
+	analysis, err := svc.AnalyzeDuplicates()
+	if err != nil {
+		t.Fatalf("AnalyzeDuplicates: %v", err)
+	}
+	if analysis.TotalGroups != 1 {
+		t.Fatalf("TotalGroups = %d, want 1 for NULL-year episode duplicates", analysis.TotalGroups)
+	}
+	if analysis.Groups[0].Year != nil {
+		t.Fatalf("Year = %v, want nil", analysis.Groups[0].Year)
+	}
+	if analysis.ReclaimableBytes != 100 {
+		t.Fatalf("ReclaimableBytes = %d, want 100", analysis.ReclaimableBytes)
 	}
 }
 

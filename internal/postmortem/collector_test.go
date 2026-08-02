@@ -225,3 +225,204 @@ func TestDaemonLogExcerptFallsBackToJournalctl(t *testing.T) {
 		t.Fatalf("daemonLogExcerpt() = %q, should not report unavailable when journalctl works", got)
 	}
 }
+
+func TestCollectorSummaryIncludesWindowedConvergenceMetrics(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	insert := func(d database.ParseDecision) int64 {
+		t.Helper()
+		id, err := db.InsertDecision(d)
+		if err != nil {
+			t.Fatalf("InsertDecision: %v", err)
+		}
+		return id
+	}
+
+	idDrift := insert(database.ParseDecision{
+		SourcePath: "/downloads/a.mkv", SourceFilename: "a.mkv",
+		EventAt: now.Add(-time.Hour), OrganizeOutcome: "success", TargetPath: "/movies/a.mkv",
+		AutoLabel: "DRIFT",
+	})
+	idFail := insert(database.ParseDecision{
+		SourcePath: "/downloads/b.mkv", SourceFilename: "b.mkv",
+		EventAt: now.Add(-2 * time.Hour), OrganizeOutcome: "success", TargetPath: "/movies/b.mkv",
+		AutoLabel: "FAIL",
+	})
+	idMeta := insert(database.ParseDecision{
+		SourcePath: "/downloads/c.mkv", SourceFilename: "c.mkv",
+		EventAt: now.Add(-3 * time.Hour), OrganizeOutcome: "success", TargetPath: "/movies/c.mkv",
+	})
+	if err := db.UpdateMetadataCheckState(idMeta, "jellyfin_item_missing", "missing", nil); err != nil {
+		t.Fatalf("UpdateMetadataCheckState: %v", err)
+	}
+	_ = insert(database.ParseDecision{
+		SourcePath: "/downloads/d.mkv", SourceFilename: "d.mkv",
+		EventAt: now.Add(-4 * time.Hour), OrganizeOutcome: "success", TargetPath: "/movies/d.mkv",
+	})
+	_ = insert(database.ParseDecision{
+		SourcePath: "/downloads/e.mkv", SourceFilename: "e.mkv",
+		EventAt: now.Add(-30 * time.Hour), OrganizeOutcome: "success", TargetPath: "/movies/e.mkv",
+	})
+	_, _ = idDrift, idFail
+
+	// Old flagged backlog + one flagged created in-window.
+	if _, err := db.EnqueueHousekeepingTask("housekeeping.detect", database.TaskKindPollutedName, map[string]any{"path": "/old"}, 10); err != nil {
+		t.Fatalf("enqueue old: %v", err)
+	}
+	if _, err := db.EnqueueHousekeepingTask("housekeeping.detect", database.TaskKindYearMismatch, map[string]any{"path": "/new"}, 10); err != nil {
+		t.Fatalf("enqueue new: %v", err)
+	}
+	// Backdate the first flagged task outside the window.
+	if _, err := db.DB().Exec(`UPDATE housekeeping_tasks SET created_at = ? WHERE id = 1`, now.Add(-10*24*time.Hour)); err != nil {
+		t.Fatalf("backdate housekeeping: %v", err)
+	}
+
+	bundle, err := Collector{
+		DB:     db,
+		Root:   t.TempDir(),
+		Now:    func() time.Time { return now },
+		Since:  now.Add(-96 * time.Hour),
+		LogDir: t.TempDir(),
+	}.Collect()
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	data, err := os.ReadFile(bundle.File("summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary Summary
+	if err := json.Unmarshal(data, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.DriftLabels != 1 || summary.FailLabels != 1 {
+		t.Fatalf("labels drift=%d fail=%d", summary.DriftLabels, summary.FailLabels)
+	}
+	if summary.MetadataProblems != 1 {
+		t.Fatalf("MetadataProblems = %d, want 1", summary.MetadataProblems)
+	}
+	if summary.PendingLabels < 2 {
+		t.Fatalf("PendingLabels = %d, want >= 2", summary.PendingLabels)
+	}
+	if summary.OverdueUnlabeled != 1 {
+		t.Fatalf("OverdueUnlabeled = %d, want 1", summary.OverdueUnlabeled)
+	}
+	if summary.ManualReview != 1 {
+		t.Fatalf("ManualReview created-in-window = %d, want 1", summary.ManualReview)
+	}
+	if summary.HousekeepingOutstandingReview != 2 {
+		t.Fatalf("outstanding review = %d, want 2", summary.HousekeepingOutstandingReview)
+	}
+
+	hkData, err := os.ReadFile(bundle.File("housekeeping.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hk housekeepingSnapshot
+	if err := json.Unmarshal(hkData, &hk); err != nil {
+		t.Fatal(err)
+	}
+	if hk.CreatedInWindow[database.TaskStatusFlagged] != 1 {
+		t.Fatalf("created_in_window flagged = %d, want 1", hk.CreatedInWindow[database.TaskStatusFlagged])
+	}
+	if hk.Outstanding[database.TaskStatusFlagged] != 2 {
+		t.Fatalf("outstanding flagged = %d, want 2", hk.Outstanding[database.TaskStatusFlagged])
+	}
+}
+
+func TestDaemonLogExcerptIncludesRotatedSiblingsFilteredFromSince(t *testing.T) {
+	oldJournalctlExcerpt := journalctlExcerpt
+	journalctlExcerpt = func(time.Time) (string, error) {
+		return "", fmt.Errorf("unused")
+	}
+	t.Cleanup(func() { journalctlExcerpt = oldJournalctlExcerpt })
+
+	dir := t.TempDir()
+	since := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	rotated := strings.Join([]string{
+		"2026-07-29T23:00:00Z [INFO] [daemon] too old",
+		"2026-07-30T01:00:00Z [INFO] [daemon] from rotated",
+		"2026-07-30T02:00:00Z [WARN] [web] GET /api/v1/status",
+	}, "\n") + "\n"
+	current := strings.Join([]string{
+		"2026-07-30T03:00:00Z [INFO] [daemon] from current",
+		"2026-07-30T04:00:00Z [INFO] [web] access ok",
+		"2026-07-31T05:00:00Z [ERROR] [daemon] failure",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "plex2jellyfin.1.log"), []byte(rotated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plex2jellyfin.log"), []byte(current), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Noisy sibling that must not displace daemon evidence.
+	if err := os.WriteFile(filepath.Join(dir, "plex2jellyfin-web-access.log"), []byte(
+		"2026-07-31T06:00:00Z [INFO] [web] GET /health\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Collector{LogDir: dir, Since: since}.daemonLogExcerpt()
+
+	if !strings.Contains(got, "from rotated") || !strings.Contains(got, "from current") || !strings.Contains(got, "failure") {
+		t.Fatalf("missing daemon window lines:\n%s", got)
+	}
+	if strings.Contains(got, "too old") {
+		t.Fatalf("included pre-Since line:\n%s", got)
+	}
+	if strings.Contains(got, "GET /api/v1/status") || strings.Contains(got, "access ok") || strings.Contains(got, "GET /health") {
+		t.Fatalf("included web access noise:\n%s", got)
+	}
+	// Full window: no artificial 200-line truncation of in-window content.
+	if len(strings.Split(strings.TrimSpace(got), "\n")) < 3 {
+		t.Fatalf("expected full in-window daemon excerpt, got:\n%s", got)
+	}
+	if !strings.Contains(got, "web warnings:") || !strings.Contains(got, "warn=1") {
+		t.Fatalf("expected separate web warning summary, got:\n%s", got)
+	}
+}
+
+func TestDaemonLogExcerptJournalFallbackIsDaemonOnlyUncapped(t *testing.T) {
+	oldJournalctlExcerpt := journalctlExcerpt
+	journalctlExcerpt = func(since time.Time) (string, error) {
+		_ = since
+		var b strings.Builder
+		for i := 0; i < 250; i++ {
+			fmt.Fprintf(&b, "line-%03d daemon work\n", i)
+		}
+		return b.String(), nil
+	}
+	t.Cleanup(func() { journalctlExcerpt = oldJournalctlExcerpt })
+
+	got := Collector{LogDir: filepath.Join(t.TempDir(), "missing"), Since: time.Now().Add(-96 * time.Hour)}.daemonLogExcerpt()
+
+	if strings.Count(got, "line-") < 250 {
+		t.Fatalf("journal fallback truncated to %d lines, want full window", strings.Count(got, "line-"))
+	}
+	if strings.Contains(got, "plex2jellyfin-web") {
+		t.Fatalf("daemon excerpt should not include web unit noise: %q", got)
+	}
+}
+
+func TestJournalctlDaemonArgsAreDaemonOnlyWithoutLineCap(t *testing.T) {
+	since := time.Date(2026, 7, 30, 4, 0, 0, 0, time.UTC)
+	args := journalctlDaemonArgs(since)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "plex2jellyfin-daemon") {
+		t.Fatalf("args missing daemon unit: %v", args)
+	}
+	if strings.Contains(joined, "plex2jellyfin-web") {
+		t.Fatalf("args must not include web unit: %v", args)
+	}
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "-n" {
+			t.Fatalf("args must not cap with -n: %v", args)
+		}
+	}
+}

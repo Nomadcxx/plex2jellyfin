@@ -32,6 +32,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/scheduler"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
+	syncsvc "github.com/Nomadcxx/plex2jellyfin/internal/sync"
 	"github.com/Nomadcxx/plex2jellyfin/internal/tmdb"
 	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 	"github.com/Nomadcxx/plex2jellyfin/internal/video"
@@ -316,6 +317,16 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	fileScanner := scanner.NewFileScanner(db)
+	librarySync := syncsvc.NewSyncService(syncsvc.SyncConfig{
+		DB:             db,
+		Sonarr:         sonarrClient,
+		Radarr:         radarrClient,
+		TVLibraries:    cfg.Libraries.TV,
+		MovieLibraries: cfg.Libraries.Movies,
+		SyncHour:       3,
+	})
+
 	handler, err := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
 		TVLibraries:                  cfg.Libraries.TV,
 		MovieLibs:                    cfg.Libraries.Movies,
@@ -343,6 +354,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		AIMatcher:                    aiMatcher,
 		AIConfig:                     cfg.AI,
 		TransferConcurrencyPerVolume: cfg.Options.TransferConcurrencyPerVolume,
+		PathIndexer: func(ctx context.Context, path, libraryRoot, mediaType string) error {
+			_, err := fileScanner.ScanPath(ctx, path, libraryRoot, mediaType)
+			return err
+		},
+		SyncService: librarySync,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create media handler: %w", err)
@@ -471,7 +487,6 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return handler.UnparseableCache().Snapshot()
 	}))
 
-	fileScanner := scanner.NewFileScanner(db)
 	rescanDefaults := func() []scanner.RescanRoot {
 		var roots []scanner.RescanRoot
 		for _, p := range cfg.Libraries.TV {
@@ -658,7 +673,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			logging.F("batch_size", batchSize))
 	}
 
-	if jellyfinClient != nil && cfg.MetadataRecovery.RepairEnabled {
+	// Active metadata repair (parse-decision RunRepair). Distinct from
+	// unknown-season series refreshes, which use unknown_season_repair_enabled.
+	if metadataReconciler != nil && cfg.MetadataRecovery.RepairEnabled {
 		interval := time.Duration(cfg.MetadataRecovery.PassiveIntervalMinutes) * time.Minute
 		if interval <= 0 {
 			interval = time.Hour
@@ -667,6 +684,46 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		if batchSize <= 0 {
 			batchSize = 5
 		}
+		startBackground("Jellyfin metadata repair", func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("daemon", "Jellyfin metadata repair panic recovered",
+						fmt.Errorf("%v", r))
+				}
+			}()
+			select {
+			case <-time.After(90 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+			runMetadataRepairOnce(ctx, logger, metadataReconciler, batchSize)
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					runMetadataRepairOnce(ctx, logger, metadataReconciler, batchSize)
+				case <-ctx.Done():
+					return
+				}
+			}
+		})
+		logger.Info("daemon", "Jellyfin metadata repair started",
+			logging.F("interval", interval.String()),
+			logging.F("batch_size", batchSize))
+	}
+
+	// Unknown-season repair is default-off and separate from repair_enabled.
+	if jellyfinClient != nil && db != nil && cfg.MetadataRecovery.UnknownSeasonRepairEnabled {
+		interval := time.Duration(cfg.MetadataRecovery.PassiveIntervalMinutes) * time.Minute
+		if interval <= 0 {
+			interval = time.Hour
+		}
+		batchSize := cfg.MetadataRecovery.RepairBatchSize
+		if batchSize <= 0 {
+			batchSize = 5
+		}
+		cooldown := time.Duration(cfg.MetadataRecovery.RepairCooldownHours) * time.Hour
 		startBackground("Jellyfin unknown-season repair", func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -679,13 +736,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			case <-ctx.Done():
 				return
 			}
-			runUnknownSeasonRepairOnce(ctx, logger, jellyfinClient, batchSize)
+			runUnknownSeasonRepairOnce(ctx, logger, jellyfinClient, db, batchSize, cooldown)
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
-					runUnknownSeasonRepairOnce(ctx, logger, jellyfinClient, batchSize)
+					runUnknownSeasonRepairOnce(ctx, logger, jellyfinClient, db, batchSize, cooldown)
 				case <-ctx.Done():
 					return
 				}
@@ -693,7 +750,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		})
 		logger.Info("daemon", "Jellyfin unknown-season repair started",
 			logging.F("interval", interval.String()),
-			logging.F("batch_size", batchSize))
+			logging.F("batch_size", batchSize),
+			logging.F("cooldown", cooldown.String()))
 	}
 
 	// Housekeeping engine + scheduler: detect cross-volume duplicates,
@@ -754,6 +812,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			},
 		}); err != nil {
 			logger.Warn("daemon", "register housekeeping.drain failed", logging.F("error", err.Error()))
+		}
+		if err := registerLibrarySyncJob(sched, librarySync); err != nil {
+			logger.Warn("daemon", "register library.sync failed", logging.F("error", err.Error()))
 		}
 		// Recovery: prior daemon may have died with rows still in 'running'
 		// state (in-memory flag, not persisted). Clear them so the queue
@@ -932,8 +993,23 @@ func runMetadataReconcileOnce(ctx context.Context, logger *logging.Logger, recon
 	}
 }
 
-func runUnknownSeasonRepairOnce(ctx context.Context, logger *logging.Logger, client *jellyfin.Client, batchSize int) {
-	report, err := client.RepairUnknownSeasons(ctx, "", batchSize, false)
+func runMetadataRepairOnce(ctx context.Context, logger *logging.Logger, reconciler *jellyfin.MetadataReconciler, batchSize int) {
+	summary, err := reconciler.RunRepair(ctx, batchSize, nil)
+	if err != nil {
+		logger.Warn("daemon", "Jellyfin metadata repair error", logging.F("error", err.Error()))
+		return
+	}
+	if summary.Checked > 0 || summary.Repaired > 0 || summary.Errors > 0 {
+		logger.Info("daemon", "Jellyfin metadata repair completed",
+			logging.F("checked", summary.Checked),
+			logging.F("repaired", summary.Repaired),
+			logging.F("skipped", summary.Skipped),
+			logging.F("errors", summary.Errors))
+	}
+}
+
+func runUnknownSeasonRepairOnce(ctx context.Context, logger *logging.Logger, client *jellyfin.Client, store jellyfin.UnknownSeasonRefreshStore, batchSize int, cooldown time.Duration) {
+	report, err := client.RepairUnknownSeasons(ctx, "", batchSize, false, store, cooldown)
 	if err != nil {
 		logger.Warn("daemon", "Jellyfin unknown-season repair error", logging.F("error", err.Error()))
 		return

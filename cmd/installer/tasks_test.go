@@ -526,6 +526,7 @@ func TestGenerateConfigString_IncludesMetadataRecoveryBlock(t *testing.T) {
 		"[metadata_recovery]",
 		"passive_enabled = true",
 		"repair_enabled = false",
+		"unknown_season_repair_enabled = false",
 		"passive_interval_minutes = 60",
 		"passive_batch_size = 25",
 		"repair_batch_size = 5",
@@ -546,6 +547,9 @@ func TestDefaultConfig_MetadataRecoveryDefaults(t *testing.T) {
 	}
 	if cfg.MetadataRecovery.RepairEnabled {
 		t.Error("expected metadata recovery repair_enabled default false")
+	}
+	if cfg.MetadataRecovery.UnknownSeasonRepairEnabled {
+		t.Error("expected metadata recovery unknown_season_repair_enabled default false")
 	}
 	if cfg.MetadataRecovery.PassiveIntervalMinutes != 60 {
 		t.Errorf("expected passive_interval_minutes 60, got %d", cfg.MetadataRecovery.PassiveIntervalMinutes)

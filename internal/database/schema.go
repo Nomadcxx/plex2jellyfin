@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 23
+const currentSchemaVersion = 25
 
 // SQL migration scripts
 var migrations = []migration{
@@ -702,6 +702,36 @@ var migrations = []migration{
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_deferred_ops_path ON deferred_ops(path)`,
 			`INSERT INTO schema_version (version) VALUES (23)`,
+		},
+	},
+	{
+		version: 24,
+		up: []string{
+			`CREATE TABLE IF NOT EXISTS jellyfin_inventory_state (
+				singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+				generation INTEGER NOT NULL,
+				complete INTEGER NOT NULL CHECK(complete IN (0, 1)),
+				completed_at DATETIME,
+				item_count INTEGER NOT NULL CHECK(item_count >= 0)
+			)`,
+			`INSERT INTO schema_version (version) VALUES (24)`,
+		},
+	},
+	{
+		version: 25,
+		up: []string{
+			`CREATE TABLE IF NOT EXISTS unknown_season_refresh_state (
+				series_id TEXT PRIMARY KEY,
+				series_name TEXT,
+				attempt_count INTEGER NOT NULL DEFAULT 0,
+				last_attempt_at DATETIME,
+				next_attempt_at DATETIME,
+				last_outcome TEXT,
+				last_error TEXT,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_unknown_season_refresh_next ON unknown_season_refresh_state(next_attempt_at)`,
+			`INSERT INTO schema_version (version) VALUES (25)`,
 		},
 	},
 }

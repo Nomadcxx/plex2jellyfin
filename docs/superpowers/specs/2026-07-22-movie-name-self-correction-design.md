@@ -51,9 +51,9 @@ Supporting facts (all code-verified):
 - `RunPassive` (the hourly reconciler loop, `cmd/plex2jellyfin-daemon/main.go:868`)
   only classifies. The reconciler's `RunRepair` has no automatic loop; it is
   manual WebUI/CLI only.
-- The `metadata_recovery.repair_enabled` flag does **not** gate the reconciler;
-  it gates a separate TV-only `RepairUnknownSeasons` routine
-  (`main.go:636`). There is currently no automatic movie remediation at all.
+- The `metadata_recovery.repair_enabled` flag gates `MetadataReconciler.RunRepair`.
+  Unknown-season series refreshes use the separate
+  `unknown_season_repair_enabled` flag (default off).
 
 ## Approach (phased)
 

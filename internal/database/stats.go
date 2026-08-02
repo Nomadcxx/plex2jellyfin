@@ -19,76 +19,49 @@ func (m *MediaDB) GetLibraryStats() (*LibraryStats, error) {
 
 	stats := &LibraryStats{}
 
-	// Get total files and size from media_files
 	err := m.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media_files`).Scan(&stats.TotalFiles, &stats.TotalSize)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get movie count
 	err = m.db.QueryRow(`SELECT COUNT(*) FROM movies`).Scan(&stats.MovieCount)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get series count
 	err = m.db.QueryRow(`SELECT COUNT(*) FROM series`).Scan(&stats.SeriesCount)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get episode count (files with media_type = 'episode')
 	err = m.db.QueryRow(`SELECT COUNT(*) FROM media_files WHERE media_type = 'episode'`).Scan(&stats.EpisodeCount)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get duplicate groups count and reclaimable bytes
-	// Movie duplicates
-	var movieGroups, movieReclaimable int
-	err = m.db.QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(space_reclaimable), 0)
-		FROM (
-			SELECT space_reclaimable
-			FROM movie_duplicates
-			WHERE id IN (
-				SELECT MIN(id) FROM movie_duplicates GROUP BY normalized_title, year
-			)
-		)
-	`).Scan(&movieGroups, &movieReclaimable)
+	// Canonical duplicate analysis from media_files (not dead movie_duplicates /
+	// episode_duplicates tables). Use no-lock helpers to avoid nested RLock.
+	movieGroups, err := m.findDuplicateMoviesLocked()
 	if err != nil {
-		// Table might not exist or be empty, continue with 0
-		movieGroups = 0
-		movieReclaimable = 0
+		return nil, err
+	}
+	episodeGroups, err := m.findDuplicateEpisodesLocked()
+	if err != nil {
+		return nil, err
 	}
 
-	// Episode duplicates
-	var episodeGroups, episodeReclaimable int
-	err = m.db.QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(space_reclaimable), 0)
-		FROM (
-			SELECT space_reclaimable
-			FROM episode_duplicates
-			WHERE id IN (
-				SELECT MIN(id) FROM episode_duplicates GROUP BY normalized_title, year, season, episode
-			)
-		)
-	`).Scan(&episodeGroups, &episodeReclaimable)
-	if err != nil {
-		// Table might not exist or be empty, continue with 0
-		episodeGroups = 0
-		episodeReclaimable = 0
+	stats.DuplicateGroups = len(movieGroups) + len(episodeGroups)
+	for _, g := range movieGroups {
+		stats.ReclaimableBytes += g.SpaceReclaimable
+	}
+	for _, g := range episodeGroups {
+		stats.ReclaimableBytes += g.SpaceReclaimable
 	}
 
-	stats.DuplicateGroups = movieGroups + episodeGroups
-	stats.ReclaimableBytes = int64(movieReclaimable + episodeReclaimable)
-
-	// Get scattered series count from conflicts
 	err = m.db.QueryRow(`
 		SELECT COUNT(*) FROM conflicts WHERE resolved = 0 AND media_type = 'series'
 	`).Scan(&stats.ScatteredSeries)
 	if err != nil {
-		// Table might not exist or be empty, continue with 0
 		stats.ScatteredSeries = 0
 	}
 

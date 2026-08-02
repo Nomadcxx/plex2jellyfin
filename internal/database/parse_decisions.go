@@ -191,6 +191,7 @@ func (m *MediaDB) UpdateOutcome(id int64, u OutcomeUpdate) error {
 	// Jellyfin-resolved.  This prevents the sweeper and the webhook
 	// handler (or two concurrent sweep windows) from overwriting each
 	// other's provider IDs in a last-write-wins race.
+	promote := u.JellyfinIdentified != nil && *u.JellyfinIdentified
 	_, err := m.db.Exec(`
 		UPDATE parse_decisions SET
 			jellyfin_item_id = ?,
@@ -200,13 +201,18 @@ func (m *MediaDB) UpdateOutcome(id int64, u OutcomeUpdate) error {
 			jellyfin_resolved_at = ?,
 			jellyfin_identified = COALESCE(?, jellyfin_identified),
 			jellyfin_first_seen_at = COALESCE(jellyfin_first_seen_at, ?),
-			auto_label = NULL
+			auto_label = NULL,
+			auto_label_at = CASE WHEN ? THEN NULL ELSE auto_label_at END,
+			metadata_state = CASE WHEN ? THEN 'identified' ELSE metadata_state END,
+			metadata_error = CASE WHEN ? THEN NULL ELSE metadata_error END,
+			next_metadata_check_at = CASE WHEN ? THEN NULL ELSE next_metadata_check_at END
 		WHERE id = ? AND jellyfin_resolved_at IS NULL`,
 		nullStr(u.JellyfinItemID), nullStr(u.JellyfinImdbID),
 		nullStr(u.JellyfinTmdbID), nullStr(u.JellyfinTvdbID),
 		nullTimePtr(u.JellyfinResolvedAt),
 		nullBoolPtr(u.JellyfinIdentified),
 		nullTimePtr(u.JellyfinFirstSeenAt),
+		promote, promote, promote, promote,
 		id,
 	)
 	if err != nil {
@@ -215,15 +221,15 @@ func (m *MediaDB) UpdateOutcome(id int64, u OutcomeUpdate) error {
 	return nil
 }
 
-// UpgradeOutcome updates Jellyfin resolution columns even when a previous
-// resolution exists, but only when the incoming state is "more identified"
-// than what's stored. Used by ItemUpdated webhook (metadata typically
-// attaches via Update events, not Add) and by the unidentified sweeper pass
-// (which can downgrade a row to identified=0).
+// UpgradeOutcome promotes Jellyfin resolution columns when newer evidence is
+// available. Identified can only move 0→1 here; empty/negative updates never
+// downgrade. Authoritative GET/sweep/removal paths own downgrades via
+// MarkOutcomeUnidentified or ClearOutcome.
 func (m *MediaDB) UpgradeOutcome(id int64, u OutcomeUpdate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	promote := u.JellyfinIdentified != nil && *u.JellyfinIdentified
 	_, err := m.db.Exec(`
 		UPDATE parse_decisions SET
 			jellyfin_item_id      = COALESCE(NULLIF(?, ''), jellyfin_item_id),
@@ -231,20 +237,48 @@ func (m *MediaDB) UpgradeOutcome(id int64, u OutcomeUpdate) error {
 			jellyfin_tmdb_id      = COALESCE(NULLIF(?, ''), jellyfin_tmdb_id),
 			jellyfin_tvdb_id      = COALESCE(NULLIF(?, ''), jellyfin_tvdb_id),
 			jellyfin_resolved_at  = COALESCE(?, jellyfin_resolved_at),
-			jellyfin_identified   = COALESCE(?, jellyfin_identified),
+			jellyfin_identified   = CASE WHEN ? THEN 1 ELSE jellyfin_identified END,
 			jellyfin_first_seen_at = COALESCE(jellyfin_first_seen_at, ?),
-			auto_label = CASE WHEN ? IS NOT NULL THEN NULL ELSE auto_label END
+			auto_label = CASE WHEN ? THEN NULL ELSE auto_label END,
+			auto_label_at = CASE WHEN ? THEN NULL ELSE auto_label_at END,
+			metadata_state = CASE WHEN ? THEN 'identified' ELSE metadata_state END,
+			metadata_error = CASE WHEN ? THEN NULL ELSE metadata_error END,
+			next_metadata_check_at = CASE WHEN ? THEN NULL ELSE next_metadata_check_at END
 		WHERE id = ?`,
 		nullStr(u.JellyfinItemID), nullStr(u.JellyfinImdbID),
 		nullStr(u.JellyfinTmdbID), nullStr(u.JellyfinTvdbID),
 		nullTimePtr(u.JellyfinResolvedAt),
-		nullBoolPtr(u.JellyfinIdentified),
+		promote,
 		nullTimePtr(u.JellyfinFirstSeenAt),
-		nullTimePtr(u.JellyfinResolvedAt),
+		promote, promote, promote, promote, promote,
 		id,
 	)
 	if err != nil {
 		return fmt.Errorf("UpgradeOutcome: %w", err)
+	}
+	return nil
+}
+
+// MarkOutcomeUnidentified is the authoritative downgrade used when a GET or
+// sweep confirms the Jellyfin item still lacks provider IDs. Webhooks must
+// not call this on empty update payloads.
+func (m *MediaDB) MarkOutcomeUnidentified(id int64, itemID string, seenAt *time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec(`
+		UPDATE parse_decisions SET
+			jellyfin_item_id = COALESCE(NULLIF(?, ''), jellyfin_item_id),
+			jellyfin_resolved_at = COALESCE(?, jellyfin_resolved_at),
+			jellyfin_first_seen_at = COALESCE(jellyfin_first_seen_at, ?),
+			jellyfin_identified = 0,
+			metadata_state = CASE WHEN metadata_state = 'identified' THEN NULL ELSE metadata_state END,
+			auto_label = NULL,
+			auto_label_at = NULL
+		WHERE id = ?`,
+		nullStr(itemID), nullTimePtr(seenAt), nullTimePtr(seenAt), id)
+	if err != nil {
+		return fmt.Errorf("MarkOutcomeUnidentified: %w", err)
 	}
 	return nil
 }
@@ -263,10 +297,43 @@ func (m *MediaDB) ClearOutcome(id int64) error {
 			jellyfin_tmdb_id = NULL,
 			jellyfin_tvdb_id = NULL,
 			jellyfin_resolved_at = NULL,
-			jellyfin_identified = 0
+			jellyfin_identified = 0,
+			metadata_state = NULL,
+			metadata_error = NULL,
+			next_metadata_check_at = NULL
 		WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("ClearOutcome: %w", err)
+	}
+	return nil
+}
+
+// ClearOutcomesByTargetPath clears Jellyfin resolution fields for every
+// successful organize decision matching targetPath.
+func (m *MediaDB) ClearOutcomesByTargetPath(targetPath string) error {
+	targetPath = strings.TrimSpace(targetPath)
+	if targetPath == "" {
+		return nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec(`
+		UPDATE parse_decisions SET
+			jellyfin_item_id = NULL,
+			jellyfin_imdb_id = NULL,
+			jellyfin_tmdb_id = NULL,
+			jellyfin_tvdb_id = NULL,
+			jellyfin_resolved_at = NULL,
+			jellyfin_identified = 0,
+			metadata_state = NULL,
+			metadata_error = NULL,
+			next_metadata_check_at = NULL
+		WHERE target_path = ?
+		  AND organize_outcome = 'success'`, targetPath)
+	if err != nil {
+		return fmt.Errorf("ClearOutcomesByTargetPath: %w", err)
 	}
 	return nil
 }

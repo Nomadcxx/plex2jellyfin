@@ -151,6 +151,8 @@ func (s *Server) handleItemAdded(event jellyfin.WebhookEvent) {
 // typically attaches metadata via Update events after the initial scan added
 // a bare row. We upgrade the parse_decision in place — even if it was already
 // resolved with empty ProviderIds — so identified can flip from 0 → 1.
+// Empty updates (no provider IDs) only refresh the jellyfin_items cache;
+// they must not downgrade an already-identified decision.
 func (s *Server) handleItemUpdated(event jellyfin.WebhookEvent) {
 	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
 	itemID := strings.TrimSpace(event.ItemID)
@@ -160,22 +162,24 @@ func (s *Server) handleItemUpdated(event jellyfin.WebhookEvent) {
 			s.logJellyfinActivity("jellyfin_item_updated", path, event.ItemName, false, err.Error())
 			return
 		}
-		if dec, err := s.db.GetDecisionByTargetPath(path); err == nil && dec != nil {
-			now := time.Now().UTC()
-			identified := identifiedFromEvent(event)
-			if updateErr := s.db.UpgradeOutcome(dec.ID, database.OutcomeUpdate{
-				JellyfinItemID:      itemID,
-				JellyfinImdbID:      event.ProviderImdb,
-				JellyfinTmdbID:      event.ProviderTmdb,
-				JellyfinTvdbID:      event.ProviderTvdb,
-				JellyfinResolvedAt:  &now,
-				JellyfinIdentified:  &identified,
-				JellyfinFirstSeenAt: &now,
-			}); updateErr != nil {
-				s.logJellyfinActivity("jellyfin_decision_upgrade", path, event.ItemName, false, updateErr.Error())
+		identified := identifiedFromEvent(event)
+		if identified {
+			if dec, err := s.db.GetDecisionByTargetPath(path); err == nil && dec != nil {
+				now := time.Now().UTC()
+				if updateErr := s.db.UpgradeOutcome(dec.ID, database.OutcomeUpdate{
+					JellyfinItemID:      itemID,
+					JellyfinImdbID:      event.ProviderImdb,
+					JellyfinTmdbID:      event.ProviderTmdb,
+					JellyfinTvdbID:      event.ProviderTvdb,
+					JellyfinResolvedAt:  &now,
+					JellyfinIdentified:  &identified,
+					JellyfinFirstSeenAt: &now,
+				}); updateErr != nil {
+					s.logJellyfinActivity("jellyfin_decision_upgrade", path, event.ItemName, false, updateErr.Error())
+				}
+			} else if err != nil {
+				s.logJellyfinActivity("jellyfin_decision_upgrade", path, event.ItemName, false, err.Error())
 			}
-		} else if err != nil {
-			s.logJellyfinActivity("jellyfin_decision_upgrade", path, event.ItemName, false, err.Error())
 		}
 	}
 
@@ -189,16 +193,13 @@ func (s *Server) handleItemRemoved(event jellyfin.WebhookEvent) {
 	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
 
 	if s.db != nil && path != "" {
-		dec, err := s.db.GetDecisionByTargetPath(path)
-		if err != nil {
+		if err := s.db.ClearOutcomesByTargetPath(path); err != nil {
 			s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, false, err.Error())
 			return
 		}
-		if dec != nil {
-			if clearErr := s.db.ClearOutcome(dec.ID); clearErr != nil {
-				s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, false, clearErr.Error())
-				return
-			}
+		if err := s.db.DeleteJellyfinItemByPath(path); err != nil {
+			s.logJellyfinActivity("jellyfin_item_removed", path, event.ItemName, false, err.Error())
+			return
 		}
 	}
 
@@ -237,38 +238,67 @@ func (s *Server) runJellyfinVerificationPass() {
 		return
 	}
 
-	entries, err := s.activityLogger.GetRecentEntries(200)
+	startGen, cacheComplete, err := s.db.JellyfinInventoryGeneration()
 	if err != nil {
-		s.logJellyfinActivity("jellyfin_verification_summary", "read_activity", "", false, err.Error())
+		s.logJellyfinActivity("jellyfin_verification_summary", "checked=0", "mismatches=0", false, "inconclusive: incomplete jellyfin inventory: "+err.Error())
+		return
+	}
+	if !cacheComplete {
+		s.logJellyfinActivity("jellyfin_verification_summary", "checked=0", "mismatches=0", false, "inconclusive: incomplete jellyfin inventory")
 		return
 	}
 
-	cutoff := time.Now().Add(-24 * time.Hour)
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	decisions, err := s.db.QueryDecisions(database.QueryFilter{
+		OrganizeOutcome:    "success",
+		TargetPathNotEmpty: true,
+		EventAfter:         &cutoff,
+	})
+	if err != nil {
+		s.logJellyfinActivity("jellyfin_verification_summary", "checked=0", "mismatches=0", false, "inconclusive: incomplete verification candidates: "+err.Error())
+		return
+	}
+
 	checked := 0
 	mismatches := 0
+	inventoryComplete := true
 
-	for _, entry := range entries {
-		if entry.Action != "organize" || !entry.Success || strings.TrimSpace(entry.Target) == "" {
-			continue
-		}
-		if !entry.Timestamp.IsZero() && entry.Timestamp.Before(cutoff) {
-			continue
-		}
-
+	for _, decision := range decisions {
 		checked++
-		item, err := s.db.GetJellyfinItemByPath(entry.Target)
-		if err != nil || item == nil {
+		item, err := s.db.GetJellyfinItemByPath(decision.TargetPath)
+		if err != nil {
+			inventoryComplete = false
+			continue
+		}
+		if item == nil {
 			mismatches++
-			s.logJellyfinActivity("jellyfin_verification_mismatch", entry.Target, entry.ParsedTitle, false, "path not confirmed in jellyfin")
+			s.logJellyfinActivity("jellyfin_verification_mismatch", decision.TargetPath, decision.ParsedTitle, false, "path not confirmed in jellyfin")
 			continue
 		}
 	}
 
+	// ponytail: test-only seam to simulate concurrent cache invalidation mid-pass
+	if s.verificationMidPass != nil {
+		s.verificationMidPass()
+	}
+
+	endGen, endComplete, err := s.db.JellyfinInventoryGeneration()
+	if err != nil || !endComplete || endGen != startGen {
+		inventoryComplete = false
+	}
+
+	success := checked > 0 && inventoryComplete && mismatches == 0
+	errMsg := ""
+	if checked == 0 {
+		errMsg = "inconclusive: no successful parse decisions checked"
+	} else if !inventoryComplete {
+		errMsg = "inconclusive: incomplete jellyfin inventory"
+	}
 	s.logJellyfinActivity(
 		"jellyfin_verification_summary",
 		fmt.Sprintf("checked=%d", checked),
 		fmt.Sprintf("mismatches=%d", mismatches),
-		mismatches == 0,
-		"",
+		success,
+		errMsg,
 	)
 }

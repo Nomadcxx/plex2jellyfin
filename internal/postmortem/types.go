@@ -2,8 +2,10 @@ package postmortem
 
 import (
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 )
 
@@ -34,15 +36,91 @@ func RunID(t time.Time) string {
 }
 
 type Summary struct {
-	RunID                   string    `json:"run_id"`
-	GeneratedAt             time.Time `json:"generated_at"`
-	Since                   time.Time `json:"since"`
-	ProcessedDecisions      int       `json:"processed_decisions"`
-	RepairEvents            int       `json:"repair_events"`
-	SuspiciousItems         int       `json:"suspicious_items"`
-	HousekeepingFailed      int       `json:"housekeeping_failed"`
-	ManualReview            int       `json:"manual_review"`
-	UnknownSeasonActionable int       `json:"unknown_season_actionable"`
+	RunID                         string    `json:"run_id"`
+	GeneratedAt                   time.Time `json:"generated_at"`
+	Since                         time.Time `json:"since"`
+	ProcessedDecisions            int       `json:"processed_decisions"`
+	RepairEvents                  int       `json:"repair_events"`
+	SuspiciousItems               int       `json:"suspicious_items"`
+	MetadataProblems              int       `json:"metadata_problems"`
+	DriftLabels                   int       `json:"drift_labels"`
+	FailLabels                    int       `json:"fail_labels"`
+	PendingLabels                 int       `json:"pending_labels"`
+	OverdueUnlabeled              int       `json:"overdue_unlabeled"`
+	HousekeepingFailed            int       `json:"housekeeping_failed"` // created in window
+	ManualReview                  int       `json:"manual_review"`       // created in window
+	HousekeepingOutstandingFailed int       `json:"housekeeping_outstanding_failed"`
+	HousekeepingOutstandingReview int       `json:"housekeeping_outstanding_review"`
+	UnknownSeasonActionable       int       `json:"unknown_season_actionable"`
+}
+
+// LabelOverdueAfter is how long an unlabeled decision may wait before counting
+// as overdue in the postmortem window (matches the sweeper lookback grace).
+const LabelOverdueAfter = 24 * time.Hour
+
+type HousekeepingWindowCounts struct {
+	CreatedInWindow map[string]int `json:"created_in_window"`
+	Outstanding     map[string]int `json:"outstanding"`
+}
+
+// SummarizeDecisionMetrics counts windowed convergence signals, deduplicating
+// by decision ID so a duplicated row cannot inflate totals.
+func SummarizeDecisionMetrics(decisions []*database.ParseDecision, now time.Time) Summary {
+	seen := make(map[int64]struct{})
+	var s Summary
+	for _, d := range decisions {
+		if d == nil {
+			continue
+		}
+		if _, ok := seen[d.ID]; ok {
+			continue
+		}
+		seen[d.ID] = struct{}{}
+		s.ProcessedDecisions++
+
+		switch strings.ToUpper(strings.TrimSpace(d.AutoLabel)) {
+		case "DRIFT":
+			s.DriftLabels++
+		case "FAIL":
+			s.FailLabels++
+		case "":
+			s.PendingLabels++
+			if !d.EventAt.IsZero() && now.Sub(d.EventAt) > LabelOverdueAfter {
+				s.OverdueUnlabeled++
+			}
+		}
+
+		if isMetadataProblem(d.MetadataState) {
+			s.MetadataProblems++
+		}
+	}
+	return s
+}
+
+func isMetadataProblem(state string) bool {
+	switch strings.TrimSpace(state) {
+	case "", "identified", "recent_import_waiting":
+		return false
+	default:
+		return true
+	}
+}
+
+// CountHousekeepingWindow splits tasks into created-in-window vs current
+// outstanding totals so cumulative backlog is not mixed with window metrics.
+func CountHousekeepingWindow(tasks []database.HousekeepingTask, since time.Time, outstanding map[string]int) HousekeepingWindowCounts {
+	created := make(map[string]int)
+	for _, t := range tasks {
+		if t.CreatedAt.Before(since) {
+			continue
+		}
+		created[t.Status]++
+	}
+	out := make(map[string]int, len(outstanding))
+	for k, v := range outstanding {
+		out[k] = v
+	}
+	return HousekeepingWindowCounts{CreatedInWindow: created, Outstanding: out}
 }
 
 type UnknownSeasonEvidence struct {

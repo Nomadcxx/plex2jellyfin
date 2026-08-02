@@ -3,6 +3,7 @@ package postmortem
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
@@ -157,6 +158,31 @@ func TestSuspiciousFromDecisionsChecksVisibleTargetName(t *testing.T) {
 	}})
 	if len(suspicious) != 1 || suspicious[0].Marker != "TUBI" {
 		t.Fatalf("suspicious = %#v, want visible TUBI pollution", suspicious)
+	}
+}
+
+func TestSummarizeDecisionMetricsCountsMetadataProblemsMissedBySuspiciousClassifier(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	decisions := []*database.ParseDecision{{
+		ID:             42,
+		EventAt:        now.Add(-time.Hour),
+		SourceFilename: "Clean Title.mkv",
+		ParsedTitle:    "Clean Title",
+		TargetPath:     "/mnt/STORAGE1/MOVIES/Clean Title (2024)/Clean Title (2024).mkv",
+		MetadataState:  "jellyfin_item_missing",
+		AutoLabel:      "",
+	}}
+
+	suspicious, _ := suspiciousFromDecisions(decisions)
+	if len(suspicious) != 0 {
+		t.Fatalf("suspicious classifier should stay quiet for clean names, got %#v", suspicious)
+	}
+	metrics := SummarizeDecisionMetrics(decisions, now)
+	if metrics.MetadataProblems != 1 {
+		t.Fatalf("MetadataProblems = %d, want 1", metrics.MetadataProblems)
+	}
+	if metrics.PendingLabels != 1 {
+		t.Fatalf("PendingLabels = %d, want 1", metrics.PendingLabels)
 	}
 }
 

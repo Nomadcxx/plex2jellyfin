@@ -611,6 +611,12 @@ func ClassifyMetadata(row *database.ParseDecision, item *Item, series *Item, now
 						Identified: true,
 					}
 				}
+				if isValidatedDateEpisode(row, item) {
+					return MetadataClassification{
+						State:      MetadataStateIdentified,
+						Identified: true,
+					}
+				}
 				return MetadataClassification{
 					State: MetadataStateSeriesIdentifiedEpisodeStale,
 					Error: "episode is missing provider ids but parent series is identified",
@@ -629,6 +635,15 @@ func ClassifyMetadata(row *database.ParseDecision, item *Item, series *Item, now
 		}
 
 		if item.SeriesID != "" && !HasEpisodeNumbers(item) {
+			// The date validation only means anything against an identified
+			// parent: without provider IDs on the series there is nothing
+			// anchoring the premiere date to the show we think this is.
+			if series != nil && HasProviderIDs(series) && isValidatedDateEpisode(row, item) {
+				return MetadataClassification{
+					State:      MetadataStateIdentified,
+					Identified: true,
+				}
+			}
 			return MetadataClassification{
 				State: MetadataStateMissingEpisodeNumbers,
 				Error: "episode is missing season or episode number",
@@ -678,6 +693,94 @@ func HasEpisodeMetadata(item *Item) bool {
 		}
 	}
 	return false
+}
+
+// isValidatedDateEpisode accepts date-based imports when the parse decision
+// encodes YYYY/MMDD, path identity already matched, premiere metadata exists,
+// and the premiere date is the *same* calendar day.
+//
+// The match must be exact. Date-based numbering is used almost exclusively by
+// daily shows, whose consecutive episodes are exactly one day apart, so any
+// tolerance window validates the neighbouring episode just as readily as the
+// right one — which is precisely the off-by-one mis-mapping this check exists
+// to catch. Both sides are already reduced to a fixed-zone calendar date
+// (parsedDateEpisode parses YYYY-MM-DD as UTC; parseJellyfinPremiereDate
+// truncates every layout to UTC midnight), so no skew window is needed to
+// compare them.
+//
+// A date that does not line up simply fails to validate here and the episode
+// falls through to a review state; nothing is deleted or rewritten on the
+// strength of this returning false.
+func isValidatedDateEpisode(row *database.ParseDecision, item *Item) bool {
+	if row == nil || item == nil {
+		return false
+	}
+	epDate, ok := parsedDateEpisode(row)
+	if !ok {
+		return false
+	}
+	if !HasEpisodeMetadata(item) {
+		return false
+	}
+	premiere, ok := parseJellyfinPremiereDate(item.PremiereDate)
+	if !ok {
+		return false
+	}
+	return epDate.Equal(premiere)
+}
+
+// parsedDateEpisode reconstructs a calendar date from naming's date-based
+// encoding: season=YYYY, episode=month*100+day.
+func parsedDateEpisode(row *database.ParseDecision) (time.Time, bool) {
+	if row == nil || row.ParsedSeason == nil || row.ParsedEpisode == nil {
+		return time.Time{}, false
+	}
+	year := *row.ParsedSeason
+	encoded := *row.ParsedEpisode
+	if year < 1900 || year > 2100 {
+		return time.Time{}, false
+	}
+	month := encoded / 100
+	day := encoded % 100
+	if month < 1 || month > 12 || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02", fmt.Sprintf("%04d-%02d-%02d", year, month, day))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+func parseJellyfinPremiereDate(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04:05.0000000Z",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			y, m, d := t.Date()
+			return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), true
+		}
+	}
+	// Jellyfin sometimes emits fractional seconds without a recognized zone.
+	if t, err := time.Parse("2006-01-02T15:04:05.9999999Z", raw); err == nil {
+		y, m, d := t.Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), true
+	}
+	if len(raw) >= 10 {
+		if t, err := time.Parse("2006-01-02", raw[:10]); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func recentlyImported(row *database.ParseDecision, now time.Time) bool {

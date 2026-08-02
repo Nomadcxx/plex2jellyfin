@@ -117,6 +117,135 @@ func TestClassifyMetadata(t *testing.T) {
 			item:      &Item{ID: "movie-1", Type: "Movie", Path: "/media/movie.mkv"},
 			wantState: MetadataStateRecentImportWaiting,
 		},
+		{
+			name: "date-based Daily Show episode without IndexNumber",
+			row: dateEpisodeDecision(
+				"/media/The Daily Show/The Daily Show 2026-07-29.mkv",
+				oldTargetAt, 2026, 729,
+			),
+			item: &Item{
+				ID:           "episode-daily",
+				Type:         "Episode",
+				Path:         "/media/The Daily Show/The Daily Show 2026-07-29.mkv",
+				SeriesID:     "series-daily",
+				PremiereDate: "2026-07-29T04:00:00.0000000Z",
+				Overview:     "Guest episode.",
+			},
+			series:     &Item{ID: "series-daily", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "71256"}},
+			wantState:  MetadataStateIdentified,
+			identified: true,
+		},
+		{
+			// Date-based numbering is a daily-show convention, so the episode
+			// one day away is a real, distinct episode. A tolerance window
+			// would validate that neighbour as confidently as the right file,
+			// which is the exact off-by-one this check has to catch.
+			name: "date-based episode one day off is the neighbouring episode, not a match",
+			row: dateEpisodeDecision(
+				"/media/The Daily Show/The Daily Show 2026-07-30.mkv",
+				oldTargetAt, 2026, 730,
+			),
+			item: &Item{
+				ID:           "episode-offbyone",
+				Type:         "Episode",
+				Path:         "/media/The Daily Show/The Daily Show 2026-07-30.mkv",
+				SeriesID:     "series-daily",
+				PremiereDate: "2026-07-31T02:00:00.0000000Z", // next calendar day
+				Overview:     "The following night's episode.",
+			},
+			series:    &Item{ID: "series-daily", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "71256"}},
+			wantState: MetadataStateSeriesIdentifiedEpisodeStale,
+		},
+		{
+			// Same shape in the other direction: the previous day's episode.
+			name: "date-based episode one day early is the previous episode, not a match",
+			row: dateEpisodeDecision(
+				"/media/The Daily Show/The Daily Show 2026-07-30.mkv",
+				oldTargetAt, 2026, 730,
+			),
+			item: &Item{
+				ID:           "episode-offbyone-back",
+				Type:         "Episode",
+				Path:         "/media/The Daily Show/The Daily Show 2026-07-30.mkv",
+				SeriesID:     "series-daily",
+				PremiereDate: "2026-07-29T22:00:00.0000000Z",
+				Overview:     "The previous night's episode.",
+			},
+			series:    &Item{ID: "series-daily", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "71256"}},
+			wantState: MetadataStateSeriesIdentifiedEpisodeStale,
+		},
+		{
+			// The item carries its own provider IDs but has no episode
+			// numbers. Date validation is only meaningful against an
+			// identified parent; without one the premiere date is anchored to
+			// nothing, so this must stay a review state.
+			name: "date-based episode with unidentified parent is not validated",
+			row: dateEpisodeDecision(
+				"/media/The Daily Show/The Daily Show 2026-07-29.mkv",
+				oldTargetAt, 2026, 729,
+			),
+			item: &Item{
+				ID:           "episode-orphan-parent",
+				Type:         "Episode",
+				Path:         "/media/The Daily Show/The Daily Show 2026-07-29.mkv",
+				SeriesID:     "series-daily",
+				ProviderIDs:  map[string]string{"Tvdb": "99887"},
+				PremiereDate: "2026-07-29T04:00:00.0000000Z",
+				Overview:     "Guest episode.",
+			},
+			series:    &Item{ID: "series-daily", Type: "Series"},
+			wantState: MetadataStateMissingEpisodeNumbers,
+		},
+		{
+			name: "date-based episode with identified parent validates without episode numbers",
+			row: dateEpisodeDecision(
+				"/media/The Daily Show/The Daily Show 2026-07-29.mkv",
+				oldTargetAt, 2026, 729,
+			),
+			item: &Item{
+				ID:           "episode-own-ids",
+				Type:         "Episode",
+				Path:         "/media/The Daily Show/The Daily Show 2026-07-29.mkv",
+				SeriesID:     "series-daily",
+				ProviderIDs:  map[string]string{"Tvdb": "99887"},
+				PremiereDate: "2026-07-29T04:00:00.0000000Z",
+				Overview:     "Guest episode.",
+			},
+			series:     &Item{ID: "series-daily", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "71256"}},
+			wantState:  MetadataStateIdentified,
+			identified: true,
+		},
+		{
+			name: "indexless episode without date evidence stays stale",
+			row:  decisionWithTarget("/media/show/s01e03.mkv", oldTargetAt),
+			item: &Item{
+				ID:           "episode-stale",
+				Type:         "Episode",
+				Path:         "/media/show/s01e03.mkv",
+				SeriesID:     "series-1",
+				PremiereDate: "2026-01-15T00:00:00Z",
+				Overview:     "Has metadata but no date parse.",
+			},
+			series:    &Item{ID: "series-1", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "789"}},
+			wantState: MetadataStateSeriesIdentifiedEpisodeStale,
+		},
+		{
+			name: "date-based episode with mismatched premiere stays stale",
+			row: dateEpisodeDecision(
+				"/media/The Daily Show/The Daily Show 2026-07-29.mkv",
+				oldTargetAt, 2026, 729,
+			),
+			item: &Item{
+				ID:           "episode-mismatch",
+				Type:         "Episode",
+				Path:         "/media/The Daily Show/The Daily Show 2026-07-29.mkv",
+				SeriesID:     "series-daily",
+				PremiereDate: "2026-06-01T00:00:00Z",
+				Overview:     "Wrong date.",
+			},
+			series:    &Item{ID: "series-daily", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "71256"}},
+			wantState: MetadataStateSeriesIdentifiedEpisodeStale,
+		},
 	}
 
 	for _, tt := range tests {
@@ -129,6 +258,16 @@ func TestClassifyMetadata(t *testing.T) {
 			assert.Equal(t, tt.wantState, got.State)
 			assert.Equal(t, tt.identified, got.Identified)
 		})
+	}
+}
+
+func dateEpisodeDecision(path string, targetAt time.Time, season, episode int) *database.ParseDecision {
+	s, e := season, episode
+	return &database.ParseDecision{
+		TargetPath:    path,
+		TargetAt:      &targetAt,
+		ParsedSeason:  &s,
+		ParsedEpisode: &e,
 	}
 }
 

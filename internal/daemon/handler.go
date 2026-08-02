@@ -22,6 +22,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/notify"
 	"github.com/Nomadcxx/plex2jellyfin/internal/organizer"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
+	syncsvc "github.com/Nomadcxx/plex2jellyfin/internal/sync"
 	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 	"github.com/Nomadcxx/plex2jellyfin/internal/watcher"
@@ -87,6 +88,8 @@ type MediaHandler struct {
 	// deterministic, non-recoverable parse/organize errors so the periodic
 	// scanner doesn't burn cycles re-attempting them every 5 minutes.
 	unparseableCache *NegativeCache
+	// ponytail: test-only seam for mid-pass inventory invalidation
+	verificationMidPass func()
 }
 
 type PendingItem struct {
@@ -221,6 +224,10 @@ type MediaHandlerConfig struct {
 	// failures and long no-progress timeouts. <=0 disables the cap.
 	// Default (when zero) is 2.
 	TransferConcurrencyPerVolume int
+	// PathIndexer indexes organized destinations into media_files (ScanPath).
+	PathIndexer organizer.PathIndexer
+	// SyncService queues dirty movie/series path syncs to *arr managers.
+	SyncService *syncsvc.SyncService
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
@@ -323,6 +330,12 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
 		tvOrgOpts = append(tvOrgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
 	}
+	if cfg.PathIndexer != nil {
+		tvOrgOpts = append(tvOrgOpts, organizer.WithPathIndexer(cfg.PathIndexer))
+	}
+	if cfg.SyncService != nil {
+		tvOrgOpts = append(tvOrgOpts, organizer.WithSyncService(cfg.SyncService))
+	}
 	tvOrganizer, err := organizer.NewOrganizer(cfg.TVLibraries, tvOrgOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TV organizer: %w", err)
@@ -342,6 +355,12 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	}
 	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
 		movieOrgOpts = append(movieOrgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
+	}
+	if cfg.PathIndexer != nil {
+		movieOrgOpts = append(movieOrgOpts, organizer.WithPathIndexer(cfg.PathIndexer))
+	}
+	if cfg.SyncService != nil {
+		movieOrgOpts = append(movieOrgOpts, organizer.WithSyncService(cfg.SyncService))
 	}
 	movieOrganizer, err := organizer.NewOrganizer(cfg.MovieLibs, movieOrgOpts...)
 	if err != nil {
@@ -1697,27 +1716,30 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) e
 				}
 				return fmt.Errorf("upsert Jellyfin item: %w", err)
 			}
-			if dec, err := h.db.GetDecisionByTargetPath(path); err != nil {
-				if h.logger != nil {
-					h.logger.Warn("handler", "Failed to query parse decision for path", logging.F("path", path), logging.F("error", err.Error()))
-				}
-				return fmt.Errorf("query parse decision for path: %w", err)
-			} else if dec != nil {
-				now := time.Now().UTC()
-				identified := identifiedFromJellyfinEvent(event)
-				if updateErr := h.db.UpgradeOutcome(dec.ID, database.OutcomeUpdate{
-					JellyfinItemID:      itemID,
-					JellyfinImdbID:      event.ProviderImdb,
-					JellyfinTmdbID:      event.ProviderTmdb,
-					JellyfinTvdbID:      event.ProviderTvdb,
-					JellyfinResolvedAt:  &now,
-					JellyfinIdentified:  &identified,
-					JellyfinFirstSeenAt: &now,
-				}); updateErr != nil {
+			// Empty updates refresh cache only; never downgrade identified rows.
+			if identifiedFromJellyfinEvent(event) {
+				if dec, err := h.db.GetDecisionByTargetPath(path); err != nil {
 					if h.logger != nil {
-						h.logger.Warn("handler", "Failed to upgrade parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", updateErr.Error()))
+						h.logger.Warn("handler", "Failed to query parse decision for path", logging.F("path", path), logging.F("error", err.Error()))
 					}
-					return fmt.Errorf("upgrade parse decision outcome: %w", updateErr)
+					return fmt.Errorf("query parse decision for path: %w", err)
+				} else if dec != nil {
+					now := time.Now().UTC()
+					identified := true
+					if updateErr := h.db.UpgradeOutcome(dec.ID, database.OutcomeUpdate{
+						JellyfinItemID:      itemID,
+						JellyfinImdbID:      event.ProviderImdb,
+						JellyfinTmdbID:      event.ProviderTmdb,
+						JellyfinTvdbID:      event.ProviderTvdb,
+						JellyfinResolvedAt:  &now,
+						JellyfinIdentified:  &identified,
+						JellyfinFirstSeenAt: &now,
+					}); updateErr != nil {
+						if h.logger != nil {
+							h.logger.Warn("handler", "Failed to upgrade parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", updateErr.Error()))
+						}
+						return fmt.Errorf("upgrade parse decision outcome: %w", updateErr)
+					}
 				}
 			}
 		}
@@ -1726,18 +1748,17 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) e
 		}
 	case jellyfin.EventItemRemoved:
 		if h.db != nil && path != "" {
-			if dec, err := h.db.GetDecisionByTargetPath(path); err != nil {
+			if err := h.db.ClearOutcomesByTargetPath(path); err != nil {
 				if h.logger != nil {
-					h.logger.Warn("handler", "Failed to query parse decision for removed path", logging.F("path", path), logging.F("error", err.Error()))
+					h.logger.Warn("handler", "Failed to clear parse decision outcomes", logging.F("path", path), logging.F("error", err.Error()))
 				}
-				return fmt.Errorf("query parse decision for removed path: %w", err)
-			} else if dec != nil {
-				if clearErr := h.db.ClearOutcome(dec.ID); clearErr != nil {
-					if h.logger != nil {
-						h.logger.Warn("handler", "Failed to clear parse decision outcome", logging.F("path", path), logging.F("decision_id", dec.ID), logging.F("error", clearErr.Error()))
-					}
-					return fmt.Errorf("clear parse decision outcome: %w", clearErr)
+				return fmt.Errorf("clear parse decision outcomes: %w", err)
+			}
+			if deleteErr := h.db.DeleteJellyfinItemByPath(path); deleteErr != nil {
+				if h.logger != nil {
+					h.logger.Warn("handler", "Failed to delete Jellyfin item cache", logging.F("path", path), logging.F("error", deleteErr.Error()))
 				}
+				return fmt.Errorf("delete Jellyfin item cache: %w", deleteErr)
 			}
 		}
 		if h.logger != nil {
@@ -1785,39 +1806,68 @@ func (h *MediaHandler) runJellyfinVerificationPass() {
 		return
 	}
 
-	entries, err := h.activityLogger.GetRecentEntries(200)
+	startGen, cacheComplete, err := h.db.JellyfinInventoryGeneration()
 	if err != nil {
-		h.logJellyfinActivity("jellyfin_verification_summary", "read_activity", "", false, err.Error())
+		h.logJellyfinActivity("jellyfin_verification_summary", "checked=0", "mismatches=0", false, "inconclusive: incomplete jellyfin inventory: "+err.Error())
+		return
+	}
+	if !cacheComplete {
+		h.logJellyfinActivity("jellyfin_verification_summary", "checked=0", "mismatches=0", false, "inconclusive: incomplete jellyfin inventory")
 		return
 	}
 
-	cutoff := time.Now().Add(-24 * time.Hour)
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	decisions, err := h.db.QueryDecisions(database.QueryFilter{
+		OrganizeOutcome:    "success",
+		TargetPathNotEmpty: true,
+		EventAfter:         &cutoff,
+	})
+	if err != nil {
+		h.logJellyfinActivity("jellyfin_verification_summary", "checked=0", "mismatches=0", false, "inconclusive: incomplete verification candidates: "+err.Error())
+		return
+	}
+
 	checked := 0
 	mismatches := 0
+	inventoryComplete := true
 
-	for _, entry := range entries {
-		if entry.Action != "organize" || !entry.Success || strings.TrimSpace(entry.Target) == "" {
-			continue
-		}
-		if !entry.Timestamp.IsZero() && entry.Timestamp.Before(cutoff) {
-			continue
-		}
-
+	for _, decision := range decisions {
 		checked++
-		item, err := h.db.GetJellyfinItemByPath(entry.Target)
-		if err != nil || item == nil {
+		item, err := h.db.GetJellyfinItemByPath(decision.TargetPath)
+		if err != nil {
+			inventoryComplete = false
+			continue
+		}
+		if item == nil {
 			mismatches++
-			h.logJellyfinActivity("jellyfin_verification_mismatch", entry.Target, entry.ParsedTitle, false, "path not confirmed in jellyfin")
+			h.logJellyfinActivity("jellyfin_verification_mismatch", decision.TargetPath, decision.ParsedTitle, false, "path not confirmed in jellyfin")
 			continue
 		}
 	}
 
+	// ponytail: test-only seam to simulate concurrent cache invalidation mid-pass
+	if h.verificationMidPass != nil {
+		h.verificationMidPass()
+	}
+
+	endGen, endComplete, err := h.db.JellyfinInventoryGeneration()
+	if err != nil || !endComplete || endGen != startGen {
+		inventoryComplete = false
+	}
+
+	success := checked > 0 && inventoryComplete && mismatches == 0
+	errMsg := ""
+	if checked == 0 {
+		errMsg = "inconclusive: no successful parse decisions checked"
+	} else if !inventoryComplete {
+		errMsg = "inconclusive: incomplete jellyfin inventory"
+	}
 	h.logJellyfinActivity(
 		"jellyfin_verification_summary",
 		fmt.Sprintf("checked=%d", checked),
 		fmt.Sprintf("mismatches=%d", mismatches),
-		mismatches == 0,
-		"",
+		success,
+		errMsg,
 	)
 }
 
@@ -2229,6 +2279,12 @@ func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.Organi
 		u.OrganizeOutcome = "success"
 		u.TargetPath = result.TargetPath
 		u.TargetAt = &now
+		// The move landed; a post-move indexing failure is recorded against
+		// the successful row so the file stays visible to the sweep and
+		// verification instead of being hidden behind a "failed" outcome.
+		if result.InventoryError != nil {
+			u.OrganizeError = fmt.Sprintf("post-move inventory consistency error: %v", result.InventoryError)
+		}
 	case result.Skipped:
 		u.OrganizeOutcome = "skipped"
 		u.TargetPath = result.TargetPath

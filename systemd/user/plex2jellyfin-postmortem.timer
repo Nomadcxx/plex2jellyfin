@@ -1,9 +1,8 @@
 [Unit]
-Description=Run Plex2Jellyfin postmortem every four days
+Description=Wake Plex2Jellyfin postmortem daily; --if-due enforces 96h cadence
 
 [Timer]
-OnBootSec=20m
-OnUnitActiveSec=96h
+OnCalendar=daily
 Persistent=true
 Unit=plex2jellyfin-postmortem.service
 
