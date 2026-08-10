@@ -25,6 +25,7 @@ type TVShowInfo struct {
 	Year         string
 	Season       int
 	Episode      int
+	EpisodeEnd   int
 	EpisodeDate  string
 	EpisodeTitle string
 }
@@ -313,6 +314,7 @@ func parseTVShowFromBaseName(baseName, filename string) (*TVShowInfo, error) {
 		Year:         year,
 		Season:       episodeMatch.season,
 		Episode:      episodeMatch.episode,
+		EpisodeEnd:   episodeMatch.episodeEnd,
 		EpisodeDate:  episodeMatch.date,
 		EpisodeTitle: episodeTitle,
 	}, nil
@@ -352,11 +354,18 @@ func FormatTVEpisodeFilenameFromInfo(info *TVShowInfo, ext string) string {
 		title := NormalizeMediaName(info.Title, info.Year)
 		return fmt.Sprintf("%s %s.%s", title, info.EpisodeDate, ext)
 	}
+	episodeMarker := fmt.Sprintf("S%02dE%02d", info.Season, info.Episode)
+	if info.EpisodeEnd > info.Episode {
+		episodeMarker += fmt.Sprintf("-E%02d", info.EpisodeEnd)
+	}
 	if info.EpisodeTitle != "" {
 		if info.Year != "" {
-			return fmt.Sprintf("%s (%s) S%02dE%02d - %s.%s", info.Title, info.Year, info.Season, info.Episode, info.EpisodeTitle, ext)
+			return fmt.Sprintf("%s (%s) %s - %s.%s", info.Title, info.Year, episodeMarker, info.EpisodeTitle, ext)
 		}
-		return fmt.Sprintf("%s S%02dE%02d - %s.%s", info.Title, info.Season, info.Episode, info.EpisodeTitle, ext)
+		return fmt.Sprintf("%s %s - %s.%s", info.Title, episodeMarker, info.EpisodeTitle, ext)
+	}
+	if info.EpisodeEnd > info.Episode {
+		return fmt.Sprintf("%s %s.%s", NormalizeMediaName(info.Title, info.Year), episodeMarker, ext)
 	}
 	return FormatTVEpisodeFilename(info.Title, info.Year, info.Season, info.Episode, ext)
 }
@@ -574,12 +583,13 @@ func removeYear(s, year string) string {
 }
 
 type episodeMatch struct {
-	season  int
-	episode int
-	loc     []int
-	kind    string
-	date    string
-	found   bool
+	season     int
+	episode    int
+	episodeEnd int
+	loc        []int
+	kind       string
+	date       string
+	found      bool
 }
 
 func hasUnsupportedMultiEpisodeRange(s string) bool {
@@ -587,33 +597,47 @@ func hasUnsupportedMultiEpisodeRange(s string) bool {
 		if len(loc) < 6 || loc[5] < 0 || loc[5] > len(s) {
 			continue
 		}
-		if hasEpisodeRangeSuffix(s[loc[5]:]) {
-			return true
+		suffix := s[loc[5]:]
+		end, consumed, ok := parseEpisodeRangeSuffix(suffix)
+		if ok {
+			start, _ := strconv.Atoi(s[loc[4]:loc[5]])
+			if end <= start {
+				return true
+			}
+			_, _, another := parseEpisodeRangeSuffix(suffix[consumed:])
+			if another {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func hasEpisodeRangeSuffix(s string) bool {
+func parseEpisodeRangeSuffix(s string) (episode, consumed int, ok bool) {
 	if s == "" {
-		return false
+		return 0, 0, false
 	}
+	offset := 0
 	if s[0] == 'E' || s[0] == 'e' {
-		_, ok := consumeEpisodeRangeNumber(s[1:])
-		return ok
+		offset = 1
+	} else {
+		if s[0] != '-' {
+			return 0, 0, false
+		}
+		offset = 1
+		if len(s) > offset && (s[offset] == 'E' || s[offset] == 'e') {
+			offset++
+		}
 	}
-	if s[0] != '-' {
-		return false
+	digits, ok := consumeEpisodeRangeNumber(s[offset:])
+	if !ok {
+		return 0, 0, false
 	}
-	rest := s[1:]
-	if rest == "" {
-		return false
+	episode, err := strconv.Atoi(s[offset : offset+digits])
+	if err != nil {
+		return 0, 0, false
 	}
-	if rest[0] == 'E' || rest[0] == 'e' {
-		rest = rest[1:]
-	}
-	_, ok := consumeEpisodeRangeNumber(rest)
-	return ok
+	return episode, offset + digits, true
 }
 
 func consumeEpisodeRangeNumber(s string) (int, bool) {
@@ -646,12 +670,19 @@ func findEpisodeMatch(s string) episodeMatch {
 	if len(match) > 2 {
 		season, _ := strconv.Atoi(match[1])
 		episode, _ := strconv.Atoi(match[2])
+		loc := episodeSERegex.FindStringIndex(s)
+		episodeEnd := 0
+		if end, consumed, ok := parseEpisodeRangeSuffix(s[loc[1]:]); ok && end > episode {
+			episodeEnd = end
+			loc[1] += consumed
+		}
 		return episodeMatch{
-			season:  season,
-			episode: episode,
-			loc:     episodeSERegex.FindStringIndex(s),
-			kind:    "season_episode",
-			found:   true,
+			season:     season,
+			episode:    episode,
+			episodeEnd: episodeEnd,
+			loc:        loc,
+			kind:       "season_episode",
+			found:      true,
 		}
 	}
 

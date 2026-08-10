@@ -33,8 +33,9 @@ const (
 
 	// Convergence (housekeeper ↔ consolidator/cleanup): three workflows.
 	// Duplicate-removal workflow (movies + TV):
-	TaskKindConsolidateDuplicate = "consolidate_duplicate"  // auto, delete inferior copies via service.CleanupService
-	TaskKindCrossVolumeDuplicate = "cross_volume_duplicate" // flag, low-confidence duplicate awaiting human approval
+	TaskKindConsolidateDuplicate      = "consolidate_duplicate"       // auto, delete inferior copies via service.CleanupService
+	TaskKindCrossVolumeDuplicate      = "cross_volume_duplicate"      // flag, low-confidence duplicate awaiting human approval
+	TaskKindProviderIdentityDuplicate = "provider_identity_duplicate" // flag, distinct titles resolved to one provider work
 	// Consolidation workflow (TV scatter only):
 	TaskKindSeriesConsolidate = "series_consolidate" // auto, move one TV series' scattered episodes onto a single volume
 	// Naming workflow:
@@ -180,7 +181,8 @@ func (m *MediaDB) EnqueueHousekeepingTask(jobName, kind string, payload map[stri
 	case TaskKindYearMismatch,
 		TaskKindPollutedName,
 		TaskKindSubdirMismatch,
-		TaskKindCrossVolumeDuplicate:
+		TaskKindCrossVolumeDuplicate,
+		TaskKindProviderIdentityDuplicate:
 		status = TaskStatusFlagged
 	}
 

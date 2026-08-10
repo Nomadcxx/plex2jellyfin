@@ -102,6 +102,11 @@ func (c Collector) Collect() (BundlePaths, error) {
 	hk := c.housekeeping()
 	unknownSeasons := c.unknownSeasonEvidence()
 	suspicious, pathFalsePositives := suspiciousFromDecisions(decisions)
+	providerDuplicates, err := c.DB.FindProviderIdentityMovieDuplicates()
+	if err != nil {
+		return BundlePaths{}, fmt.Errorf("query provider identity duplicates: %w", err)
+	}
+	suspicious = append(suspicious, providerIdentitySuspicious(providerDuplicates)...)
 	metrics := SummarizeDecisionMetrics(decisions, now)
 	summary := Summary{
 		RunID:                         bundle.RunID,
@@ -232,6 +237,8 @@ type parseDecisionEvidence struct {
 	OrganizeOutcome      string     `json:"organize_outcome,omitempty"`
 	OrganizeError        string     `json:"organize_error,omitempty"`
 	JellyfinItemID       string     `json:"jellyfin_item_id,omitempty"`
+	JellyfinImdbID       string     `json:"jellyfin_imdb_id,omitempty"`
+	JellyfinTmdbID       string     `json:"jellyfin_tmdb_id,omitempty"`
 	JellyfinIdentified   *bool      `json:"jellyfin_identified,omitempty"`
 	AutoLabel            string     `json:"auto_label,omitempty"`
 	MetadataState        string     `json:"metadata_state,omitempty"`
@@ -261,6 +268,8 @@ func parseDecisionEvidenceList(decisions []*database.ParseDecision) []parseDecis
 			OrganizeOutcome:      d.OrganizeOutcome,
 			OrganizeError:        d.OrganizeError,
 			JellyfinItemID:       d.JellyfinItemID,
+			JellyfinImdbID:       d.JellyfinImdbID,
+			JellyfinTmdbID:       d.JellyfinTmdbID,
 			JellyfinIdentified:   d.JellyfinIdentified,
 			AutoLabel:            d.AutoLabel,
 			MetadataState:        d.MetadataState,
@@ -268,6 +277,23 @@ func parseDecisionEvidenceList(decisions []*database.ParseDecision) []parseDecis
 		})
 	}
 	return out
+}
+
+func providerIdentitySuspicious(groups []database.ProviderIdentityMovieDuplicate) []SuspiciousItem {
+	items := make([]SuspiciousItem, 0, len(groups))
+	for _, group := range groups {
+		if len(group.Paths) < 2 {
+			continue
+		}
+		items = append(items, SuspiciousItem{
+			Category: "provider_identity_collision",
+			Name:     strings.Join(group.Titles, " / "),
+			Path:     group.Paths[0],
+			Reason: fmt.Sprintf("%s:%s resolves %d distinct movie paths: %s",
+				group.Provider, group.ProviderID, len(group.Paths), strings.Join(group.Paths, "; ")),
+		})
+	}
+	return items
 }
 
 func (c Collector) housekeeping() housekeepingSnapshot {

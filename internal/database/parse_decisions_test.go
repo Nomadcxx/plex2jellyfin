@@ -910,3 +910,54 @@ func TestClearOutcomeResetsMetadataState(t *testing.T) {
 	assert.Empty(t, got.MetadataError)
 	assert.Nil(t, got.NextMetadataCheckAt)
 }
+
+func TestFindProviderIdentityMovieDuplicatesGroupsDifferentTitles(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	insert := func(title, target, tmdb, imdb, mediaType string) {
+		t.Helper()
+		_, err := db.InsertDecision(ParseDecision{
+			SourcePath:       "/downloads/" + title + ".mkv",
+			SourceFilename:   title + ".mkv",
+			EventAt:          time.Now().UTC(),
+			MediaTypeGuessed: mediaType,
+			ParsedTitle:      title,
+			TargetPath:       target,
+			OrganizeOutcome:  "success",
+			JellyfinTmdbID:   tmdb,
+			JellyfinImdbID:   imdb,
+		})
+		require.NoError(t, err)
+	}
+	insertMedia := func(target, mediaType string) {
+		t.Helper()
+		_, err := db.SQL().Exec(`INSERT INTO media_files (path, size, media_type, normalized_title) VALUES (?, 1, ?, ?)`, target, mediaType, target)
+		require.NoError(t, err)
+	}
+
+	insertMedia("/movies/Son Ev (2026)/Son Ev (2026).mkv", "movie")
+	insertMedia("/movies/The Last House (2026)/The Last House (2026).mkv", "movie")
+	insertMedia("/tv/Show S01E01.mkv", "episode")
+	insert("Son Ev", "/movies/Son Ev (2026)/Son Ev (2026).mkv", "1284041", "tt32268156", "movie")
+	insert("The Last House", "/movies/The Last House (2026)/The Last House (2026).mkv", "1284041", "tt32268156", "movie")
+	insert("Same target retry", "/movies/The Last House (2026)/The Last House (2026).mkv", "1284041", "tt32268156", "movie")
+	insert("Unrelated episode", "/tv/Show S01E01.mkv", "1284041", "tt32268156", "tv")
+
+	groups, err := db.FindProviderIdentityMovieDuplicates()
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	assert.Equal(t, "tmdb", groups[0].Provider)
+	assert.Equal(t, "1284041", groups[0].ProviderID)
+	assert.ElementsMatch(t, []string{"Son Ev", "The Last House", "Same target retry"}, groups[0].Titles)
+	assert.ElementsMatch(t, []string{
+		"/movies/Son Ev (2026)/Son Ev (2026).mkv",
+		"/movies/The Last House (2026)/The Last House (2026).mkv",
+	}, groups[0].Paths)
+
+	_, err = db.SQL().Exec(`DELETE FROM media_files WHERE path = ?`, "/movies/Son Ev (2026)/Son Ev (2026).mkv")
+	require.NoError(t, err)
+	groups, err = db.FindProviderIdentityMovieDuplicates()
+	require.NoError(t, err)
+	assert.Empty(t, groups, "historical decisions must not keep a resolved collision active")
+}

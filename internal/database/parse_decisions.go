@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -43,6 +44,104 @@ type ParseDecision struct {
 	LastMetadataCheckAt  *time.Time
 	NextMetadataCheckAt  *time.Time
 	LastMetadataRepairAt *time.Time
+}
+
+// ProviderIdentityMovieDuplicate is a set of distinct movie paths which
+// Jellyfin identified as the same external work despite their parsed titles.
+type ProviderIdentityMovieDuplicate struct {
+	Provider   string
+	ProviderID string
+	Titles     []string
+	Paths      []string
+}
+
+// FindProviderIdentityMovieDuplicates finds cross-title duplicates using
+// provider identity instead of the filename-derived title/year key.
+func (m *MediaDB) FindProviderIdentityMovieDuplicates() ([]ProviderIdentityMovieDuplicate, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query(`
+		SELECT pd.parsed_title, pd.target_path,
+		       COALESCE(pd.jellyfin_tmdb_id, ''), COALESCE(pd.jellyfin_imdb_id, '')
+		  FROM parse_decisions pd
+		  JOIN media_files mf ON mf.path = pd.target_path
+		 WHERE pd.organize_outcome = 'success'
+		   AND pd.media_type_guessed = 'movie'
+		   AND pd.target_path IS NOT NULL AND pd.target_path != ''
+		   AND (COALESCE(pd.jellyfin_tmdb_id, '') != '' OR COALESCE(pd.jellyfin_imdb_id, '') != '')`)
+	if err != nil {
+		return nil, fmt.Errorf("FindProviderIdentityMovieDuplicates: %w", err)
+	}
+	defer rows.Close()
+
+	type identityGroup struct {
+		titles map[string]struct{}
+		paths  map[string]struct{}
+	}
+	byProvider := map[string]map[string]*identityGroup{
+		"tmdb": {},
+		"imdb": {},
+	}
+	for rows.Next() {
+		var title, path, tmdbID, imdbID string
+		if err := rows.Scan(&title, &path, &tmdbID, &imdbID); err != nil {
+			return nil, fmt.Errorf("FindProviderIdentityMovieDuplicates scan: %w", err)
+		}
+		for provider, id := range map[string]string{"tmdb": strings.TrimSpace(tmdbID), "imdb": strings.TrimSpace(imdbID)} {
+			if id == "" {
+				continue
+			}
+			group := byProvider[provider][id]
+			if group == nil {
+				group = &identityGroup{titles: make(map[string]struct{}), paths: make(map[string]struct{})}
+				byProvider[provider][id] = group
+			}
+			if title = strings.TrimSpace(title); title != "" {
+				group.titles[title] = struct{}{}
+			}
+			group.paths[path] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var out []ProviderIdentityMovieDuplicate
+	seenPaths := make(map[string]struct{})
+	for _, provider := range []string{"tmdb", "imdb"} {
+		ids := make([]string, 0, len(byProvider[provider]))
+		for id := range byProvider[provider] {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			group := byProvider[provider][id]
+			if len(group.paths) < 2 {
+				continue
+			}
+			paths := sortedSet(group.paths)
+			signature := strings.Join(paths, "\x00")
+			if _, duplicateEvidence := seenPaths[signature]; duplicateEvidence {
+				continue // Prefer TMDb when the same paths also share IMDb.
+			}
+			seenPaths[signature] = struct{}{}
+			out = append(out, ProviderIdentityMovieDuplicate{
+				Provider: provider, ProviderID: id,
+				Titles: sortedSet(group.titles), Paths: paths,
+			})
+		}
+	}
+	return out, nil
+}
+
+func sortedSet(set map[string]struct{}) []string {
+	out := make([]string, 0, len(set))
+	for value := range set {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ParseUpdate carries updated parse metadata for a decision row.

@@ -32,6 +32,7 @@ type HealthResponse struct {
 	Uptime        string                 `json:"uptime"`
 	Timestamp     time.Time              `json:"timestamp"`
 	ScannerStatus *scanner.ScannerStatus `json:"scanner,omitempty"`
+	BlockedFiles  int                    `json:"blocked_files"`
 }
 
 type MetricsResponse struct {
@@ -43,6 +44,7 @@ type MetricsResponse struct {
 	Errors           int64   `json:"errors"`
 	UptimeSeconds    float64 `json:"uptime_seconds"`
 	LastProcessed    string  `json:"last_processed,omitempty"`
+	BlockedFiles     int     `json:"blocked_files"`
 }
 
 func NewServer(handler *MediaHandler, periodicScanner *scanner.PeriodicScanner, addr string, logger *logging.Logger, webhookSecret string) *Server {
@@ -109,19 +111,24 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		scannerStatus = &status
 	}
 
-	overallHealthy := healthy && scannerHealthy
+	blockedFiles := 0
+	if s.handler != nil && s.handler.unparseableCache != nil {
+		blockedFiles = len(s.handler.unparseableCache.Snapshot())
+	}
+	overallHealthy := healthy && scannerHealthy && blockedFiles == 0
 
 	response := HealthResponse{
 		Uptime:        time.Since(s.startTime).Round(time.Second).String(),
 		Timestamp:     time.Now(),
 		ScannerStatus: scannerStatus,
+		BlockedFiles:  blockedFiles,
 	}
 
 	if overallHealthy {
 		response.Status = "healthy"
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-	} else if healthy && !scannerHealthy {
+	} else if healthy {
 		response.Status = "degraded"
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK) // Degraded but still serving
@@ -150,6 +157,10 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	stats := s.handler.Stats()
+	blockedFiles := 0
+	if s.handler.unparseableCache != nil {
+		blockedFiles = len(s.handler.unparseableCache.Snapshot())
+	}
 
 	response := MetricsResponse{
 		MoviesProcessed:  stats.MoviesProcessed,
@@ -159,6 +170,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		BytesTransferMB:  float64(stats.BytesTransferred) / (1024 * 1024),
 		Errors:           stats.Errors,
 		UptimeSeconds:    stats.Uptime.Seconds(),
+		BlockedFiles:     blockedFiles,
 	}
 
 	if !stats.LastProcessed.IsZero() {

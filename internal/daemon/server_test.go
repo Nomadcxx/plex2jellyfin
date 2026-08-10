@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -42,6 +43,49 @@ func TestServerHealth(t *testing.T) {
 
 	if resp.Status != "healthy" {
 		t.Errorf("expected status healthy, got %s", resp.Status)
+	}
+}
+
+func TestServerHealthDegradedWhileDeterministicFailureExists(t *testing.T) {
+	blocked := filepath.Join(t.TempDir(), "Daniel.Tigers.Neighborhood.S08E03-04.mkv")
+	if err := os.WriteFile(blocked, []byte("episode"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handler := &MediaHandler{stats: NewStats(), unparseableCache: NewNegativeCache()}
+	handler.unparseableCache.Record(blocked, "unable to parse TV show name")
+	server := NewServer(handler, nil, ":0", nil, "")
+
+	w := httptest.NewRecorder()
+	server.handleHealth(w, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var health HealthResponse
+	if err := json.NewDecoder(w.Body).Decode(&health); err != nil {
+		t.Fatal(err)
+	}
+	if health.Status != "degraded" || health.BlockedFiles != 1 {
+		t.Fatalf("health = %+v, want degraded with one blocked file", health)
+	}
+
+	w = httptest.NewRecorder()
+	server.handleMetrics(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	var metrics MetricsResponse
+	if err := json.NewDecoder(w.Body).Decode(&metrics); err != nil {
+		t.Fatal(err)
+	}
+	if metrics.BlockedFiles != 1 {
+		t.Fatalf("metrics blocked_files = %d, want 1", metrics.BlockedFiles)
+	}
+
+	if err := os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	server.handleHealth(w, httptest.NewRequest(http.MethodGet, "/health", nil))
+	health = HealthResponse{}
+	if err := json.NewDecoder(w.Body).Decode(&health); err != nil {
+		t.Fatal(err)
+	}
+	if health.Status != "healthy" || health.BlockedFiles != 0 {
+		t.Fatalf("health after source removal = %+v, want healthy", health)
 	}
 }
 

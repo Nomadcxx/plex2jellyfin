@@ -161,6 +161,28 @@ func TestSuspiciousFromDecisionsChecksVisibleTargetName(t *testing.T) {
 	}
 }
 
+func TestProviderIdentitySuspiciousFlagsCrossTitleMovie(t *testing.T) {
+	items := providerIdentitySuspicious([]database.ProviderIdentityMovieDuplicate{{
+		Provider:   "tmdb",
+		ProviderID: "1284041",
+		Titles:     []string{"Son Ev", "The Last House"},
+		Paths: []string{
+			"/movies/Son Ev (2026)/Son Ev (2026).mkv",
+			"/movies/The Last House (2026)/The Last House (2026).mkv",
+		},
+	}})
+
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1: %#v", len(items), items)
+	}
+	if items[0].Category != "provider_identity_collision" {
+		t.Fatalf("Category = %q", items[0].Category)
+	}
+	if !strings.Contains(items[0].Reason, "tmdb:1284041") || !strings.Contains(items[0].Reason, "Son Ev") {
+		t.Fatalf("Reason = %q", items[0].Reason)
+	}
+}
+
 func TestSummarizeDecisionMetricsCountsMetadataProblemsMissedBySuspiciousClassifier(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	decisions := []*database.ParseDecision{{

@@ -40,6 +40,9 @@ func MarkdownReport(s Summary, suspicious []SuspiciousItem, unknownSeasons Unkno
 			if item.Path != "" {
 				fmt.Fprintf(&b, " path=%s", item.Path)
 			}
+			if item.Reason != "" {
+				fmt.Fprintf(&b, " reason=%s", item.Reason)
+			}
 			fmt.Fprintln(&b)
 		}
 		fmt.Fprintln(&b)

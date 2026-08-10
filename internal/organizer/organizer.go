@@ -86,7 +86,6 @@ type Organizer struct {
 // Prefer injecting FileScanner.ScanPath (or a thin wrapper) to avoid organizer↔scanner cycles.
 type PathIndexer func(ctx context.Context, path, libraryRoot, mediaType string) error
 
-
 func NewOrganizer(libraries []string, options ...func(*Organizer)) (*Organizer, error) {
 	transferer, err := transfer.New(transfer.BackendAuto)
 	if err != nil {
@@ -704,6 +703,23 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 	}
 
 	existingFile, existingFound := FindEpisodeFile(seasonDir, tv.Season, tv.Episode)
+	if tv.EpisodeEnd > tv.Episode {
+		// ponytail: a range is one physical file, so do not quality-replace an
+		// individual member. Upgrade path: model episode-to-file membership.
+		for episode := tv.Episode; episode <= tv.EpisodeEnd; episode++ {
+			if overlap, found := FindEpisodeFile(seasonDir, tv.Season, episode); found {
+				return &OrganizationResult{
+					Success:       false,
+					SourcePath:    sourcePath,
+					TargetPath:    overlap,
+					Skipped:       true,
+					SkipReason:    fmt.Sprintf("multi-episode range overlaps existing episode E%02d", episode),
+					SourceQuality: sourceQuality,
+				}, nil
+			}
+		}
+		existingFile, existingFound = "", false
+	}
 	var existingQuality *quality.QualityInfo
 	if existingFound {
 		existingQuality = quality.Parse(filepath.Base(existingFile))

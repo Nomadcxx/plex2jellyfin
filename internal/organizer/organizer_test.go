@@ -438,6 +438,43 @@ func TestOrganizeTVEpisode_ExistingShow(t *testing.T) {
 	// For this test, we just verify the new episode was added correctly
 }
 
+func TestOrganizeTVEpisode_TwoEpisodeRangeUsesCanonicalName(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	source := filepath.Join(sourceDir, "Daniel.Tigers.Neighborhood.S08E03-04.Daniel.Jodi.Asks.Before.Touching.1080p.WEB-DL.mkv")
+	createTestFile(t, source, 1024)
+	org, err := NewOrganizer([]string{libraryDir}, WithBackend(transfer.BackendNative))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVEpisode(source, libraryDir)
+	require.NoError(t, err)
+	require.True(t, result.Success, "result=%+v", result)
+	assert.Equal(t, filepath.Join(libraryDir, "Daniel Tigers Neighborhood", "Season 08", "Daniel Tigers Neighborhood S08E03-E04 - Daniel Jodi Asks Before Touching.mkv"), result.TargetPath)
+	assert.FileExists(t, result.TargetPath)
+}
+
+func TestOrganizeTVEpisode_TwoEpisodeRangeDoesNotReplaceIndividualEpisode(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	seasonDir := filepath.Join(libraryDir, "Daniel Tigers Neighborhood", "Season 08")
+	require.NoError(t, os.MkdirAll(seasonDir, 0o755))
+	existing := filepath.Join(seasonDir, "Daniel Tigers Neighborhood S08E04.mkv")
+	createTestFile(t, existing, 2048)
+	source := filepath.Join(sourceDir, "Daniel.Tigers.Neighborhood.S08E03-04.2160p.WEB-DL.mkv")
+	createTestFile(t, source, 4096)
+	org, err := NewOrganizer([]string{libraryDir}, WithBackend(transfer.BackendNative))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVEpisode(source, libraryDir)
+	require.NoError(t, err)
+	require.True(t, result.Skipped)
+	assert.Contains(t, result.SkipReason, "overlaps existing episode E04")
+	assert.FileExists(t, existing)
+	assert.FileExists(t, source)
+}
+
 func TestOrganizeTVWithParsed_BlocksIdentityUnsafeExistingShow(t *testing.T) {
 	sourceDir, libraryDir, cleanup := setupTestEnv(t)
 	defer cleanup()

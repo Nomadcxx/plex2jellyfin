@@ -490,6 +490,29 @@ func TestParseTVShowFromPath_RejectsUnsupportedMultiEpisodeRange(t *testing.T) {
 	}
 }
 
+func TestParseTVShowFromPath_RejectsDescendingEpisodeRange(t *testing.T) {
+	_, err := ParseTVShowFromPath("/downloads/Show.Name.S01E04-03.mkv")
+	if !errors.Is(err, ErrParseFailed) {
+		t.Fatalf("ParseTVShowFromPath() error = %v, want ErrParseFailed", err)
+	}
+}
+
+func TestParseTVShowFromPath_TwoEpisodeRange(t *testing.T) {
+	path := "/downloads/tv/Daniel.Tigers.Neighborhood.S08E03-04/Daniel.Tigers.Neighborhood.S08E03-04.Daniel.Jodi.Asks.Before.Touching.1080p.PBSK.WEB-DL.AAC.2.0.H.264.mkv"
+
+	got, err := ParseTVShowFromPath(path)
+	if err != nil {
+		t.Fatalf("ParseTVShowFromPath() unexpected error: %v", err)
+	}
+	if got.Title != "Daniel Tigers Neighborhood" || got.Season != 8 || got.Episode != 3 || got.EpisodeEnd != 4 {
+		t.Fatalf("ParseTVShowFromPath() = %#v", got)
+	}
+	want := "Daniel Tigers Neighborhood S08E03-E04 - Daniel Jodi Asks Before Touching.mkv"
+	if name := FormatTVEpisodeFilenameFromInfo(got, "mkv"); name != want {
+		t.Fatalf("FormatTVEpisodeFilenameFromInfo() = %q, want %q", name, want)
+	}
+}
+
 func TestIsTVEpisodeFromPath_SourceHint(t *testing.T) {
 	tests := []struct {
 		path string

@@ -65,7 +65,7 @@ func TestCollectionDueWhenNoBundle(t *testing.T) {
 
 func TestCollectIfDueSkipsYoungBundleWithoutCollecting(t *testing.T) {
 	root := t.TempDir()
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	stamp := now.Add(-12 * time.Hour)
 	writeSuccessfulBundle(t, root, stamp)
 	before, err := os.ReadDir(root)

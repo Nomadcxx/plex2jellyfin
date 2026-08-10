@@ -165,6 +165,10 @@ func (n *NegativeCache) Snapshot() []NegativeCacheEntry {
 	defer n.mu.Unlock()
 	out := make([]NegativeCacheEntry, 0, len(n.entries))
 	for path, e := range n.entries {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			delete(n.entries, path)
+			continue
+		}
 		wait := backoffSchedule(e.failures)
 		remain := wait - time.Since(e.failedAt)
 		if remain < 0 {

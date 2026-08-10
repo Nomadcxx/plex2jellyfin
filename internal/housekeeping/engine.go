@@ -213,18 +213,19 @@ func NewEngine(cfg Config, db *database.MediaDB, logger *logging.Logger) *Engine
 
 // DetectResult summarises one detect cycle.
 type DetectResult struct {
-	CrossVolumeDupes   int // duplicate workflow: low-confidence flags
-	AutoDupes          int // duplicate workflow: high-confidence auto-delete tasks
-	NoYearMerges       int
-	YearMismatches     int
-	VerifiedDistinct   int
-	PollutedNames      int
-	OrphanSources      int
-	StuckSyncs         int
-	FolderRenames      int
-	ParserDriftRenames int
-	Enqueued           int
-	Skipped            int
+	CrossVolumeDupes      int // duplicate workflow: low-confidence flags
+	ProviderIdentityDupes int // distinct movie titles sharing one provider identity
+	AutoDupes             int // duplicate workflow: high-confidence auto-delete tasks
+	NoYearMerges          int
+	YearMismatches        int
+	VerifiedDistinct      int
+	PollutedNames         int
+	OrphanSources         int
+	StuckSyncs            int
+	FolderRenames         int
+	ParserDriftRenames    int
+	Enqueued              int
+	Skipped               int
 }
 
 // Detect scans the configured libraries and watch dirs, enqueueing any
@@ -261,6 +262,7 @@ func (e *Engine) Detect(ctx context.Context) (*DetectResult, error) {
 	// are queued for auto-delete-of-inferior; low-confidence groups are
 	// flagged for human review.
 	e.detectFileDuplicates(ctx, res, enqueue)
+	e.detectProviderIdentityDuplicates(ctx, res, enqueue)
 
 	// 5: orphan source dirs in watch directories
 	e.detectOrphanSources(ctx, res, enqueue)
@@ -273,6 +275,28 @@ func (e *Engine) Detect(ctx context.Context) (*DetectResult, error) {
 	e.detectParserDriftRepairs(ctx, res, enqueue)
 
 	return res, nil
+}
+
+func (e *Engine) detectProviderIdentityDuplicates(ctx context.Context, res *DetectResult, enqueue func(string, map[string]any, int)) {
+	groups, err := e.db.FindProviderIdentityMovieDuplicates()
+	if err != nil {
+		e.logf("warn", "provider identity duplicate analysis failed err=%v", err)
+		return
+	}
+	for _, group := range groups {
+		if ctx.Err() != nil {
+			return
+		}
+		res.ProviderIdentityDupes++
+		enqueue(database.TaskKindProviderIdentityDuplicate, map[string]any{
+			"media_type":  "movie",
+			"provider":    group.Provider,
+			"provider_id": group.ProviderID,
+			"titles":      group.Titles,
+			"paths":       group.Paths,
+			"file_count":  len(group.Paths),
+		}, 130)
+	}
 }
 
 // folder represents a library subdirectory.
@@ -1133,7 +1157,7 @@ func (e *Engine) executeTask(ctx context.Context, t *database.HousekeepingTask) 
 		// Flag kinds. Reaching the executor means a human approved them
 		// in the WebUI; treat them as duplicate-resolution requests.
 		return e.execConsolidateDuplicate(ctx, t)
-	case database.TaskKindPollutedName, database.TaskKindSubdirMismatch:
+	case database.TaskKindPollutedName, database.TaskKindSubdirMismatch, database.TaskKindProviderIdentityDuplicate:
 		// These have no deterministic target — a human must rename
 		// manually; reaching the executor is an error.
 		return fmt.Errorf("flag-only task kind %q requires manual action", t.Kind)

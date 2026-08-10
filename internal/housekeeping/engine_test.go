@@ -45,6 +45,44 @@ func openTestDB(t *testing.T) *database.MediaDB {
 	return db
 }
 
+func TestDetectFlagsProviderIdentityMovieDuplicate(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC()
+	for _, path := range []string{
+		"/movies/Son Ev (2026)/Son Ev (2026).mkv",
+		"/movies/The Last House (2026)/The Last House (2026).mkv",
+	} {
+		_, err := db.SQL().Exec(`INSERT INTO media_files (path, size, media_type, normalized_title) VALUES (?, 1, 'movie', ?)`, path, path)
+		require.NoError(t, err)
+	}
+	for _, decision := range []database.ParseDecision{
+		{
+			SourcePath: "/downloads/Son.Ev.mkv", SourceFilename: "Son.Ev.mkv", EventAt: now,
+			MediaTypeGuessed: "movie", ParsedTitle: "Son Ev", OrganizeOutcome: "success",
+			TargetPath: "/movies/Son Ev (2026)/Son Ev (2026).mkv", JellyfinTmdbID: "1284041",
+		},
+		{
+			SourcePath: "/downloads/The.Last.House.mkv", SourceFilename: "The.Last.House.mkv", EventAt: now,
+			MediaTypeGuessed: "movie", ParsedTitle: "The Last House", OrganizeOutcome: "success",
+			TargetPath: "/movies/The Last House (2026)/The Last House (2026).mkv", JellyfinTmdbID: "1284041",
+		},
+	} {
+		_, err := db.InsertDecision(decision)
+		require.NoError(t, err)
+	}
+
+	engine := NewEngine(Config{MaxTasksPerCycle: 10}, db, nil)
+	result, err := engine.Detect(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, result.ProviderIdentityDupes)
+
+	tasks, err := db.ListHousekeepingTasks(database.TaskStatusFlagged, 10)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, database.TaskKindProviderIdentityDuplicate, tasks[0].Kind)
+	require.Equal(t, "1284041", tasks[0].Payload["provider_id"])
+}
+
 func TestMoveDirWithFallbackMovesFilesAndRemovesSourceTree(t *testing.T) {
 	root := t.TempDir()
 	srcDir := filepath.Join(root, "Movie Old (2026)")
