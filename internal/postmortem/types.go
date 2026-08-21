@@ -7,6 +7,7 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/labeling"
 )
 
 const TimestampLayout = "2006-01-02T1504"
@@ -43,6 +44,7 @@ type Summary struct {
 	RepairEvents                  int       `json:"repair_events"`
 	SuspiciousItems               int       `json:"suspicious_items"`
 	MetadataProblems              int       `json:"metadata_problems"`
+	MetadataProblemsOutstanding   int       `json:"metadata_problems_outstanding"`
 	DriftLabels                   int       `json:"drift_labels"`
 	FailLabels                    int       `json:"fail_labels"`
 	PendingLabels                 int       `json:"pending_labels"`
@@ -54,9 +56,9 @@ type Summary struct {
 	UnknownSeasonActionable       int       `json:"unknown_season_actionable"`
 }
 
-// LabelOverdueAfter is how long an unlabeled decision may wait before counting
-// as overdue in the postmortem window (matches the sweeper lookback grace).
-const LabelOverdueAfter = 24 * time.Hour
+// LabelOverdueAfter matches the labeler's deadline. Before this duration the
+// labeler is still waiting by design, so the postmortem must not report a fault.
+const LabelOverdueAfter = labeling.DefaultTTL
 
 type HousekeepingWindowCounts struct {
 	CreatedInWindow map[string]int `json:"created_in_window"`

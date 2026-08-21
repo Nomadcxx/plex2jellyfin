@@ -107,7 +107,10 @@ type PendingItem struct {
 	ParseDecisionID int64
 }
 
-const maxAIRetryAttempts = 10
+const (
+	maxAIRetryAttempts             = 10
+	negativeCacheHydrationLookback = 30 * 24 * time.Hour
+)
 
 // aiRetryBackoff returns the backoff duration for a given attempt count.
 // Schedule: 30s, 60s, 2m, 5m, 15m, 30m, then 30m for all subsequent.
@@ -412,14 +415,14 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 
 // hydrateNegativeCacheFromDB pre-populates the in-memory deterministic-defer
 // cache from prior parse_decisions rows so daemon restarts don't reset the
-// backoff. We pull failures over the past 7 days, count them per source path,
+// backoff. We pull failures over the cache's maximum backoff, count them per source path,
 // and only seed entries whose latest error matches IsDeterministicUnparseable
 // (so transient errors like missing-file races don't get spuriously deferred).
 func hydrateNegativeCacheFromDB(cache *NegativeCache, db *database.MediaDB, logger *logging.Logger) {
 	if cache == nil || db == nil {
 		return
 	}
-	rows, err := db.GetRecentDeterministicFailures(7 * 24 * time.Hour)
+	rows, err := db.GetRecentDeterministicFailures(negativeCacheHydrationLookback)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("handler", "failed to hydrate negative cache", logging.F("error", err.Error()))
@@ -1668,7 +1671,7 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) e
 			h.logger.Info("handler", "Playback lock removed", logging.F("path", path))
 		}
 	case jellyfin.EventItemAdded:
-		itemID := strings.TrimSpace(event.ItemID)
+		itemID := jellyfin.NormalizeItemID(event.ItemID)
 		if h.db != nil && path != "" && itemID != "" {
 			h.parseDecisionMu.Lock()
 			defer h.parseDecisionMu.Unlock()
@@ -1706,7 +1709,7 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) e
 			h.logger.Info("handler", "Jellyfin item added", logging.F("path", path), logging.F("item_id", itemID), logging.F("name", event.ItemName), logging.F("type", event.ItemType))
 		}
 	case jellyfin.EventItemUpdated:
-		itemID := strings.TrimSpace(event.ItemID)
+		itemID := jellyfin.NormalizeItemID(event.ItemID)
 		if h.db != nil && path != "" && itemID != "" {
 			h.parseDecisionMu.Lock()
 			defer h.parseDecisionMu.Unlock()

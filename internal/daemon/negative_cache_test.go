@@ -66,6 +66,36 @@ func TestNegativeCache_BackoffEscalates(t *testing.T) {
 	if backoffSchedule(4) != 24*time.Hour {
 		t.Fatalf("4th+ failure should defer 24h, got %v", backoffSchedule(4))
 	}
+	if backoffSchedule(5) != 7*24*time.Hour {
+		t.Fatalf("fifth failure should defer 7d, got %v", backoffSchedule(5))
+	}
+	if backoffSchedule(6) != 30*24*time.Hour {
+		t.Fatalf("sixth+ failure should defer 30d, got %v", backoffSchedule(6))
+	}
+}
+
+func TestNegativeCacheModifiedFileRetriesImmediately(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Show.S01E01.mkv")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	failedAt := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, failedAt.Add(-time.Hour), failedAt.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := NewNegativeCache()
+	cache.HydrateEntry(path, "unable to parse TV show name", failedAt, 6)
+	if deferred, _, _ := cache.IsDeferred(path); !deferred {
+		t.Fatal("expected unchanged file to remain deferred")
+	}
+
+	if err := os.Chtimes(path, time.Now(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if deferred, _, _ := cache.IsDeferred(path); deferred {
+		t.Fatal("changed file must get a fresh parse attempt")
+	}
 }
 
 func TestIsDeterministicUnparseable(t *testing.T) {

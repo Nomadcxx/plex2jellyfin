@@ -9,7 +9,6 @@ import (
 
 const (
 	pageSize          = 1000
-	defaultTTL        = 7 * 24 * time.Hour
 	defaultStaleAfter = 14 * 24 * time.Hour
 )
 
@@ -31,7 +30,7 @@ func NewRunner(db *database.MediaDB, getName JellyfinNameFetcher) *Runner {
 	return &Runner{
 		db:          db,
 		getName:     getName,
-		ttl:         defaultTTL,
+		ttl:         DefaultTTL,
 		staleAfter:  defaultStaleAfter,
 		stalePageSz: pageSize,
 	}

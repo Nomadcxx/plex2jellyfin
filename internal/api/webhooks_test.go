@@ -117,7 +117,7 @@ func TestWebhookItemAddedPersistsToDB(t *testing.T) {
 	}
 
 	path := "/library/Movies/The Matrix (1999)/The Matrix (1999).mkv"
-	payload := []byte(`{"NotificationType":"ItemAdded","ItemPath":"` + path + `","ItemId":"jf-123","Name":"The Matrix","ItemType":"Movie"}`)
+	payload := []byte(`{"NotificationType":"ItemAdded","ItemPath":"` + path + `","ItemId":"4bceeac3-77fe-a6fa-39e9-7850c6b55e35","Name":"The Matrix","ItemType":"Movie"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewReader(payload))
 	req.Header.Set("X-Plex2Jellyfin-Webhook-Secret", "test-secret")
 	w := httptest.NewRecorder()
@@ -134,8 +134,8 @@ func TestWebhookItemAddedPersistsToDB(t *testing.T) {
 	if item == nil {
 		t.Fatalf("expected persisted jellyfin item")
 	}
-	if item.JellyfinItemID != "jf-123" {
-		t.Fatalf("expected item id jf-123, got %s", item.JellyfinItemID)
+	if item.JellyfinItemID != "4bceeac377fea6fa39e97850c6b55e35" {
+		t.Fatalf("expected compact item id, got %s", item.JellyfinItemID)
 	}
 }
 
@@ -718,7 +718,7 @@ func TestHandleItemUpdated_EmptyProvidersDoNotDowngradeIdentified(t *testing.T) 
 	s := &Server{db: db}
 	s.handleItemUpdated(jellyfin.WebhookEvent{
 		NotificationType: jellyfin.EventItemUpdated,
-		ItemID:           "jf-ready",
+		ItemID:           "4bceeac3-77fe-a6fa-39e9-7850c6b55e35",
 		ItemPath:         targetPath,
 		ItemName:         "Ready",
 		ItemType:         "Movie",
@@ -737,5 +737,12 @@ func TestHandleItemUpdated_EmptyProvidersDoNotDowngradeIdentified(t *testing.T) 
 	}
 	if dec.MetadataState != "identified" {
 		t.Fatalf("metadata_state=%q, want identified", dec.MetadataState)
+	}
+	item, err := db.GetJellyfinItemByPath(targetPath)
+	if err != nil {
+		t.Fatalf("GetJellyfinItemByPath: %v", err)
+	}
+	if item == nil || item.JellyfinItemID != "4bceeac377fea6fa39e97850c6b55e35" {
+		t.Fatalf("updated cache item ID was not normalized: %+v", item)
 	}
 }

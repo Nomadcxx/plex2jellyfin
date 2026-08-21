@@ -16,6 +16,7 @@ func MarkdownReport(s Summary, suspicious []SuspiciousItem, unknownSeasons Unkno
 	fmt.Fprintf(&b, "- Repair events: %d\n", s.RepairEvents)
 	fmt.Fprintf(&b, "- Suspicious items: %d\n", s.SuspiciousItems)
 	fmt.Fprintf(&b, "- Metadata problems: %d\n", s.MetadataProblems)
+	fmt.Fprintf(&b, "- Metadata problems (outstanding): %d\n", s.MetadataProblemsOutstanding)
 	fmt.Fprintf(&b, "- DRIFT labels: %d\n", s.DriftLabels)
 	fmt.Fprintf(&b, "- FAIL labels: %d\n", s.FailLabels)
 	fmt.Fprintf(&b, "- Pending labels: %d\n", s.PendingLabels)

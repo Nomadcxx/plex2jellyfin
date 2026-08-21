@@ -891,6 +891,35 @@ func (m *MediaDB) ListDueMetadataChecks(now time.Time, limit int) ([]*ParseDecis
 	return out, rows.Err()
 }
 
+// CountMetadataStates returns current row counts grouped by metadata_state.
+func (m *MediaDB) CountMetadataStates() (map[string]int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query(`
+		SELECT COALESCE(metadata_state, ''), COUNT(*)
+		FROM parse_decisions
+		GROUP BY COALESCE(metadata_state, '')`)
+	if err != nil {
+		return nil, fmt.Errorf("CountMetadataStates: %w", err)
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var state string
+		var count int
+		if err := rows.Scan(&state, &count); err != nil {
+			return nil, fmt.Errorf("CountMetadataStates scan: %w", err)
+		}
+		counts[state] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("CountMetadataStates rows: %w", err)
+	}
+	return counts, nil
+}
+
 // UpdateMetadataCheckState records a passive metadata check result and
 // schedules the next check time.
 func (m *MediaDB) UpdateMetadataCheckState(id int64, state, errMsg string, nextCheck *time.Time) error {
@@ -1039,9 +1068,8 @@ func (m *MediaDB) GetRecentDeterministicFailures(lookback time.Duration) ([]Dete
 		       OR (organize_outcome = 'skipped'
 		           AND (organize_error LIKE 'season_pack_unresolved:%'
 		                OR organize_error LIKE 'extras_unresolved:%')))
-		  AND event_at >= ?
 		GROUP BY source_path
-		HAVING failures >= 1`, cutoff)
+		HAVING MAX(event_at) >= ?`, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("GetRecentDeterministicFailures: %w", err)
 	}
