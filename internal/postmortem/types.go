@@ -47,6 +47,7 @@ type Summary struct {
 	MetadataProblemsOutstanding   int       `json:"metadata_problems_outstanding"`
 	DriftLabels                   int       `json:"drift_labels"`
 	FailLabels                    int       `json:"fail_labels"`
+	VanishedLabels                int       `json:"vanished_labels"`
 	PendingLabels                 int       `json:"pending_labels"`
 	OverdueUnlabeled              int       `json:"overdue_unlabeled"`
 	HousekeepingFailed            int       `json:"housekeeping_failed"` // created in window
@@ -85,6 +86,8 @@ func SummarizeDecisionMetrics(decisions []*database.ParseDecision, now time.Time
 			s.DriftLabels++
 		case "FAIL":
 			s.FailLabels++
+		case "VANISHED":
+			s.VanishedLabels++
 		case "":
 			s.PendingLabels++
 			if !d.EventAt.IsZero() && now.Sub(d.EventAt) > LabelOverdueAfter {

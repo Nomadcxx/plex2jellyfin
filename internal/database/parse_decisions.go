@@ -1041,11 +1041,13 @@ type DeterministicFailureRow struct {
 	LastAt     time.Time
 }
 
-// GetRecentDeterministicFailures returns recent organize attempts that may be
-// deterministic enough to hydrate the negative cache. This includes failed
-// attempts plus skipped season-pack rows that intentionally preserve
-// unresolved season-only files for review. The caller applies its own pattern
-// filter (e.g. IsDeterministicUnparseable) on LastError before seeding.
+// GetRecentDeterministicFailures returns paths whose latest eligible organize
+// attempt is inside lookback. Failures is the path's lifetime eligible attempt
+// count, which lets the negative cache restore long backoff tiers after a
+// restart. Eligible rows include failed attempts plus skipped season-pack rows
+// that intentionally preserve unresolved season-only files for review. The
+// caller applies its own pattern filter (e.g. IsDeterministicUnparseable) on
+// LastError before seeding.
 func (m *MediaDB) GetRecentDeterministicFailures(lookback time.Duration) ([]DeterministicFailureRow, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

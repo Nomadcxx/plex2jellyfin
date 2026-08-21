@@ -129,6 +129,7 @@ func (c Collector) Collect() (BundlePaths, error) {
 		MetadataProblemsOutstanding:   metadataOutstanding,
 		DriftLabels:                   metrics.DriftLabels,
 		FailLabels:                    metrics.FailLabels,
+		VanishedLabels:                metrics.VanishedLabels,
 		PendingLabels:                 metrics.PendingLabels,
 		OverdueUnlabeled:              metrics.OverdueUnlabeled,
 		HousekeepingFailed:            hk.CreatedInWindow[database.TaskStatusFailed],

@@ -415,9 +415,10 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 
 // hydrateNegativeCacheFromDB pre-populates the in-memory deterministic-defer
 // cache from prior parse_decisions rows so daemon restarts don't reset the
-// backoff. We pull failures over the cache's maximum backoff, count them per source path,
-// and only seed entries whose latest error matches IsDeterministicUnparseable
-// (so transient errors like missing-file races don't get spuriously deferred).
+// backoff. We pull paths whose latest failure is inside the cache's maximum
+// backoff and restore their lifetime failure count. We only seed entries whose
+// latest error matches IsDeterministicUnparseable so transient errors like
+// missing-file races don't get spuriously deferred.
 func hydrateNegativeCacheFromDB(cache *NegativeCache, db *database.MediaDB, logger *logging.Logger) {
 	if cache == nil || db == nil {
 		return

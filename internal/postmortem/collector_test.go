@@ -253,6 +253,11 @@ func TestCollectorSummaryIncludesWindowedConvergenceMetrics(t *testing.T) {
 		EventAt: now.Add(-2 * time.Hour), OrganizeOutcome: "success", TargetPath: "/movies/b.mkv",
 		AutoLabel: "FAIL",
 	})
+	_ = insert(database.ParseDecision{
+		SourcePath: "/downloads/vanished.mkv", SourceFilename: "vanished.mkv",
+		EventAt: now.Add(-2 * time.Hour), OrganizeOutcome: "success", TargetPath: "/movies/vanished.mkv",
+		AutoLabel: "VANISHED",
+	})
 	idMeta := insert(database.ParseDecision{
 		SourcePath: "/downloads/c.mkv", SourceFilename: "c.mkv",
 		EventAt: now.Add(-3 * time.Hour), OrganizeOutcome: "success", TargetPath: "/movies/c.mkv",
@@ -303,6 +308,9 @@ func TestCollectorSummaryIncludesWindowedConvergenceMetrics(t *testing.T) {
 	}
 	if summary.DriftLabels != 1 || summary.FailLabels != 1 {
 		t.Fatalf("labels drift=%d fail=%d", summary.DriftLabels, summary.FailLabels)
+	}
+	if summary.VanishedLabels != 1 {
+		t.Fatalf("VanishedLabels = %d, want 1", summary.VanishedLabels)
 	}
 	if summary.MetadataProblems != 1 {
 		t.Fatalf("MetadataProblems = %d, want 1", summary.MetadataProblems)

@@ -38,13 +38,14 @@ func TestSummarizeDecisionMetricsSeparatesWindowedCountsAndDedupesByID(t *testin
 		{ID: 7, EventAt: now.Add(-time.Hour), MetadataState: "missing_provider_ids"},
 		{ID: 7, EventAt: now.Add(-time.Hour), MetadataState: "missing_provider_ids"},  // duplicate ID
 		{ID: 8, EventAt: now.Add(-time.Hour), MetadataState: "recent_import_waiting"}, // not a problem
+		{ID: 9, EventAt: now.Add(-time.Hour), AutoLabel: "VANISHED"},
 		nil,
 	}
 
 	got := SummarizeDecisionMetrics(decisions, now)
 
-	if got.ProcessedDecisions != 8 {
-		t.Fatalf("ProcessedDecisions = %d, want 8 unique IDs", got.ProcessedDecisions)
+	if got.ProcessedDecisions != 9 {
+		t.Fatalf("ProcessedDecisions = %d, want 9 unique IDs", got.ProcessedDecisions)
 	}
 	if got.DriftLabels != 1 {
 		t.Fatalf("DriftLabels = %d, want 1", got.DriftLabels)
@@ -60,6 +61,9 @@ func TestSummarizeDecisionMetricsSeparatesWindowedCountsAndDedupesByID(t *testin
 	}
 	if got.OverdueUnlabeled != 1 {
 		t.Fatalf("OverdueUnlabeled = %d, want 1 (id 5)", got.OverdueUnlabeled)
+	}
+	if got.VanishedLabels != 1 {
+		t.Fatalf("VanishedLabels = %d, want 1", got.VanishedLabels)
 	}
 }
 

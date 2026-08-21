@@ -19,6 +19,7 @@ func MarkdownReport(s Summary, suspicious []SuspiciousItem, unknownSeasons Unkno
 	fmt.Fprintf(&b, "- Metadata problems (outstanding): %d\n", s.MetadataProblemsOutstanding)
 	fmt.Fprintf(&b, "- DRIFT labels: %d\n", s.DriftLabels)
 	fmt.Fprintf(&b, "- FAIL labels: %d\n", s.FailLabels)
+	fmt.Fprintf(&b, "- VANISHED labels: %d\n", s.VanishedLabels)
 	fmt.Fprintf(&b, "- Pending labels: %d\n", s.PendingLabels)
 	fmt.Fprintf(&b, "- Overdue unlabeled: %d\n", s.OverdueUnlabeled)
 	fmt.Fprintf(&b, "- Housekeeping failed (created in window): %d\n", s.HousekeepingFailed)
