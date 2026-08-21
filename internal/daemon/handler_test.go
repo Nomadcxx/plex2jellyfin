@@ -1258,6 +1258,44 @@ func TestNewMediaHandler_HydratesSeasonPackUnresolvedNegativeCache(t *testing.T)
 	assert.Contains(t, lastErr, "season_pack_unresolved")
 }
 
+func TestNewMediaHandler_HydratesOldDeterministicFailureBackoff(t *testing.T) {
+	tmpLib := t.TempDir()
+	watchDir := t.TempDir()
+	srcFile := filepath.Join(watchDir, "Daniel.Tigers.Neighborhood.S08E03-04.Daniel.mkv")
+	require.NoError(t, os.WriteFile(srcFile, []byte("test"), 0o644))
+
+	now := time.Now().UTC()
+	require.NoError(t, os.Chtimes(srcFile, now.Add(-20*24*time.Hour), now.Add(-20*24*time.Hour)))
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	defer db.Close()
+
+	for daysAgo := 15; daysAgo >= 10; daysAgo-- {
+		_, err := db.InsertDecision(database.ParseDecision{
+			SourcePath:       srcFile,
+			SourceFilename:   filepath.Base(srcFile),
+			EventAt:          now.Add(-time.Duration(daysAgo) * 24 * time.Hour),
+			MediaTypeGuessed: "tv",
+			OrganizeOutcome:  "failed",
+			OrganizeError:    "unable to parse TV show name: parse failed: unsupported multi-episode range",
+		})
+		require.NoError(t, err)
+	}
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:  []string{tmpLib},
+		TVWatchPaths: []string{watchDir},
+		Logger:       logging.Nop(),
+		Database:     db,
+	})
+	require.NoError(t, err)
+
+	deferred, remaining, _ := handler.unparseableCache.IsDeferred(srcFile)
+	require.True(t, deferred)
+	require.Greater(t, remaining, time.Duration(0))
+}
+
 func TestProcessFile_SeasonPackImportsEpisodeSiblings(t *testing.T) {
 	tmpLib := t.TempDir()
 	watchDir := t.TempDir()
@@ -1476,7 +1514,7 @@ func TestHandleJellyfinWebhookEvent_ItemAddedUpdatesParseDecision(t *testing.T) 
 
 	event := jellyfin.WebhookEvent{
 		NotificationType: jellyfin.EventItemAdded,
-		ItemID:           "jf-item-001",
+		ItemID:           "4bceeac3-77fe-a6fa-39e9-7850c6b55e35",
 		ItemPath:         targetPath,
 		ItemName:         "The Matrix",
 		ItemType:         "Movie",
@@ -1489,7 +1527,7 @@ func TestHandleJellyfinWebhookEvent_ItemAddedUpdatesParseDecision(t *testing.T) 
 	dec, err := db.GetDecision(id)
 	require.NoError(t, err)
 	require.NotNil(t, dec)
-	assert.Equal(t, "jf-item-001", dec.JellyfinItemID)
+	assert.Equal(t, "4bceeac377fea6fa39e97850c6b55e35", dec.JellyfinItemID)
 	assert.Equal(t, "tt0133093", dec.JellyfinImdbID)
 	assert.Equal(t, "603", dec.JellyfinTmdbID)
 	assert.NotNil(t, dec.JellyfinResolvedAt)
@@ -1763,7 +1801,7 @@ func TestHandleJellyfinWebhookEvent_ItemUpdatedUpgradesIdentification(t *testing
 
 	handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
 		NotificationType: jellyfin.EventItemUpdated,
-		ItemID:           "jf-identified",
+		ItemID:           "4bceeac3-77fe-a6fa-39e9-7850c6b55e35",
 		ItemPath:         "/movies1/F Valentines Day (2026)/F Valentines Day (2026).mkv",
 		ItemName:         "F Valentine's Day",
 		ItemType:         "Movie",
@@ -1774,7 +1812,7 @@ func TestHandleJellyfinWebhookEvent_ItemUpdatedUpgradesIdentification(t *testing
 	dec, err := db.GetDecision(id)
 	require.NoError(t, err)
 	require.NotNil(t, dec)
-	assert.Equal(t, "jf-identified", dec.JellyfinItemID)
+	assert.Equal(t, "4bceeac377fea6fa39e97850c6b55e35", dec.JellyfinItemID)
 	assert.Equal(t, "tt34622232", dec.JellyfinImdbID)
 	assert.Equal(t, "1429605", dec.JellyfinTmdbID)
 	require.NotNil(t, dec.JellyfinIdentified)

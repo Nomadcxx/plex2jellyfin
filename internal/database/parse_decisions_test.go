@@ -79,6 +79,24 @@ func TestParseDecisionsMetadataRecoveryColumns(t *testing.T) {
 	}
 }
 
+func TestCountMetadataStatesGroupsEveryState(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	for _, state := range []string{"identified", "identified", "missing_provider_ids", ""} {
+		id, err := db.InsertDecision(makeDecision())
+		require.NoError(t, err)
+		if state != "" {
+			require.NoError(t, db.UpdateMetadataCheckState(id, state, "", nil))
+		}
+	}
+
+	counts, err := db.CountMetadataStates()
+	require.NoError(t, err)
+	require.Equal(t, 2, counts["identified"])
+	require.Equal(t, 1, counts["missing_provider_ids"])
+}
+
 func TestParseDecisionGetNotFound(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -190,6 +208,36 @@ func TestGetRecentDeterministicFailures_IncludesSeasonPackSkipped(t *testing.T) 
 	assert.Equal(t, 1, rows[0].Failures)
 	assert.Equal(t, d.OrganizeError, rows[0].LastError)
 	assert.False(t, rows[0].LastAt.IsZero())
+}
+
+func TestGetRecentDeterministicFailuresCountsHistoryForRecentPath(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	for failuresAgo := 6; failuresAgo >= 1; failuresAgo-- {
+		d := makeDecision()
+		d.SourcePath = "/downloads/tv/Daniel.Tigers.Neighborhood.S08E03-04.mkv"
+		d.EventAt = now.Add(-time.Duration(35+failuresAgo) * 24 * time.Hour)
+		d.OrganizeOutcome = "failed"
+		d.OrganizeError = "unable to parse TV show name: unsupported multi-episode range"
+		_, err := db.InsertDecision(d)
+		require.NoError(t, err)
+	}
+
+	d := makeDecision()
+	d.SourcePath = "/downloads/tv/Daniel.Tigers.Neighborhood.S08E03-04.mkv"
+	d.EventAt = now.Add(-10 * 24 * time.Hour)
+	d.OrganizeOutcome = "failed"
+	d.OrganizeError = "unable to parse TV show name: unsupported multi-episode range"
+	_, err := db.InsertDecision(d)
+	require.NoError(t, err)
+
+	rows, err := db.GetRecentDeterministicFailures(30 * 24 * time.Hour)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, 7, rows[0].Failures)
+	require.WithinDuration(t, d.EventAt, rows[0].LastAt, time.Second)
 }
 
 func TestParseDecisionUpdateOutcome(t *testing.T) {

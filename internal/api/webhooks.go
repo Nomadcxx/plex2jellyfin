@@ -118,7 +118,7 @@ func identifiedFromEvent(event jellyfin.WebhookEvent) bool {
 
 func (s *Server) handleItemAdded(event jellyfin.WebhookEvent) {
 	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
-	itemID := strings.TrimSpace(event.ItemID)
+	itemID := jellyfin.NormalizeItemID(event.ItemID)
 
 	if s.db != nil && path != "" && itemID != "" {
 		if err := s.db.UpsertJellyfinItem(path, itemID, event.ItemName, event.ItemType); err != nil {
@@ -155,7 +155,7 @@ func (s *Server) handleItemAdded(event jellyfin.WebhookEvent) {
 // they must not downgrade an already-identified decision.
 func (s *Server) handleItemUpdated(event jellyfin.WebhookEvent) {
 	path := s.pathTranslator.JellyfinToDaemon(strings.TrimSpace(event.ItemPath))
-	itemID := strings.TrimSpace(event.ItemID)
+	itemID := jellyfin.NormalizeItemID(event.ItemID)
 
 	if s.db != nil && path != "" && itemID != "" {
 		if err := s.db.UpsertJellyfinItem(path, itemID, event.ItemName, event.ItemType); err != nil {

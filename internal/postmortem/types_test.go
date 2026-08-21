@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/labeling"
 )
 
 func TestReportBundlePathUsesTimestampAndLatest(t *testing.T) {
@@ -31,19 +32,20 @@ func TestSummarizeDecisionMetricsSeparatesWindowedCountsAndDedupesByID(t *testin
 		{ID: 1, EventAt: now.Add(-time.Hour), AutoLabel: "DRIFT"},
 		{ID: 2, EventAt: now.Add(-time.Hour), AutoLabel: "FAIL"},
 		{ID: 3, EventAt: now.Add(-time.Hour), MetadataState: "series_identified_episode_stale"},
-		{ID: 4, EventAt: now.Add(-2 * time.Hour), AutoLabel: ""},  // pending, not yet overdue
-		{ID: 5, EventAt: now.Add(-30 * time.Hour), AutoLabel: ""}, // overdue unlabeled (>24h)
+		{ID: 4, EventAt: now.Add(-2 * time.Hour), AutoLabel: ""},      // pending, not yet overdue
+		{ID: 5, EventAt: now.Add(-8 * 24 * time.Hour), AutoLabel: ""}, // overdue unlabeled (past labeler TTL)
 		{ID: 6, EventAt: now.Add(-time.Hour), MetadataState: "identified", AutoLabel: "PASS"},
 		{ID: 7, EventAt: now.Add(-time.Hour), MetadataState: "missing_provider_ids"},
 		{ID: 7, EventAt: now.Add(-time.Hour), MetadataState: "missing_provider_ids"},  // duplicate ID
 		{ID: 8, EventAt: now.Add(-time.Hour), MetadataState: "recent_import_waiting"}, // not a problem
+		{ID: 9, EventAt: now.Add(-time.Hour), AutoLabel: "VANISHED"},
 		nil,
 	}
 
 	got := SummarizeDecisionMetrics(decisions, now)
 
-	if got.ProcessedDecisions != 8 {
-		t.Fatalf("ProcessedDecisions = %d, want 8 unique IDs", got.ProcessedDecisions)
+	if got.ProcessedDecisions != 9 {
+		t.Fatalf("ProcessedDecisions = %d, want 9 unique IDs", got.ProcessedDecisions)
 	}
 	if got.DriftLabels != 1 {
 		t.Fatalf("DriftLabels = %d, want 1", got.DriftLabels)
@@ -59,6 +61,32 @@ func TestSummarizeDecisionMetricsSeparatesWindowedCountsAndDedupesByID(t *testin
 	}
 	if got.OverdueUnlabeled != 1 {
 		t.Fatalf("OverdueUnlabeled = %d, want 1 (id 5)", got.OverdueUnlabeled)
+	}
+	if got.VanishedLabels != 1 {
+		t.Fatalf("VanishedLabels = %d, want 1", got.VanishedLabels)
+	}
+}
+
+func TestLabelOverdueAfterMatchesLabelingTTL(t *testing.T) {
+	if LabelOverdueAfter != labeling.DefaultTTL {
+		t.Fatalf("LabelOverdueAfter = %v, labeling.DefaultTTL = %v", LabelOverdueAfter, labeling.DefaultTTL)
+	}
+}
+
+func TestSummarizeDecisionMetricsDoesNotFlagRowsInsideTTL(t *testing.T) {
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	decisions := []*database.ParseDecision{
+		{ID: 1, EventAt: now.Add(-48 * time.Hour)},
+		{ID: 2, EventAt: now.Add(-8 * 24 * time.Hour)},
+	}
+
+	got := SummarizeDecisionMetrics(decisions, now)
+
+	if got.PendingLabels != 2 {
+		t.Fatalf("PendingLabels = %d, want 2", got.PendingLabels)
+	}
+	if got.OverdueUnlabeled != 1 {
+		t.Fatalf("OverdueUnlabeled = %d, want 1", got.OverdueUnlabeled)
 	}
 }
 

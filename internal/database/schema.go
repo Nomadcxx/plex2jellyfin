@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 25
+const currentSchemaVersion = 26
 
 // SQL migration scripts
 var migrations = []migration{
@@ -732,6 +732,42 @@ var migrations = []migration{
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_unknown_season_refresh_next ON unknown_season_refresh_state(next_attempt_at)`,
 			`INSERT INTO schema_version (version) VALUES (25)`,
+		},
+	},
+	{
+		version: 26,
+		up: []string{
+			`UPDATE parse_decisions
+			    SET jellyfin_item_id = lower(replace(jellyfin_item_id, '-', ''))
+			  WHERE jellyfin_item_id IS NOT NULL
+			    AND ((length(jellyfin_item_id) = 32
+			          AND lower(jellyfin_item_id) NOT GLOB '*[^0-9a-f]*')
+			      OR (length(jellyfin_item_id) = 36
+			          AND substr(jellyfin_item_id, 9, 1) = '-'
+			          AND substr(jellyfin_item_id, 14, 1) = '-'
+			          AND substr(jellyfin_item_id, 19, 1) = '-'
+			          AND substr(jellyfin_item_id, 24, 1) = '-'
+			          AND length(replace(jellyfin_item_id, '-', '')) = 32
+			          AND lower(replace(jellyfin_item_id, '-', '')) NOT GLOB '*[^0-9a-f]*'))`,
+			`UPDATE jellyfin_items
+			    SET jellyfin_item_id = lower(replace(jellyfin_item_id, '-', ''))
+			  WHERE jellyfin_item_id IS NOT NULL
+			    AND ((length(jellyfin_item_id) = 32
+			          AND lower(jellyfin_item_id) NOT GLOB '*[^0-9a-f]*')
+			      OR (length(jellyfin_item_id) = 36
+			          AND substr(jellyfin_item_id, 9, 1) = '-'
+			          AND substr(jellyfin_item_id, 14, 1) = '-'
+			          AND substr(jellyfin_item_id, 19, 1) = '-'
+			          AND substr(jellyfin_item_id, 24, 1) = '-'
+			          AND length(replace(jellyfin_item_id, '-', '')) = 32
+			          AND lower(replace(jellyfin_item_id, '-', '')) NOT GLOB '*[^0-9a-f]*'))`,
+			`UPDATE parse_decisions
+			    SET metadata_state = 'identified',
+			        metadata_error = NULL,
+			        next_metadata_check_at = NULL
+			  WHERE jellyfin_identified = 1
+			    AND metadata_state = 'missing_provider_ids'`,
+			`INSERT INTO schema_version (version) VALUES (26)`,
 		},
 	},
 }

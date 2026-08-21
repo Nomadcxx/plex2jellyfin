@@ -108,6 +108,16 @@ func (c Collector) Collect() (BundlePaths, error) {
 	}
 	suspicious = append(suspicious, providerIdentitySuspicious(providerDuplicates)...)
 	metrics := SummarizeDecisionMetrics(decisions, now)
+	states, err := c.DB.CountMetadataStates()
+	if err != nil {
+		return bundle, fmt.Errorf("count outstanding metadata states: %w", err)
+	}
+	metadataOutstanding := 0
+	for state, count := range states {
+		if isMetadataProblem(state) {
+			metadataOutstanding += count
+		}
+	}
 	summary := Summary{
 		RunID:                         bundle.RunID,
 		GeneratedAt:                   now,
@@ -116,8 +126,10 @@ func (c Collector) Collect() (BundlePaths, error) {
 		RepairEvents:                  len(repairs),
 		SuspiciousItems:               len(suspicious),
 		MetadataProblems:              metrics.MetadataProblems,
+		MetadataProblemsOutstanding:   metadataOutstanding,
 		DriftLabels:                   metrics.DriftLabels,
 		FailLabels:                    metrics.FailLabels,
+		VanishedLabels:                metrics.VanishedLabels,
 		PendingLabels:                 metrics.PendingLabels,
 		OverdueUnlabeled:              metrics.OverdueUnlabeled,
 		HousekeepingFailed:            hk.CreatedInWindow[database.TaskStatusFailed],

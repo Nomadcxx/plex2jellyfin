@@ -103,3 +103,27 @@ func TestDeriveLabel(t *testing.T) {
 		}
 	})
 }
+
+func TestDeriveLabelVanishedItemEscapesAfterTTL(t *testing.T) {
+	dec := database.ParseDecision{
+		ParsedTitle:    "Fantastic Beasts and Where to Find Them",
+		JellyfinImdbID: "tt3183660",
+		EventAt:        time.Now().Add(-40 * 24 * time.Hour),
+	}
+
+	if got := labeling.DeriveLabel(dec, "", labeling.DefaultTTL); got != "VANISHED" {
+		t.Fatalf("DeriveLabel = %q, want VANISHED", got)
+	}
+}
+
+func TestDeriveLabelVanishedItemStaysPendingInsideTTL(t *testing.T) {
+	dec := database.ParseDecision{
+		ParsedTitle:    "Fantastic Beasts and Where to Find Them",
+		JellyfinImdbID: "tt3183660",
+		EventAt:        time.Now().Add(-2 * time.Hour),
+	}
+
+	if got := labeling.DeriveLabel(dec, "", labeling.DefaultTTL); got != "" {
+		t.Fatalf("DeriveLabel = %q, want empty label inside TTL", got)
+	}
+}

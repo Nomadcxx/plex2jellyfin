@@ -63,7 +63,7 @@ type negEntry struct {
 }
 
 // backoffSchedule returns how long to defer a path after `failures` failures.
-// 1st: 30 min, 2nd: 2h, 3rd: 12h, 4th+: 24h.
+// 1st: 30m, 2nd: 2h, 3rd: 12h, 4th: 24h, 5th: 7d, 6th+: 30d.
 func backoffSchedule(failures int) time.Duration {
 	switch failures {
 	case 0, 1:
@@ -72,8 +72,15 @@ func backoffSchedule(failures int) time.Duration {
 		return 2 * time.Hour
 	case 3:
 		return 12 * time.Hour
-	default:
+	case 4:
 		return 24 * time.Hour
+	case 5:
+		return 7 * 24 * time.Hour
+	default:
+		// ponytail: no parser-version fingerprint yet. The 30-day ceiling
+		// bounds duplicate rows while parser upgrades still get another
+		// attempt. Store the parser version if releases must clear entries.
+		return 30 * 24 * time.Hour
 	}
 }
 
@@ -95,7 +102,12 @@ func (n *NegativeCache) IsDeferred(path string) (bool, time.Duration, string) {
 	if !ok {
 		return false, 0, ""
 	}
-	if _, err := os.Stat(path); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
+		delete(n.entries, path)
+		return false, 0, ""
+	}
+	if info.ModTime().After(e.failedAt) {
 		delete(n.entries, path)
 		return false, 0, ""
 	}
