@@ -67,3 +67,71 @@ func TestWatchConfigPathHelpersReturnCopies(t *testing.T) {
 		t.Fatal("TVPaths returned aliased storage")
 	}
 }
+
+func TestPathContainsUsesFilesystemBoundaries(t *testing.T) {
+	tests := []struct {
+		name      string
+		root      string
+		candidate string
+		want      bool
+	}{
+		{name: "same", root: "/downloads/tv", candidate: "/downloads/tv", want: true},
+		{name: "child", root: "/downloads/tv", candidate: "/downloads/tv/release/episode.mkv", want: true},
+		{name: "adjacent prefix", root: "/downloads/tv", candidate: "/downloads/tv2/episode.mkv", want: false},
+		{name: "parent", root: "/downloads/tv", candidate: "/downloads", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := PathContains(tt.root, tt.candidate); got != tt.want {
+				t.Fatalf("PathContains(%q, %q) = %v, want %v", tt.root, tt.candidate, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateWatchLayoutRejectsConflictingRoots(t *testing.T) {
+	tests := []struct {
+		name      string
+		watch     WatchConfig
+		libraries LibrariesConfig
+	}{
+		{
+			name:  "ordinary and seeding overlap",
+			watch: WatchConfig{TV: []string{"/downloads/tv"}, SeedingTV: []string{"/downloads/tv/seeding"}},
+		},
+		{
+			name:  "media types share root",
+			watch: WatchConfig{TV: []string{"/downloads/shared"}, Movies: []string{"/downloads/shared"}},
+		},
+		{
+			name:      "watch inside library",
+			watch:     WatchConfig{TV: []string{"/media/tv/incoming"}},
+			libraries: LibrariesConfig{TV: []string{"/media/tv"}},
+		},
+		{
+			name:      "library inside watch",
+			watch:     WatchConfig{Movies: []string{"/media"}},
+			libraries: LibrariesConfig{Movies: []string{"/media/movies"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateWatchLayout(tt.watch, tt.libraries); err == nil {
+				t.Fatal("expected conflicting layout error")
+			}
+		})
+	}
+}
+
+func TestValidateWatchLayoutAllowsAdjacentPrefixes(t *testing.T) {
+	watch := WatchConfig{
+		TV:            []string{"/downloads/tv"},
+		SeedingTV:     []string{"/downloads/tv2"},
+		Movies:        []string{"/downloads/movies"},
+		SeedingMovies: []string{"/downloads/movies2"},
+	}
+	libraries := LibrariesConfig{TV: []string{"/media/tv"}, Movies: []string{"/media/movies"}}
+	if err := ValidateWatchLayout(watch, libraries); err != nil {
+		t.Fatalf("adjacent prefixes rejected: %v", err)
+	}
+}

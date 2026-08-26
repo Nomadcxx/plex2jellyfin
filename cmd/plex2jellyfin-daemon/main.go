@@ -105,28 +105,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 	defer logger.Close()
 
-	var watchPaths []string
-	watchPaths = append(watchPaths, cfg.Watch.Movies...)
-	watchPaths = append(watchPaths, cfg.Watch.TV...)
+	watchPaths := cfg.Watch.AllPaths()
 
 	if len(watchPaths) == 0 {
 		return fmt.Errorf("no watch directories configured")
 	}
-
-	// Warn if any watch path overlaps with a library path — this causes the
-	// watcher to recursively monitor the entire library, generating massive
-	// event volume and memory usage.
-	allLibPaths := append(cfg.Libraries.Movies, cfg.Libraries.TV...)
-	for _, wp := range watchPaths {
-		wpClean := filepath.Clean(wp)
-		for _, lp := range allLibPaths {
-			lpClean := filepath.Clean(lp)
-			if wpClean == lpClean || strings.HasPrefix(wpClean, lpClean+string(filepath.Separator)) || strings.HasPrefix(lpClean, wpClean+string(filepath.Separator)) {
-				logger.Warn("daemon", "DANGEROUS: watch path overlaps with library path — this will cause excessive memory and CPU usage",
-					logging.F("watch_path", wp),
-					logging.F("library_path", lp))
-			}
-		}
+	if err := config.ValidateWatchLayout(cfg.Watch, cfg.Libraries); err != nil {
+		return fmt.Errorf("invalid watch configuration: %w", err)
 	}
 
 	notifyMgr := notify.NewManager(false)
