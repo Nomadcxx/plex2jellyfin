@@ -8,27 +8,27 @@
 
 Plex2Jellyfin is the import authority and its database is the library source of truth. Sonarr and Radarr may schedule downloads and receive post-import rescans, but they must not rename or import completed media.
 
-The current qBittorrent categories write directly into `/mnt/STORAGE5/TVSHOWS` and `/mnt/STORAGE5/MOVIES`. Those paths bypass Plex2Jellyfin's watch roots, parsing, canonical naming, placement, audit log, and database updates. That is why Stargirl seasons 1 and 3 appeared as separate Jellyfin series while the SABnzbd-imported season 2 was canonical.
+The current qBittorrent categories write directly into `/mnt/STORAGE5/TVSHOWS` and `/mnt/STORAGE5/MOVIES`. Those paths bypass Plex2Jellyfin's watch roots, parsing, canonical naming, placement, audit log, and database updates. That is why Stargirl seasons 1 and 3 appeared as separate Jellyfin series while the SABnzbd-imported season 2 was canonical. Other torrent clients can cause the same failure when their final download directory is a media-library root.
 
-Pointing qBittorrent at an existing watch root is also unsafe. The daemon organizer always moves successful imports, removing the source file that qBittorrent needs for seeding. Although `[options].delete_source = false` is documented and exposed by setup surfaces, the daemon does not currently wire that option into its organizers.
+Pointing a torrent client at an existing watch root is also unsafe. The daemon organizer always moves successful imports, removing the source file the client needs for seeding. Although `[options].delete_source = false` is documented and exposed by setup surfaces, the daemon does not currently wire that option into its organizers.
 
 ## Goals
 
-- Import completed qBittorrent downloads through the same parsing, library selection, naming, audit, and database pipeline as SABnzbd downloads.
-- Retain torrent source files until qBittorrent's own ratio/time policy removes them.
+- Import completed torrents from any filesystem-based client through the same parsing, library selection, naming, audit, and database pipeline as SABnzbd downloads.
+- Retain torrent source files until the client's ratio/time policy removes them.
 - Use hardlinks when source and target are on the same filesystem, with verified copying across filesystems.
 - Keep existing SABnzbd move behavior and backward-compatible configuration.
-- Support manually added torrents when the user assigns a TV or Movies category.
+- Support manually added torrents when the user assigns or selects a TV or Movies completion directory.
 - Expose the feature consistently in CLI setup, the TUI installer, web setup, and web path settings.
 - Reload watch roots and their transfer policies atomically.
 
 ## Non-goals
 
-- Plex2Jellyfin will not manage torrent ratios, stop seeding, or remove torrents from qBittorrent.
+- Plex2Jellyfin will not manage torrent ratios, stop seeding, or remove torrents from a client.
 - Plex2Jellyfin will not infer an import type for uncategorised torrents.
 - Sonarr/Radarr completed-download handling will remain disabled.
 - The change will not trigger library-wide Jellyfin refreshes.
-- The first release will not add qBittorrent API integration. Filesystem completion paths are sufficient.
+- The first release will not add downloader API integration. Filesystem completion paths are sufficient.
 
 ## Configuration
 
@@ -38,8 +38,8 @@ Extend the existing `[watch]` table with two optional arrays:
 [watch]
 tv = ["/mnt/NVME3/Sabnzbd/complete/tv"]
 movies = ["/mnt/NVME3/Sabnzbd/complete/movies"]
-torrent_tv = ["/mnt/STORAGE5/.downloads/qbittorrent/complete/tv"]
-torrent_movies = ["/mnt/STORAGE5/.downloads/qbittorrent/complete/movies"]
+seeding_tv = ["/mnt/STORAGE5/.downloads/torrents/complete/tv"]
+seeding_movies = ["/mnt/STORAGE5/.downloads/torrents/complete/movies"]
 
 [options]
 delete_source = true
@@ -51,16 +51,31 @@ The policies are fixed and intentionally small:
 |---|---|
 | `watch.tv`, `watch.movies` with `delete_source = true` | Move after successful import |
 | `watch.tv`, `watch.movies` with `delete_source = false` | Copy and retain source |
-| `watch.torrent_tv`, `watch.torrent_movies` | Hardlink when possible, otherwise copy; always retain source |
+| `watch.seeding_tv`, `watch.seeding_movies` | Hardlink when possible, otherwise copy; always retain source |
 
 Existing configurations load unchanged because the new arrays default to empty. Generated TOML always emits the new keys so saved configurations do not silently lose them.
 
-## qBittorrent Layout
+## Torrent-Client Contract
+
+Plex2Jellyfin integrates with a completed-download filesystem contract rather than a client API:
+
+- incomplete data lives outside watched seeding roots;
+- a completed torrent lands in either a TV or Movies seeding root;
+- the client continues seeding from that completed path;
+- Plex2Jellyfin never changes or removes the source contents;
+- the client owns ratio limits, seed duration, and eventual source removal;
+- uncategorised or unclassified downloads remain outside automatic intake.
+
+Clients that preallocate a final video filename directly inside a watched root are unsafe because a debounce interval cannot prove the writer has finished. They must use a separate incomplete directory or a temporary extension that is atomically renamed only after completion.
+
+## Client Layouts
+
+### qBittorrent
 
 qBittorrent receives only a staging mount, not a media-library mount:
 
 ```text
-host:      /mnt/STORAGE5/.downloads/qbittorrent
+host:      /mnt/STORAGE5/.downloads/torrents
 container: /downloads
 ```
 
@@ -75,11 +90,21 @@ Default/unclassified path:    /downloads/complete/unclassified
 
 Plex2Jellyfin watches only the category completion directories. Partial files and uncategorised torrents remain outside its intake boundary. A manually added torrent is imported after it completes and has either the `TVSHOWS` or `MOVIES` category.
 
+### Transmission
+
+Transmission uses a separate incomplete directory and the TV or Movies completion root as the torrent's final download directory. Transmission has no native category equivalent, so the user or automation must select the correct final directory when adding each torrent. A single unclassified default directory remains unwatched.
+
+### Deluge
+
+Deluge uses a separate incomplete directory and its Label plugin's per-label `move_completed` paths. TV and Movies labels map to the corresponding Plex2Jellyfin seeding roots. Downloads without one of those labels remain in an unwatched default directory.
+
+Other clients, including rTorrent/ruTorrent, are supported when their directory or completion rules satisfy the same contract. No client-specific code runs inside Plex2Jellyfin.
+
 ## Runtime Architecture
 
 ### Source policy
 
-Introduce a small, concurrency-safe source-policy resolver owned by the daemon. It classifies a source path as `move`, `copy`, or `seed` using filesystem-boundary-aware containment. Torrent roots take their fixed `seed` policy; ordinary roots use the current `delete_source` value.
+Introduce a small, concurrency-safe source-policy resolver owned by the daemon. It classifies a source path as `move`, `copy`, or `seed` using filesystem-boundary-aware containment. Seeding roots take their fixed `seed` policy; ordinary roots use the current `delete_source` value.
 
 The organizer resolves the policy per source operation. This avoids mutable organizer-wide `keepSource` state and preserves correct behavior when TV episodes, movies, season packs, deferred operations, and AI retries run concurrently.
 
@@ -97,7 +122,7 @@ A transfer wrapper in `internal/transfer` attempts an atomic hardlink publicatio
 
 Unexpected failures such as permissions or a missing source are returned instead of being hidden behind a copy. The source is never removed. A successful hardlink reports zero physical bytes copied while retaining the source size as the logical total.
 
-Hardlinks share inode ownership, mode, and modification time. Applying configured library permissions or import time therefore also changes those attributes at qBittorrent's source path, but not file contents. qBittorrent hashes contents, so seeding remains valid. Deployments must keep qBittorrent and Plex2Jellyfin in the same media group.
+Hardlinks share inode ownership, mode, and modification time. Applying configured library permissions or import time therefore also changes those attributes at the client's source path, but not file contents. Torrent clients hash contents, so seeding remains valid. Deployments must keep the client and Plex2Jellyfin in the same media group.
 
 ### Watch and policy reload
 
@@ -117,7 +142,7 @@ Containment checks use `filepath.Rel` semantics, not string prefixes. For exampl
 
 Configuration is rejected when:
 
-- an ordinary watch root overlaps a torrent watch root;
+- an ordinary watch root overlaps a seeding watch root;
 - a watch root overlaps a library root;
 - the same canonical path appears with conflicting media types or policies.
 
@@ -125,23 +150,23 @@ CLI, TUI, and web setup report these errors before saving. Manual TOML receives 
 
 ## Import Data Flow
 
-1. qBittorrent writes partial data under `/downloads/incomplete`.
-2. On completion, qBittorrent moves the release into its category completion directory.
+1. The torrent client writes partial data outside Plex2Jellyfin's watch roots.
+2. On completion, the client publishes the release into a media-typed seeding root.
 3. Plex2Jellyfin receives or periodically discovers the completed media file.
 4. The handler identifies TV or movie type from the configured category root, parses the release, and chooses the canonical library target.
 5. The organizer resolves the source policy and hardlinks or copies while retaining the torrent source.
 6. Plex2Jellyfin indexes the canonical target, records the parse/import decision, and sends scoped Sonarr/Radarr/Jellyfin notifications as currently implemented.
-7. qBittorrent continues seeding from the release-named source path.
-8. When its seed policy is satisfied, qBittorrent may remove the torrent and source. The canonical library target remains.
+7. The torrent client continues seeding from the release-named source path.
+8. When its seed policy is satisfied, the client may remove the torrent and source. The canonical library target remains.
 
 ## Failure Handling
 
 - A failed hardlink fallback copy leaves the source intact and does not record a successful import.
 - Cross-volume copy uses the existing disk-health, timeout, retry, and partial-file behavior.
-- If qBittorrent removes the source during import, the operation fails or becomes `VANISHED`; it never deletes a valid target as compensation.
+- If the torrent client removes the source during import, the operation fails or becomes `VANISHED`; it never deletes a valid target as compensation.
 - Repeated completion events use existing destination-quality and already-organized checks.
 - Source-directory cleanup observes that retained source files still exist and skips them.
-- Housekeeping may remove an empty abandoned release directory after qBittorrent removes its contents, but it must not treat live seed data as disposable.
+- Housekeeping may remove an empty abandoned release directory after the client removes its contents, but it must not treat live seed data as disposable.
 - A reload validation or commit failure restores the previous configuration and runtime policy.
 
 ## Setup and Management Surfaces
@@ -156,26 +181,29 @@ All configuration writers and editors must preserve the new arrays:
 - web setup hydration, validation, path editors, and review summary;
 - web Watch Paths settings API and page;
 - daemon startup, initial scan, periodic scan, watcher, reload, and housekeeping inputs;
-- README, configuration reference, Docker examples, and a qBittorrent workflow guide;
+- README, configuration reference, Docker examples, a client-neutral torrent workflow, and recipes for qBittorrent, Transmission, and Deluge;
 - embedded frontend assets rebuilt from the updated web source.
 
-The TUI exposes two optional fixed fields, `TV torrents (keep seeding)` and `Movie torrents (keep seeding)`, in addition to its existing ordinary watch fields. Its dynamic custom folders remain ordinary watch roots.
+The TUI exposes two optional fixed fields, `TV seeding completions` and `Movie seeding completions`, in addition to its existing ordinary watch fields. Its dynamic custom folders remain ordinary watch roots.
 
 ## Regression Test Matrix
 
 | Area | Required proof |
 |---|---|
-| Config | Old TOML loads with empty torrent arrays; new arrays survive load/save and section updates |
-| Validation | Boundary-safe containment; ordinary/torrent and watch/library overlaps fail; adjacent prefixes pass |
+| Config | Old TOML loads with empty seeding arrays; new arrays survive load/save and section updates |
+| Validation | Boundary-safe containment; ordinary/seeding and watch/library overlaps fail; adjacent prefixes pass |
 | Transfer | Same-device import creates equal inodes and retains source; forced cross-device path uses copy; unexpected link failure is returned |
 | Organizer | Move removes ordinary source; copy retains ordinary source; seed retains source and selects hardlink-first transfer for movie, episode, and season-pack paths |
 | Database | Canonical destination is indexed once; retained staging path is not treated as a library duplicate |
 | Daemon | All four root lists are watched/scanned; source hints classify torrent paths; `delete_source = false` works |
 | Reload | Watcher and handler policy change together; rollback restores both |
 | Cleanup | Live seed release directories are untouched; normal successful move cleanup still works |
-| Setup | Shared draft, CLI, API, web, and TUI round-trip torrent roots without erasing existing settings |
-| Frontend | Hydration defaults missing torrent arrays; validation accepts torrent-only intake paired with a library |
-| Documentation | qBittorrent incomplete/category/mount settings are explicit and direct-library paths are rejected |
+| Setup | Shared draft, CLI, API, web, and TUI round-trip seeding roots without erasing existing settings |
+| Frontend | Hydration defaults missing seeding arrays; validation accepts seeding-only intake paired with a library |
+| Ingestion forms | Completed directory moves, file renames, temporary extensions, multi-file torrents, and season packs converge safely |
+| Permissions | Client-specific umasks work with the configured shared media group |
+| Source lifecycle | Canonical hardlinks survive client source rename/removal; source removal during copy cannot produce a false success |
+| Documentation | The generic contract and qBittorrent, Transmission, and Deluge recipes are explicit; direct-library paths are rejected |
 
 Run focused package tests after each task, then run the complete Go suite, web tests/build, OpenAPI consistency check, and repository lint/build gates before deployment.
 
@@ -184,8 +212,8 @@ Run focused package tests after each task, then run the complete Go suite, web t
 Deployment is staged to avoid losing active seed state:
 
 1. Create the host incomplete, TV completion, movie completion, and unclassified directories with the media group's ownership.
-2. Deploy the new Plex2Jellyfin build and configure torrent watch roots.
-3. Change qBittorrent's incomplete path and category save paths; remove its media-library mount if container layout permits.
+2. Deploy the new Plex2Jellyfin build and configure seeding watch roots.
+3. Change the active torrent client's incomplete and media-typed completion paths; remove its media-library mount if container layout permits.
 4. Add a small completed test torrent or test fixture and verify source retention, canonical import, database decision, and scoped Jellyfin visibility.
 5. Use qBittorrent's `Set location` operation to relocate active Stargirl season 1 and 3 data into the TV completion staging area without breaking torrent state.
 6. Let Plex2Jellyfin import both seasons into the canonical Stargirl series, then verify inode/copy state, episode counts, provider identity, and Jellyfin paths.
