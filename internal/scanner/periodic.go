@@ -105,7 +105,7 @@ func NewPeriodicScanner(cfg ScannerConfig) *PeriodicScanner {
 
 	return &PeriodicScanner{
 		interval:        cfg.Interval,
-		watchPaths:      cfg.WatchPaths,
+		watchPaths:      append([]string(nil), cfg.WatchPaths...),
 		handler:         cfg.Handler,
 		logger:          cfg.Logger,
 		activityDir:     cfg.ActivityDir,
@@ -115,6 +115,18 @@ func NewPeriodicScanner(cfg ScannerConfig) *PeriodicScanner {
 		radarrClient:    cfg.RadarrClient,
 		healthy:         true,
 	}
+}
+
+func (s *PeriodicScanner) ReplaceWatchPaths(paths []string) {
+	s.mu.Lock()
+	s.watchPaths = append([]string(nil), paths...)
+	s.mu.Unlock()
+}
+
+func (s *PeriodicScanner) WatchPaths() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.watchPaths...)
 }
 
 func isNilOrphanChecker(checker OrphanChecker) bool {
@@ -160,9 +172,10 @@ func (s *PeriodicScanner) Status() ScannerStatus {
 
 // Start begins the periodic scanning loop. Blocks until context is cancelled.
 func (s *PeriodicScanner) Start(ctx context.Context) error {
+	watchPaths := s.WatchPaths()
 	s.logger.Info("scanner", "Periodic scanner starting",
 		logging.F("interval", s.interval.String()),
-		logging.F("watch_paths", len(s.watchPaths)))
+		logging.F("watch_paths", len(watchPaths)))
 	if err := s.checkArrHealth(); err != nil {
 		s.mu.Lock()
 		s.healthy = false
@@ -292,7 +305,8 @@ func (s *PeriodicScanner) checkOrphans() {
 }
 
 func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
-	for _, watchPath := range s.watchPaths {
+	watchPaths := s.WatchPaths()
+	for _, watchPath := range watchPaths {
 		s.logger.Info("scanner", "Scanning directory", logging.F("path", watchPath))
 
 		err := filepath.Walk(watchPath, func(path string, info os.FileInfo, walkErr error) error {

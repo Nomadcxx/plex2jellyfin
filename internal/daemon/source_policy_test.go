@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/Nomadcxx/plex2jellyfin/internal/organizer"
 )
 
@@ -93,4 +94,35 @@ func TestSourcePolicyConcurrentResolveAndUpdate(t *testing.T) {
 		}, i%2 == 0)
 	}
 	wg.Wait()
+}
+
+func TestMediaHandlerReplaceSourcePolicyUpdatesHintsAndTransferMode(t *testing.T) {
+	root := t.TempDir()
+	oldTV := filepath.Join(root, "old-tv")
+	newSeedTV := filepath.Join(root, "new-seed-tv")
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:  []string{filepath.Join(root, "tv-library")},
+		MovieLibs:    []string{filepath.Join(root, "movie-library")},
+		Watch:        config.WatchConfig{TV: []string{oldTV}},
+		DeleteSource: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldFile := filepath.Join(oldTV, "Show.S01E01.mkv")
+	if got := handler.sourcePolicy.Resolve(oldFile); got != organizer.TransferMove {
+		t.Fatalf("old mode = %d, want move", got)
+	}
+
+	handler.ReplaceSourcePolicy(config.WatchConfig{SeedingTV: []string{newSeedTV}}, false)
+	newFile := filepath.Join(newSeedTV, "Show.S01E01.mkv")
+	if got := handler.sourcePolicy.Resolve(newFile); got != organizer.TransferSeed {
+		t.Fatalf("new mode = %d, want seed", got)
+	}
+	if got := handler.getSourceHint(newFile); got != naming.SourceTV {
+		t.Fatalf("new hint = %q, want tv", got.String())
+	}
+	if got := handler.sourcePolicy.Resolve(oldFile); got != organizer.TransferCopy {
+		t.Fatalf("removed old root mode = %d, want safe unknown copy", got)
+	}
 }

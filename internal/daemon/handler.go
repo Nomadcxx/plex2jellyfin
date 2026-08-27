@@ -481,6 +481,10 @@ func (h *MediaHandler) allWatchPaths() []string {
 	return h.sourcePolicy.AllPaths()
 }
 
+func (h *MediaHandler) ReplaceSourcePolicy(watch config.WatchConfig, deleteSource bool) {
+	h.sourcePolicy.Update(watch, deleteSource)
+}
+
 func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 	if event.Type == watcher.EventDelete {
 		return nil

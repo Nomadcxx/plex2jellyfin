@@ -81,3 +81,27 @@ func TestSupervisorReportsCommitFailure(t *testing.T) {
 		t.Fatalf("unexpected failures: %+v", res.Failed)
 	}
 }
+
+func TestSupervisorRollbackOnCommitFailure(t *testing.T) {
+	a := &fakeReloadable{name: "a"}
+	b := &fakeReloadable{name: "b", commitErr: errors.New("commit failed")}
+	c := &fakeReloadable{name: "c"}
+	sup := NewSupervisor()
+	sup.Register(a)
+	sup.Register(b)
+	sup.Register(c)
+
+	res := sup.Reload(context.Background(), &config.Config{}, &config.Config{})
+	if res.OK {
+		t.Fatal("expected failure")
+	}
+	if !a.committed || c.committed {
+		t.Fatalf("commit sequence a=%v c=%v, want first committed and third skipped", a.committed, c.committed)
+	}
+	if !a.rolledBack || !b.rolledBack || !c.rolledBack {
+		t.Fatalf("rollback state a=%v b=%v c=%v, want all prepared subsystems rolled back", a.rolledBack, b.rolledBack, c.rolledBack)
+	}
+	if len(res.Reloaded) != 0 {
+		t.Fatalf("rolled-back subsystems reported reloaded: %v", res.Reloaded)
+	}
+}

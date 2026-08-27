@@ -75,9 +75,15 @@ func (s *Supervisor) Reload(ctx context.Context, oldCfg, newCfg *config.Config) 
 			continue
 		}
 		if err := sub.commit(); err != nil {
-			res.OK = false
-			res.Failed = append(res.Failed, FailedSubsystem{Name: sub.name, Error: err.Error()})
-			continue
+			for i := len(preparedSubs) - 1; i >= 0; i-- {
+				if preparedSubs[i].rollback != nil {
+					preparedSubs[i].rollback()
+				}
+			}
+			return Result{
+				OK:     false,
+				Failed: []FailedSubsystem{{Name: sub.name, Error: err.Error()}},
+			}
 		}
 		res.Reloaded = append(res.Reloaded, sub.name)
 	}

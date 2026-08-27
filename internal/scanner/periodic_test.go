@@ -187,6 +187,79 @@ func TestPeriodicScanner_ScanWatchDirectoriesForwardsFullPath(t *testing.T) {
 	}
 }
 
+func TestPeriodicScannerReplaceWatchPaths(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "old")
+	newPath := filepath.Join(root, "new")
+	if err := os.MkdirAll(oldPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(newPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldFile := filepath.Join(oldPath, "old.mkv")
+	newFile := filepath.Join(newPath, "new.mkv")
+	if err := os.WriteFile(oldFile, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newFile, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := &recordingHandler{}
+	s := NewPeriodicScanner(ScannerConfig{
+		WatchPaths: []string{oldPath},
+		Handler:    handler,
+		Logger:     logging.Nop(),
+	})
+	s.ReplaceWatchPaths([]string{newPath})
+	processed, scanErrors := s.scanWatchDirectories()
+	if processed != 1 || scanErrors != 0 {
+		t.Fatalf("scan result = (%d, %d), want (1, 0)", processed, scanErrors)
+	}
+	if len(handler.events) != 1 || handler.events[0].Path != newFile {
+		t.Fatalf("events = %+v, want only %q", handler.events, newFile)
+	}
+	paths := s.WatchPaths()
+	paths[0] = "/mutated"
+	if s.WatchPaths()[0] != newPath {
+		t.Fatal("WatchPaths returned aliased storage")
+	}
+}
+
+func TestPeriodicScannerReplaceWatchPathsConcurrentWithScan(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "old")
+	newPath := filepath.Join(root, "new")
+	if err := os.MkdirAll(oldPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(newPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := NewPeriodicScanner(ScannerConfig{
+		WatchPaths: []string{oldPath},
+		Handler:    &recordingHandler{},
+		Logger:     logging.Nop(),
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 500; i++ {
+			s.scanWatchDirectories()
+		}
+	}()
+	for i := 0; i < 500; i++ {
+		if i%2 == 0 {
+			s.ReplaceWatchPaths([]string{newPath})
+		} else {
+			s.ReplaceWatchPaths([]string{oldPath})
+		}
+	}
+	<-done
+}
+
 func TestPeriodicScanner_RunScanIgnoresTypedNilOrphanChecker(t *testing.T) {
 	var checker *jellyfin.Client
 	s := NewPeriodicScanner(ScannerConfig{

@@ -430,7 +430,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	reloadSupervisor := daemonreload.NewSupervisor()
 	reloadSupervisor.Register(daemonreload.NewLoggingReloadable(logger))
-	reloadSupervisor.Register(daemonreload.NewScannerReloadable(w))
+	reloadSupervisor.Register(daemonreload.NewScannerReloadable(w, periodicScanner, handler))
 	if aiMatcher != nil {
 		reloadSupervisor.Register(daemonreload.NewAIReloadable(aiMatcher))
 	}

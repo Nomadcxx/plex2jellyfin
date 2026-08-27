@@ -81,8 +81,8 @@ func TestReloadHandlerLoadsConfigAndUpdatesCurrentConfig(t *testing.T) {
 }
 
 func TestStopHandlerCallsShutdown(t *testing.T) {
-	called := false
-	stop := func() { called = true }
+	called := make(chan struct{})
+	stop := func() { close(called) }
 	srv := ipc.NewServer(filepath.Join(t.TempDir(), "ctl.sock"))
 	srv.Register(ipc.CmdStop, stopHandler(stop))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -93,8 +93,9 @@ func TestStopHandlerCallsShutdown(t *testing.T) {
 	defer srv.Stop()
 	cli := ipc.NewClient(srv.Path())
 	_, _ = cli.Call(ctx, ipc.CmdStop, nil)
-	time.Sleep(50 * time.Millisecond)
-	if !called {
+	select {
+	case <-called:
+	case <-time.After(time.Second):
 		t.Error("stop func not invoked")
 	}
 }
