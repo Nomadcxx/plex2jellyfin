@@ -33,9 +33,12 @@ docker run -d \
 |---|---|
 | `/config` | Home directory for the in-container user. Holds `.config/plex2jellyfin/config.toml`, the SQLite `media.db`, lock files, and audit/postmortem reports. Must be writable. |
 | `/watch` | Mount point(s) matched to your `[watch]` section — where Sonarr/Radarr/download clients drop new files. |
+| `/seeding` | Optional. Mount point(s) matched to `watch.seeding_movies` / `watch.seeding_tv` — completed torrents your client keeps seeding. Read access is enough. |
 | `/library` | Mount point(s) matched to your `[libraries]` section — your Jellyfin `Movies` / `TV Shows` roots. |
 
-The container declares all three as `VOLUME` in the image, so even without explicit `-v` flags Docker creates anonymous volumes for them — always bind-mount all three explicitly or you'll lose data between container recreations.
+The container declares `/config`, `/watch`, and `/library` as `VOLUME` in the image, so even without explicit `-v` flags Docker creates anonymous volumes for them. Bind-mount them explicitly or you'll lose data between container recreations.
+
+Imports from a seeding mount hardlink into the library only when both resolve to the same host filesystem; otherwise they copy. Bind-mount `/seeding` and `/library` from one host filesystem to keep a single copy on disk, and see [Torrent clients](/docs/getting-started/torrent-clients) for the client-side layout.
 
 If your host layout uses more than one watch or library directory (multi-drive setups are common with this tool), bind-mount each one to its own path under `/watch` or `/library` and mirror that layout in `config.toml`'s `[watch]` and `[libraries]` arrays. Path mappings inside the container must match what you write into the config — see [Configuration](/docs/reference/configuration).
 
@@ -123,6 +126,9 @@ services:
     volumes:
       - ./config:/config
       - /path/to/downloads:/watch
+      # Completed torrents you keep seeding. Mount them on the same host
+      # filesystem as /library so imports hardlink instead of copying.
+      - /path/to/torrents:/seeding
       - /path/to/media:/library
     ports:
       - "5522:5522"

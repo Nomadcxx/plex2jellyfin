@@ -5,6 +5,7 @@
     "setup-wizards",
     "path-mappings",
     "packages",
+    "torrent-clients",
     "docker",
     "jellyfin-plugin",
     "migration-guide"

@@ -28,14 +28,22 @@ Completing setup on any surface completes it for all. The web server adopts olde
 
 | Key | Type | Description |
 |---|---|---|
-| `movies` | string[] | Download drop dirs for movies. |
-| `tv` | string[] | Download drop dirs for TV. |
+| `movies` | string[] | Download drop dirs for movies. Moved or copied per `delete_source`. |
+| `tv` | string[] | Download drop dirs for TV. Moved or copied per `delete_source`. |
+| `seeding_movies` | string[] | Completed movie downloads your torrent client keeps seeding. Sources stay in place. |
+| `seeding_tv` | string[] | Completed TV downloads your torrent client keeps seeding. Sources stay in place. |
 
 ```toml
 [watch]
 movies = ["/path/to/downloads/movies"]
 tv = ["/path/to/downloads/tv"]
+seeding_movies = ["/path/to/torrents/complete/movies"]
+seeding_tv = ["/path/to/torrents/complete/tv"]
 ```
+
+Both seeding arrays default to empty, so older configs load unchanged.
+
+Imports from a seeding root hardlink into the library when the source and destination share a filesystem, and copy when they do not. `delete_source` does not apply: Plex2Jellyfin never modifies or removes a seeding source. See [Torrent clients](/docs/getting-started/torrent-clients) for the client-side layout.
 
 ## `[libraries]`
 
@@ -51,6 +59,8 @@ tv = ["/path/to/jellyfin/TV Shows"]
 ```
 
 Both `[watch]` and `[libraries]` accept multiple paths for multi-drive setups.
+
+No watch root may contain, or sit inside, another watch root of a different media type or policy, or any library path. The daemon rejects an overlapping layout at startup, and the CLI, TUI, and web wizards block it before you save.
 
 ## `[sonarr]` / `[radarr]`
 
@@ -158,7 +168,7 @@ Passive recovery checks Jellyfin for metadata that arrives after import. Active 
 |---|---|---|---|
 | `dry_run` | bool | `false` | Preview flag for some CLI flows. **The daemon always organizes for real** and forces this off at startup. |
 | `verify_checksums` | bool | `false` | Verify integrity after transfer before deleting the source. |
-| `delete_source` | bool | `true` | Delete source after a successful move (`false` = copy). |
+| `delete_source` | bool | `true` | Delete source after a successful move (`false` = copy). Applies to `watch.movies` and `watch.tv` only; seeding roots always keep their source. |
 
 Loadable but not always emitted by `config init`: `transfer_concurrency_per_volume` (int; caps parallel transfers to the same destination mount; `<=0` disables; unset uses the daemon default of `2`).
 
@@ -264,8 +274,10 @@ version = 1
 completed = true
 
 [watch]
-movies = ["/downloads/movies"]
-tv     = ["/downloads/tv"]
+movies         = ["/downloads/movies"]
+tv             = ["/downloads/tv"]
+seeding_movies = ["/torrents/complete/movies"]
+seeding_tv     = ["/torrents/complete/tv"]
 
 [libraries]
 movies = ["/media/Movies"]
