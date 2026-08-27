@@ -45,9 +45,10 @@ const (
 
 // WatchFolder represents a configurable watch folder
 type WatchFolder struct {
-	Label string // Freeform label: "TV Shows", "Movies", "Torrents", etc.
-	Type  string // Underlying type: "tv" or "movies"
-	Paths string // Comma-separated paths
+	Label   string // Freeform label: "TV Shows", "Movies", "Torrents", etc.
+	Type    string // Underlying type: "tv" or "movies"
+	Paths   string // Comma-separated paths
+	Seeding bool   // Completed-download root: sources stay in place for the torrent client
 }
 
 // AI detection state
@@ -113,9 +114,8 @@ type model struct {
 	watchFolderFocused int // Which folder entry is focused
 
 	// Library paths
-	tvLibraryPaths     string
-	movieLibraryPaths  string
-	pathOverlapWarning string
+	tvLibraryPaths    string
+	movieLibraryPaths string
 
 	// Sonarr configuration
 	sonarrEnabled bool

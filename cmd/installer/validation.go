@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,75 +14,52 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// detectPathOverlap checks if any watch path overlaps with a library path.
-// Returns a warning message if overlap detected, empty string otherwise.
-func (m *model) detectPathOverlap() string {
-	var watchPaths []string
-	for _, wf := range m.watchFolders {
-		for _, p := range splitPaths(wf.Paths) {
-			if p != "" {
-				watchPaths = append(watchPaths, filepath.Clean(p))
-			}
-		}
-	}
-
-	var libPaths []string
-	for _, p := range splitPaths(m.tvLibraryPaths) {
-		if p != "" {
-			libPaths = append(libPaths, filepath.Clean(p))
-		}
-	}
-	for _, p := range splitPaths(m.movieLibraryPaths) {
-		if p != "" {
-			libPaths = append(libPaths, filepath.Clean(p))
-		}
-	}
-
-	for _, wp := range watchPaths {
-		for _, lp := range libPaths {
-			if wp == lp || strings.HasPrefix(wp, lp+string(filepath.Separator)) || strings.HasPrefix(lp, wp+string(filepath.Separator)) {
-				return fmt.Sprintf("Watch path %q overlaps with library path %q — this will cause excessive resource usage. Watch paths should point to download/incoming directories, not library directories.", wp, lp)
-			}
-		}
-	}
-	return ""
-}
-
-// mediaPathsError requires at least one complete watch+library pair (TV or Movies),
-// matching setup.ValidateDraft's media rules without pulling in later wizard fields.
-func (m model) mediaPathsError() string {
-	var watchTV, watchMovies []string
+// watchLayout projects the wizard's folder list and library fields onto the
+// config types that own watch-root policy, so the installer validates through
+// the same rules the daemon enforces at load.
+func (m model) watchLayout() (config.WatchConfig, config.LibrariesConfig) {
+	var watch config.WatchConfig
 	for _, wf := range m.watchFolders {
 		paths := splitPaths(wf.Paths)
-		if wf.Type == "tv" {
-			watchTV = append(watchTV, paths...)
-		} else if wf.Type == "movies" {
-			watchMovies = append(watchMovies, paths...)
+		switch {
+		case wf.Seeding && wf.Type == "tv":
+			watch.SeedingTV = append(watch.SeedingTV, paths...)
+		case wf.Seeding:
+			watch.SeedingMovies = append(watch.SeedingMovies, paths...)
+		case wf.Type == "tv":
+			watch.TV = append(watch.TV, paths...)
+		default:
+			watch.Movies = append(watch.Movies, paths...)
 		}
 	}
-	libTV := splitPaths(m.tvLibraryPaths)
-	libMovies := splitPaths(m.movieLibraryPaths)
-
-	nonEmpty := func(in []string) []string {
-		out := make([]string, 0, len(in))
-		for _, p := range in {
-			if strings.TrimSpace(p) != "" {
-				out = append(out, p)
-			}
-		}
-		return out
+	libraries := config.LibrariesConfig{
+		Movies: splitPaths(m.movieLibraryPaths),
+		TV:     splitPaths(m.tvLibraryPaths),
 	}
-	watchTV, watchMovies = nonEmpty(watchTV), nonEmpty(watchMovies)
-	libTV, libMovies = nonEmpty(libTV), nonEmpty(libMovies)
+	return watch, libraries
+}
 
-	if len(watchTV)+len(watchMovies)+len(libTV)+len(libMovies) == 0 {
+// mediaPathsError requires at least one complete watch+library pair (TV or
+// Movies) — ordinary or seeding intake both count — and then defers to
+// config.ValidateWatchLayout so overlapping media or policy roots block the
+// wizard instead of reaching the daemon.
+func (m model) mediaPathsError() string {
+	watch, libraries := m.watchLayout()
+
+	intakeTV := len(watch.TV) + len(watch.SeedingTV)
+	intakeMovies := len(watch.Movies) + len(watch.SeedingMovies)
+
+	if intakeTV+intakeMovies+len(libraries.TV)+len(libraries.Movies) == 0 {
 		return "configure at least one complete watch+library pair (TV or Movies)"
 	}
-	if (len(watchTV) == 0) != (len(libTV) == 0) {
+	if (intakeTV == 0) != (len(libraries.TV) == 0) {
 		return "TV watch and library paths must both be set"
 	}
-	if (len(watchMovies) == 0) != (len(libMovies) == 0) {
+	if (intakeMovies == 0) != (len(libraries.Movies) == 0) {
 		return "Movie watch and library paths must both be set"
+	}
+	if err := config.ValidateWatchLayout(watch, libraries); err != nil {
+		return err.Error()
 	}
 	return ""
 }
