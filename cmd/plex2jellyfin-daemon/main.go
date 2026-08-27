@@ -315,8 +315,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	handler, err := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
 		TVLibraries:                  cfg.Libraries.TV,
 		MovieLibs:                    cfg.Libraries.Movies,
-		TVWatchPaths:                 cfg.Watch.TV,
-		MovieWatchPaths:              cfg.Watch.Movies,
+		Watch:                        cfg.Watch,
+		DeleteSource:                 cfg.Options.DeleteSource,
 		DebounceTime:                 10 * time.Second,
 		DryRun:                       false, // Daemon always processes files automatically
 		Timeout:                      5 * time.Minute,

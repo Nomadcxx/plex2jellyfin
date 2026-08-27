@@ -79,6 +79,110 @@ func TestMediaHandler_SeparateLibraries(t *testing.T) {
 	}
 }
 
+func TestMediaHandlerSourcePolicyIncludesSeedingRoots(t *testing.T) {
+	root := t.TempDir()
+	watch := config.WatchConfig{
+		TV:            []string{filepath.Join(root, "ordinary-tv")},
+		Movies:        []string{filepath.Join(root, "ordinary-movies")},
+		SeedingTV:     []string{filepath.Join(root, "seed-tv")},
+		SeedingMovies: []string{filepath.Join(root, "seed-movies")},
+	}
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:  []string{filepath.Join(root, "tv-library")},
+		MovieLibs:    []string{filepath.Join(root, "movie-library")},
+		Watch:        watch,
+		DeleteSource: true,
+		Logger:       logging.Nop(),
+	})
+	require.NoError(t, err)
+
+	assert.ElementsMatch(t, watch.AllPaths(), handler.allWatchPaths())
+	assert.Equal(t, naming.SourceTV, handler.getSourceHint(filepath.Join(watch.SeedingTV[0], "Show.S01E01.mkv")))
+	assert.Equal(t, naming.SourceMovie, handler.getSourceHint(filepath.Join(watch.SeedingMovies[0], "Movie.2026.mkv")))
+	assert.Equal(t, naming.SourceUnknown, handler.getSourceHint(filepath.Join(root, "seed-tv2", "Show.S01E01.mkv")))
+}
+
+func TestMediaHandlerDeleteSourceFalseRetainsOrdinarySource(t *testing.T) {
+	root := t.TempDir()
+	watchDir := filepath.Join(root, "ordinary-movies")
+	movieLib := filepath.Join(root, "movies")
+	sourcePath := filepath.Join(watchDir, "Ordinary.Copy.2026.1080p.WEB-DL.mkv")
+	require.NoError(t, os.MkdirAll(watchDir, 0o755))
+	require.NoError(t, os.MkdirAll(movieLib, 0o755))
+	require.NoError(t, os.WriteFile(sourcePath, []byte("ordinary copy"), 0o644))
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:  []string{filepath.Join(root, "tv")},
+		MovieLibs:    []string{movieLib},
+		Watch:        config.WatchConfig{Movies: []string{watchDir}},
+		DeleteSource: false,
+		Backend:      transfer.BackendNative,
+		Logger:       logging.Nop(),
+	})
+	require.NoError(t, err)
+
+	handler.processFile(sourcePath)
+	targetPath := filepath.Join(movieLib, "Ordinary Copy (2026)", "Ordinary Copy (2026).mkv")
+	sourceInfo, err := os.Stat(sourcePath)
+	require.NoError(t, err)
+	targetInfo, err := os.Stat(targetPath)
+	require.NoError(t, err)
+	assert.False(t, os.SameFile(sourceInfo, targetInfo))
+}
+
+func TestMediaHandlerLegacyWatchFieldsKeepMoveDefault(t *testing.T) {
+	root := t.TempDir()
+	watchDir := filepath.Join(root, "ordinary-movies")
+	movieLib := filepath.Join(root, "movies")
+	sourcePath := filepath.Join(watchDir, "Legacy.Move.2026.1080p.WEB-DL.mkv")
+	require.NoError(t, os.MkdirAll(watchDir, 0o755))
+	require.NoError(t, os.MkdirAll(movieLib, 0o755))
+	require.NoError(t, os.WriteFile(sourcePath, []byte("legacy move"), 0o644))
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:     []string{filepath.Join(root, "tv")},
+		MovieLibs:       []string{movieLib},
+		MovieWatchPaths: []string{watchDir},
+		Backend:         transfer.BackendNative,
+		Logger:          logging.Nop(),
+	})
+	require.NoError(t, err)
+	handler.processFile(sourcePath)
+
+	assert.NoFileExists(t, sourcePath)
+	assert.FileExists(t, filepath.Join(movieLib, "Legacy Move (2026)", "Legacy Move (2026).mkv"))
+}
+
+func TestMediaHandlerSeedingSourceRetainsLiveReleaseDirectory(t *testing.T) {
+	root := t.TempDir()
+	watchDir := filepath.Join(root, "seeding-movies")
+	movieLib := filepath.Join(root, "movies")
+	releaseDir := filepath.Join(watchDir, "Seeded.Movie.2026-GROUP")
+	sourcePath := filepath.Join(releaseDir, "Seeded.Movie.2026.1080p.WEB-DL.mkv")
+	require.NoError(t, os.MkdirAll(releaseDir, 0o755))
+	require.NoError(t, os.MkdirAll(movieLib, 0o755))
+	require.NoError(t, os.WriteFile(sourcePath, []byte("seed payload"), 0o644))
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:  []string{filepath.Join(root, "tv")},
+		MovieLibs:    []string{movieLib},
+		Watch:        config.WatchConfig{SeedingMovies: []string{watchDir}},
+		DeleteSource: true,
+		Backend:      transfer.BackendNative,
+		Logger:       logging.Nop(),
+	})
+	require.NoError(t, err)
+
+	handler.processFile(sourcePath)
+	targetPath := filepath.Join(movieLib, "Seeded Movie (2026)", "Seeded Movie (2026).mkv")
+	sourceInfo, err := os.Stat(sourcePath)
+	require.NoError(t, err)
+	targetInfo, err := os.Stat(targetPath)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(sourceInfo, targetInfo))
+	assert.DirExists(t, releaseDir)
+}
+
 func TestMediaHandlerRecordsOrganizedMovieAsP2JTruth(t *testing.T) {
 	movieLib := t.TempDir()
 	watchDir := t.TempDir()
@@ -913,9 +1017,8 @@ func TestProcessPendingAI_FailuresOpenCircuit(t *testing.T) {
 func makeHandler(t *testing.T, watchRoots []string) *MediaHandler {
 	t.Helper()
 	return &MediaHandler{
-		tvWatchPaths:    watchRoots,
-		movieWatchPaths: watchRoots,
-		logger:          logging.Nop(),
+		sourcePolicy: newSourcePolicy(config.WatchConfig{TV: watchRoots}, true),
+		logger:       logging.Nop(),
 	}
 }
 
