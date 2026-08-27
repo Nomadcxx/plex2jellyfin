@@ -1,6 +1,8 @@
 package organizer
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +23,68 @@ import (
 
 type failAfterFirstMoveTransferer struct {
 	moves int
+}
+
+type recordingTransferer struct {
+	moves  int
+	copies int
+}
+
+func (t *recordingTransferer) Move(src, dst string, _ transfer.TransferOptions) (*transfer.TransferResult, error) {
+	t.moves++
+	info, err := os.Stat(src)
+	if err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	return &transfer.TransferResult{
+		Success:       true,
+		SourceRemoved: true,
+		BytesCopied:   info.Size(),
+		BytesTotal:    info.Size(),
+		Attempts:      1,
+	}, nil
+}
+
+func (t *recordingTransferer) Copy(src, dst string, _ transfer.TransferOptions) (*transfer.TransferResult, error) {
+	t.copies++
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	return &transfer.TransferResult{
+		Success:     true,
+		BytesCopied: int64(len(data)),
+		BytesTotal:  int64(len(data)),
+		Attempts:    1,
+	}, nil
+}
+
+func (t *recordingTransferer) CanResume() bool { return false }
+func (t *recordingTransferer) Name() string    { return "recording" }
+
+type failAfterFirstCopyTransferer struct {
+	recordingTransferer
+}
+
+func (t *failAfterFirstCopyTransferer) Copy(src, dst string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
+	if t.copies == 1 {
+		t.copies++
+		err := errors.New("forced copy failure")
+		return &transfer.TransferResult{Error: err}, err
+	}
+	return t.recordingTransferer.Copy(src, dst, opts)
 }
 
 func (t *failAfterFirstMoveTransferer) Move(src, dst string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
@@ -83,6 +147,8 @@ func setupTestDB(t *testing.T) (*database.MediaDB, func()) {
 
 // createTestFile creates a test video file with specified size
 func createTestFile(t *testing.T, path string, size int64) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	f, err := os.Create(path)
 	require.NoError(t, err)
 	defer f.Close()
@@ -91,6 +157,230 @@ func createTestFile(t *testing.T, path string, size int64) {
 	data := make([]byte, size)
 	_, err = f.Write(data)
 	require.NoError(t, err)
+}
+
+func assertTransferPolicyResult(t *testing.T, mode SourceTransferMode, transferer *recordingTransferer, sourcePath, targetPath string, expectedCalls int) {
+	t.Helper()
+
+	sourceInfo, sourceErr := os.Stat(sourcePath)
+	targetInfo, targetErr := os.Stat(targetPath)
+	require.NoError(t, targetErr)
+
+	switch mode {
+	case TransferMove:
+		assert.ErrorIs(t, sourceErr, os.ErrNotExist)
+		assert.Equal(t, expectedCalls, transferer.moves)
+		assert.Zero(t, transferer.copies)
+	case TransferCopy:
+		require.NoError(t, sourceErr)
+		assert.False(t, os.SameFile(sourceInfo, targetInfo))
+		assert.Zero(t, transferer.moves)
+		assert.Equal(t, expectedCalls, transferer.copies)
+	case TransferSeed:
+		require.NoError(t, sourceErr)
+		assert.True(t, os.SameFile(sourceInfo, targetInfo))
+		assert.Zero(t, transferer.moves)
+		assert.Zero(t, transferer.copies, "same-filesystem seed should not invoke fallback copy")
+	default:
+		t.Fatalf("unhandled transfer mode %d", mode)
+	}
+}
+
+func TestOrganizerMovieTransferPolicy(t *testing.T) {
+	tests := []struct {
+		name string
+		mode SourceTransferMode
+	}{
+		{name: "move", mode: TransferMove},
+		{name: "copy", mode: TransferCopy},
+		{name: "seed", mode: TransferSeed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			sourcePath := filepath.Join(root, "incoming", "Policy.Movie.2026.mkv")
+			libraryDir := filepath.Join(root, "library")
+			createTestFile(t, sourcePath, 64)
+
+			db, cleanup := setupTestDB(t)
+			defer cleanup()
+			require.NoError(t, db.UpsertMediaFile(&database.MediaFile{
+				Path:            sourcePath,
+				Size:            64,
+				ModifiedAt:      time.Now(),
+				MediaType:       "movie",
+				NormalizedTitle: "Policy Movie",
+			}))
+
+			transferer := &recordingTransferer{}
+			indexCalls := 0
+			org, err := NewOrganizer([]string{libraryDir},
+				WithDatabase(db),
+				WithTransferer(transferer),
+				WithTransferModeResolver(func(string) SourceTransferMode { return tt.mode }),
+				WithPathIndexer(func(_ context.Context, path, libraryRoot, mediaType string) error {
+					indexCalls++
+					return db.UpsertMediaFile(&database.MediaFile{
+						Path:            path,
+						Size:            64,
+						ModifiedAt:      time.Now(),
+						MediaType:       mediaType,
+						NormalizedTitle: "Policy Movie",
+						LibraryRoot:     libraryRoot,
+					})
+				}),
+			)
+			require.NoError(t, err)
+
+			result, err := org.OrganizeMovieWithParsed(sourcePath, libraryDir, naming.MovieInfo{Title: "Policy Movie", Year: "2026"})
+			require.NoError(t, err)
+			require.True(t, result.Success, "organize error: %v", result.Error)
+			assertTransferPolicyResult(t, tt.mode, transferer, sourcePath, result.TargetPath, 1)
+			assert.Equal(t, 1, indexCalls)
+
+			sourceRow, err := db.GetMediaFile(sourcePath)
+			require.NoError(t, err)
+			assert.Nil(t, sourceRow, "staging source must not remain canonical inventory")
+			targetRow, err := db.GetMediaFile(result.TargetPath)
+			require.NoError(t, err)
+			require.NotNil(t, targetRow)
+			assert.Equal(t, libraryDir, targetRow.LibraryRoot)
+		})
+	}
+}
+
+func TestOrganizerEpisodeTransferPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		mode SourceTransferMode
+	}{
+		{name: "move", mode: TransferMove},
+		{name: "copy", mode: TransferCopy},
+		{name: "seed", mode: TransferSeed},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			sourcePath := filepath.Join(root, "incoming", "Policy.Show.2026.S01E01.mkv")
+			libraryDir := filepath.Join(root, "library")
+			createTestFile(t, sourcePath, 64)
+			transferer := &recordingTransferer{}
+
+			org, err := NewOrganizer([]string{libraryDir},
+				WithTransferer(transferer),
+				WithTransferModeResolver(func(string) SourceTransferMode { return tt.mode }),
+			)
+			require.NoError(t, err)
+			result, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, naming.TVShowInfo{
+				Title: "Policy Show", Year: "2026", Season: 1, Episode: 1,
+			})
+			require.NoError(t, err)
+			require.True(t, result.Success, "organize error: %v", result.Error)
+			assertTransferPolicyResult(t, tt.mode, transferer, sourcePath, result.TargetPath, 1)
+		})
+	}
+}
+
+func TestOrganizerSeasonPackTransferPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		mode SourceTransferMode
+	}{
+		{name: "move", mode: TransferMove},
+		{name: "copy", mode: TransferCopy},
+		{name: "seed", mode: TransferSeed},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			packDir := filepath.Join(root, "incoming", "Policy.Show.S01.1080p-GROUP")
+			libraryDir := filepath.Join(root, "library")
+			ep1 := filepath.Join(packDir, "Policy.Show.S01E01.1080p-GROUP.mkv")
+			ep2 := filepath.Join(packDir, "Policy.Show.S01E02.1080p-GROUP.mkv")
+			createTestFile(t, ep1, 64)
+			createTestFile(t, ep2, 64)
+			transferer := &recordingTransferer{}
+
+			org, err := NewOrganizer([]string{libraryDir},
+				WithTransferer(transferer),
+				WithTransferModeResolver(func(string) SourceTransferMode { return tt.mode }),
+			)
+			require.NoError(t, err)
+			result, err := org.OrganizeTVSeasonPackAuto(packDir, func(path string) (int64, error) {
+				info, err := os.Stat(path)
+				if err != nil {
+					return 0, err
+				}
+				return info.Size(), nil
+			})
+			require.NoError(t, err)
+			require.True(t, result.Success, "organize error: %v", result.Error)
+			require.Len(t, result.Imported, 2)
+
+			assertTransferPolicyResult(t, tt.mode, transferer, ep1, result.Imported[0].TargetPath, 2)
+			if tt.mode == TransferMove {
+				assert.Equal(t, 2, transferer.moves)
+			} else if tt.mode == TransferCopy {
+				assert.Equal(t, 2, transferer.copies)
+			} else {
+				assert.Zero(t, transferer.copies)
+			}
+			if tt.mode != TransferMove {
+				sourceInfo, statErr := os.Stat(ep2)
+				require.NoError(t, statErr)
+				targetInfo, statErr := os.Stat(result.Imported[1].TargetPath)
+				require.NoError(t, statErr)
+				assert.Equal(t, tt.mode == TransferSeed, os.SameFile(sourceInfo, targetInfo))
+			}
+		})
+	}
+}
+
+func TestOrganizerSeasonPackCopyPolicyRollsBackTargetWithoutTouchingSources(t *testing.T) {
+	root := t.TempDir()
+	packDir := filepath.Join(root, "incoming", "Policy.Show.S01.1080p-GROUP")
+	libraryDir := filepath.Join(root, "library")
+	ep1 := filepath.Join(packDir, "Policy.Show.S01E01.1080p-GROUP.mkv")
+	ep2 := filepath.Join(packDir, "Policy.Show.S01E02.1080p-GROUP.mkv")
+	createTestFile(t, ep1, 64)
+	createTestFile(t, ep2, 64)
+	transferer := &failAfterFirstCopyTransferer{}
+
+	org, err := NewOrganizer([]string{libraryDir},
+		WithTransferer(transferer),
+		WithTransferModeResolver(func(string) SourceTransferMode { return TransferCopy }),
+	)
+	require.NoError(t, err)
+	result, err := org.OrganizeTVSeasonPackAuto(packDir, func(path string) (int64, error) {
+		info, err := os.Stat(path)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	})
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Error(t, result.Error)
+	assert.NotContains(t, result.Error.Error(), "rollback failed")
+	assert.FileExists(t, ep1)
+	assert.FileExists(t, ep2)
+	assert.NoFileExists(t, filepath.Join(libraryDir, "Policy Show", "Season 01", "Policy Show S01E01.mkv"))
+}
+
+func TestOrganizerTransferPolicyPreservesWithKeepSource(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "incoming", "Legacy.Copy.2026.mkv")
+	libraryDir := filepath.Join(root, "library")
+	createTestFile(t, sourcePath, 64)
+	transferer := &recordingTransferer{}
+
+	org, err := NewOrganizer([]string{libraryDir}, WithTransferer(transferer), WithKeepSource(true))
+	require.NoError(t, err)
+	result, err := org.OrganizeMovieWithParsed(sourcePath, libraryDir, naming.MovieInfo{Title: "Legacy Copy", Year: "2026"})
+	require.NoError(t, err)
+	require.True(t, result.Success, "organize error: %v", result.Error)
+	assert.FileExists(t, sourcePath)
+	assert.Equal(t, 1, transferer.copies)
+	assert.Zero(t, transferer.moves)
 }
 
 // TestOrganizeMovie_Basic tests basic movie organization

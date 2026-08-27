@@ -42,6 +42,7 @@ type OrganizationResult struct {
 	// this only reports that the inventory did not catch up. Callers must
 	// not treat it as a failed organize — the bytes are already on disk.
 	InventoryError error
+	sourceRetained bool
 }
 
 type SeasonPackResult struct {
@@ -55,34 +56,46 @@ type SeasonPackResult struct {
 	BytesCopied int64
 }
 
+type SourceTransferMode uint8
+
+const (
+	TransferMove SourceTransferMode = iota
+	TransferCopy
+	TransferSeed
+)
+
+type TransferModeResolver func(sourcePath string) SourceTransferMode
+
 type Organizer struct {
-	dryRun         bool
-	keepSource     bool
-	forceOverwrite bool
-	libraries      []string
-	selector       *library.Selector
-	transferer     transfer.Transferer
-	timeout        time.Duration
-	checksumVerify bool
-	targetUID      int
-	targetGID      int
-	fileMode       os.FileMode
-	dirMode        os.FileMode
-	sonarrClient   *sonarr.Client
-	jellyfinClient *jellyfin.Client
-	playbackSafety bool
-	db             *database.MediaDB
-	syncService    *syncsvc.SyncService
-	pathIndexer    PathIndexer
-	pluginClient   *jellyfin.PluginClient
-	pauseOnScan    bool
-	paused         bool
-	pauseMu        sync.RWMutex
-	playbackLocks  *jellyfin.PlaybackLockManager
-	deferredQueue  *jellyfin.DeferredQueue
+	dryRun               bool
+	keepSource           bool
+	forceOverwrite       bool
+	libraries            []string
+	selector             *library.Selector
+	transferer           transfer.Transferer
+	seedTransferer       transfer.Transferer
+	transferModeResolver TransferModeResolver
+	timeout              time.Duration
+	checksumVerify       bool
+	targetUID            int
+	targetGID            int
+	fileMode             os.FileMode
+	dirMode              os.FileMode
+	sonarrClient         *sonarr.Client
+	jellyfinClient       *jellyfin.Client
+	playbackSafety       bool
+	db                   *database.MediaDB
+	syncService          *syncsvc.SyncService
+	pathIndexer          PathIndexer
+	pluginClient         *jellyfin.PluginClient
+	pauseOnScan          bool
+	paused               bool
+	pauseMu              sync.RWMutex
+	playbackLocks        *jellyfin.PlaybackLockManager
+	deferredQueue        *jellyfin.DeferredQueue
 }
 
-// PathIndexer indexes a destination path into media_files after a successful move.
+// PathIndexer indexes a destination path into media_files after a successful transfer.
 // Prefer injecting FileScanner.ScanPath (or a thin wrapper) to avoid organizer↔scanner cycles.
 type PathIndexer func(ctx context.Context, path, libraryRoot, mediaType string) error
 
@@ -110,6 +123,7 @@ func NewOrganizer(libraries []string, options ...func(*Organizer)) (*Organizer, 
 	for _, opt := range options {
 		opt(org)
 	}
+	org.seedTransferer = transfer.NewHardlinkCopyTransferer(org.transferer)
 
 	// Create selector with Sonarr and database integration if available
 	org.selector = library.NewSelectorWithConfig(library.SelectorConfig{
@@ -133,6 +147,12 @@ func WithDryRun(dryRun bool) func(*Organizer) {
 func WithKeepSource(keep bool) func(*Organizer) {
 	return func(o *Organizer) {
 		o.keepSource = keep
+	}
+}
+
+func WithTransferModeResolver(resolve TransferModeResolver) func(*Organizer) {
+	return func(o *Organizer) {
+		o.transferModeResolver = resolve
 	}
 }
 
@@ -276,6 +296,30 @@ func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
 	}
 }
 
+func (o *Organizer) transferSource(sourcePath, targetPath string, opts transfer.TransferOptions) (*transfer.TransferResult, bool, error) {
+	mode := TransferMove
+	if o.transferModeResolver != nil {
+		mode = o.transferModeResolver(sourcePath)
+	} else if o.keepSource {
+		mode = TransferCopy
+	}
+
+	switch mode {
+	case TransferMove:
+		result, err := o.transferer.Move(sourcePath, targetPath, opts)
+		return result, false, err
+	case TransferCopy:
+		result, err := o.transferer.Copy(sourcePath, targetPath, opts)
+		return result, true, err
+	case TransferSeed:
+		result, err := o.seedTransferer.Copy(sourcePath, targetPath, opts)
+		return result, true, err
+	default:
+		err := fmt.Errorf("unsupported source transfer mode %d", mode)
+		return &transfer.TransferResult{Error: err}, false, err
+	}
+}
+
 func (o *Organizer) applyDirOwnership(path string) error {
 	if o.dirMode != 0 {
 		if err := os.Chmod(path, o.dirMode); err != nil {
@@ -304,10 +348,10 @@ func (o *Organizer) applyDirOwnership(path string) error {
 // filesystem or database cannot wedge the organize pipeline indefinitely.
 const inventoryIndexTimeout = 2 * time.Minute
 
-// refreshInventoryAfterMove indexes the destination via PathIndexer and then
+// refreshInventoryAfterTransfer indexes the destination via PathIndexer and then
 // removes the stale source/replaced media_files rows it supersedes. Returns a
-// consistency error the caller reports alongside an otherwise successful move.
-func (o *Organizer) refreshInventoryAfterMove(sourcePath, targetPath, replacedPath, libraryRoot, mediaType string) error {
+// consistency error the caller reports alongside an otherwise successful transfer.
+func (o *Organizer) refreshInventoryAfterTransfer(sourcePath, targetPath, replacedPath, libraryRoot, mediaType string, sourceRetained bool) error {
 	if o.db == nil {
 		return nil
 	}
@@ -331,10 +375,12 @@ func (o *Organizer) refreshInventoryAfterMove(sourcePath, targetPath, replacedPa
 	if err := o.pathIndexer(ctx, targetPath, libraryRoot, mediaType); err != nil {
 		return fmt.Errorf("index destination: %w", err)
 	}
-	if !o.keepSource {
-		if err := o.db.DeleteMediaFile(sourcePath); err != nil {
-			return fmt.Errorf("remove stale source row: %w", err)
-		}
+	sourceRole := "stale"
+	if sourceRetained {
+		sourceRole = "retained staging"
+	}
+	if err := o.db.DeleteMediaFile(sourcePath); err != nil {
+		return fmt.Errorf("remove %s source row: %w", sourceRole, err)
 	}
 	if replacedPath != "" && replacedPath != targetPath && replacedPath != sourcePath {
 		if err := o.db.DeleteMediaFile(replacedPath); err != nil {
@@ -524,13 +570,7 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 
 	opts := o.buildTransferOptions()
 
-	var err error
-	var result *transfer.TransferResult
-	if o.keepSource {
-		result, err = o.transferer.Copy(sourcePath, targetPath, opts)
-	} else {
-		result, err = o.transferer.Move(sourcePath, targetPath, opts)
-	}
+	result, sourceRetained, err := o.transferSource(sourcePath, targetPath, opts)
 
 	if err != nil {
 		if skipped := alreadyOrganizedResult(sourcePath, targetPath); skipped != nil {
@@ -558,7 +598,7 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 	// consistency problem to report, not a failed organize: reporting failure
 	// here would drop target_path from the decision and hide a file that is
 	// genuinely on disk.
-	inventoryErr := o.refreshInventoryAfterMove(sourcePath, targetPath, existingFile, libraryPath, "movie")
+	inventoryErr := o.refreshInventoryAfterTransfer(sourcePath, targetPath, existingFile, libraryPath, "movie", sourceRetained)
 
 	// HOLDEN Phase 3: Self-learning - update database with organized movie
 	if o.db != nil {
@@ -577,14 +617,15 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 		_, err := o.db.UpsertMovie(movieRecord)
 		if err != nil {
 			return &OrganizationResult{
-				Success:       false,
-				SourcePath:    sourcePath,
-				TargetPath:    targetPath,
-				BytesCopied:   result.BytesCopied,
-				Duration:      result.Duration,
-				Attempts:      result.Attempts,
-				SourceQuality: sourceQuality,
-				Error:         fmt.Errorf("DB upsert failed after file move — filesystem and database are inconsistent: %w", err),
+				Success:        false,
+				SourcePath:     sourcePath,
+				TargetPath:     targetPath,
+				BytesCopied:    result.BytesCopied,
+				Duration:       result.Duration,
+				Attempts:       result.Attempts,
+				SourceQuality:  sourceQuality,
+				sourceRetained: sourceRetained,
+				Error:          fmt.Errorf("DB upsert failed after file move — filesystem and database are inconsistent: %w", err),
 			}, nil
 		}
 		if o.syncService != nil {
@@ -603,6 +644,7 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 		SourceQuality:   sourceQuality,
 		ExistingQuality: existingQuality,
 		InventoryError:  inventoryErr,
+		sourceRetained:  sourceRetained,
 	}, nil
 }
 
@@ -784,13 +826,7 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 
 	opts := o.buildTransferOptions()
 
-	var err error
-	var result *transfer.TransferResult
-	if o.keepSource {
-		result, err = o.transferer.Copy(sourcePath, targetPath, opts)
-	} else {
-		result, err = o.transferer.Move(sourcePath, targetPath, opts)
-	}
+	result, sourceRetained, err := o.transferSource(sourcePath, targetPath, opts)
 
 	if err != nil {
 		if skipped := alreadyOrganizedResult(sourcePath, targetPath); skipped != nil {
@@ -816,7 +852,7 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 
 	// See OrganizeMovieWithParsed: the move already completed, so an indexing
 	// failure is reported without demoting the organize to failed.
-	inventoryErr := o.refreshInventoryAfterMove(sourcePath, targetPath, existingFile, libraryPath, "episode")
+	inventoryErr := o.refreshInventoryAfterTransfer(sourcePath, targetPath, existingFile, libraryPath, "episode", sourceRetained)
 
 	// HOLDEN Phase 3: Self-learning - update database with organized TV show
 	if o.db != nil {
@@ -836,14 +872,15 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		_, err := o.db.UpsertSeries(seriesRecord)
 		if err != nil {
 			return &OrganizationResult{
-				Success:       false,
-				SourcePath:    sourcePath,
-				TargetPath:    targetPath,
-				BytesCopied:   result.BytesCopied,
-				Duration:      result.Duration,
-				Attempts:      result.Attempts,
-				SourceQuality: sourceQuality,
-				Error:         fmt.Errorf("DB upsert failed after file move — filesystem and database are inconsistent: %w", err),
+				Success:        false,
+				SourcePath:     sourcePath,
+				TargetPath:     targetPath,
+				BytesCopied:    result.BytesCopied,
+				Duration:       result.Duration,
+				Attempts:       result.Attempts,
+				SourceQuality:  sourceQuality,
+				sourceRetained: sourceRetained,
+				Error:          fmt.Errorf("DB upsert failed after file move — filesystem and database are inconsistent: %w", err),
 			}, nil
 		}
 		if o.syncService != nil {
@@ -862,6 +899,7 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		SourceQuality:   sourceQuality,
 		ExistingQuality: existingQuality,
 		InventoryError:  inventoryErr,
+		sourceRetained:  sourceRetained,
 	}, nil
 }
 
@@ -1058,13 +1096,7 @@ func (o *Organizer) organizeExtrasRelease(releaseDir string, packInfo *naming.TV
 			result.Imported = append(result.Imported, item)
 			continue
 		}
-		var transferResult *transfer.TransferResult
-		var err error
-		if o.keepSource {
-			transferResult, err = o.transferer.Copy(path, targetPath, opts)
-		} else {
-			transferResult, err = o.transferer.Move(path, targetPath, opts)
-		}
+		transferResult, sourceRetained, err := o.transferSource(path, targetPath, opts)
 		if err != nil {
 			result.Unresolved = append(result.Unresolved, videos[i:]...)
 			result.Error = fmt.Errorf("extras transfer failed: %w", err)
@@ -1072,6 +1104,7 @@ func (o *Organizer) organizeExtrasRelease(releaseDir string, packInfo *naming.TV
 			return result, nil
 		}
 		item.Success = true
+		item.sourceRetained = sourceRetained
 		if transferResult != nil {
 			item.BytesCopied = transferResult.BytesCopied
 			result.BytesCopied += transferResult.BytesCopied
@@ -1093,6 +1126,16 @@ func rollbackSeasonPackImports(imported []*OrganizationResult) error {
 		if _, err := os.Stat(item.TargetPath); err != nil {
 			if !os.IsNotExist(err) {
 				errs = append(errs, fmt.Errorf("stat target %s: %w", item.TargetPath, err))
+			}
+			continue
+		}
+		if item.sourceRetained {
+			if _, err := os.Stat(item.SourcePath); err != nil {
+				errs = append(errs, fmt.Errorf("retained source unavailable, preserving target %s: %w", item.TargetPath, err))
+				continue
+			}
+			if err := os.Remove(item.TargetPath); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("remove retained import target %s: %w", item.TargetPath, err))
 			}
 			continue
 		}
