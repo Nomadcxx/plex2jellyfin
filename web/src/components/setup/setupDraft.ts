@@ -4,6 +4,16 @@ export type SetupStep = 'media' | 'services' | 'ai' | 'runtime' | 'review';
 export type RuntimeKind = 'native' | 'container';
 export type ServiceName = 'sonarr' | 'radarr' | 'jellyfin';
 
+/** Where a path sits in the wizard. Seeding roots live inside the draft's
+ * `watch` object under their own keys, so the collection name has to carry the
+ * policy — otherwise an ordinary root and a seeding root at the same path would
+ * share a verification key. */
+export type PathCollection = 'watch' | 'seeding' | 'libraries';
+
+export function seedingKey(media: 'tv' | 'movies'): 'seeding_tv' | 'seeding_movies' {
+  return media === 'tv' ? 'seeding_tv' : 'seeding_movies';
+}
+
 export type WizardChecks = {
   paths: Record<string, boolean>;
   services: Partial<Record<ServiceName, string>>;
@@ -34,6 +44,8 @@ export function hydrateDraft(input: DeepPartial<SetupDraft> = {}, runtime: Runti
     watch: {
       tv: [...(source.watch?.tv ?? [])],
       movies: [...(source.watch?.movies ?? [])],
+      seeding_tv: [...(source.watch?.seeding_tv ?? [])],
+      seeding_movies: [...(source.watch?.seeding_movies ?? [])],
     },
     libraries: {
       tv: [...(source.libraries?.tv ?? [])],
@@ -70,7 +82,7 @@ export function emptyChecks(): WizardChecks {
   return { paths: {}, services: {} };
 }
 
-export function pathCheckKey(collection: 'watch' | 'libraries', media: 'tv' | 'movies', path: string): string {
+export function pathCheckKey(collection: PathCollection, media: 'tv' | 'movies', path: string): string {
   return `${collection}:${media}:${path.trim()}`;
 }
 
@@ -119,16 +131,21 @@ function mediaErrors(draft: SetupDraft, checks: WizardChecks): string[] {
     ['TV', 'tv'],
     ['Movies', 'movies'],
   ] as const;
-  if (pairs.every(([, media]) => draft.watch[media].length === 0 && draft.libraries[media].length === 0)) {
+  // Ordinary and seeding roots are both intake: either one pairs with a library.
+  const intakeCount = (media: 'tv' | 'movies') => draft.watch[media].length + draft.watch[seedingKey(media)].length;
+
+  if (pairs.every(([, media]) => intakeCount(media) === 0 && draft.libraries[media].length === 0)) {
     errors.push('Configure TV, Movies, or both.');
   }
   for (const [label, media] of pairs) {
-    const incoming = draft.watch[media];
     const library = draft.libraries[media];
-    if (incoming.length > 0 && library.length === 0) errors.push(`Add a ${label} library path.`);
-    if (library.length > 0 && incoming.length === 0) errors.push(`Add a ${label} incoming path.`);
-    for (const path of incoming) {
+    if (intakeCount(media) > 0 && library.length === 0) errors.push(`Add a ${label} library path.`);
+    if (library.length > 0 && intakeCount(media) === 0) errors.push(`Add a ${label} incoming path.`);
+    for (const path of draft.watch[media]) {
       if (!checks.paths[pathCheckKey('watch', media, path)]) errors.push(`Verify incoming path ${path}.`);
+    }
+    for (const path of draft.watch[seedingKey(media)]) {
+      if (!checks.paths[pathCheckKey('seeding', media, path)]) errors.push(`Verify seeding path ${path}.`);
     }
     for (const path of library) {
       if (!checks.paths[pathCheckKey('libraries', media, path)]) errors.push(`Verify library path ${path}.`);
