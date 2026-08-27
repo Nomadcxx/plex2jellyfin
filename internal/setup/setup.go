@@ -27,6 +27,13 @@ type PathsDraft struct {
 	Movies []string `json:"movies"`
 }
 
+type WatchDraft struct {
+	TV            []string `json:"tv"`
+	Movies        []string `json:"movies"`
+	SeedingTV     []string `json:"seeding_tv"`
+	SeedingMovies []string `json:"seeding_movies"`
+}
+
 type ServiceDraft struct {
 	Enabled bool   `json:"enabled"`
 	URL     string `json:"url"`
@@ -58,7 +65,7 @@ type RuntimeDraft struct {
 }
 
 type Draft struct {
-	Watch     PathsDraft    `json:"watch"`
+	Watch     WatchDraft    `json:"watch"`
 	Libraries PathsDraft    `json:"libraries"`
 	Sonarr    ServiceDraft  `json:"sonarr"`
 	Radarr    ServiceDraft  `json:"radarr"`
@@ -86,8 +93,8 @@ func HasMediaPair(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
 	}
-	tv := len(nonEmpty(cfg.Watch.TV)) > 0 && len(nonEmpty(cfg.Libraries.TV)) > 0
-	movies := len(nonEmpty(cfg.Watch.Movies)) > 0 && len(nonEmpty(cfg.Libraries.Movies)) > 0
+	tv := len(nonEmpty(cfg.Watch.TVPaths())) > 0 && len(nonEmpty(cfg.Libraries.TV)) > 0
+	movies := len(nonEmpty(cfg.Watch.MoviePaths())) > 0 && len(nonEmpty(cfg.Libraries.Movies)) > 0
 	return tv || movies
 }
 
@@ -113,7 +120,10 @@ func DraftFromConfig(cfg *config.Config) Draft {
 		cfg = config.DefaultConfig()
 	}
 	return Draft{
-		Watch:     PathsDraft{TV: clone(cfg.Watch.TV), Movies: clone(cfg.Watch.Movies)},
+		Watch: WatchDraft{
+			TV: clone(cfg.Watch.TV), Movies: clone(cfg.Watch.Movies),
+			SeedingTV: clone(cfg.Watch.SeedingTV), SeedingMovies: clone(cfg.Watch.SeedingMovies),
+		},
 		Libraries: PathsDraft{TV: clone(cfg.Libraries.TV), Movies: clone(cfg.Libraries.Movies)},
 		Sonarr:    ServiceDraft{Enabled: cfg.Sonarr.Enabled, URL: cfg.Sonarr.URL, APIKey: mask(cfg.Sonarr.APIKey)},
 		Radarr:    ServiceDraft{Enabled: cfg.Radarr.Enabled, URL: cfg.Radarr.URL, APIKey: mask(cfg.Radarr.APIKey)},
@@ -136,8 +146,9 @@ func DraftFromConfig(cfg *config.Config) Draft {
 
 func ValidateDraft(d Draft, runtime RuntimeInfo) []FieldError {
 	var errs []FieldError
-	tvWatch, tvLibrary := nonEmpty(d.Watch.TV), nonEmpty(d.Libraries.TV)
-	movieWatch, movieLibrary := nonEmpty(d.Watch.Movies), nonEmpty(d.Libraries.Movies)
+	tvWatch := nonEmpty(append(clone(d.Watch.TV), d.Watch.SeedingTV...))
+	movieWatch := nonEmpty(append(clone(d.Watch.Movies), d.Watch.SeedingMovies...))
+	tvLibrary, movieLibrary := nonEmpty(d.Libraries.TV), nonEmpty(d.Libraries.Movies)
 	if len(tvWatch)+len(tvLibrary)+len(movieWatch)+len(movieLibrary) == 0 {
 		errs = append(errs, FieldError{Field: "media", Message: "configure TV, Movies, or both"})
 	}
@@ -148,6 +159,12 @@ func ValidateDraft(d Draft, runtime RuntimeInfo) []FieldError {
 	}
 	validatePair("tv", tvWatch, tvLibrary)
 	validatePair("movies", movieWatch, movieLibrary)
+	if err := config.ValidateWatchLayout(config.WatchConfig{
+		TV: d.Watch.TV, Movies: d.Watch.Movies,
+		SeedingTV: d.Watch.SeedingTV, SeedingMovies: d.Watch.SeedingMovies,
+	}, config.LibrariesConfig{TV: d.Libraries.TV, Movies: d.Libraries.Movies}); err != nil {
+		errs = append(errs, FieldError{Field: "watch", Message: err.Error()})
+	}
 
 	if _, err := NormalizeScanFrequency(d.Runtime.ScanFrequency); err != nil {
 		errs = append(errs, FieldError{Field: "runtime.scan_frequency", Message: "must be a positive duration such as 5m or 10"})
@@ -216,6 +233,8 @@ func ApplyDraft(current *config.Config, d Draft) *config.Config {
 	next := *current
 	next.Watch.TV = nonEmpty(d.Watch.TV)
 	next.Watch.Movies = nonEmpty(d.Watch.Movies)
+	next.Watch.SeedingTV = nonEmpty(d.Watch.SeedingTV)
+	next.Watch.SeedingMovies = nonEmpty(d.Watch.SeedingMovies)
 	next.Libraries.TV = nonEmpty(d.Libraries.TV)
 	next.Libraries.Movies = nonEmpty(d.Libraries.Movies)
 	next.Daemon.Enabled = true

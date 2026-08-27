@@ -166,6 +166,42 @@ func TestReplaceMoviesWatchPaths(t *testing.T) {
 	}
 }
 
+func TestAddSeedingTVPathPreservesOrdinaryPaths(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Watch.TV = []string{"/ordinary/tv"}
+	r := newPathsRouter(t, cfg)
+	req := httptest.NewRequest("POST", "/settings/paths/seeding_tv", bytes.NewBufferString(`{"path":"/seeding/tv"}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if len(cfg.Watch.TV) != 1 || cfg.Watch.TV[0] != "/ordinary/tv" {
+		t.Fatalf("ordinary TV paths changed: %v", cfg.Watch.TV)
+	}
+	if len(cfg.Watch.SeedingTV) != 1 || cfg.Watch.SeedingTV[0] != "/seeding/tv" {
+		t.Fatalf("seeding TV paths = %v", cfg.Watch.SeedingTV)
+	}
+}
+
+func TestReplaceSeedingMoviePathsPreservesOrdinaryPaths(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Watch.Movies = []string{"/ordinary/movies"}
+	r := newPathsRouter(t, cfg)
+	req := httptest.NewRequest("PUT", "/settings/paths/seeding_movies", bytes.NewBufferString(`{"paths":["/seeding/movies"]}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if len(cfg.Watch.Movies) != 1 || cfg.Watch.Movies[0] != "/ordinary/movies" {
+		t.Fatalf("ordinary movie paths changed: %v", cfg.Watch.Movies)
+	}
+	if len(cfg.Watch.SeedingMovies) != 1 || cfg.Watch.SeedingMovies[0] != "/seeding/movies" {
+		t.Fatalf("seeding movie paths = %v", cfg.Watch.SeedingMovies)
+	}
+}
+
 func TestAddTVLibrary(t *testing.T) {
 	cfg := config.DefaultConfig()
 	r := newLibrariesRouter(t, cfg)

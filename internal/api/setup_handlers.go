@@ -197,6 +197,8 @@ func validateSetupPaths(draft setupdomain.Draft) []setupdomain.FieldError {
 	}
 	check("watch.tv", draft.Watch.TV, draft.Runtime.DeleteSource)
 	check("watch.movies", draft.Watch.Movies, draft.Runtime.DeleteSource)
+	check("watch.seeding_tv", draft.Watch.SeedingTV, false)
+	check("watch.seeding_movies", draft.Watch.SeedingMovies, false)
 	check("libraries.tv", draft.Libraries.TV, true)
 	check("libraries.movies", draft.Libraries.Movies, true)
 	return errs

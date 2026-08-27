@@ -156,6 +156,7 @@ func TestSetupWizardShowsBannerAndIntro(t *testing.T) {
 	deps, _ := wizardTestDeps(t)
 	answers := []string{
 		"/downloads/tv", "/media/tv", "", "",
+		"", "", // seeding paths
 		"n", "n", "n",
 		"n",
 		"5m", "n", "n",
@@ -197,30 +198,32 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 	deps, state := wizardTestDeps(t)
 
 	answers := []string{
-		"/downloads/tv", // TV incoming
-		"/media/tv",     // TV library
-		"",              // Movie incoming (skip)
-		"",              // Movie library (skip)
-		"y",             // connect Sonarr?
-		"",              // Sonarr URL (default)
-		"sonarr-key",    // Sonarr API key
-		"n",             // connect Radarr?
-		"y",             // connect Jellyfin?
-		"",              // Jellyfin URL (default)
-		"jf-key",        // Jellyfin API key
-		"y",             // install companion plugin?
-		"y",             // restart Jellyfin?
-		"n",             // use Ollama?
-		"10m",           // scan frequency
-		"y",             // move files?
-		"n",             // verify checksums?
-		"",              // owner user
-		"",              // owner group (default media)
-		"",              // file mode
-		"",              // dir mode
-		"y",             // confirm write
-		"y",             // start web UI
-		"",              // webhook URL (accept detected default)
+		"/downloads/tv",         // TV incoming
+		"/media/tv",             // TV library
+		"",                      // Movie incoming (skip)
+		"",                      // Movie library (skip)
+		"/downloads/seeding/tv", // TV seeding completion
+		"",                      // Movie seeding completion
+		"y",                     // connect Sonarr?
+		"",                      // Sonarr URL (default)
+		"sonarr-key",            // Sonarr API key
+		"n",                     // connect Radarr?
+		"y",                     // connect Jellyfin?
+		"",                      // Jellyfin URL (default)
+		"jf-key",                // Jellyfin API key
+		"y",                     // install companion plugin?
+		"y",                     // restart Jellyfin?
+		"n",                     // use Ollama?
+		"10m",                   // scan frequency
+		"y",                     // move files?
+		"n",                     // verify checksums?
+		"",                      // owner user
+		"",                      // owner group (default media)
+		"",                      // file mode
+		"",                      // dir mode
+		"y",                     // confirm write
+		"y",                     // start web UI
+		"",                      // webhook URL (accept detected default)
 	}
 	out, err := runWizard(t, deps, answers)
 	if err != nil {
@@ -258,6 +261,12 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 	if len(saved.Watch.Movies) != 0 {
 		t.Errorf("watch.movies should be empty, got %v", saved.Watch.Movies)
 	}
+	if len(saved.Watch.SeedingTV) != 1 || saved.Watch.SeedingTV[0] != "/downloads/seeding/tv" {
+		t.Errorf("watch.seeding_tv = %v", saved.Watch.SeedingTV)
+	}
+	if !strings.Contains(out, "TV seeding completion") || !strings.Contains(out, "retained for seeding") {
+		t.Errorf("missing seeding prompt or retention review:\n%s", out)
+	}
 	if !saved.Sonarr.Enabled || saved.Sonarr.APIKey != "sonarr-key" {
 		t.Errorf("sonarr not saved: %+v", saved.Sonarr)
 	}
@@ -294,6 +303,7 @@ func TestSetupWizardPromptsPathMappingsWhenUnmapped(t *testing.T) {
 	answers := []string{
 		"", "", // TV skip
 		"/downloads/movies", "/mnt/STORAGE1/MOVIES",
+		"", "", // seeding paths
 		"n", "n",
 		"y", "", "jf-key",
 		"/movies1", "/mnt/STORAGE1/MOVIES", // path mapping
@@ -331,6 +341,7 @@ func TestSetupWizardAutomaticallyEnforcesArrCompatibility(t *testing.T) {
 
 	answers := []string{
 		"/downloads/tv", "/media/tv", "", "", // paths
+		"", "", // seeding paths
 		"y", "", "sonarr-key", // sonarr
 		"n", "n", // radarr, jellyfin off
 		"n",            // no ollama
@@ -355,6 +366,7 @@ func TestSetupWizardDecliningWebUIPrintsServiceHints(t *testing.T) {
 	deps, state := wizardTestDeps(t)
 	answers := []string{
 		"/downloads/tv", "/media/tv", "", "",
+		"", "", // seeding paths
 		"n", "n", "n",
 		"n",
 		"5m", "n", "n",
@@ -383,6 +395,7 @@ func TestSetupWizardFailedActivationLeavesSetupIncomplete(t *testing.T) {
 
 	answers := []string{
 		"/downloads/tv", "/media/tv", "", "",
+		"", "", // seeding paths
 		"n", "n", "n", // no services
 		"n",            // no ollama
 		"5m", "n", "n", // runtime
@@ -409,6 +422,7 @@ func TestSetupWizardRejectsHalfConfiguredMedia(t *testing.T) {
 
 	answers := []string{
 		"/downloads/tv", "", "", "", // TV incoming without library
+		"", "", // seeding paths
 		"n", "n", "n",
 		"n",
 		"5m", "n", "n",
@@ -434,6 +448,7 @@ func TestSetupWizardDeclinedPluginRestartStillCompletesSetup(t *testing.T) {
 
 	answers := []string{
 		"/downloads/tv", "/media/tv", "", "",
+		"", "", // seeding paths
 		"n", "n", // sonarr, radarr off
 		"y", "", "jf-key", // jellyfin
 		"y",            // install plugin?
@@ -471,6 +486,7 @@ func TestSetupWizardPluginFailureDoesNotFailSetup(t *testing.T) {
 
 	answers := []string{
 		"/downloads/tv", "/media/tv", "", "",
+		"", "", // seeding paths
 		"n", "n",
 		"y", "", "jf-key",
 		"n",            // no ollama
@@ -500,6 +516,7 @@ func TestSetupWizardAINumberedModelPick(t *testing.T) {
 	deps, _ := wizardTestDeps(t)
 	answers := []string{
 		"/downloads/tv", "/media/tv", "", "",
+		"", "", // seeding paths
 		"n", "n", "n", // no arr/jellyfin
 		"y",            // enable ollama
 		"",             // endpoint default

@@ -2,6 +2,7 @@ package setup
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -174,13 +175,78 @@ func TestAdoptLegacyCompletionPersistsThroughSaveLoad(t *testing.T) {
 }
 
 func TestValidateDraftAllowsEitherCompleteMediaType(t *testing.T) {
+	seedingTV := validDraft(nil, []string{"/library/tv"}, nil, nil)
+	seedingTV.Watch.SeedingTV = []string{"/watch/seeding-tv"}
 	for _, draft := range []Draft{
 		validDraft([]string{"/watch/tv"}, []string{"/library/tv"}, nil, nil),
 		validDraft(nil, nil, []string{"/watch/movies"}, []string{"/library/movies"}),
+		seedingTV,
 	} {
 		if errs := ValidateDraft(draft, RuntimeInfo{Kind: RuntimeNative}); len(errs) != 0 {
 			t.Fatalf("valid draft rejected: %+v", errs)
 		}
+	}
+}
+
+func TestDraftWatchPathsRoundTrip(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Watch.TV = []string{"/watch/tv"}
+	cfg.Watch.Movies = []string{"/watch/movies"}
+	cfg.Watch.SeedingTV = []string{"/seed/tv"}
+	cfg.Watch.SeedingMovies = []string{"/seed/movies"}
+
+	draft := DraftFromConfig(cfg)
+	if !slices.Equal(draft.Watch.TV, cfg.Watch.TV) ||
+		!slices.Equal(draft.Watch.Movies, cfg.Watch.Movies) ||
+		!slices.Equal(draft.Watch.SeedingTV, cfg.Watch.SeedingTV) ||
+		!slices.Equal(draft.Watch.SeedingMovies, cfg.Watch.SeedingMovies) {
+		t.Fatalf("draft watch paths = %+v, want %+v", draft.Watch, cfg.Watch)
+	}
+
+	applied := ApplyDraft(config.DefaultConfig(), draft)
+	if !slices.Equal(applied.Watch.TV, cfg.Watch.TV) ||
+		!slices.Equal(applied.Watch.Movies, cfg.Watch.Movies) ||
+		!slices.Equal(applied.Watch.SeedingTV, cfg.Watch.SeedingTV) ||
+		!slices.Equal(applied.Watch.SeedingMovies, cfg.Watch.SeedingMovies) {
+		t.Fatalf("applied watch paths = %+v, want %+v", applied.Watch, cfg.Watch)
+	}
+}
+
+func TestHasMediaPairAllowsSeedingOnlyTV(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Watch.SeedingTV = []string{"/seed/tv"}
+	cfg.Libraries.TV = []string{"/library/tv"}
+	if !HasMediaPair(cfg) {
+		t.Fatal("seeding-only TV intake with a TV library should be complete")
+	}
+}
+
+func TestValidateDraftRejectsConflictingWatchLayout(t *testing.T) {
+	tests := []struct {
+		name  string
+		draft Draft
+	}{
+		{
+			name: "ordinary and seeding overlap",
+			draft: func() Draft {
+				d := validDraft([]string{"/downloads/tv"}, []string{"/library/tv"}, nil, nil)
+				d.Watch.SeedingTV = []string{"/downloads/tv/seeding"}
+				return d
+			}(),
+		},
+		{
+			name:  "watch and library overlap",
+			draft: validDraft([]string{"/media/tv/incoming"}, []string{"/media/tv"}, nil, nil),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := ValidateDraft(tt.draft, RuntimeInfo{Kind: RuntimeNative})
+			if !strings.Contains(fieldErrors(errs), "watch") {
+				t.Fatalf("missing watch layout field error: %+v", errs)
+			}
+		})
 	}
 }
 
@@ -272,7 +338,7 @@ func configWithSetupVersion(version int) *config.Config {
 
 func validDraft(tvWatch, tvLibrary, movieWatch, movieLibrary []string) Draft {
 	return Draft{
-		Watch:     PathsDraft{TV: tvWatch, Movies: movieWatch},
+		Watch:     WatchDraft{TV: tvWatch, Movies: movieWatch},
 		Libraries: PathsDraft{TV: tvLibrary, Movies: movieLibrary},
 		Runtime:   RuntimeDraft{ScanFrequency: "5m", DeleteSource: true},
 		Jellyfin:  JellyfinDraft{},
