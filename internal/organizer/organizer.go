@@ -282,6 +282,31 @@ func alreadyOrganizedResult(sourcePath, targetPath string) *OrganizationResult {
 	}
 }
 
+// alreadyPublished reports whether existing is already this source's published
+// copy. Move policy removes the source, so a second scan never sees it; copy and
+// seed policies retain it deliberately, and every periodic scan re-offers it.
+// Canonical naming strips quality tokens from the target, so re-parsing the
+// target yields a weaker quality than the release-named source and the source
+// looks like a perpetual upgrade. Identity, not quality, settles this case.
+//
+// A shared inode means a hardlinked seed import: republishing would copy the
+// file over itself, so that always skips. Equal size means a cross-device copy
+// of the same release, which a deliberate force-overwrite may still redo.
+func alreadyPublished(sourcePath, existingPath string, forceOverwrite bool) bool {
+	src, err := os.Stat(sourcePath)
+	if err != nil {
+		return false
+	}
+	dst, err := os.Stat(existingPath)
+	if err != nil {
+		return false
+	}
+	if os.SameFile(src, dst) {
+		return true
+	}
+	return !forceOverwrite && src.Size() == dst.Size()
+}
+
 func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
 	return transfer.TransferOptions{
 		Timeout:       o.timeout,
@@ -524,6 +549,15 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 	}
 
 	existingFile, existingQuality := o.findExistingMediaFile(movieDir)
+	if existingFile != "" && alreadyPublished(sourcePath, existingFile, o.forceOverwrite) {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			TargetPath: existingFile,
+			Skipped:    true,
+			SkipReason: "already imported from this source",
+		}, nil
+	}
 	if existingFile != "" && !o.forceOverwrite {
 		if !sourceQuality.IsBetterThan(existingQuality) {
 			return &OrganizationResult{
@@ -762,6 +796,16 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		}
 		existingFile, existingFound = "", false
 	}
+	if existingFound && alreadyPublished(sourcePath, existingFile, o.forceOverwrite) {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			TargetPath: existingFile,
+			Skipped:    true,
+			SkipReason: "already imported from this source",
+		}, nil
+	}
+
 	var existingQuality *quality.QualityInfo
 	if existingFound {
 		existingQuality = quality.Parse(filepath.Base(existingFile))

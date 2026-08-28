@@ -1497,3 +1497,73 @@ func TestOrganizeSeasonPackExtrasMatchesShowYear(t *testing.T) {
 	assert.FileExists(t, filepath.Join(libraryDir, "Show (2020)", "extras", "Show S01 EXTRAS.mkv"))
 	assert.NoDirExists(t, filepath.Join(libraryDir, "Show (1990)", "extras"))
 }
+
+// A retained source (copy or seed policy) is re-seen by every periodic scan.
+// Canonical naming strips quality tokens from the target, so re-parsing it
+// yields a weaker quality than the source and the source looks like a perpetual
+// upgrade. Guard the second scan explicitly.
+func TestOrganizerRetainedSourceIsNotReimportedOnSecondScan(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		mode SourceTransferMode
+	}{
+		{name: "seed", mode: TransferSeed},
+		{name: "copy", mode: TransferCopy},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			sourcePath := filepath.Join(root, "incoming", "Loop.Show.2026.S01E01.1080p.WEB-DL.x265-GROUP.mkv")
+			libraryDir := filepath.Join(root, "library")
+			createTestFile(t, sourcePath, 4096)
+
+			transferer := &recordingTransferer{}
+			org, err := NewOrganizer([]string{libraryDir},
+				WithTransferer(transferer),
+				WithTransferModeResolver(func(string) SourceTransferMode { return tt.mode }),
+			)
+			require.NoError(t, err)
+
+			info := naming.TVShowInfo{Title: "Loop Show", Year: "2026", Season: 1, Episode: 1}
+
+			first, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, info)
+			require.NoError(t, err)
+			require.True(t, first.Success, "first import failed: %v", first.Error)
+			transfersAfterFirst := transferer.moves + transferer.copies
+
+			second, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, info)
+			require.NoError(t, err)
+			assert.False(t, second.Success, "second scan re-imported a retained source")
+			assert.True(t, second.Skipped, "second scan should skip, got %+v", second)
+			assert.Equal(t, transfersAfterFirst, transferer.moves+transferer.copies,
+				"retained source was transferred a second time")
+			assert.FileExists(t, sourcePath, "source must remain retained")
+		})
+	}
+}
+
+func TestOrganizerRetainedMovieSourceIsNotReimportedOnSecondScan(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "incoming", "Loop.Movie.2026.1080p.BluRay.x265-GROUP.mkv")
+	libraryDir := filepath.Join(root, "library")
+	createTestFile(t, sourcePath, 4096)
+
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir},
+		WithTransferer(transferer),
+		WithTransferModeResolver(func(string) SourceTransferMode { return TransferSeed }),
+	)
+	require.NoError(t, err)
+
+	info := naming.MovieInfo{Title: "Loop Movie", Year: "2026"}
+
+	first, err := org.OrganizeMovieWithParsed(sourcePath, libraryDir, info)
+	require.NoError(t, err)
+	require.True(t, first.Success, "first import failed: %v", first.Error)
+	transfersAfterFirst := transferer.moves + transferer.copies
+
+	second, err := org.OrganizeMovieWithParsed(sourcePath, libraryDir, info)
+	require.NoError(t, err)
+	assert.True(t, second.Skipped, "second scan should skip, got %+v", second)
+	assert.Equal(t, transfersAfterFirst, transferer.moves+transferer.copies,
+		"retained movie source was transferred a second time")
+}
