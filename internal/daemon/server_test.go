@@ -51,8 +51,8 @@ func TestServerHealthDegradedWhileDeterministicFailureExists(t *testing.T) {
 	if err := os.WriteFile(blocked, []byte("episode"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	handler := &MediaHandler{stats: NewStats(), unparseableCache: NewNegativeCache()}
-	handler.unparseableCache.Record(blocked, "unable to parse TV show name")
+	handler := &MediaHandler{stats: NewStats(), retryCache: NewNegativeCache()}
+	handler.retryCache.Record(blocked, "unable to parse TV show name")
 	server := NewServer(handler, nil, ":0", nil, "")
 
 	w := httptest.NewRecorder()

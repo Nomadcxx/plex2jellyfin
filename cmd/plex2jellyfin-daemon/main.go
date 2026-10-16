@@ -380,14 +380,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Create periodic scanner
 	periodicScanner := scanner.NewPeriodicScanner(scanner.ScannerConfig{
-		Interval:     scanInterval,
-		WatchPaths:   watchPaths,
-		Handler:      handler,
-		Logger:       logger,
-		ActivityDir:  filepath.Join(configDir, "activity"),
-		OrphanCheck:  jellyfinClient,
-		SonarrClient: sonarrHealthClient,
-		RadarrClient: radarrHealthClient,
+		Interval:        scanInterval,
+		WatchPaths:      watchPaths,
+		Handler:         handler,
+		Logger:          logger,
+		ActivityDir:     filepath.Join(configDir, "activity"),
+		OrphanCheck:     jellyfinClient,
+		RetrySuppressed: handler.ShouldSuppressRetry,
+		SonarrClient:    sonarrHealthClient,
+		RadarrClient:    radarrHealthClient,
 	})
 
 	healthServer := daemon.NewServer(handler, periodicScanner, healthAddr, logger, cfg.Jellyfin.WebhookSecret)
@@ -484,7 +485,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	controlServer.Register(daemonipc.CmdStop, stopHandler(func() { cancel() }))
 	controlServer.Register(daemonipc.CmdRecover, recoverHandler(opLog, getPending, clearPending))
 	controlServer.Register(daemonipc.CmdDeferred, deferredHandler(func() any {
-		return handler.UnparseableCache().Snapshot()
+		return handler.RetryCache().Snapshot()
 	}))
 
 	rescanDefaults := func() []scanner.RescanRoot {

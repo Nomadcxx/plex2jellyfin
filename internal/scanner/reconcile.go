@@ -41,8 +41,7 @@ func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err err
 		return 0, 0, err
 	}
 
-	var toClean []string
-
+	var activityPaths []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -52,9 +51,17 @@ func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err err
 		if !strings.HasPrefix(name, "activity-") || !strings.HasSuffix(name, ".jsonl") {
 			continue
 		}
+		activityPaths = append(activityPaths, filepath.Join(s.activityDir, name))
+	}
+	latestBySource, err := latestActivityEntries(activityPaths)
+	if err != nil {
+		return 0, 0, err
+	}
 
-		filePath := filepath.Join(s.activityDir, name)
-		fileRetried, fileToClean, fileErr := s.processActivityFile(filePath, retryWindow, cleanupWindow)
+	var toClean []string
+	for _, filePath := range activityPaths {
+		name := filepath.Base(filePath)
+		fileRetried, fileToClean, fileErr := s.processActivityFileWithLatest(filePath, retryWindow, cleanupWindow, latestBySource)
 		if fileErr != nil {
 			s.logger.Warn("scanner", "Error processing activity file",
 				logging.F("file", name),
@@ -87,6 +94,10 @@ func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err err
 }
 
 func (s *PeriodicScanner) processActivityFile(path string, retryWindow, cleanupWindow time.Time) (retried int, shouldClean bool, err error) {
+	return s.processActivityFileWithLatest(path, retryWindow, cleanupWindow, nil)
+}
+
+func (s *PeriodicScanner) processActivityFileWithLatest(path string, retryWindow, cleanupWindow time.Time, latestBySource map[string]activity.Entry) (retried int, shouldClean bool, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, false, err
@@ -139,6 +150,16 @@ func (s *PeriodicScanner) processActivityFile(path string, retryWindow, cleanupW
 	deterministicCutoff := now.Add(-deterministicRetryDays * 24 * time.Hour)
 
 	for _, entry := range latestFailure {
+		if s.retrySuppressed != nil && s.retrySuppressed(entry.Source) {
+			continue
+		}
+		if latestBySource != nil {
+			latest, ok := latestBySource[entry.Source]
+			if !ok || latest.Success || latest.Timestamp.After(entry.Timestamp) {
+				continue
+			}
+		}
+
 		// Only retry failures within the standard retry window unless the
 		// entry is deterministic and due for a periodic re-check.
 		withinRetryWindow := entry.Timestamp.After(retryWindow)
@@ -160,6 +181,36 @@ func (s *PeriodicScanner) processActivityFile(path string, retryWindow, cleanupW
 	shouldClean = hasOldFailures && !hasRecentOrSuccess
 
 	return retried, shouldClean, scanner.Err()
+}
+
+func latestActivityEntries(paths []string) (map[string]activity.Entry, error) {
+	latest := make(map[string]activity.Entry)
+	for _, path := range paths {
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open activity file %s: %w", filepath.Base(path), err)
+		}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			var entry activity.Entry
+			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil || entry.Source == "" {
+				continue
+			}
+			previous, ok := latest[entry.Source]
+			if !ok || !entry.Timestamp.Before(previous.Timestamp) {
+				latest[entry.Source] = entry
+			}
+		}
+		scanErr := scanner.Err()
+		closeErr := file.Close()
+		if scanErr != nil {
+			return nil, fmt.Errorf("read activity file %s: %w", filepath.Base(path), scanErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close activity file %s: %w", filepath.Base(path), closeErr)
+		}
+	}
+	return latest, nil
 }
 
 // deterministicDueForRetry returns true when a deterministic failure should

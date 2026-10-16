@@ -6,21 +6,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func rewindToMigration25(t *testing.T, db *MediaDB) {
+	t.Helper()
+	_, err := db.SQL().Exec(`ALTER TABLE parse_decisions DROP COLUMN source_size`)
+	require.NoError(t, err)
+	_, err = db.SQL().Exec(`ALTER TABLE parse_decisions DROP COLUMN source_modified_at`)
+	require.NoError(t, err)
+	_, err = db.SQL().Exec(`DELETE FROM schema_version WHERE version >= 26`)
+	require.NoError(t, err)
+}
+
+func insertLegacyDecision(t *testing.T, db *MediaDB) int64 {
+	t.Helper()
+	res, err := db.SQL().Exec(`
+		INSERT INTO parse_decisions (source_path, source_filename, event_at)
+		VALUES ('/legacy/item.mkv', 'item.mkv', CURRENT_TIMESTAMP)`)
+	require.NoError(t, err)
+	id, err := res.LastInsertId()
+	require.NoError(t, err)
+	return id
+}
+
 func TestMigration26NormalizesOnlyGUIDItemIDs(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
+	var err error
 
-	_, err := db.SQL().Exec(`DELETE FROM schema_version WHERE version = 26`)
-	require.NoError(t, err)
+	rewindToMigration25(t, db)
 
-	dashedID, err := db.InsertDecision(makeDecision())
-	require.NoError(t, err)
-	uppercaseID, err := db.InsertDecision(makeDecision())
-	require.NoError(t, err)
-	nonGUIDID, err := db.InsertDecision(makeDecision())
-	require.NoError(t, err)
-	malformedID, err := db.InsertDecision(makeDecision())
-	require.NoError(t, err)
+	dashedID := insertLegacyDecision(t, db)
+	uppercaseID := insertLegacyDecision(t, db)
+	nonGUIDID := insertLegacyDecision(t, db)
+	malformedID := insertLegacyDecision(t, db)
 
 	_, err = db.SQL().Exec(`UPDATE parse_decisions SET jellyfin_item_id = ? WHERE id = ?`,
 		"4bceeac3-77fe-a6fa-39e9-7850c6b55e35", dashedID)
@@ -68,12 +85,11 @@ func TestMigration26NormalizesOnlyGUIDItemIDs(t *testing.T) {
 func TestMigration26ClearsOnlyLegacyMissingProviderContradictions(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
+	var err error
 
-	_, err := db.SQL().Exec(`DELETE FROM schema_version WHERE version = 26`)
-	require.NoError(t, err)
+	rewindToMigration25(t, db)
 
-	contradictory, err := db.InsertDecision(makeDecision())
-	require.NoError(t, err)
+	contradictory := insertLegacyDecision(t, db)
 	_, err = db.SQL().Exec(`
 		UPDATE parse_decisions
 		   SET jellyfin_identified = 1,
@@ -83,8 +99,7 @@ func TestMigration26ClearsOnlyLegacyMissingProviderContradictions(t *testing.T) 
 		 WHERE id = ?`, contradictory)
 	require.NoError(t, err)
 
-	unresolved, err := db.InsertDecision(makeDecision())
-	require.NoError(t, err)
+	unresolved := insertLegacyDecision(t, db)
 	_, err = db.SQL().Exec(`
 		UPDATE parse_decisions
 		   SET jellyfin_identified = 0,
@@ -92,8 +107,7 @@ func TestMigration26ClearsOnlyLegacyMissingProviderContradictions(t *testing.T) 
 		 WHERE id = ?`, unresolved)
 	require.NoError(t, err)
 
-	staleEpisode, err := db.InsertDecision(makeDecision())
-	require.NoError(t, err)
+	staleEpisode := insertLegacyDecision(t, db)
 	_, err = db.SQL().Exec(`
 		UPDATE parse_decisions
 		   SET jellyfin_identified = 1,

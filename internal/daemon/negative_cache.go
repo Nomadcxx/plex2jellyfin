@@ -22,6 +22,8 @@ var obfuscatedHashName = regexp.MustCompile(`^[A-Za-z0-9]{20,}\.(mkv|mp4|avi|m4v
 // file itself is obfuscated, so we should NOT defer.
 var parentFolderHasMarkers = regexp.MustCompile(`(?i)(s\d{1,2}e\d{1,3}|season[._\s-]?\d+|\b(19|20)\d{2}\b|\bcomplete\b|\bs\d{2}\b)`)
 
+const maxRetryBackoffFailures = 6
+
 // IsObfuscatedSABFilename reports whether the basename looks like a SAB
 // temp-hash file with no parseable context in its parent folder. Files whose
 // parent folders carry valid release markers are not considered SAB
@@ -57,9 +59,10 @@ type NegativeCache struct {
 }
 
 type negEntry struct {
-	failedAt time.Time
-	failures int
-	errMsg   string
+	failedAt        time.Time
+	failures        int
+	errMsg          string
+	resourceFailure bool
 }
 
 // backoffSchedule returns how long to defer a path after `failures` failures.
@@ -82,6 +85,28 @@ func backoffSchedule(failures int) time.Duration {
 		// attempt. Store the parser version if releases must clear entries.
 		return 30 * 24 * time.Hour
 	}
+}
+
+func resourceBackoffSchedule(failures int) time.Duration {
+	switch failures {
+	case 0, 1:
+		return 30 * time.Minute
+	case 2:
+		return time.Hour
+	case 3:
+		return 2 * time.Hour
+	case 4:
+		return 4 * time.Hour
+	default:
+		return 6 * time.Hour
+	}
+}
+
+func (e *negEntry) backoff() time.Duration {
+	if e.resourceFailure {
+		return resourceBackoffSchedule(e.failures)
+	}
+	return backoffSchedule(e.failures)
 }
 
 // NewNegativeCache returns an initialized NegativeCache.
@@ -111,7 +136,7 @@ func (n *NegativeCache) IsDeferred(path string) (bool, time.Duration, string) {
 		delete(n.entries, path)
 		return false, 0, ""
 	}
-	wait := backoffSchedule(e.failures)
+	wait := e.backoff()
 	elapsed := time.Since(e.failedAt)
 	if elapsed >= wait {
 		return false, 0, ""
@@ -128,12 +153,21 @@ func (n *NegativeCache) Record(path, errMsg string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	e, ok := n.entries[path]
+	resourceFailure := IsRetryableResourceFailure(errMsg)
 	if !ok {
-		e = &negEntry{}
+		e = &negEntry{resourceFailure: resourceFailure}
 		n.entries[path] = e
+	} else if e.resourceFailure != resourceFailure {
+		// Backoff counts belong to one error class; a transient storage error
+		// must not stretch a later parse failure to the 30-day ceiling.
+		e.failures = 0
+		e.resourceFailure = resourceFailure
 	}
 	e.failedAt = time.Now()
-	e.failures++
+	// ponytail: counts saturate once parser backoff reaches 30 days; exact lifetime totals need separate storage if operators need them.
+	if e.failures < maxRetryBackoffFailures {
+		e.failures++
+	}
 	e.errMsg = errMsg
 }
 
@@ -157,12 +191,16 @@ func (n *NegativeCache) HydrateEntry(path, errMsg string, failedAt time.Time, fa
 	if n == nil || failures <= 0 {
 		return
 	}
+	if failures > maxRetryBackoffFailures {
+		failures = maxRetryBackoffFailures
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.entries[path] = &negEntry{
-		failedAt: failedAt,
-		failures: failures,
-		errMsg:   errMsg,
+		failedAt:        failedAt,
+		failures:        failures,
+		errMsg:          errMsg,
+		resourceFailure: IsRetryableResourceFailure(errMsg),
 	}
 }
 
@@ -181,7 +219,7 @@ func (n *NegativeCache) Snapshot() []NegativeCacheEntry {
 			delete(n.entries, path)
 			continue
 		}
-		wait := backoffSchedule(e.failures)
+		wait := e.backoff()
 		remain := wait - time.Since(e.failedAt)
 		if remain < 0 {
 			remain = 0
@@ -233,4 +271,40 @@ func IsDeterministicUnparseable(errMsg string) bool {
 		}
 	}
 	return false
+}
+
+// IsRetryableResourceFailure identifies transient low-space errors. These get
+// a short capped backoff because capacity can recover without the source file
+// changing.
+func IsRetryableResourceFailure(errMsg string) bool {
+	msg := strings.ToLower(errMsg)
+	for _, pattern := range []string{
+		"insufficient space",
+		"not enough space",
+		"no space left on device",
+	} {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsFailureWorthBackoff(errMsg string) bool {
+	return IsDeterministicUnparseable(errMsg) || IsRetryableResourceFailure(errMsg)
+}
+
+func retryFailureStreak(recentErrors []string) int {
+	if len(recentErrors) == 0 || !IsFailureWorthBackoff(recentErrors[0]) {
+		return 0
+	}
+	resourceFailure := IsRetryableResourceFailure(recentErrors[0])
+	failures := 0
+	for _, errMsg := range recentErrors {
+		if !IsFailureWorthBackoff(errMsg) || IsRetryableResourceFailure(errMsg) != resourceFailure {
+			break
+		}
+		failures++
+	}
+	return failures
 }

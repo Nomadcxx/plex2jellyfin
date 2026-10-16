@@ -112,8 +112,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	blockedFiles := 0
-	if s.handler != nil && s.handler.unparseableCache != nil {
-		blockedFiles = len(s.handler.unparseableCache.Snapshot())
+	if s.handler != nil && s.handler.retryCache != nil {
+		blockedFiles = len(s.handler.retryCache.Snapshot())
 	}
 	overallHealthy := healthy && scannerHealthy && blockedFiles == 0
 
@@ -158,8 +158,8 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	stats := s.handler.Stats()
 	blockedFiles := 0
-	if s.handler.unparseableCache != nil {
-		blockedFiles = len(s.handler.unparseableCache.Snapshot())
+	if s.handler.retryCache != nil {
+		blockedFiles = len(s.handler.retryCache.Snapshot())
 	}
 
 	response := MetricsResponse{
