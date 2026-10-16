@@ -306,6 +306,32 @@ func TestMediaHandlerLogsRetainedSourceDuplicateAsResolved(t *testing.T) {
 	}
 }
 
+func TestMediaHandlerLogsRangeOverlapAsConflictNotImportSuccess(t *testing.T) {
+	logger, err := activity.NewLogger(t.TempDir())
+	require.NoError(t, err)
+	defer logger.Close()
+	entries, unsubscribe := logger.Subscribe()
+	defer unsubscribe()
+
+	const reason = "multi-episode range overlaps existing episode E07"
+	handler := &MediaHandler{activityLogger: logger, logger: logging.Nop()}
+	handler.logEntry(&organizer.OrganizationResult{
+		SourcePath: "/downloads/Show.S01E07-E08.mkv",
+		TargetPath: "/library/Show/Season 01/Show S01E07.mkv",
+		Skipped:    true,
+		SkipReason: reason,
+	}, notify.MediaTypeTVEpisode, "Show", nil, activity.MethodRegex, 0, time.Second, false, false)
+
+	select {
+	case entry := <-entries:
+		assert.False(t, entry.Success, "an unresolved overlap is not an import success")
+		assert.Equal(t, reason, entry.Error, "activity must keep the reviewable overlap reason")
+	case <-time.After(time.Second):
+		t.Fatal("activity entry was not logged")
+	}
+	assert.True(t, stableDuplicateSkipReason(reason), "unchanged overlap should remain suppressed on repeat scans")
+}
+
 func TestMediaHandlerTracksOnlySuccessfulArrHandoffs(t *testing.T) {
 	manager := notify.NewManager(false)
 	manager.Register(fixedNotifyResult{service: "radarr", success: false})

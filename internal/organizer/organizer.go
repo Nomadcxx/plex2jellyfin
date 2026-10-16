@@ -2,6 +2,7 @@ package organizer
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -37,10 +38,9 @@ type OrganizationResult struct {
 	SkipReason      string
 	SourceQuality   *quality.QualityInfo
 	ExistingQuality *quality.QualityInfo
-	// InventoryError records a post-move media_files indexing failure. The
-	// move itself completed, so Success stays true and TargetPath is set;
-	// this only reports that the inventory did not catch up. Callers must
-	// not treat it as a failed organize — the bytes are already on disk.
+	// InventoryError records post-publication inventory or replacement cleanup
+	// failures. The new target is already on disk, so Success stays true and
+	// TargetPath is set; callers can surface the consistency issue separately.
 	InventoryError error
 	sourceRetained bool
 }
@@ -307,6 +307,14 @@ func alreadyPublished(sourcePath, existingPath string, forceOverwrite bool) bool
 	return !forceOverwrite && src.Size() == dst.Size()
 }
 
+func hasQualityEvidence(q *quality.QualityInfo) bool {
+	return q != nil && (q.Source != quality.SourceUnknown ||
+		q.Resolution != quality.ResolutionUnknown ||
+		q.HDR != quality.HDRNone ||
+		q.Audio != quality.AudioUnknown ||
+		q.Is3D || q.IsProper || q.IsExtended)
+}
+
 func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
 	return transfer.TransferOptions{
 		Timeout:       o.timeout,
@@ -376,7 +384,7 @@ const inventoryIndexTimeout = 2 * time.Minute
 // refreshInventoryAfterTransfer indexes the destination via PathIndexer and then
 // removes the stale source/replaced media_files rows it supersedes. Returns a
 // consistency error the caller reports alongside an otherwise successful transfer.
-func (o *Organizer) refreshInventoryAfterTransfer(sourcePath, targetPath, replacedPath, libraryRoot, mediaType string, sourceRetained bool) error {
+func (o *Organizer) refreshInventoryAfterTransfer(sourcePath, targetPath string, replacedPaths []string, libraryRoot, mediaType string, sourceRetained bool) error {
 	if o.db == nil {
 		return nil
 	}
@@ -384,35 +392,55 @@ func (o *Organizer) refreshInventoryAfterTransfer(sourcePath, targetPath, replac
 	defer cancel()
 	if o.pathIndexer == nil {
 		// Legacy fallback when callers have not wired ScanPath yet.
+		destinationIndexed := false
 		if mediaFile, err := o.db.GetMediaFile(sourcePath); err == nil && mediaFile != nil {
 			mediaFile.Path = targetPath
 			if err := o.db.UpdateMediaFile(mediaFile); err != nil {
-				log.Printf("[organizer] warning: failed to update media file path after move: %v", err)
+				return fmt.Errorf("update source inventory path: %w", err)
+			}
+			destinationIndexed = true
+		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("read source inventory row: %w", err)
+		}
+		if !destinationIndexed && len(replacedPaths) > 0 {
+			if mediaFile, err := o.db.GetMediaFile(targetPath); err == nil && mediaFile != nil {
+				destinationIndexed = true
+			} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("read destination inventory row: %w", err)
 			}
 		}
-		return nil
-	}
-
-	// Index the destination before dropping the rows it replaces. If indexing
-	// fails, the stale rows are the only remaining record of the file, so
-	// deleting them first would leave the moved file absent from media_files
-	// entirely — invisible to the sweep, verification, and duplicate analysis.
-	if err := o.pathIndexer(ctx, targetPath, libraryRoot, mediaType); err != nil {
-		return fmt.Errorf("index destination: %w", err)
-	}
-	sourceRole := "stale"
-	if sourceRetained {
-		sourceRole = "retained staging"
-	}
-	if err := o.db.DeleteMediaFile(sourcePath); err != nil {
-		return fmt.Errorf("remove %s source row: %w", sourceRole, err)
-	}
-	if replacedPath != "" && replacedPath != targetPath && replacedPath != sourcePath {
-		if err := o.db.DeleteMediaFile(replacedPath); err != nil {
-			return fmt.Errorf("remove stale replaced row: %w", err)
+		if len(replacedPaths) > 0 && !destinationIndexed {
+			return fmt.Errorf("keep replaced inventory rows: destination was not indexed")
+		}
+	} else {
+		// Index the destination before dropping the rows it replaces. If indexing
+		// fails, the stale rows are the only remaining record of the file, so
+		// deleting them first would leave the moved file absent from media_files
+		// entirely — invisible to the sweep, verification, and duplicate analysis.
+		if err := o.pathIndexer(ctx, targetPath, libraryRoot, mediaType); err != nil {
+			return fmt.Errorf("index destination: %w", err)
 		}
 	}
-	return nil
+
+	var errs []error
+	if o.pathIndexer != nil {
+		sourceRole := "stale"
+		if sourceRetained {
+			sourceRole = "retained staging"
+		}
+		if err := o.db.DeleteMediaFile(sourcePath); err != nil {
+			errs = append(errs, fmt.Errorf("remove %s source row: %w", sourceRole, err))
+		}
+	}
+	for _, replacedPath := range replacedPaths {
+		if replacedPath == "" || replacedPath == targetPath || replacedPath == sourcePath {
+			continue
+		}
+		if err := o.db.DeleteMediaFile(replacedPath); err != nil {
+			errs = append(errs, fmt.Errorf("remove stale replaced row %s: %w", replacedPath, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (o *Organizer) checkPlaybackSafety(sourcePath string) error {
@@ -622,9 +650,13 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 		}, nil
 	}
 
+	var replacedPaths []string
+	var replacementErr error
 	if existingFile != "" && existingFile != targetPath {
 		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
-			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
+			replacementErr = fmt.Errorf("remove replaced file %s: %w", existingFile, err)
+		} else {
+			replacedPaths = append(replacedPaths, existingFile)
 		}
 	}
 
@@ -632,7 +664,7 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 	// consistency problem to report, not a failed organize: reporting failure
 	// here would drop target_path from the decision and hide a file that is
 	// genuinely on disk.
-	inventoryErr := o.refreshInventoryAfterTransfer(sourcePath, targetPath, existingFile, libraryPath, "movie", sourceRetained)
+	inventoryErr := errors.Join(replacementErr, o.refreshInventoryAfterTransfer(sourcePath, targetPath, replacedPaths, libraryPath, "movie", sourceRetained))
 
 	// HOLDEN Phase 3: Self-learning - update database with organized movie
 	if o.db != nil {
@@ -778,41 +810,103 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		}, nil
 	}
 
-	existingFile, existingFound := FindEpisodeFile(seasonDir, tv.Season, tv.Episode)
+	var existingFile string
+	var existingQuality *quality.QualityInfo
+	var replacedPaths []string
+	rangeEnd := tv.Episode
 	if tv.EpisodeEnd > tv.Episode {
-		// ponytail: a range is one physical file, so do not quality-replace an
-		// individual member. Upgrade path: model episode-to-file membership.
-		for episode := tv.Episode; episode <= tv.EpisodeEnd; episode++ {
-			if overlap, found := FindEpisodeFile(seasonDir, tv.Season, episode); found {
-				return &OrganizationResult{
-					Success:       false,
-					SourcePath:    sourcePath,
-					TargetPath:    overlap,
-					Skipped:       true,
-					SkipReason:    fmt.Sprintf("multi-episode range overlaps existing episode E%02d", episode),
-					SourceQuality: sourceQuality,
-				}, nil
-			}
-		}
-		existingFile, existingFound = "", false
+		rangeEnd = tv.EpisodeEnd
 	}
-	if existingFound && alreadyPublished(sourcePath, existingFile, o.forceOverwrite) {
+	replacedPaths, err := findEpisodeFilesForRange(seasonDir, tv.Season, tv.Episode, rangeEnd)
+	if err != nil {
 		return &OrganizationResult{
-			Success:    false,
-			SourcePath: sourcePath,
-			TargetPath: existingFile,
-			Skipped:    true,
-			SkipReason: "already imported from this source",
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("unable to inspect existing TV episode files: %w", err),
 		}, nil
 	}
-
-	var existingQuality *quality.QualityInfo
-	if existingFound {
-		existingQuality = quality.Parse(filepath.Base(existingFile))
+	incomingRange := fmt.Sprintf("S%02dE%02d", tv.Season, tv.Episode)
+	if rangeEnd > tv.Episode {
+		incomingRange += fmt.Sprintf("-E%02d", rangeEnd)
 	}
+	for _, overlap := range replacedPaths {
+		fileSeason, fileStart, fileEnd, ok := extractEpisodeRange(filepath.Base(overlap))
+		if !ok {
+			continue
+		}
+		overlapEpisode := fileStart
+		if overlapEpisode < tv.Episode {
+			overlapEpisode = tv.Episode
+		}
+		fileRange := fmt.Sprintf("S%02dE%02d", fileSeason, fileStart)
+		if fileEnd > fileStart {
+			fileRange += fmt.Sprintf("-E%02d", fileEnd)
+		}
+		skipOverlap := func(reason string, qualityInfo *quality.QualityInfo) *OrganizationResult {
+			return &OrganizationResult{
+				SourcePath:      sourcePath,
+				TargetPath:      overlap,
+				Skipped:         true,
+				SkipReason:      fmt.Sprintf("multi-episode range overlaps existing episode E%02d: %s", overlapEpisode, reason),
+				SourceQuality:   sourceQuality,
+				ExistingQuality: qualityInfo,
+			}
+		}
 
-	if existingFound && !o.forceOverwrite {
-		if !sourceQuality.IsBetterThan(existingQuality) {
+		if tv.EpisodeEnd > tv.Episode {
+			if overlap == targetPath && alreadyPublished(sourcePath, overlap, o.forceOverwrite) {
+				return &OrganizationResult{
+					SourcePath: sourcePath,
+					TargetPath: overlap,
+					Skipped:    true,
+					SkipReason: "already imported from this source",
+				}, nil
+			}
+			if fileStart < tv.Episode || fileEnd > rangeEnd {
+				return skipOverlap(fmt.Sprintf("existing range %s extends outside incoming range %s", fileRange, incomingRange), nil), nil
+			}
+			if !hasQualityEvidence(sourceQuality) {
+				return skipOverlap("incoming source has no comparable quality data", nil), nil
+			}
+			if o.db == nil {
+				return skipOverlap("successful import quality evidence is unavailable", nil), nil
+			}
+			decision, err := o.db.GetDecisionByTargetPath(overlap)
+			if err != nil {
+				return skipOverlap(fmt.Sprintf("could not read successful import quality evidence: %v", err), nil), nil
+			}
+			if decision == nil || strings.TrimSpace(decision.SourceFilename) == "" {
+				return skipOverlap("successful import quality evidence is unavailable", nil), nil
+			}
+			importedQuality := quality.Parse(decision.SourceFilename)
+			if !hasQualityEvidence(importedQuality) {
+				return skipOverlap("recorded source filename has no comparable quality data", importedQuality), nil
+			}
+			if !sourceQuality.IsBetterThan(importedQuality) {
+				return skipOverlap(fmt.Sprintf("incoming quality (%s) is not higher than imported quality (%s)", sourceQuality.String(), importedQuality.String()), importedQuality), nil
+			}
+			if existingQuality == nil {
+				existingQuality = importedQuality
+			}
+		} else if fileStart < tv.Episode || fileEnd > rangeEnd {
+			return skipOverlap(fmt.Sprintf("existing range %s extends outside incoming range %s", fileRange, incomingRange), nil), nil
+		}
+	}
+	if tv.EpisodeEnd > tv.Episode {
+		existingFile = ""
+	} else if len(replacedPaths) > 0 {
+		existingFile = replacedPaths[0]
+		if alreadyPublished(sourcePath, existingFile, o.forceOverwrite) {
+			return &OrganizationResult{
+				SourcePath: sourcePath,
+				TargetPath: existingFile,
+				Skipped:    true,
+				SkipReason: "already imported from this source",
+			}, nil
+		}
+		existingQuality = quality.Parse(filepath.Base(existingFile))
+		if !o.forceOverwrite && !sourceQuality.IsBetterThan(existingQuality) {
 			return &OrganizationResult{
 				Success:         false,
 				SourcePath:      sourcePath,
@@ -823,9 +917,8 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 				ExistingQuality: existingQuality,
 			}, nil
 		}
-		// same episode, source is better quality — fall through to overwrite
-	}
-	if !existingFound {
+		replacedPaths = []string{existingFile}
+	} else {
 		existingFile = ""
 	}
 
@@ -888,15 +981,22 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		}, nil
 	}
 
-	if existingFile != "" && existingFile != targetPath {
-		if err := os.Remove(existingFile); err != nil && !os.IsNotExist(err) {
-			log.Printf("[organizer] warning: failed to remove existing file %s: %v", existingFile, err)
+	var removedPaths []string
+	var replacementErrs []error
+	for _, replacedPath := range replacedPaths {
+		if replacedPath == targetPath || replacedPath == sourcePath {
+			continue
 		}
+		if err := os.Remove(replacedPath); err != nil && !os.IsNotExist(err) {
+			replacementErrs = append(replacementErrs, fmt.Errorf("remove replaced episode %s: %w", replacedPath, err))
+			continue
+		}
+		removedPaths = append(removedPaths, replacedPath)
 	}
 
 	// See OrganizeMovieWithParsed: the move already completed, so an indexing
 	// failure is reported without demoting the organize to failed.
-	inventoryErr := o.refreshInventoryAfterTransfer(sourcePath, targetPath, existingFile, libraryPath, "episode", sourceRetained)
+	inventoryErr := errors.Join(errors.Join(replacementErrs...), o.refreshInventoryAfterTransfer(sourcePath, targetPath, removedPaths, libraryPath, "episode", sourceRetained))
 
 	// HOLDEN Phase 3: Self-learning - update database with organized TV show
 	if o.db != nil {

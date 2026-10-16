@@ -606,7 +606,8 @@ func (h *MediaHandler) logEntry(
 		target = result.TargetPath
 	}
 
-	activitySuccess := result.Success || (result.Skipped && stableDuplicateSkipReason(result.SkipReason))
+	rangeConflict := strings.Contains(strings.ToLower(result.SkipReason), "multi-episode range overlaps existing episode")
+	activitySuccess := result.Success || (result.Skipped && stableDuplicateSkipReason(result.SkipReason) && !rangeConflict)
 	entry := activity.Entry{
 		Action:         "organize",
 		Source:         result.SourcePath,
@@ -623,15 +624,19 @@ func (h *MediaHandler) logEntry(
 		RadarrNotified: radarrNotified,
 	}
 
-	if !activitySuccess && result.Error != nil {
-		entry.Error = result.Error.Error()
-		if errors.Is(result.Error, naming.ErrParseFailed) || IsDeterministicUnparseable(entry.Error) {
-			entry.Deterministic = true
-			if result.SourcePath != "" {
-				if st, serr := os.Stat(result.SourcePath); serr == nil {
-					entry.SourceMtime = st.ModTime().Unix()
+	if !activitySuccess {
+		if result.Error != nil {
+			entry.Error = result.Error.Error()
+			if errors.Is(result.Error, naming.ErrParseFailed) || IsDeterministicUnparseable(entry.Error) {
+				entry.Deterministic = true
+				if result.SourcePath != "" {
+					if st, serr := os.Stat(result.SourcePath); serr == nil {
+						entry.SourceMtime = st.ModTime().Unix()
+					}
 				}
 			}
+		} else if result.Skipped {
+			entry.Error = result.SkipReason
 		}
 	}
 

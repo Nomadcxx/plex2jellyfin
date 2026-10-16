@@ -62,3 +62,42 @@ func FindEpisodeFile(seasonDir string, season, episode int) (string, bool) {
 	}
 	return "", false
 }
+
+func extractEpisodeRange(filename string) (season, start, end int, ok bool) {
+	info, err := naming.ParseTVShowName(filename)
+	if err == nil && info.Episode > 0 {
+		end = info.EpisodeEnd
+		if end < info.Episode {
+			end = info.Episode
+		}
+		return info.Season, info.Episode, end, true
+	}
+
+	season, episode, ok := ExtractEpisodeKey(filename)
+	return season, episode, episode, ok
+}
+
+func findEpisodeFilesForRange(seasonDir string, season, start, end int) ([]string, error) {
+	if start <= 0 || end < start {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(seasonDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var paths []string
+	for _, entry := range entries {
+		if entry.IsDir() || !video.IsVideo(entry.Name()) {
+			continue
+		}
+		fileSeason, fileStart, fileEnd, ok := extractEpisodeRange(entry.Name())
+		if ok && fileSeason == season && fileStart <= end && fileEnd >= start {
+			paths = append(paths, filepath.Join(seasonDir, entry.Name()))
+		}
+	}
+	return paths, nil
+}
