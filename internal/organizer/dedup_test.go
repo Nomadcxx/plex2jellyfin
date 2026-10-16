@@ -76,3 +76,34 @@ func TestFindEpisodeFile(t *testing.T) {
 		assert.Empty(t, path)
 	})
 }
+
+func TestFindEpisodeFilesForRange(t *testing.T) {
+	dir := t.TempDir()
+	matches := []string{
+		"Show.S01E07.mkv",
+		"Show.S01E06-E07.mkv",
+		"Show.S01E08-E10.mkv",
+	}
+	for _, name := range append(matches,
+		"Show.S02E07.mkv",
+		"Show.S01E11-E12.mkv",
+		"Show.S01E08.srt",
+	) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("video"), 0o644))
+	}
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "Show.S01E08.mkv"), 0o755))
+
+	want := []string{
+		filepath.Join(dir, "Show.S01E07.mkv"),
+		filepath.Join(dir, "Show.S01E06-E07.mkv"),
+		filepath.Join(dir, "Show.S01E08-E10.mkv"),
+	}
+	got, err := findEpisodeFilesForRange(dir, 1, 7, 8)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, want, got)
+	assert.Len(t, got, len(want), "each matching path should be returned once")
+
+	got, err = findEpisodeFilesForRange(filepath.Join(dir, "missing"), 1, 7, 8)
+	require.NoError(t, err)
+	assert.Empty(t, got, "a season directory that does not exist has no overlaps")
+}

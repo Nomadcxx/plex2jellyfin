@@ -1,6 +1,8 @@
 package organizer
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +23,68 @@ import (
 
 type failAfterFirstMoveTransferer struct {
 	moves int
+}
+
+type recordingTransferer struct {
+	moves  int
+	copies int
+}
+
+func (t *recordingTransferer) Move(src, dst string, _ transfer.TransferOptions) (*transfer.TransferResult, error) {
+	t.moves++
+	info, err := os.Stat(src)
+	if err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	return &transfer.TransferResult{
+		Success:       true,
+		SourceRemoved: true,
+		BytesCopied:   info.Size(),
+		BytesTotal:    info.Size(),
+		Attempts:      1,
+	}, nil
+}
+
+func (t *recordingTransferer) Copy(src, dst string, _ transfer.TransferOptions) (*transfer.TransferResult, error) {
+	t.copies++
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	return &transfer.TransferResult{
+		Success:     true,
+		BytesCopied: int64(len(data)),
+		BytesTotal:  int64(len(data)),
+		Attempts:    1,
+	}, nil
+}
+
+func (t *recordingTransferer) CanResume() bool { return false }
+func (t *recordingTransferer) Name() string    { return "recording" }
+
+type failAfterFirstCopyTransferer struct {
+	recordingTransferer
+}
+
+func (t *failAfterFirstCopyTransferer) Copy(src, dst string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
+	if t.copies == 1 {
+		t.copies++
+		err := errors.New("forced copy failure")
+		return &transfer.TransferResult{Error: err}, err
+	}
+	return t.recordingTransferer.Copy(src, dst, opts)
 }
 
 func (t *failAfterFirstMoveTransferer) Move(src, dst string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
@@ -83,6 +147,8 @@ func setupTestDB(t *testing.T) (*database.MediaDB, func()) {
 
 // createTestFile creates a test video file with specified size
 func createTestFile(t *testing.T, path string, size int64) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	f, err := os.Create(path)
 	require.NoError(t, err)
 	defer f.Close()
@@ -91,6 +157,230 @@ func createTestFile(t *testing.T, path string, size int64) {
 	data := make([]byte, size)
 	_, err = f.Write(data)
 	require.NoError(t, err)
+}
+
+func assertTransferPolicyResult(t *testing.T, mode SourceTransferMode, transferer *recordingTransferer, sourcePath, targetPath string, expectedCalls int) {
+	t.Helper()
+
+	sourceInfo, sourceErr := os.Stat(sourcePath)
+	targetInfo, targetErr := os.Stat(targetPath)
+	require.NoError(t, targetErr)
+
+	switch mode {
+	case TransferMove:
+		assert.ErrorIs(t, sourceErr, os.ErrNotExist)
+		assert.Equal(t, expectedCalls, transferer.moves)
+		assert.Zero(t, transferer.copies)
+	case TransferCopy:
+		require.NoError(t, sourceErr)
+		assert.False(t, os.SameFile(sourceInfo, targetInfo))
+		assert.Zero(t, transferer.moves)
+		assert.Equal(t, expectedCalls, transferer.copies)
+	case TransferSeed:
+		require.NoError(t, sourceErr)
+		assert.True(t, os.SameFile(sourceInfo, targetInfo))
+		assert.Zero(t, transferer.moves)
+		assert.Zero(t, transferer.copies, "same-filesystem seed should not invoke fallback copy")
+	default:
+		t.Fatalf("unhandled transfer mode %d", mode)
+	}
+}
+
+func TestOrganizerMovieTransferPolicy(t *testing.T) {
+	tests := []struct {
+		name string
+		mode SourceTransferMode
+	}{
+		{name: "move", mode: TransferMove},
+		{name: "copy", mode: TransferCopy},
+		{name: "seed", mode: TransferSeed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			sourcePath := filepath.Join(root, "incoming", "Policy.Movie.2026.mkv")
+			libraryDir := filepath.Join(root, "library")
+			createTestFile(t, sourcePath, 64)
+
+			db, cleanup := setupTestDB(t)
+			defer cleanup()
+			require.NoError(t, db.UpsertMediaFile(&database.MediaFile{
+				Path:            sourcePath,
+				Size:            64,
+				ModifiedAt:      time.Now(),
+				MediaType:       "movie",
+				NormalizedTitle: "Policy Movie",
+			}))
+
+			transferer := &recordingTransferer{}
+			indexCalls := 0
+			org, err := NewOrganizer([]string{libraryDir},
+				WithDatabase(db),
+				WithTransferer(transferer),
+				WithTransferModeResolver(func(string) SourceTransferMode { return tt.mode }),
+				WithPathIndexer(func(_ context.Context, path, libraryRoot, mediaType string) error {
+					indexCalls++
+					return db.UpsertMediaFile(&database.MediaFile{
+						Path:            path,
+						Size:            64,
+						ModifiedAt:      time.Now(),
+						MediaType:       mediaType,
+						NormalizedTitle: "Policy Movie",
+						LibraryRoot:     libraryRoot,
+					})
+				}),
+			)
+			require.NoError(t, err)
+
+			result, err := org.OrganizeMovieWithParsed(sourcePath, libraryDir, naming.MovieInfo{Title: "Policy Movie", Year: "2026"})
+			require.NoError(t, err)
+			require.True(t, result.Success, "organize error: %v", result.Error)
+			assertTransferPolicyResult(t, tt.mode, transferer, sourcePath, result.TargetPath, 1)
+			assert.Equal(t, 1, indexCalls)
+
+			sourceRow, err := db.GetMediaFile(sourcePath)
+			require.NoError(t, err)
+			assert.Nil(t, sourceRow, "staging source must not remain canonical inventory")
+			targetRow, err := db.GetMediaFile(result.TargetPath)
+			require.NoError(t, err)
+			require.NotNil(t, targetRow)
+			assert.Equal(t, libraryDir, targetRow.LibraryRoot)
+		})
+	}
+}
+
+func TestOrganizerEpisodeTransferPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		mode SourceTransferMode
+	}{
+		{name: "move", mode: TransferMove},
+		{name: "copy", mode: TransferCopy},
+		{name: "seed", mode: TransferSeed},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			sourcePath := filepath.Join(root, "incoming", "Policy.Show.2026.S01E01.mkv")
+			libraryDir := filepath.Join(root, "library")
+			createTestFile(t, sourcePath, 64)
+			transferer := &recordingTransferer{}
+
+			org, err := NewOrganizer([]string{libraryDir},
+				WithTransferer(transferer),
+				WithTransferModeResolver(func(string) SourceTransferMode { return tt.mode }),
+			)
+			require.NoError(t, err)
+			result, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, naming.TVShowInfo{
+				Title: "Policy Show", Year: "2026", Season: 1, Episode: 1,
+			})
+			require.NoError(t, err)
+			require.True(t, result.Success, "organize error: %v", result.Error)
+			assertTransferPolicyResult(t, tt.mode, transferer, sourcePath, result.TargetPath, 1)
+		})
+	}
+}
+
+func TestOrganizerSeasonPackTransferPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		mode SourceTransferMode
+	}{
+		{name: "move", mode: TransferMove},
+		{name: "copy", mode: TransferCopy},
+		{name: "seed", mode: TransferSeed},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			packDir := filepath.Join(root, "incoming", "Policy.Show.S01.1080p-GROUP")
+			libraryDir := filepath.Join(root, "library")
+			ep1 := filepath.Join(packDir, "Policy.Show.S01E01.1080p-GROUP.mkv")
+			ep2 := filepath.Join(packDir, "Policy.Show.S01E02.1080p-GROUP.mkv")
+			createTestFile(t, ep1, 64)
+			createTestFile(t, ep2, 64)
+			transferer := &recordingTransferer{}
+
+			org, err := NewOrganizer([]string{libraryDir},
+				WithTransferer(transferer),
+				WithTransferModeResolver(func(string) SourceTransferMode { return tt.mode }),
+			)
+			require.NoError(t, err)
+			result, err := org.OrganizeTVSeasonPackAuto(packDir, func(path string) (int64, error) {
+				info, err := os.Stat(path)
+				if err != nil {
+					return 0, err
+				}
+				return info.Size(), nil
+			})
+			require.NoError(t, err)
+			require.True(t, result.Success, "organize error: %v", result.Error)
+			require.Len(t, result.Imported, 2)
+
+			assertTransferPolicyResult(t, tt.mode, transferer, ep1, result.Imported[0].TargetPath, 2)
+			if tt.mode == TransferMove {
+				assert.Equal(t, 2, transferer.moves)
+			} else if tt.mode == TransferCopy {
+				assert.Equal(t, 2, transferer.copies)
+			} else {
+				assert.Zero(t, transferer.copies)
+			}
+			if tt.mode != TransferMove {
+				sourceInfo, statErr := os.Stat(ep2)
+				require.NoError(t, statErr)
+				targetInfo, statErr := os.Stat(result.Imported[1].TargetPath)
+				require.NoError(t, statErr)
+				assert.Equal(t, tt.mode == TransferSeed, os.SameFile(sourceInfo, targetInfo))
+			}
+		})
+	}
+}
+
+func TestOrganizerSeasonPackCopyPolicyRollsBackTargetWithoutTouchingSources(t *testing.T) {
+	root := t.TempDir()
+	packDir := filepath.Join(root, "incoming", "Policy.Show.S01.1080p-GROUP")
+	libraryDir := filepath.Join(root, "library")
+	ep1 := filepath.Join(packDir, "Policy.Show.S01E01.1080p-GROUP.mkv")
+	ep2 := filepath.Join(packDir, "Policy.Show.S01E02.1080p-GROUP.mkv")
+	createTestFile(t, ep1, 64)
+	createTestFile(t, ep2, 64)
+	transferer := &failAfterFirstCopyTransferer{}
+
+	org, err := NewOrganizer([]string{libraryDir},
+		WithTransferer(transferer),
+		WithTransferModeResolver(func(string) SourceTransferMode { return TransferCopy }),
+	)
+	require.NoError(t, err)
+	result, err := org.OrganizeTVSeasonPackAuto(packDir, func(path string) (int64, error) {
+		info, err := os.Stat(path)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	})
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Error(t, result.Error)
+	assert.NotContains(t, result.Error.Error(), "rollback failed")
+	assert.FileExists(t, ep1)
+	assert.FileExists(t, ep2)
+	assert.NoFileExists(t, filepath.Join(libraryDir, "Policy Show", "Season 01", "Policy Show S01E01.mkv"))
+}
+
+func TestOrganizerTransferPolicyPreservesWithKeepSource(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "incoming", "Legacy.Copy.2026.mkv")
+	libraryDir := filepath.Join(root, "library")
+	createTestFile(t, sourcePath, 64)
+	transferer := &recordingTransferer{}
+
+	org, err := NewOrganizer([]string{libraryDir}, WithTransferer(transferer), WithKeepSource(true))
+	require.NoError(t, err)
+	result, err := org.OrganizeMovieWithParsed(sourcePath, libraryDir, naming.MovieInfo{Title: "Legacy Copy", Year: "2026"})
+	require.NoError(t, err)
+	require.True(t, result.Success, "organize error: %v", result.Error)
+	assert.FileExists(t, sourcePath)
+	assert.Equal(t, 1, transferer.copies)
+	assert.Zero(t, transferer.moves)
 }
 
 // TestOrganizeMovie_Basic tests basic movie organization
@@ -377,7 +667,7 @@ func TestOrganizeTVEpisode_DatabaseUpdate(t *testing.T) {
 	// Organize
 	result, err := org.OrganizeTVEpisode(testFile, libraryDir)
 	require.NoError(t, err)
-	require.True(t, result.Success)
+	require.True(t, result.Success, "result=%+v", result)
 
 	// Verify database entry
 	series, err := db.GetSeriesByTitle("Breaking Bad", 2008)
@@ -472,6 +762,236 @@ func TestOrganizeTVEpisode_TwoEpisodeRangeDoesNotReplaceIndividualEpisode(t *tes
 	require.True(t, result.Skipped)
 	assert.Contains(t, result.SkipReason, "overlaps existing episode E04")
 	assert.FileExists(t, existing)
+	assert.FileExists(t, source)
+}
+
+func recordSuccessfulTVImport(t *testing.T, db *database.MediaDB, targetPath, sourceFilename string) {
+	t.Helper()
+	_, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:       filepath.Join(filepath.Dir(targetPath), sourceFilename),
+		SourceFilename:   sourceFilename,
+		EventAt:          time.Now(),
+		MediaTypeGuessed: "tv",
+		TargetPath:       targetPath,
+		OrganizeOutcome:  "success",
+	})
+	require.NoError(t, err)
+}
+
+func TestOrganizeTVRangeReplacesCoveredLowerQualityEpisode(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	db, dbCleanup := setupTestDB(t)
+	defer dbCleanup()
+
+	seasonDir := filepath.Join(libraryDir, "Silo (2023)", "Season 01")
+	existing := filepath.Join(seasonDir, "Silo (2023) S01E07.mkv")
+	createTestFile(t, existing, 32)
+	recordSuccessfulTVImport(t, db, existing, "Silo.2023.S01E07.720p.WEB-DL.mkv")
+
+	source := filepath.Join(sourceDir, "Silo.2023.S01E07-E08.1080p.BluRay.mkv")
+	createTestFile(t, source, 64)
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir}, WithDatabase(db), WithTransferer(transferer))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVWithParsed(source, libraryDir, naming.TVShowInfo{
+		Title: "Silo", Year: "2023", Season: 1, Episode: 7, EpisodeEnd: 8,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Success, "result=%+v", result)
+	assert.Equal(t, 1, transferer.moves)
+	assert.NoFileExists(t, existing)
+	assert.FileExists(t, result.TargetPath)
+}
+
+func TestOrganizeTVRangeReplacesCoveredLowerQualityRange(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	db, dbCleanup := setupTestDB(t)
+	defer dbCleanup()
+
+	seasonDir := filepath.Join(libraryDir, "Silo (2023)", "Season 01")
+	existing := filepath.Join(seasonDir, "Silo (2023) S01E07-E08.720p.WEB-DL.mkv")
+	createTestFile(t, existing, 32)
+	recordSuccessfulTVImport(t, db, existing, "Silo.2023.S01E07-E08.720p.WEB-DL.mkv")
+
+	source := filepath.Join(sourceDir, "Silo.2023.S01E07-E09.1080p.BluRay.mkv")
+	createTestFile(t, source, 64)
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir}, WithDatabase(db), WithTransferer(transferer))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVWithParsed(source, libraryDir, naming.TVShowInfo{
+		Title: "Silo", Year: "2023", Season: 1, Episode: 7, EpisodeEnd: 9,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Success, "result=%+v", result)
+	assert.Equal(t, 1, transferer.moves)
+	assert.NoFileExists(t, existing)
+	assert.FileExists(t, result.TargetPath)
+}
+
+func TestOrganizeTVRangePreservesExtendingExistingRange(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	seasonDir := filepath.Join(libraryDir, "Silo (2023)", "Season 01")
+	existing := filepath.Join(seasonDir, "Silo (2023) S01E07-E09.720p.WEB-DL.mkv")
+	createTestFile(t, existing, 32)
+	source := filepath.Join(sourceDir, "Silo.2023.S01E07-E08.1080p.BluRay.mkv")
+	createTestFile(t, source, 64)
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir}, WithTransferer(transferer))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVWithParsed(source, libraryDir, naming.TVShowInfo{
+		Title: "Silo", Year: "2023", Season: 1, Episode: 7, EpisodeEnd: 8,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Skipped, "result=%+v", result)
+	assert.Contains(t, result.SkipReason, "multi-episode range overlaps existing episode")
+	assert.Zero(t, transferer.moves)
+	assert.FileExists(t, existing)
+	assert.FileExists(t, source)
+}
+
+func TestOrganizeTVRangeDetectsOverlapBeginningBeforeCandidate(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	seasonDir := filepath.Join(libraryDir, "Silo (2023)", "Season 01")
+	existing := filepath.Join(seasonDir, "Silo (2023) S01E06-E07.720p.WEB-DL.mkv")
+	createTestFile(t, existing, 32)
+	source := filepath.Join(sourceDir, "Silo.2023.S01E07-E08.1080p.BluRay.mkv")
+	createTestFile(t, source, 64)
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir}, WithTransferer(transferer))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVWithParsed(source, libraryDir, naming.TVShowInfo{
+		Title: "Silo", Year: "2023", Season: 1, Episode: 7, EpisodeEnd: 8,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Skipped, "result=%+v", result)
+	assert.Contains(t, result.SkipReason, "multi-episode range overlaps existing episode")
+	assert.Zero(t, transferer.moves)
+	assert.FileExists(t, existing)
+	assert.FileExists(t, source)
+}
+
+func TestOrganizeTVEpisodePreservesRangeWithUncoveredEpisodes(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	seasonDir := filepath.Join(libraryDir, "Silo (2023)", "Season 01")
+	existing := filepath.Join(seasonDir, "Silo (2023) S01E07-E08.mkv")
+	createTestFile(t, existing, 32)
+	source := filepath.Join(sourceDir, "Silo.2023.S01E07.2160p.BluRay.mkv")
+	createTestFile(t, source, 64)
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir}, WithTransferer(transferer))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVEpisode(source, libraryDir)
+	require.NoError(t, err)
+	require.True(t, result.Skipped, "result=%+v", result)
+	assert.Contains(t, result.SkipReason, "multi-episode range overlaps existing episode")
+	assert.Zero(t, transferer.moves)
+	assert.FileExists(t, existing)
+	assert.FileExists(t, source)
+}
+
+func TestOrganizeTVRangePreservesUncertainQualityOverlaps(t *testing.T) {
+	tests := []struct {
+		name           string
+		sourceFilename string
+		evidence       string
+	}{
+		{name: "equal quality", sourceFilename: "Silo.2023.S01E07-E08.1080p.WEB-DL.mkv", evidence: "Silo.2023.S01E07.1080p.WEB-DL.mkv"},
+		{name: "lower quality", sourceFilename: "Silo.2023.S01E07-E08.1080p.WEB-DL.mkv", evidence: "Silo.2023.S01E07.2160p.BluRay.mkv"},
+		{name: "unavailable evidence", sourceFilename: "Silo.2023.S01E07-E08.1080p.BluRay.mkv"},
+		{name: "incoming quality unavailable", sourceFilename: "Silo.2023.S01E07-E08.mkv", evidence: "Silo.2023.S01E07.720p.WEB-DL.mkv"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			sourceDir := filepath.Join(root, "source")
+			libraryDir := filepath.Join(root, "library")
+			db, err := database.OpenPath(filepath.Join(root, "media.db"))
+			require.NoError(t, err)
+			defer db.Close()
+
+			seasonDir := filepath.Join(libraryDir, "Silo (2023)", "Season 01")
+			existing := filepath.Join(seasonDir, "Silo (2023) S01E07.mkv")
+			createTestFile(t, existing, 32)
+			if tt.evidence != "" {
+				recordSuccessfulTVImport(t, db, existing, tt.evidence)
+			}
+			source := filepath.Join(sourceDir, tt.sourceFilename)
+			createTestFile(t, source, 64)
+			transferer := &recordingTransferer{}
+			org, err := NewOrganizer([]string{libraryDir}, WithDatabase(db), WithTransferer(transferer))
+			require.NoError(t, err)
+
+			result, err := org.OrganizeTVWithParsed(source, libraryDir, naming.TVShowInfo{
+				Title: "Silo", Year: "2023", Season: 1, Episode: 7, EpisodeEnd: 8,
+			})
+			require.NoError(t, err)
+			require.True(t, result.Skipped, "result=%+v", result)
+			assert.Contains(t, result.SkipReason, "multi-episode range overlaps existing episode")
+			assert.Zero(t, transferer.moves)
+			assert.FileExists(t, existing)
+			assert.FileExists(t, source)
+		})
+	}
+}
+
+type failingRangeTransferer struct {
+	moves int
+}
+
+func (t *failingRangeTransferer) Move(_, _ string, _ transfer.TransferOptions) (*transfer.TransferResult, error) {
+	t.moves++
+	err := errors.New("forced range transfer failure")
+	return &transfer.TransferResult{Error: err}, err
+}
+
+func (t *failingRangeTransferer) Copy(_, _ string, _ transfer.TransferOptions) (*transfer.TransferResult, error) {
+	return nil, errors.New("unexpected copy")
+}
+
+func (t *failingRangeTransferer) CanResume() bool { return false }
+func (t *failingRangeTransferer) Name() string    { return "failing-range" }
+
+func TestOrganizeTVRangeTransferFailurePreservesSourceAndOverlap(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	db, dbCleanup := setupTestDB(t)
+	defer dbCleanup()
+
+	seasonDir := filepath.Join(libraryDir, "Silo (2023)", "Season 01")
+	existing := filepath.Join(seasonDir, "Silo (2023) S01E07-E08.mkv")
+	createTestFile(t, existing, 32)
+	recordSuccessfulTVImport(t, db, existing, "Silo.2023.S01E07-E08.720p.WEB-DL.mkv")
+	source := filepath.Join(sourceDir, "Silo.2023.S01E07-E08.1080p.BluRay.mkv")
+	createTestFile(t, source, 64)
+	transferer := &failingRangeTransferer{}
+	org, err := NewOrganizer([]string{libraryDir}, WithDatabase(db), WithTransferer(transferer))
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVWithParsed(source, libraryDir, naming.TVShowInfo{
+		Title: "Silo", Year: "2023", Season: 1, Episode: 7, EpisodeEnd: 8,
+	})
+	require.NoError(t, err)
+	require.ErrorContains(t, result.Error, "transfer failed")
+	assert.Equal(t, 1, transferer.moves)
+	existingInfo, err := os.Stat(existing)
+	require.NoError(t, err)
+	assert.Equal(t, int64(32), existingInfo.Size(), "failed publication must leave the old target intact")
 	assert.FileExists(t, source)
 }
 
@@ -1206,4 +1726,158 @@ func TestOrganizeSeasonPackExtrasMatchesShowYear(t *testing.T) {
 	require.True(t, result.Success)
 	assert.FileExists(t, filepath.Join(libraryDir, "Show (2020)", "extras", "Show S01 EXTRAS.mkv"))
 	assert.NoDirExists(t, filepath.Join(libraryDir, "Show (1990)", "extras"))
+}
+
+// A retained source (copy or seed policy) is re-seen by every periodic scan.
+// Canonical naming strips quality tokens from the target, so re-parsing it
+// yields a weaker quality than the source and the source looks like a perpetual
+// upgrade. Guard the second scan explicitly.
+func TestOrganizerRetainedSourceIsNotReimportedOnSecondScan(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		mode SourceTransferMode
+	}{
+		{name: "seed", mode: TransferSeed},
+		{name: "copy", mode: TransferCopy},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			sourcePath := filepath.Join(root, "incoming", "Loop.Show.2026.S01E01.1080p.WEB-DL.x265-GROUP.mkv")
+			libraryDir := filepath.Join(root, "library")
+			createTestFile(t, sourcePath, 4096)
+
+			transferer := &recordingTransferer{}
+			options := []func(*Organizer){
+				WithTransferer(transferer),
+				WithTransferModeResolver(func(string) SourceTransferMode { return tt.mode }),
+			}
+			var db *database.MediaDB
+			if tt.mode == TransferCopy {
+				var cleanup func()
+				db, cleanup = setupTestDB(t)
+				defer cleanup()
+				options = append(options, WithDatabase(db))
+			}
+			org, err := NewOrganizer([]string{libraryDir}, options...)
+			require.NoError(t, err)
+
+			info := naming.TVShowInfo{Title: "Loop Show", Year: "2026", Season: 1, Episode: 1}
+
+			first, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, info)
+			require.NoError(t, err)
+			require.True(t, first.Success, "first import failed: %v", first.Error)
+			transfersAfterFirst := transferer.moves + transferer.copies
+			if db != nil {
+				// The daemon records the successful source after the organizer
+				// returns; seed that evidence before simulating the next scan.
+				sourceInfo, statErr := os.Stat(sourcePath)
+				require.NoError(t, statErr)
+				modifiedAt := sourceInfo.ModTime()
+				_, insertErr := db.InsertDecision(database.ParseDecision{
+					SourcePath: sourcePath, SourceFilename: filepath.Base(sourcePath),
+					SourceSize: sourceInfo.Size(), SourceModifiedAt: &modifiedAt,
+					EventAt: time.Now().UTC(), TargetPath: first.TargetPath,
+					OrganizeOutcome: "success",
+				})
+				require.NoError(t, insertErr)
+			}
+
+			second, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, info)
+			require.NoError(t, err)
+			assert.False(t, second.Success, "second scan re-imported a retained source")
+			assert.True(t, second.Skipped, "second scan should skip, got %+v", second)
+			assert.Equal(t, transfersAfterFirst, transferer.moves+transferer.copies,
+				"retained source was transferred a second time")
+			assert.FileExists(t, sourcePath, "source must remain retained")
+		})
+	}
+}
+
+func TestOrganizerImportsSameSizeQualityUpgradeFromDifferentSource(t *testing.T) {
+	root := t.TempDir()
+	oldSource := filepath.Join(root, "incoming-old", "Upgrade.Movie.2026.720p.WEB-DL.mkv")
+	newSource := filepath.Join(root, "incoming-new", "Upgrade.Movie.2026.1080p.BluRay.mkv")
+	libraryDir := filepath.Join(root, "library")
+	for path, contents := range map[string]string{oldSource: "old!", newSource: "new!"} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(contents), 0o644))
+	}
+
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir},
+		WithTransferer(transferer),
+		WithTransferModeResolver(func(string) SourceTransferMode { return TransferCopy }),
+	)
+	require.NoError(t, err)
+	movie := naming.MovieInfo{Title: "Upgrade Movie", Year: "2026"}
+
+	first, err := org.OrganizeMovieWithParsed(oldSource, libraryDir, movie)
+	require.NoError(t, err)
+	require.True(t, first.Success, "initial import failed: %v", first.Error)
+
+	upgrade, err := org.OrganizeMovieWithParsed(newSource, libraryDir, movie)
+	require.NoError(t, err)
+	if !upgrade.Success {
+		t.Fatalf("same-size quality upgrade was skipped: %+v", upgrade)
+	}
+	assert.Equal(t, 2, transferer.copies, "the second release must be transferred")
+	contents, err := os.ReadFile(upgrade.TargetPath)
+	require.NoError(t, err)
+	assert.Equal(t, "new!", string(contents), "the library should contain the higher-quality release")
+}
+
+func TestOrganizerRetainedMovieSourceIsNotReimportedOnSecondScan(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "incoming", "Loop.Movie.2026.1080p.BluRay.x265-GROUP.mkv")
+	libraryDir := filepath.Join(root, "library")
+	createTestFile(t, sourcePath, 4096)
+
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir},
+		WithTransferer(transferer),
+		WithTransferModeResolver(func(string) SourceTransferMode { return TransferSeed }),
+	)
+	require.NoError(t, err)
+
+	info := naming.MovieInfo{Title: "Loop Movie", Year: "2026"}
+
+	first, err := org.OrganizeMovieWithParsed(sourcePath, libraryDir, info)
+	require.NoError(t, err)
+	require.True(t, first.Success, "first import failed: %v", first.Error)
+	transfersAfterFirst := transferer.moves + transferer.copies
+
+	second, err := org.OrganizeMovieWithParsed(sourcePath, libraryDir, info)
+	require.NoError(t, err)
+	assert.True(t, second.Skipped, "second scan should skip, got %+v", second)
+	assert.Equal(t, transfersAfterFirst, transferer.moves+transferer.copies,
+		"retained movie source was transferred a second time")
+}
+
+func TestOrganizerRetainedSourceRangeIsNotReimportedOnSecondScan(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "incoming", "Loop.Show.2026.S01E07-E08.1080p.BluRay.mkv")
+	libraryDir := filepath.Join(root, "library")
+	createTestFile(t, sourcePath, 4096)
+
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir},
+		WithTransferer(transferer),
+		WithTransferModeResolver(func(string) SourceTransferMode { return TransferSeed }),
+	)
+	require.NoError(t, err)
+	info := naming.TVShowInfo{Title: "Loop Show", Year: "2026", Season: 1, Episode: 7, EpisodeEnd: 8}
+
+	first, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, info)
+	require.NoError(t, err)
+	require.True(t, first.Success, "first range import failed: %v", first.Error)
+	transfersAfterFirst := transferer.moves + transferer.copies
+
+	second, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, info)
+	require.NoError(t, err)
+	assert.True(t, second.Skipped, "second scan should skip, got %+v", second)
+	assert.Equal(t, "already imported from this source", second.SkipReason)
+	assert.Equal(t, transfersAfterFirst, transferer.moves+transferer.copies,
+		"retained range source was transferred a second time")
+	assert.FileExists(t, sourcePath, "seeding source must remain retained")
+	assert.FileExists(t, first.TargetPath)
 }

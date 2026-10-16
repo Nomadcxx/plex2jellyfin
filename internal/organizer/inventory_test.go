@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/Nomadcxx/plex2jellyfin/internal/scanner"
 	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 	"github.com/stretchr/testify/assert"
@@ -207,6 +208,95 @@ func TestOrganizeTVEpisode_IndexesDestination(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, indexed)
 	assert.Equal(t, "episode", indexed.MediaType)
+}
+
+func TestOrganizeTVRangeIndexesTargetBeforeRemovingReplacedRows(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	db, dbCleanup := setupTestDB(t)
+	defer dbCleanup()
+
+	seasonDir := filepath.Join(libraryDir, "Silo (2023)", "Season 01")
+	oldPaths := []string{
+		filepath.Join(seasonDir, "Silo (2023) S01E07.mkv"),
+		filepath.Join(seasonDir, "Silo (2023) S01E08.mkv"),
+		filepath.Join(seasonDir, "Silo (2023) S01E09.mkv"),
+	}
+	for i, path := range oldPaths {
+		createTestFile(t, path, 32)
+		recordSuccessfulTVImport(t, db, path, []string{
+			"Silo.2023.S01E07.720p.WEB-DL.mkv",
+			"Silo.2023.S01E08.720p.WEB-DL.mkv",
+			"Silo.2023.S01E09.720p.WEB-DL.mkv",
+		}[i])
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		require.NoError(t, db.UpsertMediaFile(&database.MediaFile{
+			Path: path, Size: info.Size(), MediaType: "episode", LibraryRoot: libraryDir,
+		}))
+	}
+
+	source := filepath.Join(sourceDir, "Silo.2023.S01E07-E09.1080p.BluRay.mkv")
+	createTestFile(t, source, 64)
+	sourceInfo, err := os.Stat(source)
+	require.NoError(t, err)
+	require.NoError(t, db.UpsertMediaFile(&database.MediaFile{
+		Path: source, Size: sourceInfo.Size(), MediaType: "episode", LibraryRoot: sourceDir,
+	}))
+
+	indexedPaths := 0
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir},
+		WithDatabase(db),
+		WithTransferer(transferer),
+		WithPathIndexer(func(_ context.Context, path, libraryRoot, mediaType string) error {
+			info, err := os.Stat(path)
+			if err != nil {
+				return err
+			}
+			indexedPaths++
+			return db.UpsertMediaFile(&database.MediaFile{
+				Path: path, Size: info.Size(), MediaType: mediaType, LibraryRoot: libraryRoot,
+			})
+		}),
+	)
+	require.NoError(t, err)
+
+	result, err := org.OrganizeTVWithParsed(source, libraryDir, naming.TVShowInfo{
+		Title: "Silo", Year: "2023", Season: 1, Episode: 7, EpisodeEnd: 9,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Success, "organize failed: %v", result.Error)
+	assert.Equal(t, 1, indexedPaths)
+	assert.FileExists(t, result.TargetPath)
+	for _, path := range append(oldPaths, source) {
+		assert.NoFileExists(t, path)
+		row, err := db.GetMediaFile(path)
+		require.NoError(t, err)
+		assert.Nil(t, row, "stale row remains for %s", path)
+	}
+	indexed, err := db.GetMediaFile(result.TargetPath)
+	require.NoError(t, err)
+	require.NotNil(t, indexed)
+}
+
+func TestRefreshInventoryWithoutIndexerKeepsReplacedRowsUntilTargetIsIndexed(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	replacedPath := filepath.Join(t.TempDir(), "old-episode.mkv")
+	require.NoError(t, db.UpsertMediaFile(&database.MediaFile{
+		Path: replacedPath, MediaType: "episode",
+	}))
+	org, err := NewOrganizer(nil, WithDatabase(db))
+	require.NoError(t, err)
+
+	err = org.refreshInventoryAfterTransfer("/missing/source.mkv", "/library/new-range.mkv", []string{replacedPath}, "/library", "episode", false)
+	require.ErrorContains(t, err, "destination was not indexed")
+	row, err := db.GetMediaFile(replacedPath)
+	require.NoError(t, err)
+	assert.NotNil(t, row, "keep the old inventory row when the replacement cannot be indexed")
 }
 
 func intPtr(v int) *int { return &v }

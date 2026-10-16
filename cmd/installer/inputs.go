@@ -25,6 +25,9 @@ func (m *model) initPathsInputs() {
 	for i := range m.watchFolders {
 		ti := textinput.New()
 		ti.Placeholder = "e.g., /mnt/downloads/tv, /data/torrents"
+		if m.watchFolders[i].Seeding {
+			ti.Placeholder = "e.g., /mnt/torrents/complete/tv (left in place for seeding)"
+		}
 		ti.Width = 50
 		ti.CharLimit = 500
 		ti.SetValue(m.watchFolders[i].Paths)
@@ -342,10 +345,12 @@ func (m *model) saveWebInputs() {
 }
 
 func (m model) addWatchFolder() (tea.Model, tea.Cmd) {
+	// Custom folders are ordinary roots; seeding roots are the fixed pair only.
 	newFolder := WatchFolder{
-		Label: "Custom",
-		Type:  "movies",
-		Paths: "",
+		Label:   "Custom",
+		Type:    "movies",
+		Paths:   "",
+		Seeding: false,
 	}
 	m.watchFolders = append(m.watchFolders, newFolder)
 	m.initPathsInputs()
@@ -353,7 +358,7 @@ func (m model) addWatchFolder() (tea.Model, tea.Cmd) {
 }
 
 func (m model) removeWatchFolder() (tea.Model, tea.Cmd) {
-	if len(m.watchFolders) > 2 {
+	if len(m.watchFolders) > fixedWatchFolderCount {
 		idx := len(m.watchFolders) - 1
 		m.watchFolders = m.watchFolders[:idx]
 		m.initPathsInputs()

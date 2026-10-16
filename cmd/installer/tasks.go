@@ -369,15 +369,7 @@ func (m *model) generateConfigString() (string, error) {
 		m.webhookSecret = generated
 	}
 
-	var watchTV, watchMovies []string
-	for _, wf := range m.watchFolders {
-		paths := splitPaths(wf.Paths)
-		if wf.Type == "tv" {
-			watchTV = append(watchTV, paths...)
-		} else {
-			watchMovies = append(watchMovies, paths...)
-		}
-	}
+	watch, libraries := m.watchLayout()
 
 	configStr := fmt.Sprintf(`[setup]
 # Managed by the setup wizards. completed = true tells the web UI to skip
@@ -389,6 +381,10 @@ completed = false
 [watch]
 movies = [%s]
 tv = [%s]
+# Seeding roots hold completed downloads. Sources stay in place and are
+# hardlinked into the library when the filesystem allows it, copied otherwise.
+seeding_movies = [%s]
+seeding_tv = [%s]
 
 [libraries]
 movies = [%s]
@@ -424,10 +420,12 @@ repair_cooldown_hours = 6
 needs_review_after = 4
 `,
 		setuppkg.CurrentVersion,
-		formatPathList(watchMovies),
-		formatPathList(watchTV),
-		formatPathList(splitPaths(m.movieLibraryPaths)),
-		formatPathList(splitPaths(m.tvLibraryPaths)),
+		formatPathList(watch.Movies),
+		formatPathList(watch.TV),
+		formatPathList(watch.SeedingMovies),
+		formatPathList(watch.SeedingTV),
+		formatPathList(libraries.Movies),
+		formatPathList(libraries.TV),
 		m.serviceEnabled,
 		scanFrequencyToString(m.scanFrequency),
 		m.permUser,

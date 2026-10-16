@@ -93,6 +93,8 @@ func newConfigShowCmd() *cobra.Command {
 			fmt.Println("=== Watch Directories ===")
 			fmt.Printf("TV:     %v\n", cfg.Watch.TV)
 			fmt.Printf("Movies: %v\n", cfg.Watch.Movies)
+			fmt.Printf("TV (seeding):     %v\n", cfg.Watch.SeedingTV)
+			fmt.Printf("Movies (seeding): %v\n", cfg.Watch.SeedingMovies)
 
 			fmt.Println("\n=== Library Directories ===")
 			fmt.Printf("TV:     %v\n", cfg.Libraries.TV)
@@ -152,24 +154,28 @@ Tests:
 			fmt.Println()
 
 			fmt.Println("=== Watch Directories ===")
-			if len(cfg.Watch.TV) == 0 && len(cfg.Watch.Movies) == 0 {
+			if len(cfg.Watch.AllPaths()) == 0 {
 				warnings = append(warnings, "No watch directories configured")
 				fmt.Println("[warn] No watch directories configured")
 			}
-			for _, dir := range cfg.Watch.TV {
-				if err := testReadable(dir); err != nil {
-					errors = append(errors, fmt.Sprintf("TV watch dir %s: %v", dir, err))
-					fmt.Printf("[error] TV: %s (%v)\n", dir, err)
-				} else {
-					fmt.Printf("[ok] TV: %s\n", dir)
-				}
-			}
-			for _, dir := range cfg.Watch.Movies {
-				if err := testReadable(dir); err != nil {
-					errors = append(errors, fmt.Sprintf("Movie watch dir %s: %v", dir, err))
-					fmt.Printf("[error] Movies: %s (%v)\n", dir, err)
-				} else {
-					fmt.Printf("[ok] Movies: %s\n", dir)
+			// Seeding roots are intake too: they only need read access, since
+			// the organizer never writes back to a source the client is seeding.
+			for _, group := range []struct {
+				label string
+				dirs  []string
+			}{
+				{"TV", cfg.Watch.TV},
+				{"Movies", cfg.Watch.Movies},
+				{"TV (seeding)", cfg.Watch.SeedingTV},
+				{"Movies (seeding)", cfg.Watch.SeedingMovies},
+			} {
+				for _, dir := range group.dirs {
+					if err := testReadable(dir); err != nil {
+						errors = append(errors, fmt.Sprintf("%s watch dir %s: %v", group.label, dir, err))
+						fmt.Printf("[error] %s: %s (%v)\n", group.label, dir, err)
+					} else {
+						fmt.Printf("[ok] %s: %s\n", group.label, dir)
+					}
 				}
 			}
 

@@ -183,7 +183,7 @@ export interface paths {
     post: operations["addSettingsPath"];
     parameters: {
       path: {
-        kind: "movies" | "tv";
+        kind: "movies" | "tv" | "seeding_movies" | "seeding_tv";
       };
     };
   };
@@ -282,7 +282,7 @@ export interface components {
       gid: number;
     };
     SetupDraft: {
-      watch: components["schemas"]["SetupPaths"];
+      watch: components["schemas"]["SetupWatchPaths"];
       libraries: components["schemas"]["SetupPaths"];
       sonarr: components["schemas"]["SetupService"];
       radarr: components["schemas"]["SetupService"];
@@ -294,6 +294,12 @@ export interface components {
       tv: string[];
       movies: string[];
     };
+    SetupWatchPaths: {
+      tv: string[];
+      movies: string[];
+      seeding_tv: string[];
+      seeding_movies: string[];
+    };
     SetupService: {
       enabled: boolean;
       url: string;
@@ -301,8 +307,11 @@ export interface components {
     };
     SetupJellyfin: components["schemas"]["SetupService"] & {
       path_mappings: components["schemas"]["SetupPathMapping"][];
+      /** @description Install the companion plugin via Jellyfin's package API */
       plugin_install?: boolean;
+      /** @description Restart Jellyfin after install so the plugin loads */
       plugin_restart?: boolean;
+      /** @description Base URL the companion plugin calls back to */
       plugin_daemon_url?: string;
     };
     SetupPathMapping: {
@@ -1293,7 +1302,7 @@ export interface operations {
   getSettingsPaths: {
     parameters: {
       path: {
-        kind: "movies" | "tv";
+        kind: "movies" | "tv" | "seeding_movies" | "seeding_tv";
       };
     };
     responses: {
@@ -1307,7 +1316,7 @@ export interface operations {
   replaceSettingsPaths: {
     parameters: {
       path: {
-        kind: "movies" | "tv";
+        kind: "movies" | "tv" | "seeding_movies" | "seeding_tv";
       };
     };
     requestBody: {
@@ -1326,7 +1335,7 @@ export interface operations {
   addSettingsPath: {
     parameters: {
       path: {
-        kind: "movies" | "tv";
+        kind: "movies" | "tv" | "seeding_movies" | "seeding_tv";
       };
     };
     requestBody: {
@@ -1345,7 +1354,7 @@ export interface operations {
   removeSettingsPath: {
     parameters: {
       path: {
-        kind: "movies" | "tv";
+        kind: "movies" | "tv" | "seeding_movies" | "seeding_tv";
         index: number;
       };
     };

@@ -34,7 +34,8 @@ async function apiRequest<T>(
       throw new APIError(
         response.status,
         data.code || 'UNKNOWN_ERROR',
-        data.error || data.message || `HTTP ${response.status}`
+        data.error || data.message || `HTTP ${response.status}`,
+        Array.isArray(data.fields) ? data.fields : []
       );
     }
 
@@ -81,7 +82,7 @@ export type SettingsSection =
   | 'logging'
   | 'permissions';
 
-export type PathKind = 'movies' | 'tv';
+export type PathKind = 'movies' | 'tv' | 'seeding_movies' | 'seeding_tv';
 
 export type SettingsSaveResponse = {
   saved: boolean;

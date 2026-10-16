@@ -162,15 +162,15 @@ type KeepaliveConfig struct {
 }
 
 type MetadataRecoveryConfig struct {
-	PassiveEnabled              bool `mapstructure:"passive_enabled" toml:"passive_enabled"`
-	RepairEnabled               bool `mapstructure:"repair_enabled" toml:"repair_enabled"`
-	UnknownSeasonRepairEnabled  bool `mapstructure:"unknown_season_repair_enabled" toml:"unknown_season_repair_enabled"`
-	PassiveIntervalMinutes      int  `mapstructure:"passive_interval_minutes" toml:"passive_interval_minutes"`
-	PassiveBatchSize            int  `mapstructure:"passive_batch_size" toml:"passive_batch_size"`
-	RepairBatchSize             int  `mapstructure:"repair_batch_size" toml:"repair_batch_size"`
-	RepairCooldownHours         int  `mapstructure:"repair_cooldown_hours" toml:"repair_cooldown_hours"`
-	NeedsReviewAfter            int  `mapstructure:"needs_review_after" toml:"needs_review_after"`
-	CorrectionEnabled           bool `mapstructure:"correction_enabled" toml:"correction_enabled"`
+	PassiveEnabled             bool `mapstructure:"passive_enabled" toml:"passive_enabled"`
+	RepairEnabled              bool `mapstructure:"repair_enabled" toml:"repair_enabled"`
+	UnknownSeasonRepairEnabled bool `mapstructure:"unknown_season_repair_enabled" toml:"unknown_season_repair_enabled"`
+	PassiveIntervalMinutes     int  `mapstructure:"passive_interval_minutes" toml:"passive_interval_minutes"`
+	PassiveBatchSize           int  `mapstructure:"passive_batch_size" toml:"passive_batch_size"`
+	RepairBatchSize            int  `mapstructure:"repair_batch_size" toml:"repair_batch_size"`
+	RepairCooldownHours        int  `mapstructure:"repair_cooldown_hours" toml:"repair_cooldown_hours"`
+	NeedsReviewAfter           int  `mapstructure:"needs_review_after" toml:"needs_review_after"`
+	CorrectionEnabled          bool `mapstructure:"correction_enabled" toml:"correction_enabled"`
 }
 
 // AIConfig contains AI title matching configuration
@@ -196,8 +196,10 @@ type AIConfig struct {
 
 // WatchConfig contains directories to watch
 type WatchConfig struct {
-	Movies []string `mapstructure:"movies"`
-	TV     []string `mapstructure:"tv"`
+	Movies        []string `mapstructure:"movies"`
+	TV            []string `mapstructure:"tv"`
+	SeedingMovies []string `mapstructure:"seeding_movies"`
+	SeedingTV     []string `mapstructure:"seeding_tv"`
 }
 
 // LibrariesConfig contains destination library paths
@@ -296,8 +298,10 @@ type JellyfinPathMapping struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Watch: WatchConfig{
-			Movies: []string{},
-			TV:     []string{},
+			Movies:        []string{},
+			TV:            []string{},
+			SeedingMovies: []string{},
+			SeedingTV:     []string{},
 		},
 		Libraries: LibrariesConfig{
 			Movies: []string{},
@@ -589,6 +593,10 @@ tv = %s
 # Movie downloads - daemon will watch these for new movies  
 movies = %s
 
+# Completed torrent paths retained by the download client for seeding
+seeding_tv = %s
+seeding_movies = %s
+
 # ============================================================================
 # SETUP STATE
 # Managed by the Web/CLI setup wizards.
@@ -749,6 +757,8 @@ allowed_origins = %s
 `,
 		formatStringSlice(c.Watch.TV),
 		formatStringSlice(c.Watch.Movies),
+		formatStringSlice(c.Watch.SeedingTV),
+		formatStringSlice(c.Watch.SeedingMovies),
 		c.Setup.Version,
 		c.Setup.Completed,
 		formatStringSlice(c.Libraries.TV),

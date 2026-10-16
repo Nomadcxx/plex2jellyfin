@@ -20,8 +20,11 @@ There is **no TCP** between web and daemon — only the Unix-domain control sock
 flowchart TB
     A[Sonarr / Radarr] -->|downloads| B[Download client]
     B -->|drops file| C[Watch directory]
+    T[Torrent client] -->|completed, still seeding| S[Seeding root]
     C -->|inotify| D[plex2jellyfin-daemon]
-    D -->|rename + move| E[Jellyfin library]
+    S -->|inotify| D
+    D -->|rename + move or copy| E[Jellyfin library]
+    D -->|rename + hardlink, source retained| E
     D -->|state| DB[(SQLite media.db)]
     D -.->|low confidence| O[Ollama]
     D <-->|control.sock| W[plex2jellyfin-web :5522]
@@ -41,7 +44,7 @@ flowchart TB
 1. Detect new file under `[watch]`.
 2. Parse filename (regex; optional AI if confidence is low).
 3. Build Jellyfin-style destination under `[libraries]`.
-4. Move/copy; optional `[permissions]` chown.
+4. Transfer, then optional `[permissions]` chown. Ordinary watch roots move when `delete_source = true` and copy when it is `false`. Seeding roots hardlink when the source and library share a filesystem, copy when they do not, and always keep the source.
 5. Notify Sonarr/Radarr / Jellyfin when configured.
 6. Record parse decision; sweeper + plugin webhooks confirm Jellyfin actually ingested the item.
 

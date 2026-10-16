@@ -522,6 +522,13 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 	if draft.Libraries.Movies, err = p.askPaths("Movie library paths", draft.Libraries.Movies); err != nil {
 		return err
 	}
+	clitheme.Muted(stdout, "Optional seeding completion paths keep downloader-owned files in place after import.")
+	if draft.Watch.SeedingTV, err = p.askPaths("TV seeding completion paths", draft.Watch.SeedingTV); err != nil {
+		return err
+	}
+	if draft.Watch.SeedingMovies, err = p.askPaths("Movie seeding completion paths", draft.Watch.SeedingMovies); err != nil {
+		return err
+	}
 
 	clitheme.Section(stdout, "Connected services (optional)")
 	if err := promptService(p, "Sonarr", "http://localhost:8989", &draft.Sonarr, deps.testSonarr); err != nil {
@@ -975,6 +982,12 @@ func printDraftSummary(out io.Writer, d setupdomain.Draft) {
 	line("TV library", strings.Join(d.Libraries.TV, ", "))
 	line("Movies incoming", strings.Join(d.Watch.Movies, ", "))
 	line("Movies library", strings.Join(d.Libraries.Movies, ", "))
+	if len(d.Watch.SeedingTV) > 0 {
+		line("TV seeding", strings.Join(d.Watch.SeedingTV, ", ")+" (retained for seeding)")
+	}
+	if len(d.Watch.SeedingMovies) > 0 {
+		line("Movies seeding", strings.Join(d.Watch.SeedingMovies, ", ")+" (retained for seeding)")
+	}
 	svc := func(name string, s setupdomain.ServiceDraft) {
 		if s.Enabled {
 			line(name, s.URL)
@@ -990,9 +1003,9 @@ func printDraftSummary(out io.Writer, d setupdomain.Draft) {
 	}
 	line("Scan frequency", d.Runtime.ScanFrequency)
 	if d.Runtime.DeleteSource {
-		line("Transfer mode", "move (delete source)")
+		line("Transfer mode", "ordinary paths: move (delete source)")
 	} else {
-		line("Transfer mode", "copy")
+		line("Transfer mode", "ordinary paths: copy")
 	}
 	if d.Runtime.Permissions.WantsOwnership() || d.Runtime.Permissions.WantsMode() {
 		owner := d.Runtime.Permissions.User

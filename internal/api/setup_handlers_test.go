@@ -180,6 +180,36 @@ func TestApplySetupRejectsMissingPathBeforeSaving(t *testing.T) {
 	}
 }
 
+func TestValidateSetupPathsAllowsReadOnlySeedingPath(t *testing.T) {
+	seeding := t.TempDir()
+	if err := os.Chmod(seeding, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(seeding, 0o755) })
+
+	draft := validSetupDraft("", t.TempDir())
+	draft.Watch.TV = nil
+	draft.Watch.SeedingTV = []string{seeding}
+	if errs := validateSetupPaths(draft); len(errs) != 0 {
+		t.Fatalf("read-only seeding path rejected: %+v", errs)
+	}
+}
+
+func TestValidateSetupPathsRequiresWritableOrdinaryPathWhenDeleting(t *testing.T) {
+	watch := t.TempDir()
+	if err := os.Chmod(watch, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(watch, 0o755) })
+
+	draft := validSetupDraft(watch, t.TempDir())
+	draft.Runtime.DeleteSource = true
+	errs := validateSetupPaths(draft)
+	if len(errs) != 1 || errs[0].Field != "watch.tv" {
+		t.Fatalf("ordinary delete-source path errors = %+v, want watch.tv", errs)
+	}
+}
+
 func TestApplySetupRejectsArrWhenCompatibilityCannotBeEnforced(t *testing.T) {
 	setupTestHome(t)
 	cfg := config.DefaultConfig()
@@ -538,7 +568,7 @@ func applySetupRequest(t *testing.T, s *Server, draft setupdomain.Draft) *httpte
 
 func validSetupDraft(watch, library string) setupdomain.Draft {
 	return setupdomain.Draft{
-		Watch:     setupdomain.PathsDraft{TV: []string{watch}},
+		Watch:     setupdomain.WatchDraft{TV: []string{watch}},
 		Libraries: setupdomain.PathsDraft{TV: []string{library}},
 		Runtime:   setupdomain.RuntimeDraft{ScanFrequency: "5m", DeleteSource: true},
 	}

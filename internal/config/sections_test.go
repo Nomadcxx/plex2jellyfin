@@ -52,6 +52,20 @@ func TestSetSectionUsesMapstructureNames(t *testing.T) {
 	}
 }
 
+func TestSetWatchSectionUsesSeedingPathNames(t *testing.T) {
+	cfg := DefaultConfig()
+	raw := []byte(`{"tv":["/ordinary/tv"],"movies":["/ordinary/movies"],"seeding_tv":["/seed/tv"],"seeding_movies":["/seed/movies"]}`)
+	if err := SetSection(cfg, "paths", raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Watch.SeedingTV) != 1 || cfg.Watch.SeedingTV[0] != "/seed/tv" {
+		t.Fatalf("seeding TV paths not decoded: %+v", cfg.Watch)
+	}
+	if len(cfg.Watch.SeedingMovies) != 1 || cfg.Watch.SeedingMovies[0] != "/seed/movies" {
+		t.Fatalf("seeding movie paths not decoded: %+v", cfg.Watch)
+	}
+}
+
 func TestSetSectionUnknown(t *testing.T) {
 	if err := SetSection(DefaultConfig(), "bogus", []byte("{}")); err == nil {
 		t.Fatal("expected error")

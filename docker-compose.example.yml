@@ -8,6 +8,9 @@ services:
     volumes:
       - ./config:/config
       - /path/to/downloads:/watch
+      # Completed torrents you keep seeding. Mount them on the same host
+      # filesystem as /library so imports hardlink instead of copying.
+      - /path/to/torrents:/seeding
       - /path/to/media:/library
     ports:
       - "5522:5522"

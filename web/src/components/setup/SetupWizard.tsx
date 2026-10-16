@@ -39,13 +39,16 @@ import {
   preflightPath,
   testSettingsConnection,
 } from '@/lib/api/client';
+import { fieldErrorMessages } from '@/lib/api/errors';
 import { useAIModels, useTestAIConnection, useTestAIPrompt } from '@/hooks/useSettings';
 import { SetupDraft, SetupIndexEvent, SetupStatus, setupKeys, useApplySetup } from '@/hooks/useSetup';
 import {
   emptyChecks,
   hydrateDraft,
+  PathCollection,
   pathCheckKey,
   RuntimeKind,
+  seedingKey,
   ServiceName,
   serviceFingerprint,
   SetupStep,
@@ -85,13 +88,17 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
   const queryClient = useQueryClient();
   const current = steps[stepIndex];
 
+  const applyFieldErrors = fieldErrorMessages(apply.error);
+
   const libraryPaths = useMemo(
     () => [...draft.libraries.tv, ...draft.libraries.movies],
     [draft.libraries.tv, draft.libraries.movies],
   );
 
-  const setPath = (collection: 'watch' | 'libraries', media: 'tv' | 'movies', paths: string[]) => {
-    setDraft((value) => ({ ...value, [collection]: { ...value[collection], [media]: paths } }));
+  const setPath = (collection: PathCollection, media: 'tv' | 'movies', paths: string[]) => {
+    setDraft((value) => (collection === 'seeding'
+      ? { ...value, watch: { ...value.watch, [seedingKey(media)]: paths } }
+      : { ...value, [collection]: { ...value[collection], [media]: paths } }));
   };
 
   const next = () => {
@@ -242,6 +249,11 @@ export function SetupWizard({ status }: { status: SetupStatus }) {
               {apply.isError && (
                 <div role="alert" className="mt-6 border border-red-900 bg-red-950/20 p-4 text-sm text-red-200">
                   {apply.error instanceof Error ? apply.error.message : 'Setup could not be applied.'}
+                  {applyFieldErrors.length > 0 && (
+                    <ul className="mt-2 space-y-1 text-sm text-red-200/80">
+                      {applyFieldErrors.map((detail) => <li key={detail}>{detail}</li>)}
+                    </ul>
+                  )}
                 </div>
               )}
             </div>
@@ -295,7 +307,7 @@ function MediaStep({ draft, checks, setChecks, setPath }: {
   draft: SetupDraft;
   checks: WizardChecks;
   setChecks: React.Dispatch<React.SetStateAction<WizardChecks>>;
-  setPath: (collection: 'watch' | 'libraries', media: 'tv' | 'movies', paths: string[]) => void;
+  setPath: (collection: PathCollection, media: 'tv' | 'movies', paths: string[]) => void;
 }) {
   return (
     <div className="space-y-8">
@@ -326,6 +338,19 @@ function MediaStep({ draft, checks, setChecks, setPath }: {
               onChange={(paths) => setPath('watch', media, paths)}
             />
             <PathEditor
+              title="Seeding completion"
+              hint="Optional. Completed downloads you keep seeding. Sources stay in place and are hardlinked into the library when the filesystem allows it. Incomplete downloads must live in another directory, outside every watch path."
+              example={media === 'tv' ? '/mnt/NVME3/torrents/complete/tv' : '/mnt/NVME3/torrents/complete/movies'}
+              icon={FolderInput}
+              collection="seeding"
+              media={media}
+              paths={draft.watch[seedingKey(media)]}
+              writable={false}
+              checks={checks}
+              setChecks={setChecks}
+              onChange={(paths) => setPath('seeding', media, paths)}
+            />
+            <PathEditor
               title="Library"
               hint="Final library roots Jellyfin/Sonarr/Radarr use. Paste one path or a comma-separated list across drives."
               example={media === 'tv'
@@ -352,7 +377,7 @@ function PathEditor({ title, hint, example, icon: Icon, collection, media, paths
   hint: string;
   example: string;
   icon: typeof FolderInput;
-  collection: 'watch' | 'libraries';
+  collection: PathCollection;
   media: 'tv' | 'movies';
   paths: string[];
   writable: boolean;
@@ -364,7 +389,7 @@ function PathEditor({ title, hint, example, icon: Icon, collection, media, paths
   const [checking, setChecking] = useState(false);
 
   const verify = async (path: string) => {
-    const result = await preflightPath(path, collection === 'watch' ? 'watch' : 'library');
+    const result = await preflightPath(path, collection === 'libraries' ? 'library' : 'watch');
     const ok = result.exists && result.is_dir && result.readable && (!writable || result.writable);
     setChecks((state) => ({ ...state, paths: { ...state.paths, [pathCheckKey(collection, media, path)]: ok } }));
     return { path, ok, warnings: result.warnings };
@@ -658,8 +683,8 @@ function RuntimeStep({ draft, setDraft, setChecks, runtime, uid, gid }: {
 
 function ReviewStep({ draft, runtime }: { draft: SetupDraft; runtime: RuntimeKind }) {
   const rows = useMemo(() => [
-    ['TV', `${draft.watch.tv.length} incoming / ${draft.libraries.tv.length} library`],
-    ['Movies', `${draft.watch.movies.length} incoming / ${draft.libraries.movies.length} library`],
+    ['TV', `${draft.watch.tv.length} incoming / ${draft.watch.seeding_tv.length} seeding / ${draft.libraries.tv.length} library`],
+    ['Movies', `${draft.watch.movies.length} incoming / ${draft.watch.seeding_movies.length} seeding / ${draft.libraries.movies.length} library`],
     ['Services', (['sonarr', 'radarr', 'jellyfin'] as ServiceName[]).filter((name) => draft[name].enabled).map(label).join(', ') || 'None'],
     ['AI', draft.ai.enabled ? draft.ai.primary_model : 'Disabled'],
     ['Transfer', draft.runtime.delete_source ? 'Move source' : 'Copy source'],

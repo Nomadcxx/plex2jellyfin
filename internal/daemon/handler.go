@@ -34,8 +34,7 @@ type MediaHandler struct {
 	notifyManager    *notify.Manager
 	tvLibraries      []string
 	movieLibs        []string
-	tvWatchPaths     []string // TV watch folders for source hint
-	movieWatchPaths  []string // Movie watch folders for source hint
+	sourcePolicy     *sourcePolicy
 	debounceTime     time.Duration
 	pending          map[string]*time.Timer
 	processing       map[string]struct{}
@@ -196,8 +195,10 @@ type StatsSnapshot struct {
 type MediaHandlerConfig struct {
 	TVLibraries     []string
 	MovieLibs       []string
-	TVWatchPaths    []string // New
-	MovieWatchPaths []string // New
+	Watch           config.WatchConfig
+	DeleteSource    bool
+	TVWatchPaths    []string // Deprecated: use Watch.TV.
+	MovieWatchPaths []string // Deprecated: use Watch.Movies.
 	DebounceTime    time.Duration
 	DryRun          bool
 	Timeout         time.Duration
@@ -241,6 +242,19 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = logging.Nop()
 	}
+	legacyWatch := len(cfg.Watch.AllPaths()) == 0 && (len(cfg.TVWatchPaths) > 0 || len(cfg.MovieWatchPaths) > 0)
+	watch := cfg.Watch
+	if len(watch.TV) == 0 {
+		watch.TV = cfg.TVWatchPaths
+	}
+	if len(watch.Movies) == 0 {
+		watch.Movies = cfg.MovieWatchPaths
+	}
+	deleteSource := cfg.DeleteSource
+	if legacyWatch {
+		deleteSource = true
+	}
+	sourcePolicy := newSourcePolicy(watch, deleteSource)
 
 	var activityLogger *activity.Logger
 	if cfg.ConfigDir != "" {
@@ -321,6 +335,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		organizer.WithDatabase(cfg.Database),
 		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
 		organizer.WithDeferredQueue(cfg.DeferredQueue),
+		organizer.WithTransferModeResolver(sourcePolicy.Resolve),
 	}
 	if cfg.SonarrClient != nil {
 		tvOrgOpts = append(tvOrgOpts, organizer.WithSonarrClient(cfg.SonarrClient))
@@ -350,6 +365,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		organizer.WithDatabase(cfg.Database),
 		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
 		organizer.WithDeferredQueue(cfg.DeferredQueue),
+		organizer.WithTransferModeResolver(sourcePolicy.Resolve),
 	}
 	if cfg.JellyfinClient != nil {
 		movieOrgOpts = append(movieOrgOpts, organizer.WithJellyfinClient(cfg.JellyfinClient, cfg.PlaybackSafety))
@@ -374,8 +390,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		notifyManager:     cfg.NotifyManager,
 		tvLibraries:       cfg.TVLibraries,
 		movieLibs:         cfg.MovieLibs,
-		tvWatchPaths:      cfg.TVWatchPaths,
-		movieWatchPaths:   cfg.MovieWatchPaths,
+		sourcePolicy:      sourcePolicy,
 		debounceTime:      cfg.DebounceTime,
 		pending:           make(map[string]*time.Timer),
 		processing:        make(map[string]struct{}),
@@ -463,10 +478,11 @@ func (h *MediaHandler) ShouldSuppressRetry(path string) bool {
 }
 
 func (h *MediaHandler) allWatchPaths() []string {
-	paths := make([]string, 0, len(h.tvWatchPaths)+len(h.movieWatchPaths))
-	paths = append(paths, h.tvWatchPaths...)
-	paths = append(paths, h.movieWatchPaths...)
-	return paths
+	return h.sourcePolicy.AllPaths()
+}
+
+func (h *MediaHandler) ReplaceSourcePolicy(watch config.WatchConfig, deleteSource bool) {
+	h.sourcePolicy.Update(watch, deleteSource)
 }
 
 func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
@@ -590,7 +606,8 @@ func (h *MediaHandler) logEntry(
 		target = result.TargetPath
 	}
 
-	activitySuccess := result.Success || (result.Skipped && stableDuplicateSkipReason(result.SkipReason))
+	rangeConflict := strings.Contains(strings.ToLower(result.SkipReason), "multi-episode range overlaps existing episode")
+	activitySuccess := result.Success || (result.Skipped && stableDuplicateSkipReason(result.SkipReason) && !rangeConflict)
 	entry := activity.Entry{
 		Action:         "organize",
 		Source:         result.SourcePath,
@@ -607,15 +624,19 @@ func (h *MediaHandler) logEntry(
 		RadarrNotified: radarrNotified,
 	}
 
-	if !activitySuccess && result.Error != nil {
-		entry.Error = result.Error.Error()
-		if errors.Is(result.Error, naming.ErrParseFailed) || IsDeterministicUnparseable(entry.Error) {
-			entry.Deterministic = true
-			if result.SourcePath != "" {
-				if st, serr := os.Stat(result.SourcePath); serr == nil {
-					entry.SourceMtime = st.ModTime().Unix()
+	if !activitySuccess {
+		if result.Error != nil {
+			entry.Error = result.Error.Error()
+			if errors.Is(result.Error, naming.ErrParseFailed) || IsDeterministicUnparseable(entry.Error) {
+				entry.Deterministic = true
+				if result.SourcePath != "" {
+					if st, serr := os.Stat(result.SourcePath); serr == nil {
+						entry.SourceMtime = st.ModTime().Unix()
+					}
 				}
 			}
+		} else if result.Skipped {
+			entry.Error = result.SkipReason
 		}
 	}
 
@@ -674,21 +695,7 @@ func (h *MediaHandler) shouldLogError(path, errMsg string) bool {
 
 // getSourceHint determines if a path is under a configured TV or Movie watch folder
 func (h *MediaHandler) getSourceHint(path string) naming.SourceHint {
-	// Check TV watch folders
-	for _, tvPath := range h.tvWatchPaths {
-		if strings.HasPrefix(path, tvPath) {
-			return naming.SourceTV
-		}
-	}
-
-	// Check Movie watch folders
-	for _, moviePath := range h.movieWatchPaths {
-		if strings.HasPrefix(path, moviePath) {
-			return naming.SourceMovie
-		}
-	}
-
-	return naming.SourceUnknown
+	return h.sourcePolicy.SourceHint(path)
 }
 
 // isInsideLibrary returns true if the file path resides within any configured
@@ -1622,10 +1629,7 @@ func (h *MediaHandler) cleanupSourceDir(sourcePath string) {
 	// Build a set of watch roots for O(1) boundary checks.
 	// filepath.Clean strips trailing slashes, matching normalizeEventPath behaviour.
 	rootSet := make(map[string]struct{})
-	for _, p := range h.tvWatchPaths {
-		rootSet[filepath.Clean(p)] = struct{}{}
-	}
-	for _, p := range h.movieWatchPaths {
+	for _, p := range h.sourcePolicy.AllPaths() {
 		rootSet[filepath.Clean(p)] = struct{}{}
 	}
 

@@ -89,3 +89,48 @@ describe('setup draft validation', () => {
     expect(stepErrors('ai', value, checks, 'native')).toEqual([]);
   });
 });
+
+describe('seeding watch roots', () => {
+  it('defaults missing seeding arrays when an older setup response omits them', () => {
+    const got = hydrateDraft({ watch: { tv: ['/watch/tv'], movies: [] } });
+    expect(got.watch.seeding_tv).toEqual([]);
+    expect(got.watch.seeding_movies).toEqual([]);
+    expect(got.watch.tv).toEqual(['/watch/tv']);
+  });
+
+  it('accepts seeding-only intake paired with its library', () => {
+    const value = draft();
+    value.watch.seeding_tv = ['/seed/tv'];
+    value.libraries.tv = ['/library/tv'];
+    const checks = emptyChecks();
+    checks.paths[pathCheckKey('seeding', 'tv', '/seed/tv')] = true;
+    checks.paths[pathCheckKey('libraries', 'tv', '/library/tv')] = true;
+    expect(stepErrors('media', value, checks, 'native')).toEqual([]);
+  });
+
+  it('still requires a library for seeding-only intake', () => {
+    const value = draft();
+    value.watch.seeding_tv = ['/seed/tv'];
+    const checks = emptyChecks();
+    checks.paths[pathCheckKey('seeding', 'tv', '/seed/tv')] = true;
+    expect(stepErrors('media', value, checks, 'native').join(' ')).toMatch(/TV library/i);
+  });
+
+  it('keeps ordinary, seeding, and library checks on distinct keys', () => {
+    const keys = new Set([
+      pathCheckKey('watch', 'tv', '/same'),
+      pathCheckKey('seeding', 'tv', '/same'),
+      pathCheckKey('libraries', 'tv', '/same'),
+    ]);
+    expect(keys.size).toBe(3);
+
+    // Verifying the ordinary root must not silently satisfy the seeding root.
+    const value = draft();
+    value.watch.seeding_tv = ['/downloads/tv'];
+    value.libraries.tv = ['/library/tv'];
+    const checks = emptyChecks();
+    checks.paths[pathCheckKey('watch', 'tv', '/downloads/tv')] = true;
+    checks.paths[pathCheckKey('libraries', 'tv', '/library/tv')] = true;
+    expect(stepErrors('media', value, checks, 'native').join(' ')).toMatch(/\/downloads\/tv/);
+  });
+});

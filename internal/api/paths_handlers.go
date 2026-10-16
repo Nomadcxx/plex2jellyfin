@@ -68,6 +68,10 @@ func (h *PathsHandlers) read(kind string) ([]string, error) {
 		return append([]string{}, h.Cfg.Watch.TV...), nil
 	case "movies":
 		return append([]string{}, h.Cfg.Watch.Movies...), nil
+	case "seeding_tv":
+		return append([]string{}, h.Cfg.Watch.SeedingTV...), nil
+	case "seeding_movies":
+		return append([]string{}, h.Cfg.Watch.SeedingMovies...), nil
 	default:
 		return nil, errKindUnknown
 	}
@@ -80,6 +84,12 @@ func (h *PathsHandlers) write(kind string, paths []string) error {
 		return nil
 	case "movies":
 		h.Cfg.Watch.Movies = append([]string{}, paths...)
+		return nil
+	case "seeding_tv":
+		h.Cfg.Watch.SeedingTV = append([]string{}, paths...)
+		return nil
+	case "seeding_movies":
+		h.Cfg.Watch.SeedingMovies = append([]string{}, paths...)
 		return nil
 	default:
 		return errKindUnknown
@@ -250,7 +260,7 @@ func persistConfigAndReload(ctx context.Context, cfg *config.Config, ipcClient I
 	return nil
 }
 
-var errKindUnknown = errors.New("unknown kind (must be tv or movies)")
+var errKindUnknown = errors.New("unknown kind (must be tv, movies, seeding_tv, or seeding_movies)")
 
 func (h *PathsHandlers) mutex() *sync.RWMutex {
 	if h.Mu != nil {

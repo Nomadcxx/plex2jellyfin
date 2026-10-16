@@ -180,8 +180,11 @@ Web and daemon communicate over the Unix-domain control socket under `~/.config/
 flowchart TB
     A[Sonarr / Radarr] -->|downloads| B["Download Client<br/>(SABnzbd, NZBGet, qBittorrent, ...)"]
     B -->|completed file| C[Watch Directory]
+    T["Torrent Client<br/>(qBittorrent, Transmission, Deluge, ...)"] -->|completed, still seeding| S[Seeding Root]
     C -->|inotify| D[plex2jellyfin-daemon]
-    D -->|rename + move| E[Jellyfin Library]
+    S -->|inotify| D
+    D -->|rename + move or copy| E[Jellyfin Library]
+    D -->|rename + hardlink, source retained| E
     D -->|state + audit| DB[(SQLite media.db)]
     D -.->|low confidence| O[Ollama]
     O -.->|suggested rename| D
@@ -231,6 +234,11 @@ Annotated template: [`config.toml.example`](config.toml.example). Full reference
 movies = ["/downloads/movies"]
 tv     = ["/downloads/tv"]
 
+# Optional: completed torrents your client keeps seeding. Sources stay in place
+# and are hardlinked into the library when the filesystem allows it.
+seeding_movies = ["/torrents/complete/movies"]
+seeding_tv     = ["/torrents/complete/tv"]
+
 [libraries]
 movies = ["/media/Movies"]
 tv     = ["/media/TV Shows"]
@@ -239,6 +247,8 @@ tv     = ["/media/TV Shows"]
 enabled        = true
 scan_frequency = "5m"
 ```
+
+Seeding a torrent while Jellyfin serves it: [torrent clients](https://nomadcxx.github.io/plex2jellyfin/docs/getting-started/torrent-clients/).
 
 <details>
 <summary><b>Common extras</b></summary>

@@ -102,6 +102,12 @@ func (m model) renderPaths() string {
 			prefix = fg(Primary).Render("▸ ")
 		}
 		b.WriteString(fmt.Sprintf("%s%s (%s)\n", prefix, wf.Label, wf.Type))
+		if wf.Seeding {
+			b.WriteString(fg(FgMuted).Render(
+				"    Optional. Completed downloads only — sources are retained for seeding.") + "\n")
+			b.WriteString(fg(FgMuted).Render(
+				"    Point incomplete downloads at a directory outside every watch root.") + "\n")
+		}
 		// Render the actual text input widget
 		if i < len(m.inputs) {
 			b.WriteString(fmt.Sprintf("    Paths: %s\n\n", m.inputs[i].View()))
@@ -138,13 +144,6 @@ func (m model) renderPaths() string {
 		b.WriteString(fmt.Sprintf("%sMovie Libraries: %s\n", moviePrefix, m.movieLibraryPaths))
 	}
 
-	if m.pathOverlapWarning != "" {
-		b.WriteString("\n\n")
-		b.WriteString(fgBold(lipgloss.Color("#ff5555")).Render("⚠ WARNING: "))
-		b.WriteString(fg(lipgloss.Color("#ff5555")).Render(m.pathOverlapWarning))
-		b.WriteString("\n")
-		b.WriteString(fg(FgMuted).Render("Press Enter again to proceed anyway, or fix the paths above."))
-	}
 	if m.pathsError != "" {
 		b.WriteString("\n\n")
 		b.WriteString(fgBold(lipgloss.Color("#ff5555")).Render("⚠ "))
@@ -619,7 +618,18 @@ func (m model) renderConfirm() string {
 
 	b.WriteString("Watch Folders:\n")
 	for _, wf := range m.watchFolders {
-		if wf.Paths != "" {
+		if wf.Paths != "" && !wf.Seeding {
+			b.WriteString(fmt.Sprintf("  • %s: %s\n", wf.Label, wf.Paths))
+		}
+	}
+
+	seeding := false
+	for _, wf := range m.watchFolders {
+		if wf.Paths != "" && wf.Seeding {
+			if !seeding {
+				b.WriteString("\nSeeding completions (sources retained in place):\n")
+				seeding = true
+			}
 			b.WriteString(fmt.Sprintf("  • %s: %s\n", wf.Label, wf.Paths))
 		}
 	}

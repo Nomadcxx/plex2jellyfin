@@ -16,6 +16,23 @@ import (
 // globalProgram is used to send messages from goroutines
 var globalProgram *tea.Program
 
+// fixedWatchFolderCount is how many folders the wizard always offers: ordinary
+// TV and Movie intake plus the two seeding completion roots. Users may append
+// custom folders after these, but the fixed four are not removable.
+const fixedWatchFolderCount = 4
+
+// defaultWatchFolders returns the fixed folder set in the order the paths
+// screen renders it. Seeding entries stay optional — an empty path simply
+// leaves that root unconfigured.
+func defaultWatchFolders() []WatchFolder {
+	return []WatchFolder{
+		{Label: "TV Shows", Type: "tv"},
+		{Label: "Movies", Type: "movies"},
+		{Label: "TV Seeding Completions", Type: "tv", Seeding: true},
+		{Label: "Movie Seeding Completions", Type: "movies", Seeding: true},
+	}
+}
+
 func newModel(debugMode bool, logFile *os.File) model {
 	s := spinner.New()
 	s.Style = fg(Secondary)
@@ -23,11 +40,7 @@ func newModel(debugMode bool, logFile *os.File) model {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Default watch folders
-	watchFolders := []WatchFolder{
-		{Label: "TV Shows", Type: "tv", Paths: ""},
-		{Label: "Movies", Type: "movies", Paths: ""},
-	}
+	watchFolders := defaultWatchFolders()
 
 	// Detect existing installation
 	existingDB, dbPath, _ := detectExistingInstall()
