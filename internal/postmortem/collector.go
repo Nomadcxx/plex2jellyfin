@@ -91,11 +91,11 @@ func (c Collector) Collect() (BundlePaths, error) {
 		return BundlePaths{}, fmt.Errorf("create report dir: %w", err)
 	}
 
-	decisions, err := c.DB.QueryDecisions(database.QueryFilter{EventAfter: &c.Since, Limit: 10000})
+	decisions, err := c.DB.QueryDecisions(database.QueryFilter{EventAfter: &c.Since})
 	if err != nil {
 		return BundlePaths{}, fmt.Errorf("query parse decisions: %w", err)
 	}
-	repairs, err := c.DB.ListRepairEventsSince(c.Since, 10000)
+	repairs, err := c.DB.ListRepairEventsSince(c.Since, 0)
 	if err != nil {
 		return BundlePaths{}, fmt.Errorf("query repair events: %w", err)
 	}
@@ -318,8 +318,7 @@ func (c Collector) housekeeping() housekeepingSnapshot {
 			Error:           err.Error(),
 		}
 	}
-	// ponytail: ceiling ~10k recent tasks; upgrade to COUNT(... WHERE created_at>=?) if backlog grows.
-	recent, err := c.DB.ListHousekeepingTasks("", 10000)
+	createdInWindow, err := c.DB.CountHousekeepingTasksSince(c.Since)
 	if err != nil {
 		return housekeepingSnapshot{
 			Counts:          outstanding,
@@ -328,16 +327,20 @@ func (c Collector) housekeeping() housekeepingSnapshot {
 			Error:           err.Error(),
 		}
 	}
-	window := CountHousekeepingWindow(recent, c.Since, outstanding)
-	recentOut := recent
-	if len(recentOut) > 200 {
-		recentOut = recentOut[:200]
+	recent, err := c.DB.ListHousekeepingTasks("", 200)
+	if err != nil {
+		return housekeepingSnapshot{
+			Counts:          outstanding,
+			CreatedInWindow: createdInWindow,
+			Outstanding:     outstanding,
+			Error:           err.Error(),
+		}
 	}
 	return housekeepingSnapshot{
-		Counts:          window.Outstanding,
-		CreatedInWindow: window.CreatedInWindow,
-		Outstanding:     window.Outstanding,
-		Recent:          recentOut,
+		Counts:          outstanding,
+		CreatedInWindow: createdInWindow,
+		Outstanding:     outstanding,
+		Recent:          recent,
 	}
 }
 
@@ -353,7 +356,9 @@ func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousI
 		if d == nil {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(d.OrganizeOutcome), "success") && strings.TrimSpace(d.TargetPath) != "" && strings.TrimSpace(d.SourcePath) != "" {
+		if !strings.EqualFold(strings.TrimSpace(d.ParseMethod), "season_pack") &&
+			strings.EqualFold(strings.TrimSpace(d.OrganizeOutcome), "success") &&
+			strings.TrimSpace(d.TargetPath) != "" && strings.TrimSpace(d.SourcePath) != "" {
 			sources := targetSources[d.TargetPath]
 			if sources == nil {
 				sources = make(map[string]targetSource)

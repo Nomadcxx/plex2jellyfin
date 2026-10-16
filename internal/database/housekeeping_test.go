@@ -4,7 +4,47 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestCountHousekeepingTasksSinceUsesSQLiteTimestampFormat(t *testing.T) {
+	db, err := OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+
+	for _, task := range []struct {
+		key, status, createdAt string
+	}{
+		{"before", "failed", "2026-10-16 12:29:59"},
+		{"at", "pending", "2026-10-16 12:30:00"},
+		{"after", "done", "2026-10-16 12:30:01"},
+	} {
+		_, err := db.db.Exec(`
+			INSERT INTO housekeeping_tasks (job_name, kind, dedup_key, status, created_at)
+			VALUES ('test', 'test', ?, ?, ?)`, task.key, task.status, task.createdAt)
+		if err != nil {
+			t.Fatalf("insert task %q: %v", task.key, err)
+		}
+	}
+
+	counts, err := db.CountHousekeepingTasksSince(time.Date(2026, 10, 16, 12, 30, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("CountHousekeepingTasksSince: %v", err)
+	}
+	if counts[TaskStatusPending] != 1 || counts[TaskStatusDone] != 1 || counts[TaskStatusFailed] != 0 {
+		t.Fatalf("counts = %#v, want pending=1 done=1 failed=0", counts)
+	}
+
+	counts, err = db.CountHousekeepingTasksSince(time.Date(2026, 10, 16, 12, 30, 0, 500_000_000, time.UTC))
+	if err != nil {
+		t.Fatalf("CountHousekeepingTasksSince fractional cutoff: %v", err)
+	}
+	if counts[TaskStatusPending] != 0 || counts[TaskStatusDone] != 1 || counts[TaskStatusFailed] != 0 {
+		t.Fatalf("fractional cutoff counts = %#v, want pending=0 done=1 failed=0", counts)
+	}
+}
 
 func TestBulkHousekeepingTasks(t *testing.T) {
 	db, err := OpenPath(filepath.Join(t.TempDir(), "media.db"))
