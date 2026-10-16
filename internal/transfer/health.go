@@ -155,6 +155,14 @@ func CheckDiskHealthForTransfer(src, dst string, timeout time.Duration, required
 }
 
 func StatWithTimeout(path string, timeout time.Duration) (os.FileInfo, error) {
+	return fileInfoWithTimeout(path, timeout, os.Stat)
+}
+
+func LstatWithTimeout(path string, timeout time.Duration) (os.FileInfo, error) {
+	return fileInfoWithTimeout(path, timeout, os.Lstat)
+}
+
+func fileInfoWithTimeout(path string, timeout time.Duration, stat func(string) (os.FileInfo, error)) (os.FileInfo, error) {
 	type result struct {
 		info os.FileInfo
 		err  error
@@ -162,7 +170,7 @@ func StatWithTimeout(path string, timeout time.Duration) (os.FileInfo, error) {
 	ch := make(chan result, 1)
 
 	go func() {
-		info, err := os.Stat(path)
+		info, err := stat(path)
 		ch <- result{info: info, err: err}
 	}()
 

@@ -71,6 +71,31 @@ func TestHardlinkCopyCreatesSharedInodeAndRetainsSource(t *testing.T) {
 	}
 }
 
+func TestHardlinkCopyRejectsSymlinkSource(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.mkv")
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "episode.mkv")
+	if err := os.WriteFile(target, []byte("payload"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, src); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+
+	fallback := &hardlinkFallbackStub{}
+	_, err := NewHardlinkCopyTransferer(fallback).Copy(src, dst, DefaultOptions())
+	if err == nil {
+		t.Fatal("expected symlink source to be rejected")
+	}
+	if _, err := os.Lstat(dst); !os.IsNotExist(err) {
+		t.Fatalf("destination exists or cannot be inspected: %v", err)
+	}
+	if fallback.copyCalls != 0 {
+		t.Fatalf("fallback copy calls = %d, want 0", fallback.copyCalls)
+	}
+}
+
 func TestHardlinkCopyFallsBackAcrossDevices(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "source.mkv")

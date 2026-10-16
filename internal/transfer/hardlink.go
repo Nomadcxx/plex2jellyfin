@@ -35,9 +35,13 @@ func (t *HardlinkCopyTransferer) Move(src, dst string, opts TransferOptions) (*T
 func (t *HardlinkCopyTransferer) Copy(src, dst string, opts TransferOptions) (*TransferResult, error) {
 	result := &TransferResult{Attempts: 1}
 	started := time.Now()
-	srcInfo, err := StatWithTimeout(src, 10*time.Second)
+	srcInfo, err := LstatWithTimeout(src, 10*time.Second)
 	if err != nil {
 		result.Error = fmt.Errorf("%w: %v", ErrSourceNotFound, err)
+		return result, result.Error
+	}
+	if !srcInfo.Mode().IsRegular() {
+		result.Error = fmt.Errorf("source must be a regular file: %s", src)
 		return result, result.Error
 	}
 	result.BytesTotal = srcInfo.Size()
@@ -78,6 +82,15 @@ func (t *HardlinkCopyTransferer) Copy(src, dst string, opts TransferOptions) (*T
 			return t.fallback.Copy(src, dst, opts)
 		}
 		result.Error = fmt.Errorf("create hardlink: %w", err)
+		return result, result.Error
+	}
+	linkedInfo, err := LstatWithTimeout(tmpPath, 10*time.Second)
+	if err != nil {
+		result.Error = fmt.Errorf("inspect hardlink: %w", err)
+		return result, result.Error
+	}
+	if !linkedInfo.Mode().IsRegular() {
+		result.Error = fmt.Errorf("hardlink source changed to a non-regular file: %s", src)
 		return result, result.Error
 	}
 	if err := os.Rename(tmpPath, dst); err != nil {
