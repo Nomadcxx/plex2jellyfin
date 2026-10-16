@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 type hardlinkFallbackStub struct {
@@ -68,6 +69,53 @@ func TestHardlinkCopyCreatesSharedInodeAndRetainsSource(t *testing.T) {
 	}
 	if got, err := os.ReadFile(src); err != nil || string(got) != string(data) {
 		t.Fatalf("source changed after target removal: %q, %v", got, err)
+	}
+}
+
+func TestHardlinkCopyUsesImportTimeByDefault(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "episode.mkv")
+	if err := os.WriteFile(src, []byte("payload"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-24 * time.Hour)
+	if err := os.Chtimes(src, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	before := time.Now()
+	if _, err := NewHardlinkCopyTransferer(&hardlinkFallbackStub{}).Copy(src, dst, DefaultOptions()); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ModTime().Before(before.Add(-time.Second)) {
+		t.Fatalf("modification time = %v, want import time after %v", info.ModTime(), before)
+	}
+}
+
+func TestHardlinkCopyAppliesConfiguredFileMode(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "episode.mkv")
+	if err := os.WriteFile(src, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultOptions()
+	opts.FileMode = 0o640
+	if _, err := NewHardlinkCopyTransferer(&hardlinkFallbackStub{}).Copy(src, dst, opts); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != opts.FileMode {
+		t.Fatalf("file mode = %04o, want %04o", got, opts.FileMode)
 	}
 }
 
