@@ -70,12 +70,20 @@ func TestGetLibraryStats_NullYearDuplicatesCounted(t *testing.T) {
 	}
 	defer db.Close()
 
+	show := &Series{
+		Title: "Show", Year: 2023, CanonicalPath: "/tv/Show", LibraryRoot: "/tv",
+		Source: "filesystem", SourcePriority: 50,
+	}
+	if _, err := db.UpsertSeries(show); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
 	season, episode := 2, 5
 	for i, root := range []string{"/lib1", "/lib2"} {
 		f := &MediaFile{
 			Path:            root + "/Show/Season 02/Show S02E05.mkv",
 			Size:            int64(100 * (i + 1)),
 			MediaType:       "episode",
+			ParentSeriesID:  &show.ID,
 			NormalizedTitle: "show",
 			Year:            nil,
 			Season:          &season,

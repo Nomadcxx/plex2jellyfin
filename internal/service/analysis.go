@@ -18,6 +18,7 @@ type DuplicateGroup struct {
 	ID               string // Hash of normalized title + year + episode
 	Title            string
 	Year             *int
+	ParentSeriesID   *int64
 	MediaType        string // "movie" or "series"
 	Season           *int   // For TV
 	Episode          *int   // For TV
@@ -96,7 +97,7 @@ func (s *CleanupService) AnalyzeDuplicates() (*DuplicateAnalysis, error) {
 		}
 
 		group := DuplicateGroup{
-			ID:        generateGroupID(mg.NormalizedTitle, mg.Year, nil, nil),
+			ID:        generateGroupID(mg.NormalizedTitle, mg.Year, nil, nil, nil),
 			Title:     mg.NormalizedTitle,
 			Year:      mg.Year,
 			MediaType: "movie",
@@ -140,13 +141,14 @@ func (s *CleanupService) AnalyzeDuplicates() (*DuplicateAnalysis, error) {
 		}
 
 		group := DuplicateGroup{
-			ID:        generateGroupID(eg.NormalizedTitle, eg.Year, eg.Season, eg.Episode),
-			Title:     eg.NormalizedTitle,
-			Year:      eg.Year,
-			MediaType: "series",
-			Season:    eg.Season,
-			Episode:   eg.Episode,
-			Files:     make([]MediaFile, len(files)),
+			ID:             generateGroupID(eg.NormalizedTitle, eg.Year, eg.ParentSeriesID, eg.Season, eg.Episode),
+			Title:          eg.NormalizedTitle,
+			Year:           eg.Year,
+			ParentSeriesID: eg.ParentSeriesID,
+			MediaType:      "series",
+			Season:         eg.Season,
+			Episode:        eg.Episode,
+			Files:          make([]MediaFile, len(files)),
 		}
 
 		for i, f := range files {
@@ -343,10 +345,13 @@ func isScatteredMediaFile(ext string) bool {
 }
 
 // generateGroupID creates a unique ID for a duplicate group
-func generateGroupID(title string, year *int, season, episode *int) string {
+func generateGroupID(title string, year *int, parentSeriesID *int64, season, episode *int) string {
 	parts := []string{strings.ToLower(title)}
 	if year != nil {
 		parts = append(parts, fmt.Sprintf("%d", *year))
+	}
+	if parentSeriesID != nil {
+		parts = append(parts, fmt.Sprintf("series-%d", *parentSeriesID))
 	}
 	if season != nil {
 		parts = append(parts, fmt.Sprintf("s%d", *season))

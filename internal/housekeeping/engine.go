@@ -990,6 +990,9 @@ func (e *Engine) detectFileDuplicates(ctx context.Context, res *DetectResult, en
 		if group.Episode != nil {
 			payload["episode"] = *group.Episode
 		}
+		if group.ParentSeriesID != nil {
+			payload["parent_series_id"] = *group.ParentSeriesID
+		}
 		if len(reasons) > 0 {
 			payload["reasons"] = reasons
 		}
@@ -1635,8 +1638,12 @@ func (e *Engine) execConsolidateDuplicate(ctx context.Context, t *database.House
 	year := payloadIntPtr(t.Payload, "year")
 	season := payloadIntPtr(t.Payload, "season")
 	episode := payloadIntPtr(t.Payload, "episode")
+	var parentSeriesID *int64
+	if id, ok := payloadInt64(t.Payload, "parent_series_id"); ok {
+		parentSeriesID = &id
+	}
 
-	group, err := e.cleanup.FindDuplicateGroup(mediaType, title, year, season, episode)
+	group, err := e.cleanup.FindDuplicateGroup(mediaType, title, year, season, episode, parentSeriesID)
 	if err != nil {
 		return fmt.Errorf("lookup duplicate group: %w", err)
 	}

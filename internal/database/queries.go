@@ -9,6 +9,7 @@ import (
 type DuplicateGroup struct {
 	NormalizedTitle  string
 	Year             *int
+	ParentSeriesID   *int64
 	Season           *int // nil for movies
 	Episode          *int // nil for movies
 	Files            []*MediaFile
@@ -61,7 +62,7 @@ func (m *MediaDB) findDuplicateMoviesLocked() ([]DuplicateGroup, error) {
 			return nil, fmt.Errorf("failed to scan duplicate movie: %w", err)
 		}
 
-		files, err := m.getMediaFilesForGroup(title, year, nil, nil, "movie")
+		files, err := m.getMediaFilesForGroup(title, year, nil, nil, nil, "movie")
 		if err != nil {
 			return nil, err
 		}
@@ -95,10 +96,11 @@ func (m *MediaDB) FindDuplicateEpisodes() ([]DuplicateGroup, error) {
 // findDuplicateEpisodesLocked assumes m.mu is already held.
 func (m *MediaDB) findDuplicateEpisodesLocked() ([]DuplicateGroup, error) {
 	query := `
-		SELECT normalized_title, year, season, episode
+		SELECT parent_series_id, normalized_title, year, season, episode
 		FROM media_files
-		WHERE media_type = 'episode' AND season IS NOT NULL AND episode IS NOT NULL
-		GROUP BY normalized_title, year, season, episode
+		WHERE media_type = 'episode' AND parent_series_id IS NOT NULL
+		  AND season IS NOT NULL AND episode IS NOT NULL
+		GROUP BY parent_series_id, normalized_title, year, season, episode
 		HAVING COUNT(*) > 1
 		ORDER BY normalized_title, year, season, episode
 	`
@@ -112,14 +114,15 @@ func (m *MediaDB) findDuplicateEpisodesLocked() ([]DuplicateGroup, error) {
 	var groups []DuplicateGroup
 
 	for rows.Next() {
+		var parentSeriesID int64
 		var title string
 		var year, season, episode *int
 
-		if err := rows.Scan(&title, &year, &season, &episode); err != nil {
+		if err := rows.Scan(&parentSeriesID, &title, &year, &season, &episode); err != nil {
 			return nil, fmt.Errorf("failed to scan duplicate episode: %w", err)
 		}
 
-		files, err := m.getMediaFilesForGroup(title, year, season, episode, "episode")
+		files, err := m.getMediaFilesForGroup(title, year, season, episode, &parentSeriesID, "episode")
 		if err != nil {
 			return nil, err
 		}
@@ -127,6 +130,7 @@ func (m *MediaDB) findDuplicateEpisodesLocked() ([]DuplicateGroup, error) {
 		group := DuplicateGroup{
 			NormalizedTitle: title,
 			Year:            year,
+			ParentSeriesID:  &parentSeriesID,
 			Season:          season,
 			Episode:         episode,
 			Files:           files,
@@ -147,7 +151,7 @@ func (m *MediaDB) findDuplicateEpisodesLocked() ([]DuplicateGroup, error) {
 
 // getMediaFilesForGroup retrieves all files for a duplicate group.
 // year nil matches year IS NULL; mediaType constrains retrieval.
-func (m *MediaDB) getMediaFilesForGroup(title string, year, season, episode *int, mediaType string) ([]*MediaFile, error) {
+func (m *MediaDB) getMediaFilesForGroup(title string, year, season, episode *int, parentSeriesID *int64, mediaType string) ([]*MediaFile, error) {
 	var files []*MediaFile
 
 	query := `
@@ -163,6 +167,10 @@ func (m *MediaDB) getMediaFilesForGroup(title string, year, season, episode *int
 		WHERE normalized_title = ? AND media_type = ?
 	`
 	args := []interface{}{title, mediaType}
+	if parentSeriesID != nil {
+		query += " AND parent_series_id = ?"
+		args = append(args, *parentSeriesID)
+	}
 
 	if year != nil {
 		query += " AND year = ?"

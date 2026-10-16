@@ -111,12 +111,13 @@ func sizeDivergesMaterially(a, b int64) bool {
 // Used by the housekeeping executor to re-fetch a group at execute time
 // using only the lightweight payload it persists in housekeeping_tasks.
 func (s *CleanupService) FindDuplicateGroup(mediaType, normalizedTitle string,
-	year, season, episode *int) (*DuplicateGroup, error) {
+	year, season, episode *int, parentSeriesID *int64) (*DuplicateGroup, error) {
 
 	analysis, err := s.AnalyzeDuplicates()
 	if err != nil {
 		return nil, err
 	}
+	var match *DuplicateGroup
 	for i := range analysis.Groups {
 		g := &analysis.Groups[i]
 		if g.MediaType != mediaType || g.Title != normalizedTitle {
@@ -131,12 +132,28 @@ func (s *CleanupService) FindDuplicateGroup(mediaType, normalizedTitle string,
 		if !intPtrEq(g.Episode, episode) {
 			continue
 		}
-		return g, nil
+		if parentSeriesID != nil && !int64PtrEq(g.ParentSeriesID, parentSeriesID) {
+			continue
+		}
+		if match != nil {
+			return nil, fmt.Errorf("duplicate key %q is ambiguous across series; parent_series_id is required", normalizedTitle)
+		}
+		match = g
 	}
-	return nil, nil
+	return match, nil
 }
 
 func intPtrEq(a, b *int) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func int64PtrEq(a, b *int64) bool {
 	if a == nil && b == nil {
 		return true
 	}
