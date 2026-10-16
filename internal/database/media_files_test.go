@@ -256,6 +256,42 @@ func TestGetLowConfidenceFilesIncludesParseMethod(t *testing.T) {
 	}
 }
 
+func TestUpsertEpisodeConflictResolvesExistingID(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	series := &Series{
+		Title: "Conflict ID Test", TitleNormalized: "conflict id test", Year: 2024,
+		CanonicalPath: "/library/Conflict ID Test", LibraryRoot: "/library",
+		Source: "filesystem", SourcePriority: 50,
+	}
+	if _, err := db.UpsertSeries(series); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+
+	first := &Episode{SeriesID: series.ID, Season: 1, Episode: 1, Title: "First"}
+	if err := db.UpsertEpisode(first); err != nil {
+		t.Fatalf("UpsertEpisode first: %v", err)
+	}
+	if first.ID == 0 {
+		t.Fatal("first episode ID was not set")
+	}
+
+	// Leave an unrelated row as sqlite's last insert ID before the conflict update.
+	unrelated := &Episode{SeriesID: series.ID, Season: 1, Episode: 2, Title: "Unrelated"}
+	if err := db.UpsertEpisode(unrelated); err != nil {
+		t.Fatalf("UpsertEpisode unrelated: %v", err)
+	}
+
+	retry := &Episode{SeriesID: series.ID, Season: 1, Episode: 1, Title: "First"}
+	if err := db.UpsertEpisode(retry); err != nil {
+		t.Fatalf("UpsertEpisode conflict: %v", err)
+	}
+	if retry.ID != first.ID {
+		t.Fatalf("conflict ID = %d, want existing episode ID %d", retry.ID, first.ID)
+	}
+}
+
 func TestUpsertMediaFileSetsExistingIDOnUpdate(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
