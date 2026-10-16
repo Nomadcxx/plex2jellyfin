@@ -47,6 +47,21 @@ var (
 	version     = "dev" // Set by build flags: -ldflags="-X main.version=1.0.0"
 )
 
+func positiveTickerInterval(interval, fallback time.Duration) time.Duration {
+	if interval <= 0 {
+		return fallback
+	}
+	return interval
+}
+
+func positiveTickerIntervalSeconds(seconds int, fallback time.Duration) time.Duration {
+	const maxSeconds = uint64(1<<63-1) / uint64(time.Second)
+	if seconds <= 0 || uint64(seconds) > maxSeconds {
+		return fallback
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "plex2jellyfin-daemon",
@@ -357,10 +372,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// Parse scan frequency
 	scanInterval, err := time.ParseDuration(cfg.Daemon.ScanFrequency)
 	if err != nil {
+		scanInterval = 0
+	}
+	if scanInterval <= 0 {
 		logger.Warn("daemon", "Invalid scan_frequency, using default",
 			logging.F("configured", cfg.Daemon.ScanFrequency),
 			logging.F("default", "5m"))
-		scanInterval = 5 * time.Minute
+		scanInterval = positiveTickerInterval(scanInterval, 5*time.Minute)
 	}
 
 	// Create periodic scanner
@@ -518,10 +536,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Start AI enhancement ticker
 	if cfg.AI.Enabled && aiMatcher != nil {
-		interval := time.Duration(cfg.AI.EnhancementIntervalSeconds) * time.Second
-		if interval == 0 {
-			interval = 30 * time.Second
-		}
+		interval := positiveTickerIntervalSeconds(cfg.AI.EnhancementIntervalSeconds, 30*time.Second)
 		startBackground("AI enhancement ticker", func() {
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()

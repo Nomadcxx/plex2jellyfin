@@ -2,9 +2,56 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 )
+
+func TestPositiveTickerInterval(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		interval time.Duration
+		fallback time.Duration
+		want     time.Duration
+	}{
+		{name: "positive", interval: time.Minute, fallback: 5 * time.Minute, want: time.Minute},
+		{name: "zero", fallback: 5 * time.Minute, want: 5 * time.Minute},
+		{name: "negative", interval: -time.Second, fallback: 5 * time.Minute, want: 5 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := positiveTickerInterval(tc.interval, tc.fallback); got != tc.want {
+				t.Fatalf("positiveTickerInterval() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPositiveTickerIntervalSeconds(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		seconds  int
+		fallback time.Duration
+		want     time.Duration
+	}{
+		{name: "positive", seconds: 30, fallback: time.Minute, want: 30 * time.Second},
+		{name: "zero", fallback: time.Minute, want: time.Minute},
+		{name: "negative", seconds: -1, fallback: time.Minute, want: time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := positiveTickerIntervalSeconds(tc.seconds, tc.fallback); got != tc.want {
+				t.Fatalf("positiveTickerIntervalSeconds() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	maxInt := int(^uint(0) >> 1)
+	if uint64(maxInt) > uint64((1<<63-1)/int64(time.Second)) {
+		fallback := time.Minute
+		if got := positiveTickerIntervalSeconds(maxInt, fallback); got != fallback {
+			t.Fatalf("positiveTickerIntervalSeconds(max int) = %v, want %v", got, fallback)
+		}
+	}
+}
 
 func TestResolveHealthAddr(t *testing.T) {
 	tests := []struct {
