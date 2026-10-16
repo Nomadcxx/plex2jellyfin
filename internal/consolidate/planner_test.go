@@ -106,12 +106,20 @@ func TestGeneratePlans_Episodes(t *testing.T) {
 	year2023 := 2023
 	season1 := 1
 	episode1 := 1
+	series := &database.Series{
+		Title: "Silo", Year: year2023, CanonicalPath: "/media/STORAGE1/TV/Silo (2023)",
+		LibraryRoot: "/media/STORAGE1/TV", Source: "filesystem", SourcePriority: 50,
+	}
+	if _, err := db.UpsertSeries(series); err != nil {
+		t.Fatalf("Failed to insert test series: %v", err)
+	}
 
 	files := []*database.MediaFile{
 		{
 			Path:                "/media/STORAGE1/TV/Silo (2023)/Season 01/Silo.S01E01.720p.mkv",
 			Size:                800 * 1024 * 1024,
 			MediaType:           "episode",
+			ParentSeriesID:      &series.ID,
 			NormalizedTitle:     "silo",
 			Year:                &year2023,
 			Season:              &season1,
@@ -125,6 +133,7 @@ func TestGeneratePlans_Episodes(t *testing.T) {
 			Path:                "/media/STORAGE2/TV/Silo (2023)/Season 01/Silo (2023) S01E01.mkv",
 			Size:                1500 * 1024 * 1024,
 			MediaType:           "episode",
+			ParentSeriesID:      &series.ID,
 			NormalizedTitle:     "silo",
 			Year:                &year2023,
 			Season:              &season1,
