@@ -384,6 +384,35 @@ func (m *MediaDB) CountHousekeepingTasks() (map[string]int, error) {
 	return out, rows.Err()
 }
 
+// CountHousekeepingTasksSince returns task counts by status for the requested
+// creation window without loading task payloads into memory.
+func (m *MediaDB) CountHousekeepingTasksSince(since time.Time) (map[string]int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// created_at uses SQLite's space-separated UTC timestamp format.
+	rows, err := m.db.Query(`
+		SELECT status, COUNT(*)
+		FROM housekeeping_tasks
+		WHERE created_at >= ?
+		GROUP BY status`, since.UTC().Format("2006-01-02 15:04:05.999999999"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	for rows.Next() {
+		var status string
+		var n int
+		if err := rows.Scan(&status, &n); err != nil {
+			return nil, err
+		}
+		out[status] = n
+	}
+	return out, rows.Err()
+}
+
 // RetryHousekeepingTask resets a failed/canceled/flagged task to pending.
 func (m *MediaDB) RetryHousekeepingTask(id int64) error {
 	m.mu.Lock()

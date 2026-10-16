@@ -85,6 +85,76 @@ func TestCollectorWritesSummaryAndParseDecisions(t *testing.T) {
 	}
 }
 
+func TestCollectorIncludesAllDecisionsInWindow(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+
+	const count = 10001
+	now := time.Now().UTC()
+	tx, err := db.SQL().Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmt, err := tx.Prepare(`INSERT INTO parse_decisions (source_path, source_filename, event_at) VALUES (?, ?, ?)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < count; i++ {
+		if _, err := stmt.Exec(fmt.Sprintf("/downloads/%d.mkv", i), fmt.Sprintf("%d.mkv", i), now.Add(-time.Minute)); err != nil {
+			t.Fatalf("insert decision %d: %v", i, err)
+		}
+	}
+	if err := stmt.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	oldJournalctlExcerpt := journalctlExcerpt
+	journalctlExcerpt = func(time.Time) (string, error) { return "test log", nil }
+	t.Cleanup(func() { journalctlExcerpt = oldJournalctlExcerpt })
+	bundle, err := Collector{
+		DB:     db,
+		Root:   t.TempDir(),
+		Now:    func() time.Time { return now },
+		Since:  now.Add(-96 * time.Hour),
+		LogDir: t.TempDir(),
+		UnknownSeasons: func() UnknownSeasonEvidence {
+			return UnknownSeasonEvidence{}
+		},
+	}.Collect()
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	data, err := os.ReadFile(bundle.File("parse-decisions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []json.RawMessage
+	if err := json.Unmarshal(data, &decisions); err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != count {
+		t.Fatalf("parse decisions = %d, want all %d rows", len(decisions), count)
+	}
+	var summary Summary
+	summaryData, err := os.ReadFile(bundle.File("summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(summaryData, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.ProcessedDecisions != count {
+		t.Fatalf("summary processed decisions = %d, want %d", summary.ProcessedDecisions, count)
+	}
+}
+
 func TestCollectorWritesUnknownSeasonEvidence(t *testing.T) {
 	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
 	if err != nil {

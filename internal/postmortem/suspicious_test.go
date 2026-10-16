@@ -145,6 +145,20 @@ func TestSuspiciousFromDecisionsFlagsRepeatedSameSourceWrite(t *testing.T) {
 	}
 }
 
+func TestSuspiciousFromDecisionsDoesNotTreatSeasonPackRowsAsFileWrites(t *testing.T) {
+	target := "/tv/Among Us/Season 01/Among Us S01E01.mkv"
+	decisions := []*database.ParseDecision{
+		{SourcePath: "/downloads/Among.Us.S01.Pack/a.mkv", SourceFilename: "a.mkv", ParseMethod: "season_pack", OrganizeOutcome: "success", TargetPath: target},
+		{SourcePath: "/downloads/Among.Us.S01.Pack/b.mkv", SourceFilename: "b.mkv", ParseMethod: "season_pack", OrganizeOutcome: "success", TargetPath: target},
+	}
+	suspicious, _ := suspiciousFromDecisions(decisions)
+	for _, item := range suspicious {
+		if item.Category == "target_collision" {
+			t.Fatalf("season-pack representative paths must not be treated as writes: %#v", suspicious)
+		}
+	}
+}
+
 func TestSuspiciousFromDecisionsChecksVisibleTargetName(t *testing.T) {
 	suspicious, _ := suspiciousFromDecisions([]*database.ParseDecision{{
 		SourcePath:       "/downloads/Breaking.Bear.S01E01.TUBI.WEB.H264-DARK.mp4",

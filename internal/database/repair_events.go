@@ -43,16 +43,21 @@ func (m *MediaDB) InsertRepairEvent(e RepairEvent) (int64, error) {
 func (m *MediaDB) ListRepairEventsSince(since time.Time, limit int) ([]RepairEvent, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if limit <= 0 || limit > 10000 {
-		limit = 1000
-	}
-	rows, err := m.db.Query(`
+	query := `
 		SELECT id, event_at, action, safety_class, confidence, source_path,
 		       target_path, outcome, error, llm_consulted, evidence_json
 		  FROM repair_events
 		 WHERE event_at >= ?
-		 ORDER BY event_at DESC
-		 LIMIT ?`, since, limit)
+		 ORDER BY event_at DESC`
+	args := []any{since}
+	if limit > 0 {
+		if limit > 10000 {
+			limit = 10000
+		}
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := m.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListRepairEventsSince: %w", err)
 	}
