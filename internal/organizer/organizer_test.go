@@ -766,16 +766,56 @@ func TestOrganizeTVEpisode_TwoEpisodeRangeDoesNotReplaceIndividualEpisode(t *tes
 }
 
 func recordSuccessfulTVImport(t *testing.T, db *database.MediaDB, targetPath, sourceFilename string) {
+	recordSuccessfulImport(t, db, targetPath, sourceFilename, "tv")
+}
+
+func recordSuccessfulImport(t *testing.T, db *database.MediaDB, targetPath, sourceFilename, mediaType string) {
 	t.Helper()
 	_, err := db.InsertDecision(database.ParseDecision{
 		SourcePath:       filepath.Join(filepath.Dir(targetPath), sourceFilename),
 		SourceFilename:   sourceFilename,
 		EventAt:          time.Now(),
-		MediaTypeGuessed: "tv",
+		MediaTypeGuessed: mediaType,
 		TargetPath:       targetPath,
 		OrganizeOutcome:  "success",
 	})
 	require.NoError(t, err)
+}
+
+func insertPendingQualityDecision(t *testing.T, db *database.MediaDB, sourcePath string) int64 {
+	t.Helper()
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:     sourcePath,
+		SourceFilename: filepath.Base(sourcePath),
+		EventAt:        time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	return id
+}
+
+func persistTestOrganizeResult(t *testing.T, db *database.MediaDB, id int64, result *OrganizationResult, organizeErr error) {
+	t.Helper()
+	update := database.OrganizeUpdate{}
+	switch {
+	case organizeErr != nil:
+		update.OrganizeOutcome = "failed"
+		update.OrganizeError = organizeErr.Error()
+	case result == nil:
+		update.OrganizeOutcome = "failed"
+		update.OrganizeError = "nil result"
+	case result.Success:
+		update.OrganizeOutcome = "success"
+		update.TargetPath = result.TargetPath
+		now := time.Now().UTC()
+		update.TargetAt = &now
+	case result.Skipped:
+		update.OrganizeOutcome = "skipped"
+		update.TargetPath = result.TargetPath
+		update.OrganizeError = result.SkipReason
+	default:
+		update.OrganizeOutcome = "failed"
+	}
+	assert.NoError(t, db.UpdateOrganize(id, update))
 }
 
 func TestOrganizeTVRangeReplacesCoveredLowerQualityEpisode(t *testing.T) {
@@ -1802,20 +1842,30 @@ func TestOrganizerImportsSameSizeQualityUpgradeFromDifferentSource(t *testing.T)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(contents), 0o644))
 	}
+	db, err := database.OpenPath(filepath.Join(root, "media.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	oldDecisionID := insertPendingQualityDecision(t, db, oldSource)
+	newDecisionID := insertPendingQualityDecision(t, db, newSource)
 
 	transferer := &recordingTransferer{}
 	org, err := NewOrganizer([]string{libraryDir},
+		WithDatabase(db),
 		WithTransferer(transferer),
 		WithTransferModeResolver(func(string) SourceTransferMode { return TransferCopy }),
 	)
 	require.NoError(t, err)
 	movie := naming.MovieInfo{Title: "Upgrade Movie", Year: "2026"}
 
-	first, err := org.OrganizeMovieWithParsed(oldSource, libraryDir, movie)
+	first, err := org.OrganizeMovieWithParsedFinalized(oldSource, libraryDir, movie, func(result *OrganizationResult, err error) {
+		persistTestOrganizeResult(t, db, oldDecisionID, result, err)
+	})
 	require.NoError(t, err)
 	require.True(t, first.Success, "initial import failed: %v", first.Error)
 
-	upgrade, err := org.OrganizeMovieWithParsed(newSource, libraryDir, movie)
+	upgrade, err := org.OrganizeMovieWithParsedFinalized(newSource, libraryDir, movie, func(result *OrganizationResult, err error) {
+		persistTestOrganizeResult(t, db, newDecisionID, result, err)
+	})
 	require.NoError(t, err)
 	if !upgrade.Success {
 		t.Fatalf("same-size quality upgrade was skipped: %+v", upgrade)
@@ -1824,6 +1874,190 @@ func TestOrganizerImportsSameSizeQualityUpgradeFromDifferentSource(t *testing.T)
 	contents, err := os.ReadFile(upgrade.TargetPath)
 	require.NoError(t, err)
 	assert.Equal(t, "new!", string(contents), "the library should contain the higher-quality release")
+}
+
+func TestOrganizerUsesSuccessfulImportQualityForCanonicalTargets(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		sourceFilename string
+		existingSource string
+		mediaType      string
+	}{
+		{
+			name:           "movie",
+			sourceFilename: "Quality.Movie.2026.720p.HDTV.mkv",
+			existingSource: "Quality.Movie.2026.1080p.WEB-DL.mkv",
+			mediaType:      "movie",
+		},
+		{
+			name:           "single episode",
+			sourceFilename: "Quality.Show.2026.S01E02.720p.HDTV.mkv",
+			existingSource: "Quality.Show.2026.S01E02.1080p.WEB-DL.mkv",
+			mediaType:      "tv",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			db, err := database.OpenPath(filepath.Join(root, "media.db"))
+			require.NoError(t, err)
+			defer db.Close()
+
+			libraryDir := filepath.Join(root, "library")
+			var targetPath, sourcePath string
+			if tc.mediaType == "movie" {
+				targetDir := filepath.Join(libraryDir, "Quality Movie (2026)")
+				targetPath = filepath.Join(targetDir, "Quality Movie (2026).mkv")
+				sourcePath = filepath.Join(root, "incoming", tc.sourceFilename)
+			} else {
+				targetDir := filepath.Join(libraryDir, "Quality Show (2026)", "Season 01")
+				targetPath = filepath.Join(targetDir, "Quality Show (2026) S01E02.mkv")
+				sourcePath = filepath.Join(root, "incoming", tc.sourceFilename)
+			}
+			createTestFile(t, targetPath, 4)
+			createTestFile(t, sourcePath, 3)
+			recordSuccessfulImport(t, db, targetPath, tc.existingSource, tc.mediaType)
+
+			transferer := &recordingTransferer{}
+			org, err := NewOrganizer([]string{libraryDir}, WithDatabase(db), WithTransferer(transferer))
+			require.NoError(t, err)
+
+			var result *OrganizationResult
+			if tc.mediaType == "movie" {
+				result, err = org.OrganizeMovieWithParsed(sourcePath, libraryDir, naming.MovieInfo{Title: "Quality Movie", Year: "2026"})
+			} else {
+				result, err = org.OrganizeTVWithParsed(sourcePath, libraryDir, naming.TVShowInfo{Title: "Quality Show", Year: "2026", Season: 1, Episode: 2})
+			}
+			require.NoError(t, err)
+			assert.True(t, result.Skipped, "lower-quality import should be skipped: %+v", result)
+			assert.Contains(t, result.SkipReason, "equal or better quality")
+			assert.Zero(t, transferer.moves+transferer.copies)
+			assert.FileExists(t, sourcePath)
+			contents, err := os.ReadFile(targetPath)
+			require.NoError(t, err)
+			assert.Equal(t, []byte{0, 0, 0, 0}, contents)
+		})
+	}
+}
+
+func TestOrganizerDoesNotReplaceCanonicalTargetWithoutQualityEvidence(t *testing.T) {
+	root := t.TempDir()
+	libraryDir := filepath.Join(root, "library")
+	targetPath := filepath.Join(libraryDir, "Unknown Movie (2026)", "Unknown Movie (2026).mkv")
+	sourcePath := filepath.Join(root, "incoming", "Unknown.Movie.2026.2160p.REMUX.mkv")
+	createTestFile(t, targetPath, 4)
+	createTestFile(t, sourcePath, 3)
+
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir}, WithTransferer(transferer))
+	require.NoError(t, err)
+	result, err := org.OrganizeMovieWithParsed(sourcePath, libraryDir, naming.MovieInfo{Title: "Unknown Movie", Year: "2026"})
+	require.NoError(t, err)
+	assert.True(t, result.Skipped, "unknown existing quality should fail closed: %+v", result)
+	assert.Contains(t, result.SkipReason, "quality evidence is unavailable")
+	assert.Zero(t, transferer.moves+transferer.copies)
+	assert.FileExists(t, sourcePath)
+	contents, err := os.ReadFile(targetPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0, 0, 0, 0}, contents)
+}
+
+func TestConcurrentMovieImportsWaitForDecisionUpdateBeforeQualityCheck(t *testing.T) {
+	root := t.TempDir()
+	libraryDir := filepath.Join(root, "library")
+	highSource := filepath.Join(root, "incoming-high", "Concurrent.Movie.2026.1080p.WEB-DL.mkv")
+	lowSource := filepath.Join(root, "incoming-low", "Concurrent.Movie.2026.720p.HDTV.mkv")
+	for path, content := range map[string]string{highSource: "high", lowSource: "low!"} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+
+	db, err := database.OpenPath(filepath.Join(root, "media.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	highID := insertPendingQualityDecision(t, db, highSource)
+	lowID := insertPendingQualityDecision(t, db, lowSource)
+
+	highOrg, err := NewOrganizer([]string{libraryDir}, WithDatabase(db), WithTransferer(&recordingTransferer{}),
+		WithTransferModeResolver(func(string) SourceTransferMode { return TransferCopy }))
+	require.NoError(t, err)
+	lowOrg, err := NewOrganizer([]string{libraryDir}, WithDatabase(db), WithTransferer(&recordingTransferer{}),
+		WithTransferModeResolver(func(string) SourceTransferMode { return TransferCopy }))
+	require.NoError(t, err)
+	movie := naming.MovieInfo{Title: "Concurrent Movie", Year: "2026"}
+	type outcome struct {
+		result *OrganizationResult
+		err    error
+	}
+	highDone := make(chan outcome, 1)
+	lowDone := make(chan outcome, 1)
+	highFinalizing := make(chan struct{})
+	releaseHigh := make(chan struct{})
+	releasedHigh := false
+	defer func() {
+		if !releasedHigh {
+			close(releaseHigh)
+		}
+	}()
+
+	go func() {
+		result, err := highOrg.OrganizeMovieWithParsedFinalized(highSource, libraryDir, movie, func(result *OrganizationResult, err error) {
+			close(highFinalizing)
+			<-releaseHigh
+			persistTestOrganizeResult(t, db, highID, result, err)
+		})
+		highDone <- outcome{result: result, err: err}
+	}()
+	<-highFinalizing
+
+	go func() {
+		result, err := lowOrg.OrganizeMovieWithParsedFinalized(lowSource, libraryDir, movie, func(result *OrganizationResult, err error) {
+			persistTestOrganizeResult(t, db, lowID, result, err)
+		})
+		lowDone <- outcome{result: result, err: err}
+	}()
+
+	movieDir := filepath.Join(libraryDir, "Concurrent Movie (2026)")
+	absoluteMovieDir, err := filepath.Abs(movieDir)
+	require.NoError(t, err)
+	waitForOrganizationTargetRefs(t, absoluteMovieDir, 2)
+	select {
+	case <-lowDone:
+		t.Fatal("second import finished before the first decision update released the target lock")
+	default:
+	}
+	close(releaseHigh)
+	releasedHigh = true
+
+	high := <-highDone
+	require.NoError(t, high.err)
+	require.True(t, high.result.Success)
+	low := <-lowDone
+	require.NoError(t, low.err)
+	assert.True(t, low.result.Skipped, "lower-quality import should observe first import: %+v", low.result)
+
+	targetPath := filepath.Join(movieDir, "Concurrent Movie (2026).mkv")
+	contents, err := os.ReadFile(targetPath)
+	require.NoError(t, err)
+	assert.Equal(t, "high", string(contents))
+}
+
+func waitForOrganizationTargetRefs(t *testing.T, key string, refs int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		organizationTargetLocks.Lock()
+		lock := organizationTargetLocks.locks[key]
+		current := 0
+		if lock != nil {
+			current = lock.refs
+		}
+		organizationTargetLocks.Unlock()
+		if current >= refs {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("target %q did not reach %d lock references", key, refs)
 }
 
 func TestOrganizerRetainedMovieSourceIsNotReimportedOnSecondScan(t *testing.T) {
