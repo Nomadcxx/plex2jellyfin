@@ -866,8 +866,8 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 	return &d, nil
 }
 
-// ListDueMetadataChecks returns resolved-but-unidentified rows due for a
-// passive metadata reconciliation or active repair check.
+// ListDueMetadataChecks returns due rows for passive reconciliation or active
+// repair. It includes identified rows with unresolved metadata.
 func (m *MediaDB) ListDueMetadataChecks(now time.Time, limit int) ([]*ParseDecision, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -882,7 +882,7 @@ func (m *MediaDB) ListDueMetadataChecks(now time.Time, limit int) ([]*ParseDecis
 		WHERE organize_outcome = 'success'
 		  AND target_path IS NOT NULL AND target_path != ''
 		  AND jellyfin_resolved_at IS NOT NULL
-		  AND jellyfin_identified = 0
+		  AND (jellyfin_identified = 0 OR (metadata_state IS NOT NULL AND metadata_state != 'identified'))
 		  AND jellyfin_item_id IS NOT NULL AND jellyfin_item_id != ''
 		  AND (metadata_state IS NULL OR metadata_state != 'needs_review')
 		  AND (next_metadata_check_at IS NULL OR next_metadata_check_at <= ?)

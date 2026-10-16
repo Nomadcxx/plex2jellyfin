@@ -398,10 +398,56 @@ func TestListDueMetadataChecks(t *testing.T) {
 		JellyfinFirstSeenAt: &now,
 	}))
 
+	staleID, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(staleID, OrganizeUpdate{
+		TargetPath:      "/library/show/Season 01/show S01E04.mkv",
+		TargetAt:        &now,
+		OrganizeOutcome: "success",
+	}))
+	require.NoError(t, db.UpdateOutcome(staleID, OutcomeUpdate{
+		JellyfinItemID:      "item-stale",
+		JellyfinResolvedAt:  &now,
+		JellyfinIdentified:  &isIdentified,
+		JellyfinFirstSeenAt: &now,
+	}))
+	staleDue := now.Add(-time.Second)
+	require.NoError(t, db.UpdateMetadataCheckState(staleID, "series_identified_episode_stale", "stale episode metadata", &staleDue))
+
+	problemID, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(problemID, OrganizeUpdate{
+		TargetPath:      "/library/show/Season 01/show S01E05.mkv",
+		TargetAt:        &now,
+		OrganizeOutcome: "success",
+	}))
+	require.NoError(t, db.UpdateOutcome(problemID, OutcomeUpdate{
+		JellyfinItemID:      "item-missing",
+		JellyfinResolvedAt:  &now,
+		JellyfinIdentified:  &isIdentified,
+		JellyfinFirstSeenAt: &now,
+	}))
+	require.NoError(t, db.UpdateMetadataCheckState(problemID, "jellyfin_item_missing", "item is temporarily missing", &staleDue))
+
+	needsReviewID, err := db.InsertDecision(makeDecision())
+	require.NoError(t, err)
+	require.NoError(t, db.UpdateOrganize(needsReviewID, OrganizeUpdate{
+		TargetPath:      "/library/show/Season 01/show S01E06.mkv",
+		TargetAt:        &now,
+		OrganizeOutcome: "success",
+	}))
+	require.NoError(t, db.UpdateOutcome(needsReviewID, OutcomeUpdate{
+		JellyfinItemID:      "item-needs-review",
+		JellyfinResolvedAt:  &now,
+		JellyfinIdentified:  &isIdentified,
+		JellyfinFirstSeenAt: &now,
+	}))
+	require.NoError(t, db.UpdateMetadataCheckState(needsReviewID, "needs_review", "repair limit reached", &staleDue))
+
 	rows, err := db.ListDueMetadataChecks(now, 25)
 	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	assert.Equal(t, dueID, rows[0].ID)
+	require.Len(t, rows, 3)
+	assert.ElementsMatch(t, []int64{dueID, staleID, problemID}, []int64{rows[0].ID, rows[1].ID, rows[2].ID})
 }
 
 func TestUpdateMetadataCheckState(t *testing.T) {
