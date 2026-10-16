@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 26
+const currentSchemaVersion = 27
 
 // SQL migration scripts
 var migrations = []migration{
@@ -768,6 +768,14 @@ var migrations = []migration{
 			  WHERE jellyfin_identified = 1
 			    AND metadata_state = 'missing_provider_ids'`,
 			`INSERT INTO schema_version (version) VALUES (26)`,
+		},
+	},
+	{
+		version: 27,
+		up: []string{
+			`ALTER TABLE parse_decisions ADD COLUMN source_size INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE parse_decisions ADD COLUMN source_modified_at DATETIME`,
+			`INSERT INTO schema_version (version) VALUES (27)`,
 		},
 	},
 }

@@ -14,6 +14,8 @@ type ParseDecision struct {
 	ID                   int64
 	SourcePath           string
 	SourceFilename       string
+	SourceSize           int64
+	SourceModifiedAt     *time.Time
 	EventAt              time.Time
 	MediaTypeGuessed     string
 	ParseMethod          string
@@ -197,15 +199,15 @@ func (m *MediaDB) InsertDecision(d ParseDecision) (int64, error) {
 
 	res, err := m.db.Exec(`
 		INSERT INTO parse_decisions
-			(source_path, source_filename, event_at,
+			(source_path, source_filename, source_size, source_modified_at, event_at,
 			 media_type_guessed, parse_method, parsed_title,
 			 parsed_year, parsed_season, parsed_episode,
 			 parser_stripped_tokens, target_path, target_at,
 			 existing_match_method, organize_outcome, organize_error,
 			 jellyfin_item_id, jellyfin_imdb_id, jellyfin_tmdb_id, jellyfin_tvdb_id,
 			 jellyfin_resolved_at, auto_label, human_label_override)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		d.SourcePath, d.SourceFilename, d.EventAt,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		d.SourcePath, d.SourceFilename, d.SourceSize, nullTimePtr(d.SourceModifiedAt), d.EventAt,
 		nullStr(d.MediaTypeGuessed), nullStr(d.ParseMethod), nullStr(d.ParsedTitle),
 		nullIntPtr(d.ParsedYear), nullIntPtr(d.ParsedSeason), nullIntPtr(d.ParsedEpisode),
 		nullStr(d.ParserStrippedTokens), nullStr(d.TargetPath), nullTimePtr(d.TargetAt),
@@ -731,7 +733,8 @@ const decisionColumns = `id, source_path, source_filename, event_at,
 	jellyfin_resolved_at, jellyfin_identified, jellyfin_first_seen_at,
 	auto_label, auto_label_at, human_label_override,
 	metadata_state, metadata_error, metadata_check_count, metadata_repair_count,
-	last_metadata_check_at, next_metadata_check_at, last_metadata_repair_at`
+	last_metadata_check_at, next_metadata_check_at, last_metadata_repair_at,
+	source_size, source_modified_at`
 
 func scanDecision(s scanner) (*ParseDecision, error) {
 	var d ParseDecision
@@ -765,6 +768,8 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		lastMetadataCheckAt  sql.NullTime
 		nextMetadataCheckAt  sql.NullTime
 		lastMetadataRepairAt sql.NullTime
+		sourceSize           sql.NullInt64
+		sourceModifiedAt     sql.NullTime
 	)
 
 	err := s.Scan(
@@ -778,6 +783,7 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		&autoLabel, &autoLabelAt, &humanLabelOverride,
 		&metadataState, &metadataError, &metadataCheckCount, &metadataRepairCount,
 		&lastMetadataCheckAt, &nextMetadataCheckAt, &lastMetadataRepairAt,
+		&sourceSize, &sourceModifiedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -848,6 +854,13 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 	if lastMetadataRepairAt.Valid {
 		t := lastMetadataRepairAt.Time
 		d.LastMetadataRepairAt = &t
+	}
+	if sourceSize.Valid {
+		d.SourceSize = sourceSize.Int64
+	}
+	if sourceModifiedAt.Valid {
+		t := sourceModifiedAt.Time
+		d.SourceModifiedAt = &t
 	}
 
 	return &d, nil
@@ -1031,61 +1044,63 @@ func (m *MediaDB) GetMostRecentDecisionBySourcePath(sourcePath string) (*ParseDe
 	return d, err
 }
 
-// DeterministicFailureRow is a minimal projection for hydrating the in-memory
-// negative cache from persistent history at daemon startup. Each row
-// represents the latest failed organize attempt for a given source path.
-type DeterministicFailureRow struct {
+// RetryableFailureRow is a minimal projection for restoring retry backoff from
+// persistent history. Each row represents a source path's latest failed
+// organize attempt and recent failure count.
+type RetryableFailureRow struct {
 	SourcePath string
 	Failures   int
 	LastError  string
 	LastAt     time.Time
 }
 
-// GetRecentDeterministicFailures returns paths whose latest eligible organize
-// attempt is inside lookback. Failures is the path's lifetime eligible attempt
-// count, which lets the negative cache restore long backoff tiers after a
-// restart. Eligible rows include failed attempts plus skipped season-pack rows
-// that intentionally preserve unresolved season-only files for review. The
-// caller applies its own pattern filter (e.g. IsDeterministicUnparseable) on
-// LastError before seeding.
-func (m *MediaDB) GetRecentDeterministicFailures(lookback time.Duration) ([]DeterministicFailureRow, error) {
+// GetRecentRetryableFailures returns paths whose latest failure-or-skip
+// decision is inside lookback. The caller filters LastError to the failure
+// classes it defers.
+func (m *MediaDB) GetRecentRetryableFailures(lookback time.Duration) ([]RetryableFailureRow, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	cutoff := time.Now().UTC().Add(-lookback)
 	rows, err := m.db.Query(`
-		SELECT source_path,
-		       COUNT(1) AS failures,
-		       MAX(event_at) AS last_at,
-		       (SELECT organize_error
+		SELECT p1.source_path,
+		       (SELECT COUNT(1)
 		          FROM parse_decisions p2
 		         WHERE p2.source_path = p1.source_path
-		           AND (p2.organize_outcome = 'failed'
-		                OR (p2.organize_outcome = 'skipped'
-		                    AND (p2.organize_error LIKE 'season_pack_unresolved:%'
-		                         OR p2.organize_error LIKE 'extras_unresolved:%')))
-		         ORDER BY p2.event_at DESC LIMIT 1) AS last_error
-		FROM parse_decisions p1
-		WHERE (organize_outcome = 'failed'
-		       OR (organize_outcome = 'skipped'
-		           AND (organize_error LIKE 'season_pack_unresolved:%'
-		                OR organize_error LIKE 'extras_unresolved:%')))
-		GROUP BY source_path
-		HAVING MAX(event_at) >= ?`, cutoff)
+		           AND p2.id > COALESCE((
+		               SELECT MAX(p3.id)
+		                 FROM parse_decisions p3
+		                WHERE p3.source_path = p1.source_path
+		                  AND p3.id < p1.id
+		                  AND (p3.organize_outcome IS NULL
+		                       OR p3.organize_outcome NOT IN ('failed', 'skipped'))
+		           ), 0)
+		           AND p2.id <= p1.id
+		           AND p2.organize_outcome IN ('failed', 'skipped')) AS failures,
+		       p1.event_at AS last_at,
+		       p1.organize_error AS last_error
+		  FROM parse_decisions p1
+		 WHERE p1.id = (
+		       SELECT MAX(p2.id)
+		         FROM parse_decisions p2
+		        WHERE p2.source_path = p1.source_path
+		 )
+		   AND p1.event_at >= ?
+		   AND p1.organize_outcome IN ('failed', 'skipped')`, cutoff)
 	if err != nil {
-		return nil, fmt.Errorf("GetRecentDeterministicFailures: %w", err)
+		return nil, fmt.Errorf("GetRecentRetryableFailures: %w", err)
 	}
 	defer rows.Close()
 
-	var out []DeterministicFailureRow
+	var out []RetryableFailureRow
 	for rows.Next() {
 		var (
-			r         DeterministicFailureRow
+			r         RetryableFailureRow
 			lastAtRaw string
 			lastErr   sql.NullString
 		)
 		if err := rows.Scan(&r.SourcePath, &r.Failures, &lastAtRaw, &lastErr); err != nil {
-			return nil, fmt.Errorf("GetRecentDeterministicFailures scan: %w", err)
+			return nil, fmt.Errorf("GetRecentRetryableFailures scan: %w", err)
 		}
 		r.LastError = lastErr.String
 		// SQLite returns MAX(event_at) as a string; parse it back. We try

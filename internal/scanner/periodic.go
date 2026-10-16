@@ -20,12 +20,13 @@ import (
 // PeriodicScanner runs periodic directory scans to catch missed files
 type PeriodicScanner struct {
 	// Configuration
-	interval    time.Duration
-	watchPaths  []string
-	handler     watcher.Handler
-	logger      *logging.Logger
-	activityDir string
-	orphanCheck OrphanChecker
+	interval        time.Duration
+	watchPaths      []string
+	handler         watcher.Handler
+	logger          *logging.Logger
+	activityDir     string
+	orphanCheck     OrphanChecker
+	retrySuppressed func(path string) bool
 
 	// Arr clients for health checks
 	sonarrClient *sonarr.Client
@@ -103,15 +104,16 @@ func NewPeriodicScanner(cfg ScannerConfig) *PeriodicScanner {
 	}
 
 	return &PeriodicScanner{
-		interval:     cfg.Interval,
-		watchPaths:   cfg.WatchPaths,
-		handler:      cfg.Handler,
-		logger:       cfg.Logger,
-		activityDir:  cfg.ActivityDir,
-		orphanCheck:  orphanCheck,
-		sonarrClient: cfg.SonarrClient,
-		radarrClient: cfg.RadarrClient,
-		healthy:      true,
+		interval:        cfg.Interval,
+		watchPaths:      cfg.WatchPaths,
+		handler:         cfg.Handler,
+		logger:          cfg.Logger,
+		activityDir:     cfg.ActivityDir,
+		orphanCheck:     orphanCheck,
+		retrySuppressed: cfg.RetrySuppressed,
+		sonarrClient:    cfg.SonarrClient,
+		radarrClient:    cfg.RadarrClient,
+		healthy:         true,
 	}
 }
 

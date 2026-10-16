@@ -74,6 +74,25 @@ func TestNegativeCache_BackoffEscalates(t *testing.T) {
 	}
 }
 
+func TestNegativeCacheLowSpaceBackoffCapsAtSixHours(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "low-space.mkv")
+	if err := os.WriteFile(path, []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := NewNegativeCache()
+	for i := 0; i < 10; i++ {
+		cache.Record(path, "insufficient space: need 100 bytes, have 10 bytes")
+	}
+	deferred, remaining, _ := cache.IsDeferred(path)
+	if !deferred {
+		t.Fatal("expected low-space source to be deferred")
+	}
+	if remaining > 6*time.Hour {
+		t.Fatalf("low-space defer = %v, want at most 6h", remaining)
+	}
+}
+
 func TestNegativeCacheModifiedFileRetriesImmediately(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Show.S01E01.mkv")
 	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {

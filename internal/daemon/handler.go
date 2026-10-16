@@ -84,10 +84,8 @@ type MediaHandler struct {
 	// targetHealthState remembers the last known healthy/unhealthy state per
 	// target library so we only log on transitions, not every check.
 	targetHealthState map[string]bool
-	// unparseableCache defers re-processing of files that fail with
-	// deterministic, non-recoverable parse/organize errors so the periodic
-	// scanner doesn't burn cycles re-attempting them every 5 minutes.
-	unparseableCache *NegativeCache
+	// retryCache suppresses unchanged parse failures and low-space retries.
+	retryCache *NegativeCache
 	// ponytail: test-only seam for mid-pass inventory invalidation
 	verificationMidPass func()
 }
@@ -406,24 +404,20 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		aiEnabled:         cfg.AIEnabled,
 		loggedErrors:      make(map[string]struct{}),
 		targetHealthState: make(map[string]bool),
-		unparseableCache:  NewNegativeCache(),
+		retryCache:        NewNegativeCache(),
 	}
 	handler.ctx, handler.cancel = context.WithCancel(context.Background())
-	hydrateNegativeCacheFromDB(handler.unparseableCache, cfg.Database, cfg.Logger)
+	hydrateNegativeCacheFromDB(handler.retryCache, cfg.Database, cfg.Logger)
 	return handler, nil
 }
 
-// hydrateNegativeCacheFromDB pre-populates the in-memory deterministic-defer
-// cache from prior parse_decisions rows so daemon restarts don't reset the
-// backoff. We pull paths whose latest failure is inside the cache's maximum
-// backoff and restore their lifetime failure count. We only seed entries whose
-// latest error matches IsDeterministicUnparseable so transient errors like
-// missing-file races don't get spuriously deferred.
+// hydrateNegativeCacheFromDB restores parse and low-space backoff from prior
+// parse_decisions rows so daemon restarts do not reset retry timing.
 func hydrateNegativeCacheFromDB(cache *NegativeCache, db *database.MediaDB, logger *logging.Logger) {
 	if cache == nil || db == nil {
 		return
 	}
-	rows, err := db.GetRecentDeterministicFailures(negativeCacheHydrationLookback)
+	rows, err := db.GetRecentRetryableFailures(negativeCacheHydrationLookback)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("handler", "failed to hydrate negative cache", logging.F("error", err.Error()))
@@ -432,7 +426,7 @@ func hydrateNegativeCacheFromDB(cache *NegativeCache, db *database.MediaDB, logg
 	}
 	hydrated := 0
 	for _, r := range rows {
-		if !IsDeterministicUnparseable(r.LastError) {
+		if !IsFailureWorthBackoff(r.LastError) {
 			continue
 		}
 		cache.HydrateEntry(r.SourcePath, r.LastError, r.LastAt, r.Failures)
@@ -444,10 +438,27 @@ func hydrateNegativeCacheFromDB(cache *NegativeCache, db *database.MediaDB, logg
 	}
 }
 
-// UnparseableCache returns the deterministic-unparseable defer cache. Used
-// by the IPC layer to surface deferred files to the WebUI.
-func (h *MediaHandler) UnparseableCache() *NegativeCache {
-	return h.unparseableCache
+// RetryCache returns deferred parse and resource failures to the IPC layer.
+func (h *MediaHandler) RetryCache() *NegativeCache {
+	return h.retryCache
+}
+
+// ShouldSuppressRetry reports whether the daemon already has a live retry
+// backoff or a stable organize result for this unchanged source.
+func (h *MediaHandler) ShouldSuppressRetry(path string) bool {
+	if h == nil {
+		return false
+	}
+	path = filepath.Clean(path)
+	if deferred, _, _ := h.retryCache.IsDeferred(path); deferred {
+		return true
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	_, unchanged := h.shouldSkipUnchangedSource(path, info)
+	return unchanged
 }
 
 func (h *MediaHandler) allWatchPaths() []string {
@@ -578,8 +589,7 @@ func (h *MediaHandler) logEntry(
 		target = result.TargetPath
 	}
 
-	activitySuccess := result.Success ||
-		(result.Skipped && result.SkipReason == "already_organized")
+	activitySuccess := result.Success || (result.Skipped && stableDuplicateSkipReason(result.SkipReason))
 	entry := activity.Entry{
 		Action:         "organize",
 		Source:         result.SourcePath,
@@ -809,7 +819,8 @@ func (h *MediaHandler) processFile(path string) {
 		return
 	}
 
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+	sourceInfo, statErr := os.Stat(path)
+	if errors.Is(statErr, fs.ErrNotExist) {
 		h.logger.Debug("handler", "Skipping missing source path before processing",
 			logging.F("path", path))
 		h.mu.Lock()
@@ -826,7 +837,7 @@ func (h *MediaHandler) processFile(path string) {
 	if IsObfuscatedSABFilename(path) {
 		h.logger.Debug("handler", "Skipping obfuscated SAB temp-hash filename",
 			logging.F("path", path))
-		h.unparseableCache.Record(path, "obfuscated SAB temp-hash filename; waiting for SAB rename")
+		h.retryCache.Record(path, "obfuscated SAB temp-hash filename; waiting for SAB rename")
 		h.mu.Lock()
 		delete(h.pending, path)
 		delete(h.transientRetries, path)
@@ -840,7 +851,7 @@ func (h *MediaHandler) processFile(path string) {
 	if naming.IsObfuscatedFilename(filepath.Base(path)) && hasNamedVideoSibling(path) {
 		h.logger.Debug("handler", "Skipping stale obfuscated SAB hash with named video sibling",
 			logging.F("path", path))
-		h.unparseableCache.Record(path, "stale obfuscated SAB hash; named video sibling exists")
+		h.retryCache.Record(path, "stale obfuscated SAB hash; named video sibling exists")
 		h.mu.Lock()
 		delete(h.pending, path)
 		delete(h.transientRetries, path)
@@ -848,16 +859,23 @@ func (h *MediaHandler) processFile(path string) {
 		return
 	}
 
-	// Skip paths within the deterministic-unparseable backoff window. The
-	// periodic scanner re-walks watch folders every few minutes; without this
-	// guard, a single unparseable release (obfuscated SAB hash, season-pack
-	// release without episode markers, numeric-token false positive) would
-	// be re-attempted forever.
-	if deferred, remaining, lastErr := h.unparseableCache.IsDeferred(path); deferred {
+	// Skip known parse failures and low-space errors until their retry window.
+	if deferred, remaining, lastErr := h.retryCache.IsDeferred(path); deferred {
 		h.logger.Debug("handler", "Skipping deferred unparseable file",
 			logging.F("path", path),
 			logging.F("remaining", remaining.String()),
 			logging.F("last_error", lastErr))
+		h.mu.Lock()
+		delete(h.pending, path)
+		delete(h.transientRetries, path)
+		h.mu.Unlock()
+		return
+	}
+	if prior, skip := h.shouldSkipUnchangedSource(path, sourceInfo); skip {
+		h.logger.Debug("handler", "Skipping unchanged source with an existing organize result",
+			logging.F("path", path),
+			logging.F("decision_id", prior.ID),
+			logging.F("outcome", prior.OrganizeOutcome))
 		h.mu.Lock()
 		delete(h.pending, path)
 		delete(h.transientRetries, path)
@@ -936,10 +954,19 @@ func (h *MediaHandler) processFile(path string) {
 		if prior, perr := h.db.GetMostRecentDecisionBySourcePath(path); perr == nil && prior != nil {
 			existingMethod = prior.ParseMethod
 		}
+		var sourceSize int64
+		var sourceModifiedAt *time.Time
+		if sourceInfo != nil {
+			sourceSize = sourceInfo.Size()
+			modifiedAt := sourceInfo.ModTime()
+			sourceModifiedAt = &modifiedAt
+		}
 		var insertErr error
 		decisionID, insertErr = h.db.InsertDecision(database.ParseDecision{
 			SourcePath:          path,
 			SourceFilename:      filepath.Base(path),
+			SourceSize:          sourceSize,
+			SourceModifiedAt:    sourceModifiedAt,
 			EventAt:             time.Now().UTC(),
 			MediaTypeGuessed:    mediaTypeGuessed,
 			ExistingMatchMethod: existingMethod,
@@ -1096,8 +1123,8 @@ func (h *MediaHandler) processFile(path string) {
 	radarrNotified := false
 
 	if err != nil {
-		if IsDeterministicUnparseable(err.Error()) {
-			h.unparseableCache.Record(path, err.Error())
+		if IsFailureWorthBackoff(err.Error()) {
+			h.retryCache.Record(path, err.Error())
 		}
 		if h.shouldLogError(path, err.Error()) {
 			h.logger.Error("handler", "Organization failed", err, logging.F("filename", filename))
@@ -1127,7 +1154,7 @@ func (h *MediaHandler) processFile(path string) {
 		}
 		sonarrNotified, radarrNotified = h.sendNotificationsWithTracking(result, mediaType, parsedTitle, yearStr, parsedSeason, parsedEpisode)
 		h.cleanupSourceDir(path)
-		h.unparseableCache.Forget(path)
+		h.retryCache.Forget(path)
 	} else if result.Skipped {
 		h.logger.Info("handler", "Skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
 	} else {
@@ -1135,8 +1162,8 @@ func (h *MediaHandler) processFile(path string) {
 		if result.Error != nil {
 			errMsg = result.Error.Error()
 		}
-		if IsDeterministicUnparseable(errMsg) {
-			h.unparseableCache.Record(path, errMsg)
+		if IsFailureWorthBackoff(errMsg) {
+			h.retryCache.Record(path, errMsg)
 		}
 		if h.shouldLogError(path, errMsg) {
 			h.logger.Error("handler", "Organization failed", result.Error, logging.F("filename", filename))
@@ -1146,6 +1173,54 @@ func (h *MediaHandler) processFile(path string) {
 
 	// Log activity entry after notifications
 	h.logEntry(result, mediaType, parsedTitle, parsedYear, parseMethod, aiConfidence, duration, sonarrNotified, radarrNotified)
+}
+
+func (h *MediaHandler) shouldSkipUnchangedSource(path string, info os.FileInfo) (*database.ParseDecision, bool) {
+	if h.db == nil || info == nil {
+		return nil, false
+	}
+	prior, err := h.db.GetMostRecentDecisionBySourcePath(path)
+	if err != nil || prior == nil || prior.SourceModifiedAt == nil {
+		return nil, false
+	}
+	if prior.SourceSize != info.Size() || !prior.SourceModifiedAt.Equal(info.ModTime()) || prior.TargetPath == "" {
+		return nil, false
+	}
+	if !stableOrganizeOutcome(prior) {
+		return nil, false
+	}
+	// ponytail: size + mtime avoids re-reading large media on every scan; writers must update mtime. Upgrade path: persist a content hash if this assumption fails in practice.
+	targetInfo, err := os.Stat(prior.TargetPath)
+	if err != nil || targetInfo.IsDir() {
+		return nil, false
+	}
+	currentInfo, err := os.Stat(path)
+	if err != nil || currentInfo.Size() != info.Size() || !currentInfo.ModTime().Equal(info.ModTime()) {
+		return nil, false
+	}
+	return prior, true
+}
+
+func stableOrganizeOutcome(decision *database.ParseDecision) bool {
+	if decision == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(decision.OrganizeOutcome)) {
+	case "success":
+		return true
+	case "skipped":
+		return stableDuplicateSkipReason(decision.OrganizeError)
+	default:
+		return false
+	}
+}
+
+func stableDuplicateSkipReason(reason string) bool {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	return reason == "already_organized" ||
+		reason == "already imported from this source" ||
+		strings.Contains(reason, "equal or better quality") ||
+		strings.Contains(reason, "multi-episode range overlaps existing episode")
 }
 
 func (h *MediaHandler) shouldQueueForAI(path, filename string, tvInfo *naming.TVShowInfo, movieInfo *naming.MovieInfo, confidence float64) bool {
@@ -1229,11 +1304,11 @@ func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID i
 			logging.F("dir", releaseDir),
 			logging.F("imported", len(packResult.Imported)),
 			logging.F("unresolved", len(packResult.Unresolved)))
-		h.unparseableCache.Forget(path)
-		h.unparseableCache.Forget(releaseDir)
+		h.retryCache.Forget(path)
+		h.retryCache.Forget(releaseDir)
 	} else if result.Skipped {
-		if result.Error != nil && IsDeterministicUnparseable(result.Error.Error()) {
-			h.unparseableCache.Record(path, result.Error.Error())
+		if result.Error != nil && IsFailureWorthBackoff(result.Error.Error()) {
+			h.retryCache.Record(path, result.Error.Error())
 		}
 		h.logger.Info("handler", "Season pack requires review",
 			logging.F("dir", releaseDir),

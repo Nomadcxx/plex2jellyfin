@@ -186,7 +186,7 @@ func TestParseDecisionUpdateOrganizeFailed(t *testing.T) {
 	assert.Equal(t, "no match found", got.OrganizeError)
 }
 
-func TestGetRecentDeterministicFailures_IncludesSeasonPackSkipped(t *testing.T) {
+func TestGetRecentRetryableFailures_IncludesSeasonPackSkipped(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
@@ -201,7 +201,7 @@ func TestGetRecentDeterministicFailures_IncludesSeasonPackSkipped(t *testing.T) 
 	_, err := db.InsertDecision(d)
 	require.NoError(t, err)
 
-	rows, err := db.GetRecentDeterministicFailures(7 * 24 * time.Hour)
+	rows, err := db.GetRecentRetryableFailures(7 * 24 * time.Hour)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, d.SourcePath, rows[0].SourcePath)
@@ -210,7 +210,7 @@ func TestGetRecentDeterministicFailures_IncludesSeasonPackSkipped(t *testing.T) 
 	assert.False(t, rows[0].LastAt.IsZero())
 }
 
-func TestGetRecentDeterministicFailuresCountsHistoryForRecentPath(t *testing.T) {
+func TestGetRecentRetryableFailuresCountsHistoryForRecentPath(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
@@ -233,11 +233,60 @@ func TestGetRecentDeterministicFailuresCountsHistoryForRecentPath(t *testing.T) 
 	_, err := db.InsertDecision(d)
 	require.NoError(t, err)
 
-	rows, err := db.GetRecentDeterministicFailures(30 * 24 * time.Hour)
+	rows, err := db.GetRecentRetryableFailures(30 * 24 * time.Hour)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, 7, rows[0].Failures)
 	require.WithinDuration(t, d.EventAt, rows[0].LastAt, time.Second)
+}
+
+func TestGetRecentRetryableFailuresUsesLatestOutcomeAndCurrentStreak(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	insert := func(path, outcome, organizeError string, at time.Time) {
+		t.Helper()
+		d := makeDecision()
+		d.SourcePath = path
+		d.EventAt = at
+		d.OrganizeOutcome = outcome
+		d.OrganizeError = organizeError
+		_, err := db.InsertDecision(d)
+		require.NoError(t, err)
+	}
+
+	insert("/downloads/recovered.mkv", "failed", "insufficient space", now.Add(-time.Minute))
+	insert("/downloads/recovered.mkv", "success", "", now)
+	insert("/downloads/retried.mkv", "failed", "unable to parse movie name", now.Add(-3*time.Minute))
+	insert("/downloads/retried.mkv", "success", "", now.Add(-2*time.Minute))
+	insert("/downloads/retried.mkv", "failed", "insufficient space", now.Add(-time.Minute))
+
+	rows, err := db.GetRecentRetryableFailures(time.Hour)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "/downloads/retried.mkv", rows[0].SourcePath)
+	require.Equal(t, 1, rows[0].Failures, "success must reset the persisted retry streak")
+	require.Equal(t, "insufficient space", rows[0].LastError)
+}
+
+func TestGetRecentRetryableFailuresIncludesLowSpaceSkippedOutcome(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	d := makeDecision()
+	d.SourcePath = "/downloads/low-space-skipped.mkv"
+	d.EventAt = time.Now().UTC()
+	d.OrganizeOutcome = "skipped"
+	d.OrganizeError = "insufficient space: target has no room"
+	_, err := db.InsertDecision(d)
+	require.NoError(t, err)
+
+	rows, err := db.GetRecentRetryableFailures(time.Hour)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, d.SourcePath, rows[0].SourcePath)
+	require.Equal(t, d.OrganizeError, rows[0].LastError)
 }
 
 func TestParseDecisionUpdateOutcome(t *testing.T) {

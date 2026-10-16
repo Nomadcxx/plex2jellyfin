@@ -22,6 +22,8 @@ type ScannerConfig struct {
 	Logger      *logging.Logger
 	ActivityDir string
 	OrphanCheck OrphanChecker
+	// RetrySuppressed lets the daemon's retry policy gate activity-log retries.
+	RetrySuppressed func(path string) bool
 
 	// Arr health check (optional)
 	SonarrClient *sonarr.Client

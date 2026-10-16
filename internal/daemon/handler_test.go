@@ -108,6 +108,100 @@ func TestMediaHandlerRecordsOrganizedMovieAsP2JTruth(t *testing.T) {
 	assert.Equal(t, filepath.Join(movieLib, "Truthers (2026)"), movie.CanonicalPath)
 }
 
+func TestMediaHandlerDoesNotReprocessUnchangedDuplicateSource(t *testing.T) {
+	tvLib := t.TempDir()
+	watchDir := t.TempDir()
+	source := filepath.Join(watchDir, "Show.S01E01.1080p.WEB-DL.mkv")
+	target := filepath.Join(tvLib, "Show", "Season 01", "Show S01E01 1080p WEB-DL.mkv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(target), 0755))
+	require.NoError(t, os.WriteFile(source, []byte("source"), 0644))
+	require.NoError(t, os.WriteFile(target, []byte("existing"), 0644))
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:  []string{tvLib},
+		TVWatchPaths: []string{watchDir},
+		Database:     db,
+		Backend:      transfer.BackendNative,
+		Logger:       logging.Nop(),
+	})
+	require.NoError(t, err)
+
+	handler.processFile(source)
+	decisions, err := db.QueryDecisions(database.QueryFilter{SourceContains: source})
+	require.NoError(t, err)
+	require.Len(t, decisions, 1)
+	require.Equal(t, "skipped", decisions[0].OrganizeOutcome)
+	require.Contains(t, decisions[0].OrganizeError, "equal or better quality")
+	assert.True(t, handler.ShouldSuppressRetry(source), "stable duplicate result should suppress activity-log retries")
+
+	handler.processFile(source)
+	count, err := db.CountParseDecisions()
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "an unchanged duplicate should not create another decision row")
+}
+
+func TestShouldSkipUnchangedSourceRechecksSourceMetadata(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "Show.S01E01.mkv")
+	target := filepath.Join(t.TempDir(), "Show.S01E01.mkv")
+	require.NoError(t, os.WriteFile(source, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(target, []byte("organized"), 0o644))
+	oldTime := time.Now().Add(-time.Hour).Truncate(time.Second)
+	require.NoError(t, os.Chtimes(source, oldTime, oldTime))
+	initialInfo, err := os.Stat(source)
+	require.NoError(t, err)
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.InsertDecision(database.ParseDecision{
+		SourcePath:       source,
+		SourceFilename:   filepath.Base(source),
+		SourceSize:       initialInfo.Size(),
+		SourceModifiedAt: ptrTime(initialInfo.ModTime()),
+		EventAt:          time.Now().UTC(),
+		OrganizeOutcome:  "success",
+		TargetPath:       target,
+	})
+	require.NoError(t, err)
+
+	newTime := oldTime.Add(time.Minute)
+	require.NoError(t, os.WriteFile(source, []byte("changed source"), 0o644))
+	require.NoError(t, os.Chtimes(source, newTime, newTime))
+
+	if _, skip := (&MediaHandler{db: db}).shouldSkipUnchangedSource(source, initialInfo); skip {
+		t.Fatal("changed source must not be suppressed using the scan's stale stat")
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
+
+func TestMediaHandlerLogsRetainedSourceDuplicateAsResolved(t *testing.T) {
+	logger, err := activity.NewLogger(t.TempDir())
+	require.NoError(t, err)
+	defer logger.Close()
+	entries, unsubscribe := logger.Subscribe()
+	defer unsubscribe()
+
+	handler := &MediaHandler{activityLogger: logger, logger: logging.Nop()}
+	handler.logEntry(&organizer.OrganizationResult{
+		SourcePath: "/downloads/Show.S01E01.mkv",
+		TargetPath: "/library/Show/Season 01/Show S01E01.mkv",
+		Skipped:    true,
+		SkipReason: "already imported from this source",
+	}, notify.MediaTypeTVEpisode, "Show", nil, activity.MethodRegex, 0, time.Second, false, false)
+
+	select {
+	case entry := <-entries:
+		require.True(t, entry.Success, "stable duplicate skip should clear prior transfer failures")
+	case <-time.After(time.Second):
+		t.Fatal("activity entry was not logged")
+	}
+}
+
 func TestMediaHandlerTracksOnlySuccessfulArrHandoffs(t *testing.T) {
 	manager := notify.NewManager(false)
 	manager.Register(fixedNotifyResult{service: "radarr", success: false})
@@ -1252,10 +1346,38 @@ func TestNewMediaHandler_HydratesSeasonPackUnresolvedNegativeCache(t *testing.T)
 	handler, err := NewMediaHandler(cfg)
 	require.NoError(t, err)
 
-	deferred, remaining, lastErr := handler.unparseableCache.IsDeferred(srcFile)
+	deferred, remaining, lastErr := handler.retryCache.IsDeferred(srcFile)
 	assert.True(t, deferred)
 	assert.Greater(t, remaining, time.Duration(0))
 	assert.Contains(t, lastErr, "season_pack_unresolved")
+}
+
+func TestHydrateNegativeCacheIncludesLowSpaceFailures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "low-space.mkv")
+	require.NoError(t, os.WriteFile(path, []byte("media"), 0o644))
+	now := time.Now().UTC()
+	require.NoError(t, os.Chtimes(path, now.Add(-12*time.Hour), now.Add(-12*time.Hour)))
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	for i := 0; i < 8; i++ {
+		_, err := db.InsertDecision(database.ParseDecision{
+			SourcePath:      path,
+			SourceFilename:  filepath.Base(path),
+			EventAt:         now.Add(-time.Duration(8-i) * time.Minute),
+			OrganizeOutcome: "failed",
+			OrganizeError:   "insufficient space: need 100 bytes, have 10 bytes",
+		})
+		require.NoError(t, err)
+	}
+
+	cache := NewNegativeCache()
+	hydrateNegativeCacheFromDB(cache, db, logging.Nop())
+	deferred, remaining, lastErr := cache.IsDeferred(path)
+	assert.True(t, deferred)
+	assert.LessOrEqual(t, remaining, 6*time.Hour)
+	assert.Contains(t, lastErr, "insufficient space")
 }
 
 func TestNewMediaHandler_HydratesOldDeterministicFailureBackoff(t *testing.T) {
@@ -1291,7 +1413,7 @@ func TestNewMediaHandler_HydratesOldDeterministicFailureBackoff(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	deferred, remaining, _ := handler.unparseableCache.IsDeferred(srcFile)
+	deferred, remaining, _ := handler.retryCache.IsDeferred(srcFile)
 	require.True(t, deferred)
 	require.Greater(t, remaining, time.Duration(0))
 }

@@ -286,6 +286,93 @@ func TestPeriodicScanner_ProcessActivityFile_DedupPerSource(t *testing.T) {
 	}
 }
 
+func TestPeriodicScanner_ReconcileRetriesOnlyLatestOutcomeAcrossFiles(t *testing.T) {
+	root := t.TempDir()
+	activityDir := filepath.Join(root, "activity")
+	watchDir := filepath.Join(root, "watch")
+	if err := os.MkdirAll(activityDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(watchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(watchDir, "show.s01e01.mkv")
+	if err := os.WriteFile(source, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	write := func(name string, at time.Time, success bool) {
+		t.Helper()
+		writeActivityEntry(t, filepath.Join(activityDir, name), activity.Entry{
+			Timestamp: at,
+			Action:    "organize",
+			Source:    source,
+			Success:   success,
+			Error:     "transfer failed",
+		})
+	}
+	write("activity-2026-09-10.jsonl", now.Add(-3*time.Minute), false)
+	write("activity-2026-09-11.jsonl", now.Add(-2*time.Minute), true)
+	write("activity-2026-09-12.jsonl", now.Add(-time.Minute), false)
+
+	handler := &recordingHandler{}
+	s := &PeriodicScanner{
+		watchPaths:  []string{watchDir},
+		handler:     handler,
+		logger:      logging.Nop(),
+		activityDir: activityDir,
+	}
+
+	retried, _, err := s.reconcileActivity()
+	if err != nil {
+		t.Fatalf("reconcileActivity: %v", err)
+	}
+	if retried != 1 || len(handler.events) != 1 {
+		t.Fatalf("retried=%d events=%d, want one retry for the latest failure", retried, len(handler.events))
+	}
+}
+
+func TestPeriodicScanner_ReconcileHonorsHandlerRetryBackoff(t *testing.T) {
+	root := t.TempDir()
+	activityDir := filepath.Join(root, "activity")
+	watchDir := filepath.Join(root, "watch")
+	if err := os.MkdirAll(activityDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(watchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(watchDir, "show.s01e01.mkv")
+	if err := os.WriteFile(source, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeActivityEntry(t, filepath.Join(activityDir, "activity-2026-09-12.jsonl"), activity.Entry{
+		Timestamp: time.Now().Add(-time.Minute),
+		Action:    "organize",
+		Source:    source,
+		Success:   false,
+		Error:     "insufficient space: target is full",
+	})
+
+	handler := &recordingHandler{}
+	s := &PeriodicScanner{
+		watchPaths:      []string{watchDir},
+		handler:         handler,
+		logger:          logging.Nop(),
+		activityDir:     activityDir,
+		retrySuppressed: func(path string) bool { return path == source },
+	}
+
+	retried, _, err := s.reconcileActivity()
+	if err != nil {
+		t.Fatalf("reconcileActivity: %v", err)
+	}
+	if retried != 0 || len(handler.events) != 0 {
+		t.Fatalf("retried=%d events=%d, want no retry while handler backoff is active", retried, len(handler.events))
+	}
+}
+
 // TestPeriodicScanner_ProcessActivityFile_DeterministicSkip verifies that a
 // deterministic failure with unchanged source mtime and recent timestamp is
 // NOT retried — this is the core fix for the log-spam amplification.
