@@ -93,7 +93,7 @@ plex2jellyfin migrate                        # Migrate path mismatches between d
 plex2jellyfin parses                         # Query and manage parse decisions
 plex2jellyfin fix                            # Interactive wizard to clean up your media library
 plex2jellyfin database ...                   # Database management commands
-plex2jellyfin serve                          # Start the API server (used internally by plex2jellyfin-web)
+plex2jellyfin serve                          # Start the API server on localhost:8080
 ```
 
 ### cleanup

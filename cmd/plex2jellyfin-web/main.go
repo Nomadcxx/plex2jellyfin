@@ -21,9 +21,10 @@ import (
 )
 
 var (
-	version = "dev" // Set by build flags: -ldflags="-X main.version=..."
-	port    string
-	host    string
+	version                    = "dev" // Set by build flags: -ldflags="-X main.version=..."
+	port                       string
+	host                       string
+	allowUnauthenticatedRemote bool
 )
 
 func main() {
@@ -37,7 +38,8 @@ and exposes a REST API for media operations.`,
 	}
 
 	rootCmd.Flags().StringVarP(&port, "port", "p", "5522", "Port to listen on")
-	rootCmd.Flags().StringVarP(&host, "host", "H", "0.0.0.0", "Host to bind to")
+	rootCmd.Flags().StringVarP(&host, "host", "H", "127.0.0.1", "Host to bind to")
+	rootCmd.Flags().BoolVar(&allowUnauthenticatedRemote, "allow-unauthenticated-remote", false, "Allow unauthenticated access from remote hosts (development only)")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -58,6 +60,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+	addr := net.JoinHostPort(host, port)
+	if err := api.ValidateListenAddress(addr, cfg.Password != "" || cfg.PasswordHash != "", allowUnauthenticatedRemote); err != nil {
+		return err
 	}
 	// Configs written before the [setup] marker existed are recognized as
 	// configured only by heuristic. Stamp them explicitly once so the web
@@ -95,7 +101,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	handler := server.Handler()
 
-	addr := net.JoinHostPort(host, port)
 	httpServer := &http.Server{
 		Addr:        addr,
 		Handler:     handler,

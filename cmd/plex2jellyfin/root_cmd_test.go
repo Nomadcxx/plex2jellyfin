@@ -45,6 +45,20 @@ func TestNewRootCmdSuppressesUsageForRuntimeErrors(t *testing.T) {
 	}
 }
 
+func TestServeCommandBindsToLoopbackByDefault(t *testing.T) {
+	cmd := newServeCmd()
+	addr, err := cmd.Flags().GetString("addr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addr != "127.0.0.1:8080" {
+		t.Fatalf("serve address = %q, want 127.0.0.1:8080", addr)
+	}
+	if cmd.Flags().Lookup("allow-unauthenticated-remote") == nil {
+		t.Fatal("serve command lacks the explicit unauthenticated remote override")
+	}
+}
+
 func TestNewRootCmdKeepsAdvancedCommandsCallableButHidden(t *testing.T) {
 	cmd := newRootCmd()
 	names := subcommandNames(cmd)
