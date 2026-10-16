@@ -283,16 +283,10 @@ func alreadyOrganizedResult(sourcePath, targetPath string) *OrganizationResult {
 }
 
 // alreadyPublished reports whether existing is already this source's published
-// copy. Move policy removes the source, so a second scan never sees it; copy and
-// seed policies retain it deliberately, and every periodic scan re-offers it.
-// Canonical naming strips quality tokens from the target, so re-parsing the
-// target yields a weaker quality than the release-named source and the source
-// looks like a perpetual upgrade. Identity, not quality, settles this case.
-//
-// A shared inode means a hardlinked seed import: republishing would copy the
-// file over itself, so that always skips. Equal size means a cross-device copy
-// of the same release, which a deliberate force-overwrite may still redo.
-func alreadyPublished(sourcePath, existingPath string, forceOverwrite bool) bool {
+// copy. A shared inode identifies hardlinked seed imports. For copied sources,
+// use the successful decision's source path and metadata; size alone cannot
+// distinguish a repeated import from a same-sized quality upgrade.
+func (o *Organizer) alreadyPublished(sourcePath, existingPath string) bool {
 	src, err := os.Stat(sourcePath)
 	if err != nil {
 		return false
@@ -304,7 +298,14 @@ func alreadyPublished(sourcePath, existingPath string, forceOverwrite bool) bool
 	if os.SameFile(src, dst) {
 		return true
 	}
-	return !forceOverwrite && src.Size() == dst.Size()
+	if o.forceOverwrite || o.db == nil {
+		return false
+	}
+	decision, err := o.db.GetDecisionByTargetPath(existingPath)
+	return err == nil && decision != nil &&
+		filepath.Clean(decision.SourcePath) == filepath.Clean(sourcePath) &&
+		decision.SourceSize == src.Size() && decision.SourceModifiedAt != nil &&
+		decision.SourceModifiedAt.Equal(src.ModTime())
 }
 
 func hasQualityEvidence(q *quality.QualityInfo) bool {
@@ -577,7 +578,7 @@ func (o *Organizer) OrganizeMovieWithParsed(sourcePath, libraryPath string, movi
 	}
 
 	existingFile, existingQuality := o.findExistingMediaFile(movieDir)
-	if existingFile != "" && alreadyPublished(sourcePath, existingFile, o.forceOverwrite) {
+	if existingFile != "" && o.alreadyPublished(sourcePath, existingFile) {
 		return &OrganizationResult{
 			Success:    false,
 			SourcePath: sourcePath,
@@ -855,7 +856,7 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		}
 
 		if tv.EpisodeEnd > tv.Episode {
-			if overlap == targetPath && alreadyPublished(sourcePath, overlap, o.forceOverwrite) {
+			if overlap == targetPath && o.alreadyPublished(sourcePath, overlap) {
 				return &OrganizationResult{
 					SourcePath: sourcePath,
 					TargetPath: overlap,
@@ -897,7 +898,7 @@ func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv nami
 		existingFile = ""
 	} else if len(replacedPaths) > 0 {
 		existingFile = replacedPaths[0]
-		if alreadyPublished(sourcePath, existingFile, o.forceOverwrite) {
+		if o.alreadyPublished(sourcePath, existingFile) {
 			return &OrganizationResult{
 				SourcePath: sourcePath,
 				TargetPath: existingFile,

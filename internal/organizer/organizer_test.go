@@ -1747,10 +1747,18 @@ func TestOrganizerRetainedSourceIsNotReimportedOnSecondScan(t *testing.T) {
 			createTestFile(t, sourcePath, 4096)
 
 			transferer := &recordingTransferer{}
-			org, err := NewOrganizer([]string{libraryDir},
+			options := []func(*Organizer){
 				WithTransferer(transferer),
 				WithTransferModeResolver(func(string) SourceTransferMode { return tt.mode }),
-			)
+			}
+			var db *database.MediaDB
+			if tt.mode == TransferCopy {
+				var cleanup func()
+				db, cleanup = setupTestDB(t)
+				defer cleanup()
+				options = append(options, WithDatabase(db))
+			}
+			org, err := NewOrganizer([]string{libraryDir}, options...)
 			require.NoError(t, err)
 
 			info := naming.TVShowInfo{Title: "Loop Show", Year: "2026", Season: 1, Episode: 1}
@@ -1759,6 +1767,20 @@ func TestOrganizerRetainedSourceIsNotReimportedOnSecondScan(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, first.Success, "first import failed: %v", first.Error)
 			transfersAfterFirst := transferer.moves + transferer.copies
+			if db != nil {
+				// The daemon records the successful source after the organizer
+				// returns; seed that evidence before simulating the next scan.
+				sourceInfo, statErr := os.Stat(sourcePath)
+				require.NoError(t, statErr)
+				modifiedAt := sourceInfo.ModTime()
+				_, insertErr := db.InsertDecision(database.ParseDecision{
+					SourcePath: sourcePath, SourceFilename: filepath.Base(sourcePath),
+					SourceSize: sourceInfo.Size(), SourceModifiedAt: &modifiedAt,
+					EventAt: time.Now().UTC(), TargetPath: first.TargetPath,
+					OrganizeOutcome: "success",
+				})
+				require.NoError(t, insertErr)
+			}
 
 			second, err := org.OrganizeTVWithParsed(sourcePath, libraryDir, info)
 			require.NoError(t, err)
@@ -1769,6 +1791,39 @@ func TestOrganizerRetainedSourceIsNotReimportedOnSecondScan(t *testing.T) {
 			assert.FileExists(t, sourcePath, "source must remain retained")
 		})
 	}
+}
+
+func TestOrganizerImportsSameSizeQualityUpgradeFromDifferentSource(t *testing.T) {
+	root := t.TempDir()
+	oldSource := filepath.Join(root, "incoming-old", "Upgrade.Movie.2026.720p.WEB-DL.mkv")
+	newSource := filepath.Join(root, "incoming-new", "Upgrade.Movie.2026.1080p.BluRay.mkv")
+	libraryDir := filepath.Join(root, "library")
+	for path, contents := range map[string]string{oldSource: "old!", newSource: "new!"} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(contents), 0o644))
+	}
+
+	transferer := &recordingTransferer{}
+	org, err := NewOrganizer([]string{libraryDir},
+		WithTransferer(transferer),
+		WithTransferModeResolver(func(string) SourceTransferMode { return TransferCopy }),
+	)
+	require.NoError(t, err)
+	movie := naming.MovieInfo{Title: "Upgrade Movie", Year: "2026"}
+
+	first, err := org.OrganizeMovieWithParsed(oldSource, libraryDir, movie)
+	require.NoError(t, err)
+	require.True(t, first.Success, "initial import failed: %v", first.Error)
+
+	upgrade, err := org.OrganizeMovieWithParsed(newSource, libraryDir, movie)
+	require.NoError(t, err)
+	if !upgrade.Success {
+		t.Fatalf("same-size quality upgrade was skipped: %+v", upgrade)
+	}
+	assert.Equal(t, 2, transferer.copies, "the second release must be transferred")
+	contents, err := os.ReadFile(upgrade.TargetPath)
+	require.NoError(t, err)
+	assert.Equal(t, "new!", string(contents), "the library should contain the higher-quality release")
 }
 
 func TestOrganizerRetainedMovieSourceIsNotReimportedOnSecondScan(t *testing.T) {
