@@ -201,16 +201,16 @@ func TestGetRecentRetryableFailures_IncludesSeasonPackSkipped(t *testing.T) {
 	_, err := db.InsertDecision(d)
 	require.NoError(t, err)
 
-	rows, err := db.GetRecentRetryableFailures(7 * 24 * time.Hour)
+	rows, err := db.GetRecentRetryableFailures(7*24*time.Hour, 6)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, d.SourcePath, rows[0].SourcePath)
-	assert.Equal(t, 1, rows[0].Failures)
+	assert.Equal(t, []string{d.OrganizeError}, rows[0].RecentErrors)
 	assert.Equal(t, d.OrganizeError, rows[0].LastError)
 	assert.False(t, rows[0].LastAt.IsZero())
 }
 
-func TestGetRecentRetryableFailuresCountsHistoryForRecentPath(t *testing.T) {
+func TestGetRecentRetryableFailuresReturnsBoundedHistoryForRecentPath(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
@@ -233,10 +233,11 @@ func TestGetRecentRetryableFailuresCountsHistoryForRecentPath(t *testing.T) {
 	_, err := db.InsertDecision(d)
 	require.NoError(t, err)
 
-	rows, err := db.GetRecentRetryableFailures(30 * 24 * time.Hour)
+	rows, err := db.GetRecentRetryableFailures(30*24*time.Hour, 6)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.Equal(t, 7, rows[0].Failures)
+	require.Len(t, rows[0].RecentErrors, 6)
+	assert.Equal(t, rows[0].LastError, rows[0].RecentErrors[0])
 	require.WithinDuration(t, d.EventAt, rows[0].LastAt, time.Second)
 }
 
@@ -262,11 +263,11 @@ func TestGetRecentRetryableFailuresUsesLatestOutcomeAndCurrentStreak(t *testing.
 	insert("/downloads/retried.mkv", "success", "", now.Add(-2*time.Minute))
 	insert("/downloads/retried.mkv", "failed", "insufficient space", now.Add(-time.Minute))
 
-	rows, err := db.GetRecentRetryableFailures(time.Hour)
+	rows, err := db.GetRecentRetryableFailures(time.Hour, 6)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "/downloads/retried.mkv", rows[0].SourcePath)
-	require.Equal(t, 1, rows[0].Failures, "success must reset the persisted retry streak")
+	require.Len(t, rows[0].RecentErrors, 1, "success must reset the persisted retry streak")
 	require.Equal(t, "insufficient space", rows[0].LastError)
 }
 
@@ -282,10 +283,11 @@ func TestGetRecentRetryableFailuresIncludesLowSpaceSkippedOutcome(t *testing.T) 
 	_, err := db.InsertDecision(d)
 	require.NoError(t, err)
 
-	rows, err := db.GetRecentRetryableFailures(time.Hour)
+	rows, err := db.GetRecentRetryableFailures(time.Hour, 6)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, d.SourcePath, rows[0].SourcePath)
+	require.Equal(t, []string{d.OrganizeError}, rows[0].RecentErrors)
 	require.Equal(t, d.OrganizeError, rows[0].LastError)
 }
 

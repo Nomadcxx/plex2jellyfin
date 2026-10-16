@@ -417,7 +417,7 @@ func hydrateNegativeCacheFromDB(cache *NegativeCache, db *database.MediaDB, logg
 	if cache == nil || db == nil {
 		return
 	}
-	rows, err := db.GetRecentRetryableFailures(negativeCacheHydrationLookback)
+	rows, err := db.GetRecentRetryableFailures(negativeCacheHydrationLookback, maxRetryBackoffFailures)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("handler", "failed to hydrate negative cache", logging.F("error", err.Error()))
@@ -426,10 +426,11 @@ func hydrateNegativeCacheFromDB(cache *NegativeCache, db *database.MediaDB, logg
 	}
 	hydrated := 0
 	for _, r := range rows {
-		if !IsFailureWorthBackoff(r.LastError) {
+		failures := retryFailureStreak(r.RecentErrors)
+		if failures == 0 {
 			continue
 		}
-		cache.HydrateEntry(r.SourcePath, r.LastError, r.LastAt, r.Failures)
+		cache.HydrateEntry(r.SourcePath, r.LastError, r.LastAt, failures)
 		hydrated++
 	}
 	if logger != nil && hydrated > 0 {

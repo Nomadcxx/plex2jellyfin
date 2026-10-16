@@ -1380,6 +1380,38 @@ func TestHydrateNegativeCacheIncludesLowSpaceFailures(t *testing.T) {
 	assert.Contains(t, lastErr, "insufficient space")
 }
 
+func TestHydrateNegativeCacheResetsFailureCountWhenErrorClassChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "class-change.mkv")
+	require.NoError(t, os.WriteFile(path, []byte("media"), 0o644))
+	now := time.Now().UTC()
+	require.NoError(t, os.Chtimes(path, now.Add(-24*time.Hour), now.Add(-24*time.Hour)))
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	for i, message := range []string{
+		"insufficient space: need 100 bytes, have 10 bytes",
+		"insufficient space: need 100 bytes, have 10 bytes",
+		"unable to parse movie name: unsupported title",
+	} {
+		_, err := db.InsertDecision(database.ParseDecision{
+			SourcePath:      path,
+			SourceFilename:  filepath.Base(path),
+			EventAt:         now.Add(-time.Duration(3-i) * time.Minute),
+			OrganizeOutcome: "failed",
+			OrganizeError:   message,
+		})
+		require.NoError(t, err)
+	}
+
+	cache := NewNegativeCache()
+	hydrateNegativeCacheFromDB(cache, db, logging.Nop())
+	entries := cache.Snapshot()
+	require.Len(t, entries, 1)
+	assert.Equal(t, 1, entries[0].Failures, "parse backoff starts a new streak after resource failures")
+	assert.LessOrEqual(t, entries[0].RemainingDefer, 30*time.Minute)
+}
+
 func TestNewMediaHandler_HydratesOldDeterministicFailureBackoff(t *testing.T) {
 	tmpLib := t.TempDir()
 	watchDir := t.TempDir()

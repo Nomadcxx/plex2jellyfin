@@ -22,6 +22,8 @@ var obfuscatedHashName = regexp.MustCompile(`^[A-Za-z0-9]{20,}\.(mkv|mp4|avi|m4v
 // file itself is obfuscated, so we should NOT defer.
 var parentFolderHasMarkers = regexp.MustCompile(`(?i)(s\d{1,2}e\d{1,3}|season[._\s-]?\d+|\b(19|20)\d{2}\b|\bcomplete\b|\bs\d{2}\b)`)
 
+const maxRetryBackoffFailures = 6
+
 // IsObfuscatedSABFilename reports whether the basename looks like a SAB
 // temp-hash file with no parseable context in its parent folder. Files whose
 // parent folders carry valid release markers are not considered SAB
@@ -162,7 +164,10 @@ func (n *NegativeCache) Record(path, errMsg string) {
 		e.resourceFailure = resourceFailure
 	}
 	e.failedAt = time.Now()
-	e.failures++
+	// ponytail: counts saturate once parser backoff reaches 30 days; exact lifetime totals need separate storage if operators need them.
+	if e.failures < maxRetryBackoffFailures {
+		e.failures++
+	}
 	e.errMsg = errMsg
 }
 
@@ -185,6 +190,9 @@ func (n *NegativeCache) Forget(path string) {
 func (n *NegativeCache) HydrateEntry(path, errMsg string, failedAt time.Time, failures int) {
 	if n == nil || failures <= 0 {
 		return
+	}
+	if failures > maxRetryBackoffFailures {
+		failures = maxRetryBackoffFailures
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -284,4 +292,19 @@ func IsRetryableResourceFailure(errMsg string) bool {
 
 func IsFailureWorthBackoff(errMsg string) bool {
 	return IsDeterministicUnparseable(errMsg) || IsRetryableResourceFailure(errMsg)
+}
+
+func retryFailureStreak(recentErrors []string) int {
+	if len(recentErrors) == 0 || !IsFailureWorthBackoff(recentErrors[0]) {
+		return 0
+	}
+	resourceFailure := IsRetryableResourceFailure(recentErrors[0])
+	failures := 0
+	for _, errMsg := range recentErrors {
+		if !IsFailureWorthBackoff(errMsg) || IsRetryableResourceFailure(errMsg) != resourceFailure {
+			break
+		}
+		failures++
+	}
+	return failures
 }

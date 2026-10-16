@@ -1044,49 +1044,60 @@ func (m *MediaDB) GetMostRecentDecisionBySourcePath(sourcePath string) (*ParseDe
 	return d, err
 }
 
-// RetryableFailureRow is a minimal projection for restoring retry backoff from
-// persistent history. Each row represents a source path's latest failed
-// organize attempt and recent failure count.
+// RetryableFailureRow is a source path's latest failed or skipped organize
+// attempt and the bounded history needed to restore its retry class streak.
 type RetryableFailureRow struct {
-	SourcePath string
-	Failures   int
-	LastError  string
-	LastAt     time.Time
+	SourcePath   string
+	RecentErrors []string
+	LastError    string
+	LastAt       time.Time
 }
 
 // GetRecentRetryableFailures returns paths whose latest failure-or-skip
-// decision is inside lookback. The caller filters LastError to the failure
-// classes it defers.
-func (m *MediaDB) GetRecentRetryableFailures(lookback time.Duration) ([]RetryableFailureRow, error) {
+// decision is inside lookback, with up to historyLimit trailing errors per
+// path in newest-first order. The caller filters errors by retry class.
+func (m *MediaDB) GetRecentRetryableFailures(lookback time.Duration, historyLimit int) ([]RetryableFailureRow, error) {
+	if historyLimit <= 0 {
+		return nil, fmt.Errorf("GetRecentRetryableFailures: history limit must be positive")
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	cutoff := time.Now().UTC().Add(-lookback)
 	rows, err := m.db.Query(`
-		SELECT p1.source_path,
-		       (SELECT COUNT(1)
-		          FROM parse_decisions p2
-		         WHERE p2.source_path = p1.source_path
-		           AND p2.id > COALESCE((
-		               SELECT MAX(p3.id)
-		                 FROM parse_decisions p3
-		                WHERE p3.source_path = p1.source_path
-		                  AND p3.id < p1.id
-		                  AND (p3.organize_outcome IS NULL
-		                       OR p3.organize_outcome NOT IN ('failed', 'skipped'))
-		           ), 0)
-		           AND p2.id <= p1.id
-		           AND p2.organize_outcome IN ('failed', 'skipped')) AS failures,
-		       p1.event_at AS last_at,
-		       p1.organize_error AS last_error
-		  FROM parse_decisions p1
-		 WHERE p1.id = (
-		       SELECT MAX(p2.id)
-		         FROM parse_decisions p2
-		        WHERE p2.source_path = p1.source_path
-		 )
-		   AND p1.event_at >= ?
-		   AND p1.organize_outcome IN ('failed', 'skipped')`, cutoff)
+		WITH retry_paths AS (
+			SELECT p1.source_path, p1.id AS latest_id,
+			       COALESCE((
+			           SELECT MAX(p3.id)
+			             FROM parse_decisions p3
+			            WHERE p3.source_path = p1.source_path
+			              AND p3.id < p1.id
+			              AND (p3.organize_outcome IS NULL
+			                   OR p3.organize_outcome NOT IN ('failed', 'skipped'))
+			       ), 0) AS prior_nonfailure_id
+			  FROM parse_decisions p1
+			 WHERE p1.id = (
+			       SELECT MAX(p2.id)
+			         FROM parse_decisions p2
+			        WHERE p2.source_path = p1.source_path
+			 )
+			   AND p1.event_at >= ?
+			   AND p1.organize_outcome IN ('failed', 'skipped')
+		), ranked_history AS (
+			SELECT p.source_path, p.event_at, p.organize_error,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY p.source_path ORDER BY p.id DESC
+			       ) AS history_rank
+			  FROM parse_decisions p
+			  JOIN retry_paths r ON r.source_path = p.source_path
+			 WHERE p.id <= r.latest_id
+		   AND p.id > r.prior_nonfailure_id
+		   AND p.organize_outcome IN ('failed', 'skipped')
+		)
+		SELECT source_path, event_at, organize_error
+		  FROM ranked_history
+		 WHERE history_rank <= ?
+		 ORDER BY source_path, history_rank`, cutoff, historyLimit)
 	if err != nil {
 		return nil, fmt.Errorf("GetRecentRetryableFailures: %w", err)
 	}
@@ -1095,25 +1106,30 @@ func (m *MediaDB) GetRecentRetryableFailures(lookback time.Duration) ([]Retryabl
 	var out []RetryableFailureRow
 	for rows.Next() {
 		var (
-			r         RetryableFailureRow
-			lastAtRaw string
-			lastErr   sql.NullString
+			sourcePath string
+			lastAtRaw  string
+			lastErr    sql.NullString
 		)
-		if err := rows.Scan(&r.SourcePath, &r.Failures, &lastAtRaw, &lastErr); err != nil {
+		if err := rows.Scan(&sourcePath, &lastAtRaw, &lastErr); err != nil {
 			return nil, fmt.Errorf("GetRecentRetryableFailures scan: %w", err)
 		}
-		r.LastError = lastErr.String
-		// SQLite returns MAX(event_at) as a string; parse it back. We try
-		// the canonical RFC3339 layout first (how InsertDecision writes it
-		// via time.Now().UTC()) then fall back to SQLite's default
-		// "2006-01-02 15:04:05" format for older rows.
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05 -0700 MST", "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05"} {
-			if t, perr := time.Parse(layout, lastAtRaw); perr == nil {
-				r.LastAt = t
-				break
+		if len(out) == 0 || out[len(out)-1].SourcePath != sourcePath {
+			out = append(out, RetryableFailureRow{SourcePath: sourcePath})
+			r := &out[len(out)-1]
+			// Event timestamps may use either the Go driver format or SQLite's
+			// default UTC format, depending on when the row was written.
+			for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05 -0700 MST", "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05"} {
+				if t, perr := time.Parse(layout, lastAtRaw); perr == nil {
+					r.LastAt = t
+					break
+				}
 			}
 		}
-		out = append(out, r)
+		r := &out[len(out)-1]
+		r.RecentErrors = append(r.RecentErrors, lastErr.String)
+		if len(r.RecentErrors) == 1 {
+			r.LastError = lastErr.String
+		}
 	}
 	return out, rows.Err()
 }

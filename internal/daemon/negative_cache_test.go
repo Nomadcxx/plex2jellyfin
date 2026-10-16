@@ -91,6 +91,10 @@ func TestNegativeCacheLowSpaceBackoffCapsAtSixHours(t *testing.T) {
 	if remaining > 6*time.Hour {
 		t.Fatalf("low-space defer = %v, want at most 6h", remaining)
 	}
+	entries := cache.Snapshot()
+	if len(entries) != 1 || entries[0].Failures != maxRetryBackoffFailures {
+		t.Fatalf("failure count = %#v, want one entry capped at %d", entries, maxRetryBackoffFailures)
+	}
 }
 
 func TestNegativeCacheModifiedFileRetriesImmediately(t *testing.T) {
