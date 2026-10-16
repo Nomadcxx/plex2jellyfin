@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"time"
@@ -208,7 +207,7 @@ type resetArgs struct {
 	Preserve []string `json:"preserve,omitempty"`
 }
 
-func resetDBHandler(db *sql.DB, log *ipc.OpLog) ipc.StreamingHandler {
+func resetDBHandler(db *database.MediaDB, log *ipc.OpLog) ipc.StreamingHandler {
 	return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
 		var args resetArgs
 		if err := json.Unmarshal(raw, &args); err != nil {

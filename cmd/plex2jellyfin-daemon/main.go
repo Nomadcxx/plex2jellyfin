@@ -499,7 +499,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	controlServer.RegisterStreaming(daemonipc.CmdRescan, guardMutator(getPending, rescanHandler(fileScanner, rescanDefaults, opLog)))
-	controlServer.RegisterStreaming(daemonipc.CmdResetDB, guardMutator(getPending, resetDBHandler(db.SQL(), opLog)))
+	controlServer.RegisterStreaming(daemonipc.CmdResetDB, guardMutator(getPending, resetDBHandler(db, opLog)))
 	controlServer.RegisterStreaming(daemonipc.CmdConsolidate, guardMutator(getPending, consolidateHandler(db, opLog)))
 	controlServer.RegisterStreaming(daemonipc.CmdDupScan, dupScanHandler(service.NewCleanupService(db), opLog))
 	controlServer.RegisterStreaming(daemonipc.CmdAIBatch, guardMutator(getPending, aiBatchHandler(handler, aiMatcher, opLog)))
