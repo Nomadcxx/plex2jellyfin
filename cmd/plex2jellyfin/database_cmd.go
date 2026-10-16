@@ -22,6 +22,7 @@ func newDatabaseCmd() *cobra.Command {
 	cmd.AddCommand(newDatabaseResetCmd())
 	cmd.AddCommand(newDatabasePathCmd())
 	cmd.AddCommand(newDatabaseCleanupHousekeepingCmd())
+	cmd.AddCommand(newDatabaseRepairEpisodeLinksCmd())
 
 	return cmd
 }
@@ -133,6 +134,29 @@ keeping the newest row visible for manual review.`,
 	return cmd
 }
 
+func newDatabaseRepairEpisodeLinksCmd() *cobra.Command {
+	var execute bool
+
+	cmd := &cobra.Command{
+		Use:   "repair-episode-links",
+		Short: "Repair historical media file to episode links",
+		Long: `Repair episode file links using each file's series, season, and episode identity.
+
+Dry-run is the default. Use --execute to repair links and refresh episode best-file references.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			db, err := database.OpenPath(config.GetDatabasePath())
+			if err != nil {
+				return fmt.Errorf("failed to open database: %w", err)
+			}
+			defer db.Close()
+			return runDatabaseRepairEpisodeLinksWithDB(db, execute, cmd.OutOrStdout())
+		},
+	}
+
+	cmd.Flags().BoolVar(&execute, "execute", false, "Apply the repair instead of reporting a dry-run result")
+	return cmd
+}
+
 func runDatabaseInit(scan bool, allowOverwrite bool) error {
 	dbPath := config.GetDatabasePath()
 
@@ -232,6 +256,27 @@ func runDatabaseCleanupHousekeepingWithDB(db *database.MediaDB, execute bool, ou
 	fmt.Fprintf(out, "Duplicate manual-review housekeeping failures: %d\n", count)
 	if count > 0 {
 		fmt.Fprintln(out, "Dry run only. Run 'plex2jellyfin database cleanup-housekeeping --execute' to cancel older duplicate rows.")
+	}
+	return nil
+}
+
+func runDatabaseRepairEpisodeLinksWithDB(db *database.MediaDB, execute bool, out io.Writer) error {
+	report, err := db.RepairEpisodeFileLinks(!execute)
+	if err != nil {
+		return fmt.Errorf("repair episode links: %w", err)
+	}
+	if execute {
+		fmt.Fprintf(out, "Repaired episode file links: %d\n", report.MediaFilesRepaired)
+		fmt.Fprintf(out, "Refreshed episode best-file references: %d\n", report.BestFileReferencesRepaired)
+	} else {
+		fmt.Fprintf(out, "Episode file links to repair: %d\n", report.MediaFilesRepaired)
+		fmt.Fprintf(out, "Episode best-file references to refresh: %d\n", report.BestFileReferencesRepaired)
+	}
+	fmt.Fprintf(out, "Unmatched episode files: %d\n", report.UnmatchedMediaFiles)
+	fmt.Fprintf(out, "Episodes without matching files: %d\n", report.EpisodesWithoutMediaFiles)
+	fmt.Fprintf(out, "Episodes with missing series rows: %d\n", report.OrphanedEpisodeSeries)
+	if !execute && (report.MediaFilesRepaired > 0 || report.BestFileReferencesRepaired > 0) {
+		fmt.Fprintln(out, "Dry run only. Run 'plex2jellyfin database repair-episode-links --execute' to apply the repair.")
 	}
 	return nil
 }

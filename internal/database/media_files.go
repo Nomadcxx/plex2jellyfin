@@ -473,24 +473,16 @@ func (m *MediaDB) UpsertEpisode(episode *Episode) error {
 			title = excluded.title,
 			best_file_id = excluded.best_file_id,
 			updated_at = CURRENT_TIMESTAMP
+		RETURNING id
 	`
 
-	result, err := m.db.Exec(
+	err := m.db.QueryRow(
 		query,
 		episode.SeriesID, episode.Season, episode.Episode, episode.Title, episode.BestFileID,
-	)
+	).Scan(&episode.ID)
 	if err != nil {
 		return fmt.Errorf("failed to upsert episode: %w", err)
 	}
-
-	// Get ID if this was an insert
-	if episode.ID == 0 {
-		id, err := result.LastInsertId()
-		if err == nil {
-			episode.ID = id
-		}
-	}
-
 	return nil
 }
 
