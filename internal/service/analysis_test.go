@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -147,6 +148,13 @@ func TestAnalyzeDuplicates_NullYearEpisodes(t *testing.T) {
 	defer db.Close()
 
 	root := t.TempDir()
+	show := &database.Series{
+		Title: "Show", Year: 2023, CanonicalPath: filepath.Join(root, "Show"),
+		LibraryRoot: root, Source: "filesystem", SourcePriority: 50,
+	}
+	if _, err := db.UpsertSeries(show); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
 	season, episode := 1, 1
 	path1 := filepath.Join(root, "lib1", "Show", "Season 01", "Show S01E01.mkv")
 	path2 := filepath.Join(root, "lib2", "Show", "Season 01", "Show S01E01.mkv")
@@ -166,6 +174,7 @@ func TestAnalyzeDuplicates_NullYearEpisodes(t *testing.T) {
 			Season:          &season,
 			Episode:         &episode,
 			MediaType:       "episode",
+			ParentSeriesID:  &show.ID,
 			Size:            int64(100 * (i + 1)),
 			QualityScore:    100 * (i + 1),
 			LibraryRoot:     filepath.Dir(filepath.Dir(filepath.Dir(path))),
@@ -190,12 +199,73 @@ func TestAnalyzeDuplicates_NullYearEpisodes(t *testing.T) {
 	}
 }
 
+func TestFindDuplicateGroupRequiresSeriesIdentityWhenNaturalKeyAmbiguous(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	root := t.TempDir()
+	makeSeries := func(title string) *database.Series {
+		t.Helper()
+		series := &database.Series{
+			Title: title, Year: 2025, CanonicalPath: filepath.Join(root, title),
+			LibraryRoot: root, Source: "filesystem", SourcePriority: 50,
+		}
+		if _, err := db.UpsertSeries(series); err != nil {
+			t.Fatalf("UpsertSeries(%q): %v", title, err)
+		}
+		return series
+	}
+	mainShow := makeSeries("The Pitt")
+	podcast := makeSeries("The Pitt Podcast")
+	year, season, episode := 2025, 1, 5
+	for i, series := range []*database.Series{mainShow, mainShow, podcast, podcast} {
+		path := filepath.Join(root, fmt.Sprintf("file-%d.mkv", i))
+		if err := os.WriteFile(path, []byte("video"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		file := &database.MediaFile{
+			Path: path, MediaType: "episode", ParentSeriesID: &series.ID,
+			NormalizedTitle: "the pitt", Year: &year, Season: &season, Episode: &episode,
+			Size: int64(100 + i), QualityScore: i, LibraryRoot: root,
+		}
+		if err := db.UpsertMediaFile(file); err != nil {
+			t.Fatalf("UpsertMediaFile: %v", err)
+		}
+	}
+
+	svc := NewCleanupService(db)
+	analysis, err := svc.AnalyzeDuplicates()
+	if err != nil {
+		t.Fatalf("AnalyzeDuplicates: %v", err)
+	}
+	if len(analysis.Groups) != 2 || analysis.Groups[0].ID == analysis.Groups[1].ID {
+		t.Fatalf("groups should be distinct by series identity: %+v", analysis.Groups)
+	}
+	group, err := svc.FindDuplicateGroup("series", "the pitt", &year, &season, &episode, &mainShow.ID)
+	if err != nil {
+		t.Fatalf("FindDuplicateGroup: %v", err)
+	}
+	if group == nil || len(group.Files) != 2 || group.ParentSeriesID == nil || *group.ParentSeriesID != mainShow.ID {
+		t.Fatalf("group = %+v, want only The Pitt duplicates", group)
+	}
+	if _, err := svc.FindDuplicateGroup("series", "the pitt", &year, &season, &episode, nil); err == nil {
+		t.Fatal("title-only duplicate lookup should reject an ambiguous series key")
+	}
+}
+
 func TestAnalyzeDuplicates_TieBreaksBestFileBySize(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
 	year := 2021
 	root := t.TempDir()
+	show := &database.Series{
+		Title: "Invincible", Year: year, CanonicalPath: filepath.Join(root, "Invincible"),
+		LibraryRoot: root, Source: "filesystem", SourcePriority: 50,
+	}
+	if _, err := db.UpsertSeries(show); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
 	small := &database.MediaFile{
 		Path:            filepath.Join(root, "storage1", "TV", "Invincible S04E08.mp4"),
 		NormalizedTitle: "invincible",
@@ -203,6 +273,7 @@ func TestAnalyzeDuplicates_TieBreaksBestFileBySize(t *testing.T) {
 		Season:          intPtr(4),
 		Episode:         intPtr(8),
 		MediaType:       "episode",
+		ParentSeriesID:  &show.ID,
 		Size:            447130391,
 		QualityScore:    0,
 	}
@@ -213,6 +284,7 @@ func TestAnalyzeDuplicates_TieBreaksBestFileBySize(t *testing.T) {
 		Season:          intPtr(4),
 		Episode:         intPtr(8),
 		MediaType:       "episode",
+		ParentSeriesID:  &show.ID,
 		Size:            718249625,
 		QualityScore:    0,
 	}
@@ -346,7 +418,7 @@ func TestDeleteDuplicateFileDeletesMember(t *testing.T) {
 	}
 
 	svc := NewCleanupService(db)
-	groupID := generateGroupID("robots", &year, nil, nil)
+	groupID := generateGroupID("robots", &year, nil, nil, nil)
 	if err := svc.DeleteDuplicateFile(groupID, duplicate.ID); err != nil {
 		t.Fatalf("DeleteDuplicateFile failed: %v", err)
 	}
@@ -381,7 +453,7 @@ func TestDeleteDuplicateFileIsIdempotentForStaleDeletedFile(t *testing.T) {
 	}
 
 	svc := NewCleanupService(db)
-	groupID := generateGroupID("robots", &year, nil, nil)
+	groupID := generateGroupID("robots", &year, nil, nil, nil)
 	if err := svc.DeleteDuplicateFile(groupID, deleted.ID); err != nil {
 		t.Fatalf("DeleteDuplicateFile should be idempotent for stale deleted file, got: %v", err)
 	}
@@ -415,7 +487,7 @@ func TestDeleteDuplicateFileRejectsFileOutsideGroup(t *testing.T) {
 		t.Fatalf("GetMediaFile failed: %v", err)
 	}
 	svc := NewCleanupService(db)
-	groupID := generateGroupID("robots", &year, nil, nil)
+	groupID := generateGroupID("robots", &year, nil, nil, nil)
 	if err := svc.DeleteDuplicateFile(groupID, other.ID); err == nil {
 		t.Fatalf("DeleteDuplicateFile should reject a file outside the duplicate group")
 	}

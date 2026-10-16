@@ -365,7 +365,8 @@ func taskGroupHandler(db *database.MediaDB) ipc.Handler {
 		group, err := cs.FindDuplicateGroup(mediaType, title,
 			payloadIntPtrLocal(t.Payload, "year"),
 			payloadIntPtrLocal(t.Payload, "season"),
-			payloadIntPtrLocal(t.Payload, "episode"))
+			payloadIntPtrLocal(t.Payload, "episode"),
+			payloadInt64PtrLocal(t.Payload, "parent_series_id"))
 		if err != nil {
 			w.Error(req.ID, ipc.ErrInternal, err.Error())
 			return
@@ -392,6 +393,7 @@ func taskGroupHandler(db *database.MediaDB) ipc.Handler {
 			"group_id":           group.ID,
 			"media_type":         group.MediaType,
 			"title":              group.Title,
+			"parent_series_id":   group.ParentSeriesID,
 			"year":               group.Year,
 			"season":             group.Season,
 			"episode":            group.Episode,
@@ -445,6 +447,24 @@ func taskApproveHandler(db *database.MediaDB) ipc.Handler {
 		}
 		w.Result(req.ID, json.RawMessage(`{"approved":true}`))
 	}
+}
+
+func payloadInt64PtrLocal(p map[string]any, key string) *int64 {
+	v, ok := p[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case float64:
+		i := int64(x)
+		return &i
+	case int:
+		i := int64(x)
+		return &i
+	case int64:
+		return &x
+	}
+	return nil
 }
 
 // payloadIntPtrLocal mirrors housekeeping.payloadIntPtr — JSON numbers
