@@ -39,7 +39,7 @@ and exposes a REST API for media operations.`,
 
 	rootCmd.Flags().StringVarP(&port, "port", "p", "5522", "Port to listen on")
 	rootCmd.Flags().StringVarP(&host, "host", "H", "127.0.0.1", "Host to bind to")
-	rootCmd.Flags().BoolVar(&allowUnauthenticatedRemote, "allow-unauthenticated-remote", false, "Allow unauthenticated access from remote hosts (development only)")
+	rootCmd.Flags().BoolVar(&allowUnauthenticatedRemote, "allow-unauthenticated-remote", false, "Allow an unauthenticated non-loopback bind on an isolated, trusted network")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

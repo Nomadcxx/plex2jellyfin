@@ -159,12 +159,12 @@ func configureAndVerify(ctx context.Context, deps pluginDeps, cfg *config.Config
 
 	daemonURL := cfg.Jellyfin.PluginDaemonURL
 	if daemonURL == "" {
-		def := "http://localhost:5522"
+		def := "http://localhost:8686"
 		if ip := deps.advertiseIP(); ip != "" {
-			def = "http://" + ip + ":5522"
+			def = "http://" + ip + ":8686"
 		}
 		var err error
-		if daemonURL, err = p.ask("Web UI URL reachable from Jellyfin", def); err != nil {
+		if daemonURL, err = p.ask("Daemon callback URL reachable from Jellyfin", def); err != nil {
 			return err
 		}
 		cfg.Jellyfin.PluginDaemonURL = strings.TrimRight(daemonURL, "/")

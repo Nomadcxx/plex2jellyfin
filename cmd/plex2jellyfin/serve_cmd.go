@@ -36,7 +36,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:8080", "Address to listen on")
-	cmd.Flags().BoolVar(&allowUnauthenticatedRemote, "allow-unauthenticated-remote", false, "Allow unauthenticated access from remote hosts (development only)")
+	cmd.Flags().BoolVar(&allowUnauthenticatedRemote, "allow-unauthenticated-remote", false, "Allow an unauthenticated non-loopback bind on an isolated, trusted network")
 
 	return cmd
 }

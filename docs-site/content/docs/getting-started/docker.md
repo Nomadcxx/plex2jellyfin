@@ -19,13 +19,17 @@ docker run --rm ghcr.io/nomadcxx/plex2jellyfin:latest plex2jellyfin version
 docker run -d \
   --name plex2jellyfin \
   -e PUID=1000 -e PGID=1000 \
+  -e P2J_WEB_HOST=0.0.0.0 \
+  -e P2J_WEB_ALLOW_UNAUTHENTICATED_REMOTE=true \
   -v ./config:/config \
   -v /path/to/downloads:/watch \
   -v /path/to/media:/library \
-  -p 5522:5522 \
+  -p 127.0.0.1:5522:5522 \
   --restart unless-stopped \
   ghcr.io/nomadcxx/plex2jellyfin:latest
 ```
+
+The web process listens on the container network, while this example publishes port `5522` only on host loopback. The Docker-only override bypasses the bind check. Before you set a password, the app permits unauthenticated requests so the setup wizard can create the first password; after setup, protected API routes require a session. Other containers on the same Docker network can also reach the listener during first-run setup, so use a trusted network until you set the password. For remote access, configure the password first and use an SSH tunnel or a trusted TLS proxy.
 
 ## Volumes
 
@@ -90,10 +94,12 @@ If your host enforces SELinux, bind-mounted directories are denied to the contai
 docker run -d \
   --name plex2jellyfin \
   -e PUID=1000 -e PGID=1000 \
+  -e P2J_WEB_HOST=0.0.0.0 \
+  -e P2J_WEB_ALLOW_UNAUTHENTICATED_REMOTE=true \
   -v ./config:/config:Z \
   -v /path/to/downloads:/watch:z \
   -v /path/to/media:/library:z \
-  -p 5522:5522 \
+  -p 127.0.0.1:5522:5522 \
   --restart unless-stopped \
   ghcr.io/nomadcxx/plex2jellyfin:latest
 ```
@@ -123,6 +129,8 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
+      - P2J_WEB_HOST=0.0.0.0
+      - P2J_WEB_ALLOW_UNAUTHENTICATED_REMOTE=true
     volumes:
       - ./config:/config
       - /path/to/downloads:/watch
@@ -131,7 +139,7 @@ services:
       - /path/to/torrents:/seeding
       - /path/to/media:/library
     ports:
-      - "5522:5522"
+      - "127.0.0.1:5522:5522"
     restart: unless-stopped
 ```
 
@@ -149,7 +157,7 @@ services:
    docker compose -f docker-compose.example.yml up -d
    ```
 
-5. Open `http://<host>:5522/` and finish setup in the browser. On a fresh
+5. Open `http://127.0.0.1:5522/` on the Docker host and finish setup in the browser. On a fresh
    `/config` volume the web UI walks you through everything — no exec, no
    hand-written TOML:
 
