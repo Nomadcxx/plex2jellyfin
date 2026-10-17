@@ -80,6 +80,17 @@ func (t *HardlinkCopyTransferer) Copy(src, dst string, opts TransferOptions) (*T
 		result.Error = fmt.Errorf("create hardlink: %w", err)
 		return result, result.Error
 	}
+	if !opts.PreserveTimes {
+		now := time.Now()
+		if err := os.Chtimes(tmpPath, now, now); err != nil {
+			result.Error = fmt.Errorf("set import time: %w", err)
+			return result, result.Error
+		}
+	}
+	if err := ApplyPermissions(tmpPath, opts); err != nil {
+		result.Error = fmt.Errorf("apply transfer permissions: %w", err)
+		return result, result.Error
+	}
 	if err := os.Rename(tmpPath, dst); err != nil {
 		result.Error = fmt.Errorf("publish hardlink: %w", err)
 		return result, result.Error
