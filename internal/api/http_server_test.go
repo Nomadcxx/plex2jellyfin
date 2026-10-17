@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"net/http"
@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-func TestServeHTTPServerConfiguresRequestAndIdleTimeouts(t *testing.T) {
-	server := newServeHTTPServer("127.0.0.1:8080", http.NotFoundHandler())
+func TestNewHTTPServerConfiguresRequestTimeouts(t *testing.T) {
+	server := NewHTTPServer("127.0.0.1:8080", http.NotFoundHandler())
 	if server.ReadHeaderTimeout != 10*time.Second {
 		t.Fatalf("read-header timeout = %v, want 10s", server.ReadHeaderTimeout)
 	}
