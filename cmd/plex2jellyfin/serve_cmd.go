@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/api"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
@@ -57,5 +56,5 @@ func runServe(addr string) error {
 	fmt.Println("  GET  /api/v1/health        - Health check")
 	fmt.Println("  POST /api/v1/scan          - Trigger library scan")
 
-	return http.ListenAndServe(addr, server.Handler())
+	return api.NewHTTPServer(addr, server.Handler()).ListenAndServe()
 }
