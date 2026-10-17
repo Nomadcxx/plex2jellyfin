@@ -78,7 +78,7 @@ auto_trigger_threshold = 0.6
 # webhook_secret = "..."
 # plugin_shared_secret = "..."   # usually same as webhook_secret
 # plugin_enabled = true
-# plugin_daemon_url = "http://192.168.1.10:5522"  # never localhost from a container
+# plugin_daemon_url = "http://192.168.1.10:8686"  # never localhost from a container
 
 # Path mappings translate between Jellyfin's view of a media file (typically
 # a container-internal path) and the daemon's view (the host filesystem

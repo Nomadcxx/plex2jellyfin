@@ -688,7 +688,7 @@ Type=simple
 User=root
 Group=root
 Environment=SUDO_USER=%s
-ExecStart=/usr/bin/plex2jellyfin-web --host 0.0.0.0 --port %s
+ExecStart=/usr/bin/plex2jellyfin-web --host 127.0.0.1 --port %s
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

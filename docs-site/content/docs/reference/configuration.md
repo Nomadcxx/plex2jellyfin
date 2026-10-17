@@ -101,7 +101,7 @@ notify_on_import = true
 | `plugin_auto_scan` | bool | `true` | Ask Jellyfin to scan after organizing. |
 | `plugin_verify_on_startup` | bool | `false` | Run plugin verification when the daemon starts. |
 | `plugin_verify_interval` | int | `0` | Hours between automatic verifications (`0` = disabled). |
-| `plugin_daemon_url` | string | `""` | Base URL the plugin calls back to (appends `/api/v1/webhooks/jellyfin`). Must be reachable **from Jellyfin**; never `localhost` when either side is containerized. |
+| `plugin_daemon_url` | string | `""` | Base URL the plugin calls back to (appends `/api/v1/webhooks/jellyfin`). Setup defaults to the daemon health server on port `8686`; the URL must be reachable **from Jellyfin**, so never use `localhost` when either side is containerized. |
 
 ```toml
 [jellyfin]
@@ -117,7 +117,7 @@ plugin_shared_secret = "..."
 plugin_auto_scan = true
 plugin_verify_on_startup = false
 plugin_verify_interval = 0
-plugin_daemon_url = "http://192.168.1.10:5522"
+plugin_daemon_url = "http://192.168.1.10:8686"
 ```
 
 ### `[[jellyfin.path_mappings]]`
@@ -334,7 +334,7 @@ plugin_shared_secret      = "..."
 plugin_auto_scan          = true
 plugin_verify_on_startup  = false
 plugin_verify_interval    = 0
-plugin_daemon_url         = "http://192.168.1.10:5522"
+plugin_daemon_url         = "http://192.168.1.10:8686"
 
 [[jellyfin.path_mappings]]
 jellyfin = "/tv"

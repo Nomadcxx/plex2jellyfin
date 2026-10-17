@@ -13,7 +13,7 @@ Group=root
 #   sudo systemctl edit plex2jellyfin-web
 #   [Service]
 #   Environment=SUDO_USER=<your username>
-ExecStart=/usr/bin/plex2jellyfin-web --host 0.0.0.0 --port 5522
+ExecStart=/usr/bin/plex2jellyfin-web --host 127.0.0.1 --port 5522
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

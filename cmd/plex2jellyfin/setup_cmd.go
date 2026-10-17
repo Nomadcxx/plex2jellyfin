@@ -706,7 +706,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		return fmt.Errorf("mark setup complete: %w", err)
 	}
 
-	// Start Web UI before the Jellyfin feedback-loop verify (webhook hits :5522).
+	// Start the optional Web UI after setup; webhook callbacks go to the daemon on :8686.
 	webStarted := false
 	if deps.runtime.Kind == setupdomain.RuntimeContainer {
 		clitheme.Muted(stdout, "Container runtime: start the web UI container/service yourself if you need :5522.")
@@ -714,7 +714,7 @@ func runSetupWizard(ctx context.Context, deps setupDeps, stdin io.Reader, stdout
 		clitheme.Warn(stdout, "plex2jellyfin-web systemd unit not installed; skipping Web UI start")
 		clitheme.Muted(stdout, "Install via the TUI installer, then: sudo systemctl enable --now plex2jellyfin-web")
 	} else {
-		clitheme.Muted(stdout, "The Web UI serves the dashboard and Jellyfin webhook receiver on :5522.")
+		clitheme.Muted(stdout, "The Web UI serves the dashboard on :5522; Jellyfin callbacks go to the daemon on :8686.")
 		startWeb, err := p.askBool("Enable and start the Web UI now?", true)
 		if err != nil {
 			return err

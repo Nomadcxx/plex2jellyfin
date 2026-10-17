@@ -54,7 +54,7 @@ Wants=plex2jellyfin-daemon.service
 Type=simple
 User=root
 Group=root
-ExecStart=/usr/bin/plex2jellyfin-web --host 0.0.0.0 --port 5522
+ExecStart=/usr/bin/plex2jellyfin-web --host 127.0.0.1 --port 5522
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -70,6 +70,8 @@ WantedBy=multi-user.target
 ```
 
 `plex2jellyfin-web` depends on `plex2jellyfin-daemon` and talks to it exclusively over the Unix-domain control socket — no TCP between them. It hosts the embedded dashboard and proxies API calls to the daemon.
+
+The web unit listens on loopback. To open it from another machine, create an SSH tunnel with `ssh -L 5522:127.0.0.1:5522 user@server` and browse to `http://127.0.0.1:5522/` on your computer. A direct remote bind requires a configured web password; put a trusted TLS proxy in front of it.
 
 `ProtectHome` is deliberately left unset: the web server needs read/write access to the user's config directory (`config.toml`, lock files, `media.db` live under `~/.config/plex2jellyfin`), and web-triggered library maintenance actions (e.g. consolidation) need write access to non-system media mounts under normal filesystem permissions rather than a hardcoded allow-list.
 

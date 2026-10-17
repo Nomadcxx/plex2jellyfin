@@ -95,6 +95,29 @@ func TestPluginInstallHappyPathWithRestartConsent(t *testing.T) {
 	}
 }
 
+func TestConfigureAndVerifyDefaultsToDaemonCallbackURL(t *testing.T) {
+	cfg := pluginTestConfig()
+	cfg.Jellyfin.PluginDaemonURL = ""
+	engine := &fakeEngine{
+		verifyResult: plugininstall.VerifyResult{Sent: true, DaemonStatusCode: 200, Authenticated: true},
+	}
+	deps := pluginTestDeps(engine, cfg)
+	var out bytes.Buffer
+	p := newPrompter(strings.NewReader("\n"), &out)
+	defer p.Close()
+
+	if err := configureAndVerify(context.Background(), deps, cfg, engine, p, &out); err != nil {
+		t.Fatalf("configure: %v\n%s", err, out.String())
+	}
+	const want = "http://10.0.0.5:8686"
+	if cfg.Jellyfin.PluginDaemonURL != want {
+		t.Fatalf("saved callback URL = %q, want %q", cfg.Jellyfin.PluginDaemonURL, want)
+	}
+	if len(engine.configured) != 2 || engine.configured[0] != want {
+		t.Fatalf("configure args = %v, want callback URL %q", engine.configured, want)
+	}
+}
+
 func TestPluginInstallDecliningRestartPrintsRecovery(t *testing.T) {
 	engine := &fakeEngine{
 		inspection: plugininstall.Inspection{ServerVersion: "10.11.6", ABISupported: true},
