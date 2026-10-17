@@ -2,9 +2,67 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 )
+
+func TestPositiveDurationFromUnits(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		units    int
+		unit     time.Duration
+		fallback time.Duration
+		want     time.Duration
+		valid    bool
+	}{
+		{name: "positive seconds", units: 30, unit: time.Second, fallback: time.Minute, want: 30 * time.Second, valid: true},
+		{name: "zero", unit: time.Second, fallback: time.Minute, want: time.Minute},
+		{name: "negative", units: -1, unit: time.Second, fallback: time.Minute, want: time.Minute},
+		{name: "zero unit", units: 1, fallback: time.Minute, want: time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, valid := positiveDurationFromUnits(tc.units, tc.unit, tc.fallback)
+			if got != tc.want || valid != tc.valid {
+				t.Fatalf("positiveDurationFromUnits() = (%v, %v), want (%v, %v)", got, valid, tc.want, tc.valid)
+			}
+		})
+	}
+
+	maxInt := int(^uint(0) >> 1)
+	for _, tc := range []struct {
+		name string
+		unit time.Duration
+	}{
+		{name: "seconds", unit: time.Second},
+		{name: "minutes", unit: time.Minute},
+		{name: "hours", unit: time.Hour},
+	} {
+		t.Run(tc.name+" maximum", func(t *testing.T) {
+			maxUnits := uint64(1<<63-1) / uint64(tc.unit)
+			if maxUnits > uint64(maxInt) {
+				t.Skip("maximum representable duration exceeds int range")
+			}
+			want := time.Duration(maxUnits) * tc.unit
+			got, valid := positiveDurationFromUnits(int(maxUnits), tc.unit, time.Minute)
+			if got != want || !valid {
+				t.Fatalf("positiveDurationFromUnits(max) = (%v, %v), want (%v, true)", got, valid, want)
+			}
+		})
+
+		t.Run(tc.name+" overflow", func(t *testing.T) {
+			maxUnits := uint64(1<<63-1) / uint64(tc.unit)
+			if maxUnits >= uint64(maxInt) {
+				t.Skip("overflowing duration exceeds int range")
+			}
+			fallback := time.Minute
+			got, valid := positiveDurationFromUnits(int(maxUnits+1), tc.unit, fallback)
+			if got != fallback || valid {
+				t.Fatalf("positiveDurationFromUnits(overflow) = (%v, %v), want (%v, false)", got, valid, fallback)
+			}
+		})
+	}
+}
 
 func TestResolveHealthAddr(t *testing.T) {
 	tests := []struct {

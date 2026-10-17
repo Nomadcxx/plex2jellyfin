@@ -47,6 +47,17 @@ var (
 	version     = "dev" // Set by build flags: -ldflags="-X main.version=1.0.0"
 )
 
+func positiveDurationFromUnits(value int, unit, fallback time.Duration) (time.Duration, bool) {
+	if value <= 0 || unit <= 0 {
+		return fallback, false
+	}
+	maxUnits := uint64(1<<63-1) / uint64(unit)
+	if uint64(value) > maxUnits {
+		return fallback, false
+	}
+	return time.Duration(value) * unit, true
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "plex2jellyfin-daemon",
@@ -356,7 +367,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Parse scan frequency
 	scanInterval, err := time.ParseDuration(cfg.Daemon.ScanFrequency)
-	if err != nil {
+	if err != nil || scanInterval <= 0 {
 		logger.Warn("daemon", "Invalid scan_frequency, using default",
 			logging.F("configured", cfg.Daemon.ScanFrequency),
 			logging.F("default", "5m"))
@@ -490,8 +501,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if jellyfinClient != nil && db != nil {
 		jfSweeper = jellyfin.NewSweeper(jellyfinClient, db)
 		jfSweeper.SetPathTranslator(pathTranslator)
+		repairCooldown, _ := positiveDurationFromUnits(cfg.MetadataRecovery.RepairCooldownHours, time.Hour, 0)
 		metadataReconciler = jellyfin.NewMetadataReconciler(jellyfinClient, db, jellyfin.MetadataRecoveryConfig{
-			RepairCooldown:    time.Duration(cfg.MetadataRecovery.RepairCooldownHours) * time.Hour,
+			RepairCooldown:    repairCooldown,
 			NeedsReviewAfter:  cfg.MetadataRecovery.NeedsReviewAfter,
 			CorrectionEnabled: cfg.MetadataRecovery.CorrectionEnabled,
 		})
@@ -518,9 +530,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Start AI enhancement ticker
 	if cfg.AI.Enabled && aiMatcher != nil {
-		interval := time.Duration(cfg.AI.EnhancementIntervalSeconds) * time.Second
-		if interval == 0 {
-			interval = 30 * time.Second
+		interval, valid := positiveDurationFromUnits(cfg.AI.EnhancementIntervalSeconds, time.Second, 30*time.Second)
+		if !valid {
+			logger.Warn("daemon", "Invalid enhancement_interval_seconds, using default",
+				logging.F("configured", cfg.AI.EnhancementIntervalSeconds),
+				logging.F("default", 30))
 		}
 		startBackground("AI enhancement ticker", func() {
 			ticker := time.NewTicker(interval)
@@ -622,10 +636,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// from repair: passive checks only read Jellyfin and update Plex2Jellyfin's
 	// DB when Jellyfin later attaches provider IDs after an import.
 	if metadataReconciler != nil && cfg.MetadataRecovery.PassiveEnabled {
-		interval := time.Duration(cfg.MetadataRecovery.PassiveIntervalMinutes) * time.Minute
-		if interval <= 0 {
-			interval = time.Hour
-		}
+		interval, _ := positiveDurationFromUnits(cfg.MetadataRecovery.PassiveIntervalMinutes, time.Minute, time.Hour)
 		batchSize := cfg.MetadataRecovery.PassiveBatchSize
 		if batchSize <= 0 {
 			batchSize = 25
@@ -662,10 +673,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// Active metadata repair (parse-decision RunRepair). Distinct from
 	// unknown-season series refreshes, which use unknown_season_repair_enabled.
 	if metadataReconciler != nil && cfg.MetadataRecovery.RepairEnabled {
-		interval := time.Duration(cfg.MetadataRecovery.PassiveIntervalMinutes) * time.Minute
-		if interval <= 0 {
-			interval = time.Hour
-		}
+		interval, _ := positiveDurationFromUnits(cfg.MetadataRecovery.PassiveIntervalMinutes, time.Minute, time.Hour)
 		batchSize := cfg.MetadataRecovery.RepairBatchSize
 		if batchSize <= 0 {
 			batchSize = 5
@@ -701,15 +709,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Unknown-season repair is default-off and separate from repair_enabled.
 	if jellyfinClient != nil && db != nil && cfg.MetadataRecovery.UnknownSeasonRepairEnabled {
-		interval := time.Duration(cfg.MetadataRecovery.PassiveIntervalMinutes) * time.Minute
-		if interval <= 0 {
-			interval = time.Hour
-		}
+		interval, _ := positiveDurationFromUnits(cfg.MetadataRecovery.PassiveIntervalMinutes, time.Minute, time.Hour)
 		batchSize := cfg.MetadataRecovery.RepairBatchSize
 		if batchSize <= 0 {
 			batchSize = 5
 		}
-		cooldown := time.Duration(cfg.MetadataRecovery.RepairCooldownHours) * time.Hour
+		cooldown := time.Duration(0)
+		if cfg.MetadataRecovery.RepairCooldownHours > 0 {
+			cooldown, _ = positiveDurationFromUnits(cfg.MetadataRecovery.RepairCooldownHours, time.Hour, 6*time.Hour)
+		}
 		startBackground("Jellyfin unknown-season repair", func() {
 			defer func() {
 				if r := recover(); r != nil {
