@@ -291,7 +291,9 @@ func IsRetryableResourceFailure(errMsg string) bool {
 }
 
 func IsFailureWorthBackoff(errMsg string) bool {
-	return IsDeterministicUnparseable(errMsg) || IsRetryableResourceFailure(errMsg)
+	return IsDeterministicUnparseable(errMsg) ||
+		strings.Contains(strings.ToLower(errMsg), "source is not a regular file") ||
+		IsRetryableResourceFailure(errMsg)
 }
 
 func retryFailureStreak(recentErrors []string) int {

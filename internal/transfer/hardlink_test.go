@@ -9,8 +9,10 @@ import (
 )
 
 type hardlinkFallbackStub struct {
-	copyCalls int
-	moveCalls int
+	copyCalls     int
+	copySource    string
+	copyAsSymlink bool
+	moveCalls     int
 }
 
 func (s *hardlinkFallbackStub) Move(src, dst string, _ TransferOptions) (*TransferResult, error) {
@@ -20,6 +22,13 @@ func (s *hardlinkFallbackStub) Move(src, dst string, _ TransferOptions) (*Transf
 
 func (s *hardlinkFallbackStub) Copy(src, dst string, _ TransferOptions) (*TransferResult, error) {
 	s.copyCalls++
+	s.copySource = src
+	if s.copyAsSymlink {
+		if err := os.Symlink(src, dst); err != nil {
+			return &TransferResult{Error: err}, err
+		}
+		return &TransferResult{Success: true}, nil
+	}
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return &TransferResult{Error: err}, err
@@ -71,7 +80,7 @@ func TestHardlinkCopyCreatesSharedInodeAndRetainsSource(t *testing.T) {
 	}
 }
 
-func TestHardlinkCopyRejectsSymlinkSource(t *testing.T) {
+func TestHardlinkCopyFallsBackForSymlinkSource(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.mkv")
 	src := filepath.Join(dir, "source.mkv")
@@ -84,15 +93,79 @@ func TestHardlinkCopyRejectsSymlinkSource(t *testing.T) {
 	}
 
 	fallback := &hardlinkFallbackStub{}
-	_, err := NewHardlinkCopyTransferer(fallback).Copy(src, dst, DefaultOptions())
-	if err == nil {
-		t.Fatal("expected symlink source to be rejected")
+	result, err := NewHardlinkCopyTransferer(fallback).Copy(src, dst, DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Lstat(dst); !os.IsNotExist(err) {
-		t.Fatalf("destination exists or cannot be inspected: %v", err)
+	if !result.Success {
+		t.Fatalf("result = %+v, want successful fallback copy", result)
+	}
+	if fallback.copyCalls != 1 {
+		t.Fatalf("fallback copy calls = %d, want 1", fallback.copyCalls)
+	}
+	if fallback.copySource != target {
+		t.Fatalf("fallback source = %q, want resolved target %q", fallback.copySource, target)
+	}
+	info, err := os.Lstat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("destination mode = %v, want a regular file", info.Mode())
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "payload" {
+		t.Fatalf("destination content = %q, %v, want copied payload", got, err)
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(info, targetInfo) {
+		t.Fatal("symlink source fallback unexpectedly published a hardlink")
+	}
+}
+
+func TestHardlinkCopyRejectsSymlinkToNonRegularSource(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target-dir")
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "episode.mkv")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, src); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+
+	fallback := &hardlinkFallbackStub{}
+	_, err := NewHardlinkCopyTransferer(fallback).Copy(src, dst, DefaultOptions())
+	if !errors.Is(err, ErrSourceNotRegular) {
+		t.Fatalf("error = %v, want ErrSourceNotRegular", err)
 	}
 	if fallback.copyCalls != 0 {
 		t.Fatalf("fallback copy calls = %d, want 0", fallback.copyCalls)
+	}
+}
+
+func TestHardlinkCopyDoesNotPublishFallbackSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.mkv")
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "episode.mkv")
+	if err := os.WriteFile(target, []byte("payload"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, src); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+
+	fallback := &hardlinkFallbackStub{copyAsSymlink: true}
+	_, err := NewHardlinkCopyTransferer(fallback).Copy(src, dst, DefaultOptions())
+	if !errors.Is(err, ErrSourceNotRegular) {
+		t.Fatalf("error = %v, want ErrSourceNotRegular", err)
+	}
+	if _, err := os.Lstat(dst); !os.IsNotExist(err) {
+		t.Fatalf("destination exists or cannot be inspected: %v", err)
 	}
 }
 
