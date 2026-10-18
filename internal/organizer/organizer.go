@@ -1574,7 +1574,7 @@ func collectVideoFiles(root string) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if video.IsVideo(path) {
+		if video.IsVideo(path) && !video.IsSampleVideo(path) {
 			files = append(files, path)
 		}
 		return nil
