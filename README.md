@@ -235,7 +235,9 @@ movies = ["/downloads/movies"]
 tv     = ["/downloads/tv"]
 
 # Optional: completed torrents your client keeps seeding. Sources stay in place
-# and are hardlinked into the library when the filesystem allows it.
+# and are hardlinked into the library when the filesystem allows it. Since both
+# paths share an inode, import-time modification time and configured permissions
+# also affect the source file.
 seeding_movies = ["/torrents/complete/movies"]
 seeding_tv     = ["/torrents/complete/tv"]
 

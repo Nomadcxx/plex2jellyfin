@@ -67,8 +67,10 @@ type TransferOptions struct {
 	PreserveAttrs bool
 
 	// PreserveTimes preserves source modification times during transfer.
-	// Default false: organized files get current mtimes so Jellyfin's
-	// DateCreated (Recently Added) reflects when the file entered the library.
+	// Hardlink copies share the source inode: true preserves its existing mtime
+	// at both paths, while false sets the import time at both paths. Default
+	// false makes Jellyfin's Recently Added reflect when the file entered the
+	// library; true can preserve an old Recently Added time.
 	PreserveTimes bool
 
 	// DeletePartial removes partial files if transfer fails.
