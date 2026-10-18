@@ -101,15 +101,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	handler := server.Handler()
 
-	httpServer := &http.Server{
-		Addr:        addr,
-		Handler:     handler,
-		ReadTimeout: 30 * time.Second,
-		// WriteTimeout must stay 0: SSE setup indexing and op streams can run for
-		// many minutes. Handlers that need a cap should set their own deadlines.
-		WriteTimeout: 0,
-		IdleTimeout:  120 * time.Second,
-	}
+	httpServer := api.NewHTTPServer(addr, handler)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
