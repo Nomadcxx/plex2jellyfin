@@ -16,18 +16,27 @@ type ProgressEvent struct {
 }
 
 // ResetDatabase truncates every user table except those named in preserve.
-// Emits ProgressEvent values to progress as it works. Honors ctx cancel
-// at table boundaries.
-func ResetDatabase(ctx context.Context, db *sql.DB, preserve []string, progress chan<- ProgressEvent) error {
+// It blocks other operations on this handle and rolls back all deletes if the
+// operation is cancelled or a table cannot be cleared.
+func ResetDatabase(ctx context.Context, m *MediaDB, preserve []string, progress chan<- ProgressEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	keep := map[string]bool{}
 	for _, t := range preserve {
 		keep[t] = true
 	}
 
-	tables, err := listUserTables(db)
+	tables, err := listUserTables(m.db)
 	if err != nil {
 		return err
 	}
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin reset: %w", err)
+	}
+	defer tx.Rollback()
+
 	progress <- ProgressEvent{Phase: "preparing", Total: len(tables)}
 
 	for i, name := range tables {
@@ -41,16 +50,21 @@ func ResetDatabase(ctx context.Context, db *sql.DB, preserve []string, progress 
 			continue
 		}
 		progress <- ProgressEvent{Phase: "truncating", Msg: name, Current: i + 1, Total: len(tables)}
-		if _, err := db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %q", name)); err != nil {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %q", name)); err != nil {
 			return fmt.Errorf("truncate %s: %w", name, err)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit reset: %w", err)
+	}
 
 	progress <- ProgressEvent{Phase: "vacuuming"}
-	// VACUUM cannot run inside a transaction; database/sql + go-sqlite3 does
-	// not auto-wrap Exec in one, so this is safe. Use Exec (not ExecContext)
-	// because VACUUM ignores cancel mid-statement anyway.
-	if _, err := db.Exec("VACUUM"); err != nil {
+	// SQLite cannot run VACUUM inside the delete transaction. A committed reset
+	// stays complete even if vacuuming later fails.
+	if _, err := m.db.Exec("VACUUM"); err != nil {
 		return fmt.Errorf("vacuum: %w", err)
 	}
 
