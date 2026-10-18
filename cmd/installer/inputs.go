@@ -284,19 +284,15 @@ func (m *model) savePermissionsInputs() {
 	}
 }
 
-// defaultCallbackURL derives where Jellyfin's companion plugin posts events:
-// the web UI when it will exist, otherwise the daemon's health endpoint
-// (which mounts the same /api/v1/webhooks/jellyfin route).
+// defaultCallbackURL uses the daemon's health endpoint, which mounts the
+// /api/v1/webhooks/jellyfin route and remains reachable when the web UI binds
+// to loopback.
 func (m *model) defaultCallbackURL() string {
 	host := setuppkg.DetectAdvertiseIP()
 	if host == "" {
 		host = "localhost"
 	}
-	port := normalizedWebPort(m.webPort)
-	if !m.webEnabled {
-		port = "8686"
-	}
-	return "http://" + host + ":" + port
+	return "http://" + host + ":8686"
 }
 
 func validatePluginCallbackURL(raw string) error {

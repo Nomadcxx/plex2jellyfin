@@ -77,7 +77,7 @@ both sides:
    ```
 
 2. In Jellyfin → Dashboard → Plugins → Plex2Jellyfin: set the same secret
-   and the plex2jellyfin webhook URL (`http://<host>:5522/api/v1/webhooks/jellyfin`).
+   and the daemon webhook URL (`http://<host>:8686/api/v1/webhooks/jellyfin`).
 
 ## Verify it works
 

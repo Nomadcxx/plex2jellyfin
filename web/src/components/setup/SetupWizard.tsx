@@ -543,7 +543,7 @@ function ServicesStep({ draft, setDraft, checks, compatibility, testing, onTest,
                         <Input
                           value={draft.jellyfin.plugin_daemon_url ?? ''}
                           onChange={(event) => update('jellyfin', { plugin_daemon_url: event.target.value })}
-                          placeholder={defaultCallbackURL || 'http://192.168.1.10:5522'}
+                          placeholder={defaultCallbackURL || 'http://192.168.1.10:8686'}
                         />
                         <span className="block text-xs text-zinc-500">From Jellyfin&apos;s point of view — never localhost when Jellyfin is in a container.</span>
                       </label>

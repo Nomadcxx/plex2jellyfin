@@ -22,7 +22,14 @@ fi
 
 su-exec p2j plex2jellyfin-daemon &
 DAEMON_PID=$!
-su-exec p2j plex2jellyfin-web &
+set --
+if [ -n "${P2J_WEB_HOST:-}" ]; then
+    set -- --host "$P2J_WEB_HOST"
+fi
+if [ "${P2J_WEB_ALLOW_UNAUTHENTICATED_REMOTE:-}" = "true" ]; then
+    set -- "$@" --allow-unauthenticated-remote
+fi
+su-exec p2j plex2jellyfin-web "$@" &
 WEB_PID=$!
 
 # exec would reset the trap, orphaning the daemon on `docker stop`;
