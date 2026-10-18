@@ -26,6 +26,9 @@ var (
 	// ErrSourceNotFound is returned when the source file doesn't exist
 	ErrSourceNotFound = errors.New("source file not found")
 
+	// ErrSourceNotRegular is returned when a source resolves to a non-regular file.
+	ErrSourceNotRegular = errors.New("source is not a regular file")
+
 	// ErrDestinationNotWritable is returned when the destination is not writable
 	ErrDestinationNotWritable = errors.New("destination not writable")
 

@@ -139,3 +139,9 @@ func TestIsDeterministicUnparseable(t *testing.T) {
 		}
 	}
 }
+
+func TestIsFailureWorthBackoff(t *testing.T) {
+	if !IsFailureWorthBackoff("source is not a regular file: /downloads/complete/movie.mkv") {
+		t.Fatal("non-regular transfer source should enter backoff")
+	}
+}
