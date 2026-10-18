@@ -1052,12 +1052,14 @@ func (h *MediaHandler) processFile(path string) {
 		}
 
 		// Use auto-selection (queries Sonarr + filesystem)
-		result, err = h.tvOrganizer.OrganizeTVEpisodeAuto(path, func(p string) (int64, error) {
+		result, err = h.tvOrganizer.OrganizeTVEpisodeAutoFinalized(path, func(p string) (int64, error) {
 			info, err := os.Stat(p)
 			if err != nil {
 				return 0, err
 			}
 			return info.Size(), nil
+		}, func(result *organizer.OrganizationResult, err error) {
+			h.updateDecisionOrganize(decisionID, result, err)
 		})
 
 		// Extract target library from result for health check logging
@@ -1119,12 +1121,12 @@ func (h *MediaHandler) processFile(path string) {
 			return
 		}
 
-		result, err = h.movieOrganizer.OrganizeMovie(path, targetLib)
+		result, err = h.movieOrganizer.OrganizeMovieFinalized(path, targetLib, func(result *organizer.OrganizationResult, err error) {
+			h.updateDecisionOrganize(decisionID, result, err)
+		})
 	}
 
 	duration := time.Since(startTime)
-
-	h.updateDecisionOrganize(decisionID, result, err)
 
 	// Track notification results
 	sonarrNotified := false
@@ -1278,16 +1280,18 @@ func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID i
 		}
 	}
 
-	packResult, err := h.tvOrganizer.OrganizeTVSeasonPackAuto(releaseDir, func(p string) (int64, error) {
+	packResult, err := h.tvOrganizer.OrganizeTVSeasonPackAutoFinalized(releaseDir, func(p string) (int64, error) {
 		info, err := os.Stat(p)
 		if err != nil {
 			return 0, err
 		}
 		return info.Size(), nil
+	}, func(packResult *organizer.SeasonPackResult, err error) {
+		result := h.seasonPackOrganizationResult(path, releaseDir, packResult, err)
+		h.updateDecisionOrganize(decisionID, result, err)
 	})
 
 	result := h.seasonPackOrganizationResult(path, releaseDir, packResult, err)
-	h.updateDecisionOrganize(decisionID, result, nil)
 
 	sonarrNotified := false
 	if packResult != nil {
@@ -2421,12 +2425,14 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 		// Use smart selector instead of hard-coding tvLibraries[0]; this
 		// ensures AI-organized episodes consolidate onto the volume that
 		// already holds the series. Mirrors the regex path above.
-		result, err = h.tvOrganizer.OrganizeTVWithParsedAuto(item.Path, tvInfo, func(p string) (int64, error) {
+		result, err = h.tvOrganizer.OrganizeTVWithParsedAutoFinalized(item.Path, tvInfo, func(p string) (int64, error) {
 			info, err := os.Stat(p)
 			if err != nil {
 				return 0, err
 			}
 			return info.Size(), nil
+		}, func(result *organizer.OrganizationResult, err error) {
+			h.updateDecisionOrganize(item.ParseDecisionID, result, err)
 		})
 	} else {
 		movieInfo := naming.MovieInfo{
@@ -2436,7 +2442,9 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 			movieInfo.Year = fmt.Sprintf("%d", *aiResult.Year.Int())
 		}
 
-		result, err = h.movieOrganizer.OrganizeMovieWithParsed(item.Path, item.TargetLib, movieInfo)
+		result, err = h.movieOrganizer.OrganizeMovieWithParsedFinalized(item.Path, item.TargetLib, movieInfo, func(result *organizer.OrganizationResult, err error) {
+			h.updateDecisionOrganize(item.ParseDecisionID, result, err)
+		})
 	}
 
 	if h.db != nil && item.ParseDecisionID != 0 {
@@ -2463,8 +2471,6 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 				logging.F("error", updateErr.Error()))
 		}
 	}
-
-	h.updateDecisionOrganize(item.ParseDecisionID, result, err)
 
 	if err != nil {
 		h.logger.Error("handler", "AI-enhanced organization failed", err,
@@ -2573,12 +2579,14 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 				}
 			}
 		}
-		result, err = h.tvOrganizer.OrganizeTVEpisodeAuto(item.Path, func(p string) (int64, error) {
+		result, err = h.tvOrganizer.OrganizeTVEpisodeAutoFinalized(item.Path, func(p string) (int64, error) {
 			info, statErr := os.Stat(p)
 			if statErr != nil {
 				return 0, statErr
 			}
 			return info.Size(), nil
+		}, func(result *organizer.OrganizationResult, err error) {
+			h.updateDecisionOrganize(item.ParseDecisionID, result, err)
 		})
 	} else {
 		mediaType = notify.MediaTypeMovie
@@ -2618,14 +2626,14 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 			}, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, time.Since(startTime), false, false)
 			return
 		}
-		result, err = h.movieOrganizer.OrganizeMovie(item.Path, targetLib)
+		result, err = h.movieOrganizer.OrganizeMovieFinalized(item.Path, targetLib, func(result *organizer.OrganizationResult, err error) {
+			h.updateDecisionOrganize(item.ParseDecisionID, result, err)
+		})
 	}
 
 	duration := time.Since(startTime)
 	sonarrNotified := false
 	radarrNotified := false
-
-	h.updateDecisionOrganize(item.ParseDecisionID, result, err)
 
 	if err != nil {
 		h.logger.Error("handler", "Regex-fallback organization failed", err, logging.F("filename", filename))

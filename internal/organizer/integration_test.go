@@ -21,8 +21,9 @@ func TestOrganizeWorkflow_EndToEnd(t *testing.T) {
 	// Create test files
 	movieFile := filepath.Join(sourceDir, "The.Matrix.1999.1080p.mkv")
 	tvFile := filepath.Join(sourceDir, "Silo.2023.S01E02.1080p.mkv")
-	createTestFile(t, movieFile, 2*1024*1024*1024)
-	createTestFile(t, tvFile, 500*1024*1024)
+	// ponytail: These fixtures exercise organization flow, not transfer throughput; keep them small for constrained temp filesystems.
+	createTestFile(t, movieFile, 2*1024*1024)
+	createTestFile(t, tvFile, 500*1024)
 
 	// Initialize components
 	transferer, err := transfer.New(transfer.BackendRsync)
