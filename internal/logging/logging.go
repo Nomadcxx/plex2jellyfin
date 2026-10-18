@@ -79,12 +79,33 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Level:      "info",
-		File:       "", // Will be set to ~/.config/plex2jellyfin/logs/plex2jellyfin.log
+		File:       "", // Empty selects the default file path.
 		MaxSizeMB:  10,
 		MaxBackups: 5,
 		MaxAgeDays: 0,
 		Compress:   false,
 	}
+}
+
+// ResolveFilePath returns the effective file path used by New.
+func ResolveFilePath(cfg Config) (string, error) {
+	if cfg.File == "" {
+		jwDir, err := paths.Plex2JellyfinDir()
+		if err != nil {
+			return "", fmt.Errorf("unable to get plex2jellyfin dir: %w", err)
+		}
+		return filepath.Join(jwDir, "logs", "plex2jellyfin.log"), nil
+	}
+
+	if strings.HasPrefix(cfg.File, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("unable to get home dir: %w", err)
+		}
+		return filepath.Join(home, cfg.File[1:]), nil
+	}
+
+	return cfg.File, nil
 }
 
 // Logger provides structured logging with file output
@@ -118,27 +139,14 @@ func New(cfg Config) (*Logger, error) {
 		l.maxBackups = 5
 	}
 
-	if cfg.File == "" {
-		jwDir, err := paths.Plex2JellyfinDir()
-		if err != nil {
-			return nil, fmt.Errorf("unable to get plex2jellyfin dir: %w", err)
-		}
-		cfg.File = filepath.Join(jwDir, "logs", "plex2jellyfin.log")
+	filePath, err := ResolveFilePath(cfg)
+	if err != nil {
+		return nil, err
 	}
-
-	// Expand ~ in file path
-	if strings.HasPrefix(cfg.File, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("unable to get home dir: %w", err)
-		}
-		cfg.File = filepath.Join(home, cfg.File[1:])
-	}
-
-	l.filePath = cfg.File
+	l.filePath = filePath
 
 	// Create log directory
-	logDir := filepath.Dir(cfg.File)
+	logDir := filepath.Dir(filePath)
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, fmt.Errorf("unable to create log directory: %w", err)
 	}

@@ -37,24 +37,42 @@ func RunID(t time.Time) string {
 }
 
 type Summary struct {
-	RunID                         string    `json:"run_id"`
-	GeneratedAt                   time.Time `json:"generated_at"`
-	Since                         time.Time `json:"since"`
-	ProcessedDecisions            int       `json:"processed_decisions"`
-	RepairEvents                  int       `json:"repair_events"`
-	SuspiciousItems               int       `json:"suspicious_items"`
-	MetadataProblems              int       `json:"metadata_problems"`
-	MetadataProblemsOutstanding   int       `json:"metadata_problems_outstanding"`
-	DriftLabels                   int       `json:"drift_labels"`
-	FailLabels                    int       `json:"fail_labels"`
-	VanishedLabels                int       `json:"vanished_labels"`
-	PendingLabels                 int       `json:"pending_labels"`
-	OverdueUnlabeled              int       `json:"overdue_unlabeled"`
-	HousekeepingFailed            int       `json:"housekeeping_failed"` // created in window
-	ManualReview                  int       `json:"manual_review"`       // created in window
-	HousekeepingOutstandingFailed int       `json:"housekeeping_outstanding_failed"`
-	HousekeepingOutstandingReview int       `json:"housekeeping_outstanding_review"`
-	UnknownSeasonActionable       int       `json:"unknown_season_actionable"`
+	RunID                         string          `json:"run_id"`
+	GeneratedAt                   time.Time       `json:"generated_at"`
+	Since                         time.Time       `json:"since"`
+	ProcessedDecisions            int             `json:"processed_decisions"`
+	RepairEvents                  int             `json:"repair_events"`
+	SuspiciousItems               int             `json:"suspicious_items"`
+	MetadataProblems              int             `json:"metadata_problems"`
+	MetadataProblemsOutstanding   int             `json:"metadata_problems_outstanding"`
+	DriftLabels                   int             `json:"drift_labels"`
+	FailLabels                    int             `json:"fail_labels"`
+	VanishedLabels                int             `json:"vanished_labels"`
+	PendingLabels                 int             `json:"pending_labels"`
+	OverdueUnlabeled              int             `json:"overdue_unlabeled"`
+	HousekeepingFailed            int             `json:"housekeeping_failed"` // created in window
+	ManualReview                  int             `json:"manual_review"`       // created in window
+	HousekeepingOutstandingFailed int             `json:"housekeeping_outstanding_failed"`
+	HousekeepingOutstandingReview int             `json:"housekeeping_outstanding_review"`
+	UnknownSeasonActionable       int             `json:"unknown_season_actionable"`
+	Activity                      ActivitySummary `json:"activity"`
+}
+
+type ActivitySummary struct {
+	OrganizationAttempts                  int                     `json:"organization_attempts"`
+	OrganizationSucceeded                 int                     `json:"organization_succeeded"`
+	OrganizationUnsuccessful              int                     `json:"organization_unsuccessful"`
+	OrganizationUnsuccessfulWithoutReason int                     `json:"organization_unsuccessful_without_reason"`
+	UniqueOrganizationUnsuccessfulSources int                     `json:"unique_organization_unsuccessful_sources"`
+	JellyfinVerificationMismatches        int                     `json:"jellyfin_verification_mismatches"`
+	JellyfinVerificationInconclusive      int                     `json:"jellyfin_verification_inconclusive"`
+	TopNonSuccessReasons                  []ActivityOutcomeReason `json:"top_non_success_reasons"`
+	Error                                 string                  `json:"error,omitempty"`
+}
+
+type ActivityOutcomeReason struct {
+	Reason string `json:"reason"`
+	Count  int    `json:"count"`
 }
 
 // LabelOverdueAfter matches the labeler's deadline. Before this duration the

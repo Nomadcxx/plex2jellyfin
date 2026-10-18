@@ -123,9 +123,17 @@ func TestSuspiciousFromDecisionsFlagsTargetCollision(t *testing.T) {
 	if suspicious[0].Path != target {
 		t.Fatalf("Path = %q, want %q", suspicious[0].Path, target)
 	}
+	for _, source := range []string{
+		"/downloads/Maisy.S01E061-062-063-064/Maisy.S01E061-062-063-064.mkv",
+		"/downloads/Maisy.S01E065-066-067-068/Maisy.S01E065-066-067-068.mkv",
+	} {
+		if !strings.Contains(suspicious[0].Reason, source) {
+			t.Errorf("Reason %q does not identify source path %q", suspicious[0].Reason, source)
+		}
+	}
 }
 
-func TestSuspiciousFromDecisionsFlagsRepeatedSameSourceWrite(t *testing.T) {
+func TestSuspiciousFromDecisionsIgnoresRepeatedSameSourceWrites(t *testing.T) {
 	source := "/downloads/Seeking.Persephone.S01E04/Seeking.Persephone.S01E04.mkv"
 	target := "/mnt/STORAGE4/TVSHOWS/Seeking Persephone/Season 01/Seeking Persephone S01E04.mkv"
 	decision := database.ParseDecision{
@@ -140,8 +148,8 @@ func TestSuspiciousFromDecisionsFlagsRepeatedSameSourceWrite(t *testing.T) {
 	}
 
 	suspicious, _ := suspiciousFromDecisions([]*database.ParseDecision{&decision, &decision})
-	if len(suspicious) != 1 || suspicious[0].Category != "target_collision" {
-		t.Fatalf("suspicious = %#v, want repeated target_collision", suspicious)
+	if len(suspicious) != 0 {
+		t.Fatalf("suspicious = %#v, want repeated writes from one source ignored", suspicious)
 	}
 }
 

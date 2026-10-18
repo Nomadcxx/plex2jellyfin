@@ -9,6 +9,8 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	"github.com/Nomadcxx/plex2jellyfin/internal/postmortem"
 	"github.com/spf13/cobra"
 )
@@ -52,18 +54,27 @@ func newPostmortemCmd() *cobra.Command {
 			}
 			defer db.Close()
 
-			logDir := ""
-			if cfg, err := config.Load(); err == nil && cfg.Logging.File != "" {
-				logDir = filepath.Dir(cfg.Logging.File)
+			logDir, activityDir, activityDirError := "", "", ""
+			if configDir, err := paths.Plex2JellyfinDir(); err == nil {
+				activityDir = filepath.Join(configDir, "activity")
+			} else {
+				activityDirError = fmt.Sprintf("resolve activity directory: %v", err)
+			}
+			if cfg, err := config.Load(); err == nil {
+				if file, err := logging.ResolveFilePath(logging.Config{File: cfg.Logging.File}); err == nil {
+					logDir = filepath.Dir(file)
+				}
 			}
 
 			c := postmortem.Collector{
-				DB:        db,
-				Root:      root,
-				Now:       func() time.Time { return now },
-				Since:     now.Add(-since),
-				LogDir:    logDir,
-				Workspace: "/home/nomadx/Documents/plex2jellyfin",
+				DB:               db,
+				Root:             root,
+				Now:              func() time.Time { return now },
+				Since:            now.Add(-since),
+				LogDir:           logDir,
+				ActivityDir:      activityDir,
+				ActivityDirError: activityDirError,
+				Workspace:        "/home/nomadx/Documents/plex2jellyfin",
 			}
 			bundle, err := c.Collect()
 			if err != nil {
