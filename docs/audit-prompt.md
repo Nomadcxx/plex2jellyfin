@@ -100,7 +100,7 @@ api/server.gen.go           # Generated server interface
 
 - [ ] Build the project: `go build ./cmd/plex2jellyfin`
 - [ ] Run tests: `go test ./internal/api/...`
-- [ ] Start server: `./plex2jellyfin serve --addr :8765`
+- [ ] Start server: `./plex2jellyfin serve --addr 127.0.0.1:8765`
 - [ ] Test each endpoint:
 
 ```bash

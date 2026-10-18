@@ -75,18 +75,22 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
+      - P2J_WEB_HOST=0.0.0.0
+      - P2J_WEB_ALLOW_UNAUTHENTICATED_REMOTE=true
     volumes:
       - ./config:/config
       - /path/to/downloads:/watch
       - /path/to/media:/library
     ports:
-      - "5522:5522"
+      - "127.0.0.1:5522:5522"
     restart: unless-stopped
 ```
 
 ```bash
 docker compose -f docker-compose.example.yml up -d
 ```
+
+The web process listens on the container network, while Compose publishes port `5522` only on host loopback. The Docker-only override bypasses the bind check. Before you set a password, the app permits unauthenticated requests so the setup wizard can create the first password; after setup, protected API routes require a session. Other containers on the Compose network can also reach the listener during first-run setup, so use a trusted network until you set the password. For remote access, configure the password first and use an SSH tunnel or a trusted TLS proxy.
 
 Set `PUID`/`PGID` to the UID/GID that should own files under `/library`. In Docker, `[permissions]` chown settings have no effect; use `PUID`/`PGID` instead.
 
@@ -235,7 +239,9 @@ movies = ["/downloads/movies"]
 tv     = ["/downloads/tv"]
 
 # Optional: completed torrents your client keeps seeding. Sources stay in place
-# and are hardlinked into the library when the filesystem allows it.
+# and are hardlinked into the library when the filesystem allows it. Since both
+# paths share an inode, import-time modification time and configured permissions
+# also affect the source file.
 seeding_movies = ["/torrents/complete/movies"]
 seeding_tv     = ["/torrents/complete/tv"]
 

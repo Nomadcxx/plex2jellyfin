@@ -4,7 +4,7 @@
 
 1. Build: make build
 2. Configure: edit ~/.config/plex2jellyfin/config.toml
-3. Run: ./plex2jellyfin serve --addr :8765
+3. Run: ./plex2jellyfin serve --addr 127.0.0.1:8765
 
 ## HTTPS with Nginx
 

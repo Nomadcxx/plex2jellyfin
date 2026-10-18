@@ -5,6 +5,8 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
+      - P2J_WEB_HOST=0.0.0.0
+      - P2J_WEB_ALLOW_UNAUTHENTICATED_REMOTE=true
     volumes:
       - ./config:/config
       - /path/to/downloads:/watch
@@ -13,5 +15,6 @@ services:
       - /path/to/torrents:/seeding
       - /path/to/media:/library
     ports:
-      - "5522:5522"
+      # Keep first-run setup on the Docker host; the container network stays reachable to its peers.
+      - "127.0.0.1:5522:5522"
     restart: unless-stopped

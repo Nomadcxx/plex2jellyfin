@@ -155,6 +155,34 @@ func CheckDiskHealthForTransfer(src, dst string, timeout time.Duration, required
 }
 
 func StatWithTimeout(path string, timeout time.Duration) (os.FileInfo, error) {
+	return fileInfoWithTimeout(path, timeout, os.Stat)
+}
+
+func LstatWithTimeout(path string, timeout time.Duration) (os.FileInfo, error) {
+	return fileInfoWithTimeout(path, timeout, os.Lstat)
+}
+
+func EvalSymlinksWithTimeout(path string, timeout time.Duration) (string, error) {
+	type result struct {
+		resolved string
+		err      error
+	}
+	ch := make(chan result, 1)
+
+	go func() {
+		resolved, err := filepath.EvalSymlinks(path)
+		ch <- result{resolved: resolved, err: err}
+	}()
+
+	select {
+	case res := <-ch:
+		return res.resolved, res.err
+	case <-time.After(timeout):
+		return "", fmt.Errorf("resolve symlinks timed out after %s for path: %s", timeout, path)
+	}
+}
+
+func fileInfoWithTimeout(path string, timeout time.Duration, stat func(string) (os.FileInfo, error)) (os.FileInfo, error) {
 	type result struct {
 		info os.FileInfo
 		err  error
@@ -162,7 +190,7 @@ func StatWithTimeout(path string, timeout time.Duration) (os.FileInfo, error) {
 	ch := make(chan result, 1)
 
 	go func() {
-		info, err := os.Stat(path)
+		info, err := stat(path)
 		ch <- result{info: info, err: err}
 	}()
 

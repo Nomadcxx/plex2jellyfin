@@ -81,6 +81,13 @@ func TestSetupStatusMasksSecretsAndDetectsFreshInstall(t *testing.T) {
 	if !got.Required || got.Complete || got.DaemonState != "stopped" {
 		t.Fatalf("unexpected setup status: %+v", got)
 	}
+	wantCallback := ""
+	if got.AdvertiseIP != "" {
+		wantCallback = "http://" + got.AdvertiseIP + ":8686"
+	}
+	if got.DefaultCallbackURL != wantCallback {
+		t.Fatalf("default callback URL = %q, want %q", got.DefaultCallbackURL, wantCallback)
+	}
 	if got.Draft.Sonarr.APIKey != "****3456" {
 		t.Fatalf("secret was not masked: %q", got.Draft.Sonarr.APIKey)
 	}

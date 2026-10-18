@@ -62,7 +62,7 @@ func (s *Server) GetSetupStatus(w http.ResponseWriter, r *http.Request) {
 	advertise := setupdomain.DetectAdvertiseIP()
 	callback := ""
 	if advertise != "" {
-		callback = "http://" + advertise + ":5522"
+		callback = "http://" + advertise + ":8686"
 	}
 	writeJSON(w, http.StatusOK, SetupStatusResponse{
 		Required: required, Complete: !required,

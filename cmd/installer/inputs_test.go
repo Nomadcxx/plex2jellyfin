@@ -38,13 +38,13 @@ func TestJellyfinInputs_IncludeAndSaveWebhookSecret(t *testing.T) {
 func TestDefaultCallbackURL(t *testing.T) {
 	m := &model{webEnabled: true, webPort: "5522"}
 	url := m.defaultCallbackURL()
-	if !strings.HasPrefix(url, "http://") || !strings.HasSuffix(url, ":5522") {
-		t.Errorf("web enabled: got %q, want http://<host>:5522", url)
+	if !strings.HasPrefix(url, "http://") || !strings.HasSuffix(url, ":8686") {
+		t.Errorf("web enabled: got %q, want daemon callback on http://<host>:8686", url)
 	}
 
 	m.webPort = "18080"
-	if url := m.defaultCallbackURL(); !strings.HasSuffix(url, ":18080") {
-		t.Errorf("custom port: got %q, want suffix :18080", url)
+	if url := m.defaultCallbackURL(); !strings.HasSuffix(url, ":8686") {
+		t.Errorf("custom web port: got %q, want daemon callback suffix :8686", url)
 	}
 
 	m.webEnabled = false
@@ -59,7 +59,7 @@ func TestInitWebInputs_CallbackFieldGatedOnPluginConsent(t *testing.T) {
 	if len(m.inputs) != 2 {
 		t.Fatalf("expected port + callback URL inputs, got %d", len(m.inputs))
 	}
-	if v := m.inputs[1].Value(); !strings.HasSuffix(v, ":5522") {
+	if v := m.inputs[1].Value(); !strings.HasSuffix(v, ":8686") {
 		t.Errorf("callback input should pre-fill derived default, got %q", v)
 	}
 

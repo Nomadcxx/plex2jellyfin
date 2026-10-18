@@ -11,7 +11,8 @@ import (
 
 func newServeCmd() *cobra.Command {
 	var (
-		addr string
+		addr                       string
+		allowUnauthenticatedRemote bool
 	)
 
 	cmd := &cobra.Command{
@@ -20,25 +21,32 @@ func newServeCmd() *cobra.Command {
 		Long: `Start the HTTP API server for web UI and external integrations.
 
 The API follows the OpenAPI 3.0 specification defined in api/openapi.yaml.
+It listens on loopback unless you configure a password or opt into a remote
+unauthenticated bind for development.
 
 Examples:
-  plex2jellyfin serve                  # Start on default port 8080
-  plex2jellyfin serve --addr :9000     # Start on port 9000
+  plex2jellyfin serve                              # Start on localhost:8080
+  plex2jellyfin serve --addr 127.0.0.1:9000       # Start on localhost:9000
+  plex2jellyfin serve --addr :9000 --allow-unauthenticated-remote
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServe(addr)
+			return runServe(addr, allowUnauthenticatedRemote)
 		},
 	}
 
-	cmd.Flags().StringVar(&addr, "addr", ":8080", "Address to listen on")
+	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:8080", "Address to listen on")
+	cmd.Flags().BoolVar(&allowUnauthenticatedRemote, "allow-unauthenticated-remote", false, "Allow an unauthenticated non-loopback bind on an isolated, trusted network")
 
 	return cmd
 }
 
-func runServe(addr string) error {
+func runServe(addr string, allowUnauthenticatedRemote bool) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := api.ValidateListenAddress(addr, cfg.Password != "" || cfg.PasswordHash != "", allowUnauthenticatedRemote); err != nil {
+		return err
 	}
 
 	db, err := database.Open()

@@ -246,7 +246,7 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 		t.Error("plugin was not installed+restarted during the Jellyfin step")
 	}
 	if len(state.pluginConfigured) != 2 ||
-		state.pluginConfigured[0] != "http://10.0.0.5:5522" ||
+		state.pluginConfigured[0] != "http://10.0.0.5:8686" ||
 		state.pluginConfigured[1] != "generated-secret" {
 		t.Errorf("plugin configure args: %v", state.pluginConfigured)
 	}
@@ -276,7 +276,7 @@ func TestSetupWizardTVOnlyHappyPath(t *testing.T) {
 	if !saved.Jellyfin.Enabled || saved.Jellyfin.WebhookSecret != "generated-secret" {
 		t.Errorf("jellyfin webhook secret not generated: %+v", saved.Jellyfin)
 	}
-	if saved.Jellyfin.PluginDaemonURL != "http://10.0.0.5:5522" || !saved.Jellyfin.PluginEnabled {
+	if saved.Jellyfin.PluginDaemonURL != "http://10.0.0.5:8686" || !saved.Jellyfin.PluginEnabled {
 		t.Errorf("plugin daemon URL not persisted: %+v", saved.Jellyfin)
 	}
 	if saved.Daemon.ScanFrequency != "10m" || !saved.Options.DeleteSource {
