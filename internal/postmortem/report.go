@@ -28,6 +28,29 @@ func MarkdownReport(s Summary, suspicious []SuspiciousItem, unknownSeasons Unkno
 	fmt.Fprintf(&b, "- Manual review (outstanding): %d\n\n", s.HousekeepingOutstandingReview)
 	fmt.Fprintf(&b, "- Season Unknown actionable: %d\n\n", s.UnknownSeasonActionable)
 
+	fmt.Fprintln(&b, "## Daemon Activity")
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "- Organization attempts: %d\n", s.Activity.OrganizationAttempts)
+	fmt.Fprintf(&b, "- Organization succeeded: %d\n", s.Activity.OrganizationSucceeded)
+	fmt.Fprintf(&b, "- Organization outcomes marked unsuccessful (including skips): %d\n", s.Activity.OrganizationUnsuccessful)
+	fmt.Fprintf(&b, "- Unsuccessful outcomes without a reason: %d\n", s.Activity.OrganizationUnsuccessfulWithoutReason)
+	fmt.Fprintf(&b, "- Distinct unsuccessful sources: %d\n", s.Activity.UniqueOrganizationUnsuccessfulSources)
+	fmt.Fprintf(&b, "- Jellyfin verification mismatches: %d\n", s.Activity.JellyfinVerificationMismatches)
+	fmt.Fprintf(&b, "- Inconclusive Jellyfin verification passes: %d\n", s.Activity.JellyfinVerificationInconclusive)
+	if s.Activity.OrganizationUnsuccessfulWithoutReason > 0 {
+		fmt.Fprintln(&b, "- Older activity records may not distinguish skipped items from failures.")
+	}
+	if s.Activity.Error != "" {
+		fmt.Fprintf(&b, "- Activity log collection error: %s\n", s.Activity.Error)
+	}
+	if len(s.Activity.TopNonSuccessReasons) > 0 {
+		fmt.Fprintln(&b, "- Common unsuccessful outcome reasons:")
+		for _, reason := range s.Activity.TopNonSuccessReasons {
+			fmt.Fprintf(&b, "  - %s: %d\n", reason.Reason, reason.Count)
+		}
+	}
+	fmt.Fprintln(&b)
+
 	fmt.Fprintln(&b, "## Suspicious Items")
 	fmt.Fprintln(&b)
 	if len(suspicious) == 0 {

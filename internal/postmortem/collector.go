@@ -1,6 +1,7 @@
 package postmortem
 
 import (
+	"bufio"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -12,21 +13,30 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 )
 
+const (
+	maxDaemonLogExcerptLines = 200
+	maxDaemonLogExcerptBytes = 1 << 20
+)
+
 type Collector struct {
-	DB             *database.MediaDB
-	Root           string
-	Since          time.Time
-	Now            func() time.Time
-	LogDir         string
-	Workspace      string
-	UnknownSeasons func() UnknownSeasonEvidence
+	DB               *database.MediaDB
+	Root             string
+	Since            time.Time
+	Now              func() time.Time
+	LogDir           string
+	ActivityDir      string
+	ActivityDirError string
+	Workspace        string
+	UnknownSeasons   func() UnknownSeasonEvidence
 }
 
 var journalctlExcerpt = func(since time.Time) (string, error) {
@@ -53,6 +63,7 @@ func journalctlDaemonArgs(since time.Time) []string {
 		"-u", "plex2jellyfin-daemon",
 		"--since", since.Local().Format("2006-01-02 15:04:05"),
 		"--no-pager",
+		"--lines", fmt.Sprint(maxDaemonLogExcerptLines),
 	}
 }
 
@@ -108,6 +119,7 @@ func (c Collector) Collect() (BundlePaths, error) {
 	}
 	suspicious = append(suspicious, providerIdentitySuspicious(providerDuplicates)...)
 	metrics := SummarizeDecisionMetrics(decisions, now)
+	activityMetrics := c.activitySummary()
 	states, err := c.DB.CountMetadataStates()
 	if err != nil {
 		return bundle, fmt.Errorf("count outstanding metadata states: %w", err)
@@ -137,6 +149,7 @@ func (c Collector) Collect() (BundlePaths, error) {
 		HousekeepingOutstandingFailed: hk.Outstanding[database.TaskStatusFailed],
 		HousekeepingOutstandingReview: hk.Outstanding[database.TaskStatusFlagged],
 		UnknownSeasonActionable:       unknownSeasons.ActionablePollutionEpisodes,
+		Activity:                      activityMetrics,
 	}
 
 	if err := writeJSON(bundle.File("summary.json"), summary); err != nil {
@@ -399,11 +412,7 @@ func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousI
 		}
 	}
 	for target, sources := range targetSources {
-		totalWrites := 0
-		for _, source := range sources {
-			totalWrites += source.writes
-		}
-		if totalWrites < 2 {
+		if len(sources) < 2 {
 			continue
 		}
 		names := make([]string, 0, len(sources))
@@ -415,7 +424,7 @@ func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousI
 			if source.writes > 1 {
 				name = fmt.Sprintf("%s (%d writes)", name, source.writes)
 			}
-			names = append(names, name)
+			names = append(names, fmt.Sprintf("%s [%s]", name, path))
 		}
 		sort.Strings(names)
 		if len(names) > 4 {
@@ -424,7 +433,7 @@ func suspiciousFromDecisions(decisions []*database.ParseDecision) ([]SuspiciousI
 		suspicious = append(suspicious, SuspiciousItem{
 			Category: "target_collision",
 			Path:     target,
-			Reason:   "multiple successful parse decisions wrote to the same target: " + strings.Join(names, "; "),
+			Reason:   "multiple distinct sources successfully wrote to the same target: " + strings.Join(names, "; "),
 		})
 	}
 	return suspicious, pathFalsePositives
@@ -671,20 +680,213 @@ func (c Collector) daemonLogExcerpt() string {
 		}
 	}
 	if len(lines) > 0 {
-		text := strings.Join(lines, "\n")
+		footer := ""
 		if webWarns > 0 || webErrs > 0 {
-			text += fmt.Sprintf("\n\nweb warnings: warn=%d error=%d (excluded from daemon excerpt)", webWarns, webErrs)
+			footer = fmt.Sprintf("web warnings: warn=%d error=%d (excluded from daemon excerpt)", webWarns, webErrs)
 		}
-		return text
+		return boundedDaemonLogExcerpt(lines, footer)
 	}
 
 	if text, err := journalctlExcerpt(c.Since); err == nil {
-		return text
+		return boundedDaemonLogExcerpt(strings.Split(text, "\n"), "")
 	} else {
 		failures = append(failures, fmt.Sprintf("journalctl plex2jellyfin-daemon: %v", err))
 	}
 
 	return "daemon log unavailable\n" + strings.Join(failures, "\n")
+}
+
+func boundedDaemonLogExcerpt(lines []string, footer string) string {
+	nonEmpty := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line != "" {
+			nonEmpty = append(nonEmpty, line)
+		}
+	}
+	if len(nonEmpty) == 0 {
+		if len(footer) > maxDaemonLogExcerptBytes {
+			return lastUTF8Bytes(footer, maxDaemonLogExcerptBytes)
+		}
+		return footer
+	}
+
+	// Reserve room for the longest cap notice and annotations before keeping log
+	// lines, so the complete emitted excerpt stays within the byte limit.
+	capNotice := fmt.Sprintf("[excerpt capped: older log lines omitted=%d; latest log line truncated; limit=%d lines/%d bytes]\n",
+		len(nonEmpty), maxDaemonLogExcerptLines, maxDaemonLogExcerptBytes)
+	footerBytes := 0
+	if footer != "" {
+		footerBytes = len(footer) + 2
+	}
+	lineBudget := maxDaemonLogExcerptBytes - len(capNotice) - footerBytes
+	if lineBudget < 0 {
+		lineBudget = 0
+	}
+
+	start := len(nonEmpty) - maxDaemonLogExcerptLines
+	if start < 0 {
+		start = 0
+	}
+	var kept []string // newest first while collecting
+	usedBytes := 0
+	lineTruncated := false
+	for i := len(nonEmpty) - 1; i >= start && len(kept) < maxDaemonLogExcerptLines; i-- {
+		line := nonEmpty[i]
+		cost := len(line)
+		if len(kept) > 0 {
+			cost++ // newline separator
+		}
+		remainingBytes := lineBudget - usedBytes
+		if cost <= remainingBytes {
+			kept = append(kept, line)
+			usedBytes += cost
+			continue
+		}
+		if len(kept) == 0 {
+			const marker = "[log line truncated] "
+			if remainingBytes > len(marker) {
+				kept = append(kept, marker+lastUTF8Bytes(line, remainingBytes-len(marker)))
+				lineTruncated = true
+			}
+		}
+		break
+	}
+	omitted := len(nonEmpty) - len(kept)
+	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+		kept[i], kept[j] = kept[j], kept[i]
+	}
+	text := strings.Join(kept, "\n")
+	if omitted > 0 || lineTruncated {
+		header := ""
+		if omitted > 0 {
+			header = fmt.Sprintf("[excerpt capped: older log lines omitted=%d", omitted)
+			if lineTruncated {
+				header += "; latest log line truncated"
+			}
+			header += fmt.Sprintf("; limit=%d lines/%d bytes]\n", maxDaemonLogExcerptLines, maxDaemonLogExcerptBytes)
+		} else {
+			header = fmt.Sprintf("[excerpt capped: log line truncated; limit=%d lines/%d bytes]\n", maxDaemonLogExcerptLines, maxDaemonLogExcerptBytes)
+		}
+		text = header + text
+	}
+	if footer != "" {
+		if text != "" {
+			text += "\n\n"
+		}
+		text += footer
+	}
+	return text
+}
+
+func lastUTF8Bytes(text string, maxBytes int) string {
+	if maxBytes >= len(text) {
+		return text
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+	start := len(text) - maxBytes
+	for start < len(text) && !utf8.RuneStart(text[start]) {
+		start++
+	}
+	return text[start:]
+}
+
+func (c Collector) activitySummary() ActivitySummary {
+	summary := ActivitySummary{TopNonSuccessReasons: []ActivityOutcomeReason{}}
+	if c.ActivityDirError != "" {
+		summary.Error = c.ActivityDirError
+		return summary
+	}
+	if c.ActivityDir == "" {
+		summary.Error = "activity directory was not resolved"
+		return summary
+	}
+	entries, err := os.ReadDir(c.ActivityDir)
+	if err != nil {
+		summary.Error = fmt.Sprintf("read activity directory: %v", err)
+		return summary
+	}
+
+	failureSources := make(map[string]struct{})
+	reasons := make(map[string]int)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, "activity-") || !strings.HasSuffix(name, ".jsonl") {
+			continue
+		}
+		file, err := os.Open(filepath.Join(c.ActivityDir, name))
+		if err != nil {
+			if summary.Error == "" {
+				summary.Error = fmt.Sprintf("read activity file %s: %v", name, err)
+			}
+			continue
+		}
+
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			var item activity.Entry
+			if err := json.Unmarshal(scanner.Bytes(), &item); err != nil || item.Timestamp.IsZero() {
+				continue
+			}
+			if !c.Since.IsZero() && item.Timestamp.Before(c.Since) {
+				continue
+			}
+
+			switch item.Action {
+			case "organize":
+				summary.OrganizationAttempts++
+				if item.Success {
+					summary.OrganizationSucceeded++
+					continue
+				}
+				summary.OrganizationUnsuccessful++
+				if item.Source != "" {
+					failureSources[item.Source] = struct{}{}
+				}
+				if strings.TrimSpace(item.Error) == "" {
+					summary.OrganizationUnsuccessfulWithoutReason++
+				} else {
+					reasons[activityErrorReason(item.Error)]++
+				}
+			case "jellyfin_verification_mismatch":
+				summary.JellyfinVerificationMismatches++
+			case "jellyfin_verification_summary":
+				if !item.Success && strings.Contains(strings.ToLower(item.Error), "inconclusive") {
+					summary.JellyfinVerificationInconclusive++
+				}
+			}
+		}
+		if err := scanner.Err(); err != nil && summary.Error == "" {
+			summary.Error = fmt.Sprintf("scan activity file %s: %v", name, err)
+		}
+		if err := file.Close(); err != nil && summary.Error == "" {
+			summary.Error = fmt.Sprintf("close activity file %s: %v", name, err)
+		}
+	}
+
+	summary.UniqueOrganizationUnsuccessfulSources = len(failureSources)
+	for reason, count := range reasons {
+		summary.TopNonSuccessReasons = append(summary.TopNonSuccessReasons, ActivityOutcomeReason{Reason: reason, Count: count})
+	}
+	sort.Slice(summary.TopNonSuccessReasons, func(i, j int) bool {
+		if summary.TopNonSuccessReasons[i].Count != summary.TopNonSuccessReasons[j].Count {
+			return summary.TopNonSuccessReasons[i].Count > summary.TopNonSuccessReasons[j].Count
+		}
+		return summary.TopNonSuccessReasons[i].Reason < summary.TopNonSuccessReasons[j].Reason
+	})
+	if len(summary.TopNonSuccessReasons) > 5 {
+		summary.TopNonSuccessReasons = summary.TopNonSuccessReasons[:5]
+	}
+	return summary
+}
+
+func activityErrorReason(err string) string {
+	if strings.Contains(strings.ToLower(err), "insufficient space") {
+		return "insufficient disk space"
+	}
+	return strings.TrimSpace(err)
 }
 
 func isNoisyWebLogName(name string) bool {

@@ -460,7 +460,6 @@ func TestDaemonLogExcerptIncludesRotatedSiblingsFilteredFromSince(t *testing.T) 
 	if strings.Contains(got, "GET /api/v1/status") || strings.Contains(got, "access ok") || strings.Contains(got, "GET /health") {
 		t.Fatalf("included web access noise:\n%s", got)
 	}
-	// Full window: no artificial 200-line truncation of in-window content.
 	if len(strings.Split(strings.TrimSpace(got), "\n")) < 3 {
 		t.Fatalf("expected full in-window daemon excerpt, got:\n%s", got)
 	}
@@ -469,7 +468,7 @@ func TestDaemonLogExcerptIncludesRotatedSiblingsFilteredFromSince(t *testing.T) 
 	}
 }
 
-func TestDaemonLogExcerptJournalFallbackIsDaemonOnlyUncapped(t *testing.T) {
+func TestDaemonLogExcerptJournalFallbackIsDaemonOnlyCapped(t *testing.T) {
 	oldJournalctlExcerpt := journalctlExcerpt
 	journalctlExcerpt = func(since time.Time) (string, error) {
 		_ = since
@@ -483,15 +482,124 @@ func TestDaemonLogExcerptJournalFallbackIsDaemonOnlyUncapped(t *testing.T) {
 
 	got := Collector{LogDir: filepath.Join(t.TempDir(), "missing"), Since: time.Now().Add(-96 * time.Hour)}.daemonLogExcerpt()
 
-	if strings.Count(got, "line-") < 250 {
-		t.Fatalf("journal fallback truncated to %d lines, want full window", strings.Count(got, "line-"))
+	if strings.Count(got, "line-") != 200 {
+		t.Fatalf("journal fallback has %d lines, want the latest 200", strings.Count(got, "line-"))
+	}
+	if !strings.Contains(got, "line-249 daemon work") || strings.Contains(got, "line-049 daemon work") {
+		t.Fatalf("journal fallback did not retain the latest lines: %q", got[:min(len(got), 500)])
+	}
+	if !strings.Contains(got, "older log lines omitted") {
+		t.Fatalf("journal fallback should explain truncation: %q", got[:min(len(got), 500)])
 	}
 	if strings.Contains(got, "plex2jellyfin-web") {
 		t.Fatalf("daemon excerpt should not include web unit noise: %q", got)
 	}
 }
 
-func TestJournalctlDaemonArgsAreDaemonOnlyWithoutLineCap(t *testing.T) {
+func TestDaemonLogExcerptCapsFileLogs(t *testing.T) {
+	dir := t.TempDir()
+	var content strings.Builder
+	for i := 0; i < 220; i++ {
+		fmt.Fprintf(&content, "line-%03d daemon work\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plex2jellyfin.log"), []byte(content.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Collector{LogDir: dir}.daemonLogExcerpt()
+	if strings.Count(got, "line-") != 200 {
+		t.Fatalf("file excerpt has %d lines, want the latest 200", strings.Count(got, "line-"))
+	}
+	if !strings.Contains(got, "line-219 daemon work") || strings.Contains(got, "line-019 daemon work") {
+		t.Fatalf("file excerpt did not retain the latest lines: %q", got[:min(len(got), 500)])
+	}
+}
+
+func TestCollectorSummarizesActivityFailures(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 10, 18, 10, 0, 0, 0, time.UTC)
+	configDir := t.TempDir()
+	logDir := filepath.Join(configDir, "logs")
+	activityDir := filepath.Join(configDir, "activity")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(activityDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entries := []string{
+		`{"ts":"2026-10-18T09:00:00Z","action":"organize","source":"/downloads/ok.mkv","success":true}`,
+		`{"ts":"2026-10-18T09:01:00Z","action":"organize","source":"/downloads/a.mkv","success":false,"error":"transfer failed: disk health check failed: insufficient space: need 4 GB, have 400 MB"}`,
+		`{"ts":"2026-10-18T09:02:00Z","action":"organize","source":"/downloads/b.mkv","success":false,"error":"transfer failed: disk health check failed: insufficient space: need 8 GB, have 400 MB"}`,
+		`{"ts":"2026-10-18T09:03:00Z","action":"organize","source":"/downloads/c.mkv","success":false}`,
+		`{"ts":"2026-10-18T09:04:00Z","action":"jellyfin_verification_mismatch","source":"/library/episode.mkv","success":false,"error":"path not confirmed in jellyfin"}`,
+		`{"ts":"2026-10-18T09:05:00Z","action":"jellyfin_verification_summary","success":false,"error":"inconclusive: incomplete jellyfin inventory"}`,
+		`{"ts":"2026-10-10T09:00:00Z","action":"organize","source":"/downloads/old.mkv","success":false,"error":"old failure"}`,
+	}
+	activityPath := filepath.Join(activityDir, "activity-2026-10-18.jsonl")
+	if err := os.WriteFile(activityPath, []byte(strings.Join(entries, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldJournalctlExcerpt := journalctlExcerpt
+	journalctlExcerpt = func(time.Time) (string, error) { return "test log", nil }
+	t.Cleanup(func() { journalctlExcerpt = oldJournalctlExcerpt })
+
+	bundle, err := Collector{
+		DB:          db,
+		Root:        t.TempDir(),
+		Now:         func() time.Time { return now },
+		Since:       now.Add(-96 * time.Hour),
+		LogDir:      logDir,
+		ActivityDir: activityDir,
+	}.Collect()
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	data, err := os.ReadFile(bundle.File("summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary struct {
+		Activity struct {
+			OrganizationAttempts                  int `json:"organization_attempts"`
+			OrganizationSucceeded                 int `json:"organization_succeeded"`
+			OrganizationUnsuccessful              int `json:"organization_unsuccessful"`
+			OrganizationUnsuccessfulWithoutReason int `json:"organization_unsuccessful_without_reason"`
+			UniqueOrganizationUnsuccessfulSources int `json:"unique_organization_unsuccessful_sources"`
+			JellyfinMismatches                    int `json:"jellyfin_verification_mismatches"`
+			JellyfinInconclusive                  int `json:"jellyfin_verification_inconclusive"`
+			TopNonSuccessReasons                  []struct {
+				Reason string `json:"reason"`
+				Count  int    `json:"count"`
+			} `json:"top_non_success_reasons"`
+		} `json:"activity"`
+	}
+	if err := json.Unmarshal(data, &summary); err != nil {
+		t.Fatal(err)
+	}
+	a := summary.Activity
+	if a.OrganizationAttempts != 4 || a.OrganizationSucceeded != 1 || a.OrganizationUnsuccessful != 3 {
+		t.Fatalf("organization counts = attempts:%d succeeded:%d unsuccessful:%d", a.OrganizationAttempts, a.OrganizationSucceeded, a.OrganizationUnsuccessful)
+	}
+	if a.OrganizationUnsuccessfulWithoutReason != 1 || a.UniqueOrganizationUnsuccessfulSources != 3 {
+		t.Fatalf("unclassified unsuccessful outcomes/sources = %d/%d", a.OrganizationUnsuccessfulWithoutReason, a.UniqueOrganizationUnsuccessfulSources)
+	}
+	if a.JellyfinMismatches != 1 || a.JellyfinInconclusive != 1 {
+		t.Fatalf("Jellyfin verification counts = mismatches:%d inconclusive:%d", a.JellyfinMismatches, a.JellyfinInconclusive)
+	}
+	if len(a.TopNonSuccessReasons) != 1 || a.TopNonSuccessReasons[0].Reason != "insufficient disk space" || a.TopNonSuccessReasons[0].Count != 2 {
+		t.Fatalf("top unsuccessful outcome reasons = %+v", a.TopNonSuccessReasons)
+	}
+}
+
+func TestJournalctlDaemonArgsAreDaemonOnlyWithLineCap(t *testing.T) {
 	since := time.Date(2026, 7, 30, 4, 0, 0, 0, time.UTC)
 	args := journalctlDaemonArgs(since)
 	joined := strings.Join(args, " ")
@@ -501,9 +609,12 @@ func TestJournalctlDaemonArgsAreDaemonOnlyWithoutLineCap(t *testing.T) {
 	if strings.Contains(joined, "plex2jellyfin-web") {
 		t.Fatalf("args must not include web unit: %v", args)
 	}
+	if !strings.Contains(joined, "--lines 200") {
+		t.Fatalf("args must cap output at 200 lines: %v", args)
+	}
 	for i := 0; i < len(args)-1; i++ {
-		if args[i] == "-n" {
-			t.Fatalf("args must not cap with -n: %v", args)
+		if args[i] == "--lines" && args[i+1] != "200" {
+			t.Fatalf("args should request the latest 200 lines: %v", args)
 		}
 	}
 }
