@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -91,6 +92,23 @@ func lockOrganizationKey(key string) func() {
 	}
 }
 
+// lockOrganizationKeys takes multiple season locks in stable order to avoid deadlocks.
+func lockOrganizationKeys(keys []string) func() {
+	sort.Strings(keys)
+	unlock := make([]func(), 0, len(keys))
+	for i, key := range keys {
+		if i > 0 && key == keys[i-1] {
+			continue
+		}
+		unlock = append(unlock, lockOrganizationKey(key))
+	}
+	return func() {
+		for i := len(unlock) - 1; i >= 0; i-- {
+			unlock[i]()
+		}
+	}
+}
+
 func organizeWithTargetLock(targetPath string, finalize OrganizationFinalizer, organize func() (*OrganizationResult, error)) (*OrganizationResult, error) {
 	return organizeWithKeyLock(organizationTargetLockKey(targetPath), finalize, organize)
 }
@@ -123,6 +141,9 @@ type SeasonPackResult struct {
 	Error       error
 	BytesCopied int64
 }
+
+// SeasonPackFinalizer records a pack outcome before its show-season locks release.
+type SeasonPackFinalizer func(*SeasonPackResult, error)
 
 type SourceTransferMode uint8
 
@@ -903,18 +924,22 @@ func (o *Organizer) OrganizeTVWithParsedAutoFinalized(sourcePath string, tv nami
 
 func (o *Organizer) organizeTVWithParsedAutoFinalized(sourcePath string, tv naming.TVShowInfo, size int64, finalize OrganizationFinalizer) (*OrganizationResult, error) {
 	return organizeWithKeyLock(tvSeasonOrganizationLockKey(tv), finalize, func() (*OrganizationResult, error) {
-		selection, err := o.selector.SelectTVShowLibrary(tv.Title, tv.Year, size)
-		if err != nil {
-			return &OrganizationResult{
-				Success:    false,
-				SourcePath: sourcePath,
-				Error:      fmt.Errorf("unable to select library: %w", err),
-			}, nil
-		}
-
-		log.Printf("[organizer] tv library selected: title=%q lib=%s reason=%s", tv.Title, selection.Library, selection.Reason)
-		return o.organizeTVWithParsedAtLibrary(sourcePath, selection.Library, tv)
+		return o.organizeTVWithParsedAuto(sourcePath, tv, size)
 	})
+}
+
+func (o *Organizer) organizeTVWithParsedAuto(sourcePath string, tv naming.TVShowInfo, size int64) (*OrganizationResult, error) {
+	selection, err := o.selector.SelectTVShowLibrary(tv.Title, tv.Year, size)
+	if err != nil {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			Error:      fmt.Errorf("unable to select library: %w", err),
+		}, nil
+	}
+
+	log.Printf("[organizer] tv library selected: title=%q lib=%s reason=%s", tv.Title, selection.Library, selection.Reason)
+	return o.organizeTVWithParsedAtLibrary(sourcePath, selection.Library, tv)
 }
 
 func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv naming.TVShowInfo) (*OrganizationResult, error) {
@@ -1268,18 +1293,35 @@ func (o *Organizer) OrganizeTVEpisodeAutoFinalized(sourcePath string, getFileSiz
 }
 
 func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func(string) (int64, error)) (*SeasonPackResult, error) {
+	return o.OrganizeTVSeasonPackAutoFinalized(releaseDir, getFileSize, nil)
+}
+
+// OrganizeTVSeasonPackAutoFinalized holds the affected show-season locks through
+// pack rollback and finalization so another import cannot observe an unfinished pack.
+func (o *Organizer) OrganizeTVSeasonPackAutoFinalized(releaseDir string, getFileSize func(string) (int64, error), finalize SeasonPackFinalizer) (*SeasonPackResult, error) {
 	releaseDir = filepath.Clean(releaseDir)
 	packInfo, err := naming.ParseTVSeasonPackName(filepath.Base(releaseDir))
 	if err != nil {
+		if finalize != nil {
+			finalize(nil, err)
+		}
 		return nil, err
 	}
 
 	videoFiles, err := collectVideoFiles(releaseDir)
 	if err != nil {
+		if finalize != nil {
+			finalize(nil, err)
+		}
 		return nil, err
 	}
 
 	result := &SeasonPackResult{SourceDir: releaseDir}
+	type seasonPackEpisode struct {
+		path string
+		tv   naming.TVShowInfo
+	}
+	episodes := make([]seasonPackEpisode, 0, len(videoFiles))
 	for _, path := range videoFiles {
 		tv, err := naming.ParseTVShowFromPath(path)
 		if err != nil || tv.Season <= 0 || tv.Episode <= 0 {
@@ -1292,42 +1334,79 @@ func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func
 		if tv.Year == "" {
 			tv.Year = packInfo.Year
 		}
+		episodes = append(episodes, seasonPackEpisode{path: path, tv: *tv})
+	}
 
-		itemResult, err := o.OrganizeTVWithParsedAuto(path, *tv, getFileSize)
-		if err != nil {
-			result.Error = err
-			return result, err
+	if len(episodes) == 0 {
+		if naming.IsExtrasRelease(filepath.Base(releaseDir)) {
+			result, err = o.organizeExtrasRelease(releaseDir, packInfo, result)
+		} else {
+			result.Skipped = true
+			result.SkipReason = "season_pack_unresolved"
+			result.Error = fmt.Errorf("season pack has no episode-numbered video files: %s", releaseDir)
 		}
-		result.Imported = append(result.Imported, itemResult)
-		if itemResult != nil {
-			result.BytesCopied += itemResult.BytesCopied
-			if itemResult.Error != nil && !itemResult.Skipped {
-				result.Error = itemResult.Error
-				result.SkipReason = "season_pack_partial_failure"
-				if rollbackErr := rollbackSeasonPackImports(result.Imported); rollbackErr != nil {
-					result.Error = fmt.Errorf("%w; rollback failed: %v", result.Error, rollbackErr)
+		if finalize != nil {
+			finalize(result, err)
+		}
+		return result, err
+	}
+
+	keys := make([]string, 0, len(episodes))
+	for _, episode := range episodes {
+		keys = append(keys, tvSeasonOrganizationLockKey(episode.tv))
+	}
+	var runErr error
+	func() {
+		unlock := lockOrganizationKeys(keys)
+		defer unlock()
+
+		for _, episode := range episodes {
+			info, sizeErr := getFileSize(episode.path)
+			var itemResult *OrganizationResult
+			var itemErr error
+			if sizeErr != nil {
+				itemResult = &OrganizationResult{
+					SourcePath: episode.path,
+					Error:      fmt.Errorf("unable to get file size: %w", sizeErr),
 				}
-				result.Success = false
-				return result, nil
+			} else {
+				itemResult, itemErr = o.organizeTVWithParsedAuto(episode.path, episode.tv, info)
+			}
+			if itemErr != nil {
+				result.Error = itemErr
+				runErr = itemErr
+				if finalize != nil {
+					finalize(result, runErr)
+				}
+				return
+			}
+			result.Imported = append(result.Imported, itemResult)
+			if itemResult != nil {
+				result.BytesCopied += itemResult.BytesCopied
+				if itemResult.Error != nil && !itemResult.Skipped {
+					result.Error = itemResult.Error
+					result.SkipReason = "season_pack_partial_failure"
+					if rollbackErr := rollbackSeasonPackImports(result.Imported); rollbackErr != nil {
+						result.Error = fmt.Errorf("%w; rollback failed: %v", result.Error, rollbackErr)
+					}
+					result.Success = false
+					if finalize != nil {
+						finalize(result, nil)
+					}
+					return
+				}
 			}
 		}
-	}
 
-	if len(result.Imported) == 0 {
-		if naming.IsExtrasRelease(filepath.Base(releaseDir)) {
-			return o.organizeExtrasRelease(releaseDir, packInfo, result)
+		result.Success = result.Error == nil
+		if !result.Success && result.SkipReason == "" {
+			result.SkipReason = "season_pack_partial_failure"
 		}
-		result.Skipped = true
-		result.SkipReason = "season_pack_unresolved"
-		result.Error = fmt.Errorf("season pack has no episode-numbered video files: %s", releaseDir)
-		return result, nil
-	}
-
-	result.Success = result.Error == nil
-	if !result.Success && result.SkipReason == "" {
-		result.SkipReason = "season_pack_partial_failure"
-	}
-	return result, nil
+		if finalize != nil {
+			finalize(result, nil)
+		}
+	}()
+	return result, runErr
 }
 
 // organizeExtrasRelease routes a bonus/extras release into the matching show's

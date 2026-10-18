@@ -1280,16 +1280,18 @@ func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID i
 		}
 	}
 
-	packResult, err := h.tvOrganizer.OrganizeTVSeasonPackAuto(releaseDir, func(p string) (int64, error) {
+	packResult, err := h.tvOrganizer.OrganizeTVSeasonPackAutoFinalized(releaseDir, func(p string) (int64, error) {
 		info, err := os.Stat(p)
 		if err != nil {
 			return 0, err
 		}
 		return info.Size(), nil
+	}, func(packResult *organizer.SeasonPackResult, err error) {
+		result := h.seasonPackOrganizationResult(path, releaseDir, packResult, err)
+		h.updateDecisionOrganize(decisionID, result, err)
 	})
 
 	result := h.seasonPackOrganizationResult(path, releaseDir, packResult, err)
-	h.updateDecisionOrganize(decisionID, result, nil)
 
 	sonarrNotified := false
 	if packResult != nil {

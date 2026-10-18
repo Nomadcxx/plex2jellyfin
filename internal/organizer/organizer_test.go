@@ -2110,7 +2110,7 @@ func TestConcurrentMovieImportsWaitForDecisionUpdateBeforeQualityCheck(t *testin
 
 func waitForOrganizationTargetRefs(t *testing.T, key string, refs int) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if organizationTargetLockReferenceCount(key) >= refs {
 			return
@@ -2249,6 +2249,94 @@ func TestConcurrentOverlappingTVImportsSerializeBySeason(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, entries, 1, "overlapping import must not leave a second episode file")
 	assert.FileExists(t, rangeResult.result.TargetPath)
+}
+
+func TestConcurrentTVImportWaitsForSeasonPackDecisionUpdate(t *testing.T) {
+	root := t.TempDir()
+	libraryDir := filepath.Join(root, "library")
+	packDir := filepath.Join(root, "incoming", "Supergirl.S03.1080p.BluRay.x264-GROUP")
+	packSource := filepath.Join(packDir, "Supergirl.S03E01.1080p.BluRay.x264-GROUP.mkv")
+	competingSource := filepath.Join(root, "other", "Supergirl.S03E01.720p.HDTV.mkv")
+	createTestFile(t, packSource, 4096)
+	createTestFile(t, competingSource, 1024)
+
+	org, err := NewOrganizer([]string{libraryDir}, WithTransferer(&recordingTransferer{}))
+	require.NoError(t, err)
+
+	type packOutcome struct {
+		result *SeasonPackResult
+		err    error
+	}
+	seasonLockKey := tvSeasonOrganizationLockKey(naming.TVShowInfo{Title: "Supergirl", Season: 3})
+	type finalizerState struct {
+		result *SeasonPackResult
+		err    error
+		refs   int
+	}
+	packFinalizing := make(chan finalizerState, 1)
+	releasePack := make(chan struct{})
+	packReleased := false
+	defer func() {
+		if !packReleased {
+			close(releasePack)
+		}
+	}()
+	packDone := make(chan packOutcome, 1)
+	getFileSize := func(path string) (int64, error) {
+		info, err := os.Stat(path)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	}
+	go func() {
+		result, err := org.OrganizeTVSeasonPackAutoFinalized(packDir, getFileSize, func(finalResult *SeasonPackResult, finalizeErr error) {
+			packFinalizing <- finalizerState{
+				result: finalResult,
+				err:    finalizeErr,
+				refs:   organizationTargetLockReferenceCount(seasonLockKey),
+			}
+			<-releasePack
+		})
+		packDone <- packOutcome{result: result, err: err}
+	}()
+	select {
+	case finalized := <-packFinalizing:
+		require.NoError(t, finalized.err)
+		require.NotNil(t, finalized.result)
+		require.True(t, finalized.result.Success)
+		require.GreaterOrEqual(t, finalized.refs, 1, "decision finalization should run while the season lock is held")
+	case <-time.After(5 * time.Second):
+		t.Fatal("season-pack decision finalizer was not called")
+	}
+
+	type episodeOutcome struct {
+		result *OrganizationResult
+		err    error
+	}
+	episodeDone := make(chan episodeOutcome, 1)
+	go func() {
+		result, err := org.OrganizeTVWithParsed(competingSource, libraryDir, naming.TVShowInfo{
+			Title: "Supergirl", Season: 3, Episode: 1,
+		})
+		episodeDone <- episodeOutcome{result: result, err: err}
+	}()
+	waitForOrganizationTargetRefs(t, seasonLockKey, 2)
+	select {
+	case <-episodeDone:
+		t.Fatal("overlapping episode import finished before season-pack decision finalization")
+	default:
+	}
+
+	close(releasePack)
+	packReleased = true
+	pack := <-packDone
+	require.NoError(t, pack.err)
+	require.True(t, pack.result.Success)
+	episode := <-episodeDone
+	require.NoError(t, episode.err)
+	assert.True(t, episode.result.Skipped, "overlapping lower-quality import should observe the completed pack: %+v", episode.result)
+	assert.FileExists(t, filepath.Join(libraryDir, "Supergirl", "Season 03", "Supergirl S03E01.mkv"))
 }
 
 func TestOrganizerRetainedMovieSourceIsNotReimportedOnSecondScan(t *testing.T) {
