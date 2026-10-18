@@ -206,6 +206,8 @@ More detail: [architecture](https://nomadcxx.github.io/plex2jellyfin/docs/refere
 
 The parser strips scene/release noise (`1080p`, `x264`, `WEB-DL`, `RARBG`, `-YTS`, etc.), keeps title words that look like noise (`All`, `IT`, `Her`, `Rome`), and reads quality tags from parent folders when filenames lack them.
 
+p2j compares quality tags from the incoming file with tags in the existing filename or saved import record. It skips replacement when either side lacks quality evidence or the existing copy rates as equal or better. A database reset removes import records but leaves media files in place. Check the existing file before rerunning `plex2jellyfin organize --force`.
+
 | Incoming file | Parsed result |
 | --- | --- |
 | `Breaking.Bad.S01E01.1080p.WEB-DL.DDP5.1.H.264-FLUX.mkv` | `Breaking Bad` / `S01E01`; strips codec, audio, source, release group |

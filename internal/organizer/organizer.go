@@ -45,8 +45,8 @@ type OrganizationResult struct {
 	sourceRetained bool
 }
 
-// OrganizationFinalizer records an organize result before its target lock is
-// released, when one has been acquired. It must not organize the same target.
+// OrganizationFinalizer records an organize result before its organization
+// lock is released, when one has been acquired. It must not organize the same target.
 type OrganizationFinalizer func(*OrganizationResult, error)
 
 type organizationTargetLock struct {
@@ -61,12 +61,15 @@ var organizationTargetLocks = struct {
 	locks map[string]*organizationTargetLock
 }{locks: make(map[string]*organizationTargetLock)}
 
-func lockOrganizationTarget(targetPath string) func() {
+func organizationTargetLockKey(targetPath string) string {
 	key, err := filepath.Abs(targetPath)
 	if err != nil {
 		key = filepath.Clean(targetPath)
 	}
+	return key
+}
 
+func lockOrganizationKey(key string) func() {
 	organizationTargetLocks.Lock()
 	lock := organizationTargetLocks.locks[key]
 	if lock == nil {
@@ -89,7 +92,11 @@ func lockOrganizationTarget(targetPath string) func() {
 }
 
 func organizeWithTargetLock(targetPath string, finalize OrganizationFinalizer, organize func() (*OrganizationResult, error)) (*OrganizationResult, error) {
-	unlock := lockOrganizationTarget(targetPath)
+	return organizeWithKeyLock(organizationTargetLockKey(targetPath), finalize, organize)
+}
+
+func organizeWithKeyLock(key string, finalize OrganizationFinalizer, organize func() (*OrganizationResult, error)) (*OrganizationResult, error) {
+	unlock := lockOrganizationKey(key)
 	defer unlock()
 
 	result, err := organize()
@@ -406,7 +413,7 @@ func qualityReplacementSkipReason(sourceQuality, existingQuality *quality.Qualit
 		return "incoming file quality evidence is unavailable"
 	}
 	if !hasQualityEvidence(existingQuality) {
-		return "existing file quality evidence is unavailable"
+		return "existing file quality evidence is unavailable; verify the existing copy, then rerun organize --force to replace it"
 	}
 	if !sourceQuality.IsBetterThan(existingQuality) {
 		return fmt.Sprintf("existing file has equal or better quality (%s vs %s)", existingQuality.String(), sourceQuality.String())
@@ -852,8 +859,8 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 	return o.OrganizeTVEpisodeFinalized(sourcePath, libraryPath, nil)
 }
 
-// OrganizeTVEpisodeFinalized invokes finalize before releasing the target lock
-// when parsing succeeds.
+// OrganizeTVEpisodeFinalized invokes finalize before releasing the show-season
+// lock when parsing succeeds.
 func (o *Organizer) OrganizeTVEpisodeFinalized(sourcePath, libraryPath string, finalize OrganizationFinalizer) (*OrganizationResult, error) {
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
@@ -879,8 +886,8 @@ func (o *Organizer) OrganizeTVWithParsedAuto(sourcePath string, tv naming.TVShow
 	return o.OrganizeTVWithParsedAutoFinalized(sourcePath, tv, getFileSize, nil)
 }
 
-// OrganizeTVWithParsedAutoFinalized invokes finalize before releasing the
-// selected target lock when selection succeeds.
+// OrganizeTVWithParsedAutoFinalized selects and organizes under the show-season
+// lock so concurrent imports cannot choose different libraries for one episode.
 func (o *Organizer) OrganizeTVWithParsedAutoFinalized(sourcePath string, tv naming.TVShowInfo, getFileSize func(string) (int64, error), finalize OrganizationFinalizer) (*OrganizationResult, error) {
 	size, err := getFileSize(sourcePath)
 	if err != nil {
@@ -891,40 +898,54 @@ func (o *Organizer) OrganizeTVWithParsedAutoFinalized(sourcePath string, tv nami
 		}, nil, finalize)
 	}
 
-	selection, err := o.selector.SelectTVShowLibrary(tv.Title, tv.Year, size)
-	if err != nil {
-		return finalizeOrganization(&OrganizationResult{
-			Success:    false,
-			SourcePath: sourcePath,
-			Error:      fmt.Errorf("unable to select library: %w", err),
-		}, nil, finalize)
-	}
+	return o.organizeTVWithParsedAutoFinalized(sourcePath, tv, size, finalize)
+}
 
-	log.Printf("[organizer] tv library selected (parsed): title=%q lib=%s reason=%s", tv.Title, selection.Library, selection.Reason)
+func (o *Organizer) organizeTVWithParsedAutoFinalized(sourcePath string, tv naming.TVShowInfo, size int64, finalize OrganizationFinalizer) (*OrganizationResult, error) {
+	return organizeWithKeyLock(tvSeasonOrganizationLockKey(tv), finalize, func() (*OrganizationResult, error) {
+		selection, err := o.selector.SelectTVShowLibrary(tv.Title, tv.Year, size)
+		if err != nil {
+			return &OrganizationResult{
+				Success:    false,
+				SourcePath: sourcePath,
+				Error:      fmt.Errorf("unable to select library: %w", err),
+			}, nil
+		}
 
-	return o.OrganizeTVWithParsedFinalized(sourcePath, selection.Library, tv, finalize)
+		log.Printf("[organizer] tv library selected: title=%q lib=%s reason=%s", tv.Title, selection.Library, selection.Reason)
+		return o.organizeTVWithParsedAtLibrary(sourcePath, selection.Library, tv)
+	})
 }
 
 func (o *Organizer) OrganizeTVWithParsed(sourcePath, libraryPath string, tv naming.TVShowInfo) (*OrganizationResult, error) {
 	return o.OrganizeTVWithParsedFinalized(sourcePath, libraryPath, tv, nil)
 }
 
-// OrganizeTVWithParsedFinalized holds the episode target lock through finalize.
+// OrganizeTVWithParsedFinalized holds the show-season lock through finalize.
 func (o *Organizer) OrganizeTVWithParsedFinalized(sourcePath, libraryPath string, tv naming.TVShowInfo, finalize OrganizationFinalizer) (*OrganizationResult, error) {
+	return organizeWithKeyLock(tvSeasonOrganizationLockKey(tv), finalize, func() (*OrganizationResult, error) {
+		return o.organizeTVWithParsedAtLibrary(sourcePath, libraryPath, tv)
+	})
+}
+
+func (o *Organizer) organizeTVWithParsedAtLibrary(sourcePath, libraryPath string, tv naming.TVShowInfo) (*OrganizationResult, error) {
 	showDir := findExistingShowDir(libraryPath, tv.Title)
 	reusingExistingShowDir := showDir != ""
 	if showDir == "" {
-		showName := naming.NormalizeMediaName(tv.Title, tv.Year)
-		showDir = filepath.Join(libraryPath, showName)
+		showDir = filepath.Join(libraryPath, naming.NormalizeMediaName(tv.Title, tv.Year))
 	}
 	seasonDir := findExistingSeasonDir(showDir, tv.Season)
 	if seasonDir == "" {
 		seasonDir = filepath.Join(showDir, naming.FormatSeasonFolder(tv.Season))
 	}
-	lockTarget := filepath.Join(seasonDir, fmt.Sprintf("S%02dE%02d", tv.Season, tv.Episode))
-	return organizeWithTargetLock(lockTarget, finalize, func() (*OrganizationResult, error) {
-		return o.organizeTVWithParsed(sourcePath, libraryPath, tv, showDir, seasonDir, reusingExistingShowDir)
-	})
+	return o.organizeTVWithParsed(sourcePath, libraryPath, tv, showDir, seasonDir, reusingExistingShowDir)
+}
+
+// ponytail: One lock per show-season also serializes unrelated episodes in
+// that season; range-aware locks can restore parallel episode imports later.
+func tvSeasonOrganizationLockKey(tv naming.TVShowInfo) string {
+	show := database.NormalizeForMatch(tv.Title)
+	return fmt.Sprintf("tv-season:%s:%d", show, tv.Season)
 }
 
 func (o *Organizer) organizeTVWithParsed(sourcePath, libraryPath string, tv naming.TVShowInfo, showDir, seasonDir string, reusingExistingShowDir bool) (*OrganizationResult, error) {
@@ -1223,8 +1244,7 @@ func (o *Organizer) OrganizeTVEpisodeAuto(sourcePath string, getFileSize func(st
 	return o.OrganizeTVEpisodeAutoFinalized(sourcePath, getFileSize, nil)
 }
 
-// OrganizeTVEpisodeAutoFinalized invokes finalize before releasing the selected
-// target lock when parsing and selection succeed.
+// OrganizeTVEpisodeAutoFinalized parses and selects under the show-season lock.
 func (o *Organizer) OrganizeTVEpisodeAutoFinalized(sourcePath string, getFileSize func(string) (int64, error), finalize OrganizationFinalizer) (*OrganizationResult, error) {
 	info, err := getFileSize(sourcePath)
 	if err != nil {
@@ -1244,20 +1264,7 @@ func (o *Organizer) OrganizeTVEpisodeAutoFinalized(sourcePath string, getFileSiz
 		}, nil, finalize)
 	}
 
-	selection, err := o.selector.SelectTVShowLibrary(tv.Title, tv.Year, info)
-	if err != nil {
-		return finalizeOrganization(&OrganizationResult{
-			Success:    false,
-			SourcePath: sourcePath,
-			Error:      fmt.Errorf("unable to select library: %w", err),
-		}, nil, finalize)
-	}
-
-	// Surface the selector's reasoning so "why did this land on STORAGE3
-	// instead of STORAGE5" is answerable from the logs alone.
-	log.Printf("[organizer] tv library selected: title=%q lib=%s reason=%s", tv.Title, selection.Library, selection.Reason)
-
-	return o.OrganizeTVEpisodeFinalized(sourcePath, selection.Library, finalize)
+	return o.organizeTVWithParsedAutoFinalized(sourcePath, *tv, info, finalize)
 }
 
 func (o *Organizer) OrganizeTVSeasonPackAuto(releaseDir string, getFileSize func(string) (int64, error)) (*SeasonPackResult, error) {
