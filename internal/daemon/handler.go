@@ -107,6 +107,7 @@ type PendingItem struct {
 const (
 	maxAIRetryAttempts             = 10
 	negativeCacheHydrationLookback = 30 * 24 * time.Hour
+	sampleVideoSkipReason          = "sample video; intentionally skipped"
 )
 
 // aiRetryBackoff returns the backoff duration for a given attempt count.
@@ -505,6 +506,9 @@ func (h *MediaHandler) HandleFileEvent(event watcher.FileEvent) error {
 	if h.isInsideLibrary(normalizedPath) {
 		return nil
 	}
+	if h.skipSampleVideo(normalizedPath) {
+		return nil
+	}
 
 	if action == ingestDefer {
 		h.mu.Lock()
@@ -824,6 +828,9 @@ func (h *MediaHandler) processFile(path string) {
 		delete(h.pending, path)
 		delete(h.transientRetries, path)
 		h.mu.Unlock()
+		return
+	}
+	if h.skipSampleVideo(path) {
 		return
 	}
 
@@ -1526,13 +1533,30 @@ func (h *MediaHandler) recordTargetHealth(target string, healthy bool, err error
 }
 
 func (h *MediaHandler) IsMediaFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	mediaExts := map[string]bool{
-		".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
-		".wmv": true, ".flv": true, ".webm": true, ".m4v": true,
-		".mpg": true, ".mpeg": true, ".m2ts": true, ".ts": true,
+	return video.IsVideo(path)
+}
+
+func (h *MediaHandler) skipSampleVideo(path string) bool {
+	if !video.IsSampleVideo(path) {
+		return false
 	}
-	return mediaExts[ext]
+
+	_, _, lastErr := h.retryCache.IsDeferred(path)
+	if lastErr != sampleVideoSkipReason {
+		h.retryCache.Forget(path)
+		h.retryCache.Record(path, sampleVideoSkipReason)
+		if h.logger != nil {
+			h.logger.Info("handler", "Skipping sample video", logging.F("path", path), logging.F("reason", sampleVideoSkipReason))
+		}
+	}
+
+	h.mu.Lock()
+	h.stopPendingTimerLocked(path)
+	delete(h.pendingGen, path)
+	delete(h.transientRetries, path)
+	delete(h.transientWarned, path)
+	h.mu.Unlock()
+	return true
 }
 
 // containsVideoFilesRecursive reports whether dir or any of its descendants

@@ -8,6 +8,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
 	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
+	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 	"github.com/Nomadcxx/plex2jellyfin/internal/watcher"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -118,4 +119,73 @@ func TestMediaHandlerMultiFileSeedingReleaseRetainsCompanions(t *testing.T) {
 	assert.FileExists(t, source)
 	assert.FileExists(t, nfo)
 	assert.FileExists(t, sample)
+}
+
+func TestMediaHandlerSkipsSampleVideosAcrossWatchRoots(t *testing.T) {
+	root := t.TempDir()
+	watch := config.WatchConfig{
+		TV:            []string{filepath.Join(root, "watch-tv")},
+		Movies:        []string{filepath.Join(root, "watch-movies")},
+		SeedingTV:     []string{filepath.Join(root, "seed-tv")},
+		SeedingMovies: []string{filepath.Join(root, "seed-movies")},
+	}
+	movieLib := filepath.Join(root, "movies")
+	tvLib := filepath.Join(root, "tv")
+	require.NoError(t, os.MkdirAll(movieLib, 0o755))
+	require.NoError(t, os.MkdirAll(tvLib, 0o755))
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:  []string{tvLib},
+		MovieLibs:    []string{movieLib},
+		Watch:        watch,
+		DeleteSource: true,
+		Backend:      transfer.BackendNative,
+		Logger:       logging.Nop(),
+	})
+	require.NoError(t, err)
+
+	sources := []string{
+		filepath.Join(watch.TV[0], "Sample", "Show.S01E01.mkv"),
+		filepath.Join(watch.Movies[0], "Movie.2026.sample.mkv"),
+		filepath.Join(watch.SeedingTV[0], "samples", "Show.S01E02.mkv"),
+		filepath.Join(watch.SeedingMovies[0], "Movie.2026.SAMPLE.mkv"),
+	}
+	for _, source := range sources {
+		require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+		require.NoError(t, os.WriteFile(source, []byte("sample"), 0o644))
+		require.NoError(t, handler.HandleFileEvent(watcher.FileEvent{Path: source, Type: watcher.EventCreate}))
+		assert.FileExists(t, source, "sample source must be retained")
+		deferred, _, reason := handler.retryCache.IsDeferred(source)
+		assert.True(t, deferred, "sample source should be cached")
+		assert.Equal(t, sampleVideoSkipReason, reason)
+		handler.mu.Lock()
+		_, queued := handler.pending[source]
+		handler.mu.Unlock()
+		assert.False(t, queued, "sample source must not be scheduled")
+	}
+
+	// The initial scan calls processFile directly and must use the same guard.
+	direct := filepath.Join(watch.SeedingMovies[0], "Direct.2026.Sample.mkv")
+	require.NoError(t, os.WriteFile(direct, []byte("sample"), 0o644))
+	handler.processFile(direct)
+	assert.FileExists(t, direct, "directly scanned sample must be retained")
+
+	movieEntries, err := os.ReadDir(movieLib)
+	require.NoError(t, err)
+	assert.Empty(t, movieEntries, "sample videos must not enter the library")
+}
+
+func TestIsSampleVideoPathRequiresSampleFilenameSuffix(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		want bool
+	}{
+		{path: "Movie.2026.sample.mkv", want: true},
+		{path: "Show.S01E01.SAMPLE.mkv", want: true},
+		{path: "Movie.Sample.2026.mkv", want: false},
+		{path: "Show.S01E01.Sample-Season.mkv", want: false},
+		{path: "Samples/Show.S01E01.mkv", want: true},
+	} {
+		assert.Equal(t, test.want, video.IsSampleVideo(test.path), test.path)
+	}
 }
