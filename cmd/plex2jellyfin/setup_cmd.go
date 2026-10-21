@@ -789,7 +789,7 @@ func wizardPluginStep(ctx context.Context, p *prompter, out io.Writer, deps setu
 		return wizardPluginState{skipped: "jellyfin unreachable"}
 	}
 	if !insp.ABISupported {
-		fmt.Fprintf(out, "  Jellyfin %s cannot load the companion plugin (needs 10.11.x); see the docs for manual options\n", insp.ServerVersion)
+		fmt.Fprintf(out, "  Jellyfin %s cannot load the companion plugin (requires 10.11.x or 12.x); see the docs for manual options\n", insp.ServerVersion)
 		return wizardPluginState{skipped: "unsupported server"}
 	}
 	if insp.InstalledVersion != "" && insp.PluginResponding {

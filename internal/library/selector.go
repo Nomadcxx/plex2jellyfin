@@ -69,27 +69,42 @@ func (s *Selector) SelectMovieLibrary(movieTitle string, year string, fileSize i
 		return nil, fmt.Errorf("no libraries configured")
 	}
 
-	// HOLDEN Phase 3: Check database first for existing movie
+	// A known movie stays on its canonical library. Sending a replacement to
+	// another root when that disk is full would create a second library copy.
 	if s.db != nil && year != "" {
 		yearInt := 0
 		fmt.Sscanf(year, "%d", &yearInt)
 
 		movie, err := s.db.GetMovieByTitle(movieTitle, yearInt)
-		if err == nil && movie != nil && movie.CanonicalPath != "" {
-			// Movie exists in database - use that library
-			for _, lib := range s.libraries {
-				if strings.HasPrefix(movie.CanonicalPath, lib) {
-					available, err := getAvailableSpace(lib)
-					if err == nil && available >= fileSize {
-						sourceDesc := fmt.Sprintf("Database canonical path (%s): %s", movie.Source, movie.CanonicalPath)
-						return &SelectionResult{
-							Library:   lib,
-							Reason:    sourceDesc,
-							Available: available,
-						}, nil
-					}
-				}
+		if err != nil {
+			return nil, fmt.Errorf("lookup canonical movie: %w", err)
+		}
+		if movie != nil {
+			placementPath, placementKind := movie.CanonicalPath, "canonical path"
+			if placementPath == "" {
+				placementPath, placementKind = movie.LibraryRoot, "library root"
 			}
+			if placementPath == "" {
+				return nil, fmt.Errorf("known movie %q (%d) has no canonical path or library root", movie.Title, movie.Year)
+			}
+
+			canonicalLibrary := libraryContainingPath(placementPath, s.libraries)
+			if canonicalLibrary != "" {
+				available, err := getAvailableSpace(canonicalLibrary)
+				if err != nil {
+					return nil, fmt.Errorf("movie exists in canonical library %s but free space is unavailable: %w", canonicalLibrary, err)
+				}
+				if available < fileSize {
+					return nil, fmt.Errorf("insufficient space in canonical movie library %s: need %d, have %d", canonicalLibrary, fileSize, available)
+				}
+				sourceDesc := fmt.Sprintf("Database %s (%s): %s", placementKind, movie.Source, placementPath)
+				return &SelectionResult{
+					Library:   canonicalLibrary,
+					Reason:    sourceDesc,
+					Available: available,
+				}, nil
+			}
+			return nil, fmt.Errorf("movie %s %s is outside configured movie libraries", placementKind, placementPath)
 		}
 	}
 
@@ -133,7 +148,7 @@ func (s *Selector) SelectMovieLibrary(movieTitle string, year string, fileSize i
 	}
 
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("no suitable libraries found with sufficient space")
+		return nil, fmt.Errorf("insufficient space: no suitable movie library has room for %d bytes", fileSize)
 	}
 
 	var best *SelectionResult
@@ -145,6 +160,22 @@ func (s *Selector) SelectMovieLibrary(movieTitle string, year string, fileSize i
 	}
 
 	return best, nil
+}
+
+func libraryContainingPath(path string, libraries []string) string {
+	if path == "" {
+		return ""
+	}
+
+	var containingLibrary string
+	for _, library := range libraries {
+		rel, err := filepath.Rel(filepath.Clean(library), filepath.Clean(path))
+		inside := err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		if inside && (containingLibrary == "" || len(filepath.Clean(library)) > len(filepath.Clean(containingLibrary))) {
+			containingLibrary = library
+		}
+	}
+	return containingLibrary
 }
 
 func (s *Selector) SelectTVShowLibrary(showName string, year string, fileSize int64) (*SelectionResult, error) {

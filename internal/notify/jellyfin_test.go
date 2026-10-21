@@ -107,6 +107,9 @@ func TestJellyfinNotifierPing(t *testing.T) {
 	n := NewJellyfinNotifier("http://jf.local", "key", true)
 	n.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.Method == http.MethodGet && req.URL.Path == "/System/Info" {
+			if got := req.Header.Get("Authorization"); !strings.Contains(got, `Token="key"`) {
+				t.Fatalf("expected MediaBrowser authorization with API token, got %q", got)
+			}
 			return jsonResponse(200, `{}`), nil
 		}
 		return jsonResponse(404, `{}`), nil

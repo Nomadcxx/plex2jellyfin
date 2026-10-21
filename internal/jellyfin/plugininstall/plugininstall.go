@@ -21,10 +21,12 @@ const (
 	RepoName    = "Plex2Jellyfin (official)"
 	ManifestURL = "https://raw.githubusercontent.com/Nomadcxx/plex2jellyfin-plugin/main/manifest.json"
 
-	// The plugin targets ABI 10.11.0.0; older servers cannot load it and
-	// newer major ABIs are unknown until tested.
 	requiredVersionPrefix = "10.11."
 )
+
+func supportedServerVersion(version string) bool {
+	return strings.HasPrefix(version, requiredVersionPrefix) || strings.HasPrefix(version, "12.")
+}
 
 // Engine drives plugin installation against one Jellyfin server.
 type Engine struct {
@@ -83,7 +85,7 @@ func (e *Engine) do(ctx context.Context, method, path string, body, result any) 
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("X-Emby-Token", e.apiKey)
+	req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Token="%s", Client="plex2jellyfin", Device="plex2jellyfin-daemon", DeviceId="plex2jellyfin-daemon", Version="1.0.0"`, e.apiKey))
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -125,7 +127,7 @@ func (e *Engine) Inspect(ctx context.Context) (*Inspection, error) {
 	}
 	insp := &Inspection{
 		ServerVersion: info.Version,
-		ABISupported:  strings.HasPrefix(info.Version, requiredVersionPrefix),
+		ABISupported:  supportedServerVersion(info.Version),
 	}
 
 	var repos []repositoryInfo

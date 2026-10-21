@@ -106,7 +106,7 @@ func runPluginInstall(ctx context.Context, deps pluginDeps, stdin io.Reader, out
 		return fmt.Errorf("inspect Jellyfin: %w", err)
 	}
 	if !insp.ABISupported {
-		return fmt.Errorf("Jellyfin %s is not supported: the plugin needs 10.11.x", insp.ServerVersion)
+		return fmt.Errorf("Jellyfin %s is not supported: the plugin requires 10.11.x or 12.x", insp.ServerVersion)
 	}
 
 	if insp.InstalledVersion != "" && insp.PluginResponding {

@@ -55,8 +55,8 @@ func TestGetSystemInfo_MakesExpectedHTTPRequest(t *testing.T) {
 	if gotPath != "/System/Info" {
 		t.Fatalf("path = %s, want /System/Info", gotPath)
 	}
-	if !strings.Contains(gotAuth, `Token="secret-key"`) {
-		t.Fatalf("expected auth header to include API token, got %q", gotAuth)
+	if !strings.Contains(gotAuth, `Token="secret-key"`) || !strings.Contains(gotAuth, `Client="plex2jellyfin"`) {
+		t.Fatalf("expected MediaBrowser authorization with API token, got %q", gotAuth)
 	}
 	if info == nil || info.ServerName != "Jellyfin" {
 		t.Fatalf("unexpected response: %+v", info)

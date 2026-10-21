@@ -280,6 +280,7 @@ func IsRetryableResourceFailure(errMsg string) bool {
 	msg := strings.ToLower(errMsg)
 	for _, pattern := range []string{
 		"insufficient space",
+		"free space is unavailable",
 		"not enough space",
 		"no space left on device",
 	} {

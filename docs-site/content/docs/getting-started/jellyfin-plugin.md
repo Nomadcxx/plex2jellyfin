@@ -20,9 +20,9 @@ not enough when `/movies1` never matches `/mnt/.../MOVIES`.
 
 ## Compatibility
 
-- Jellyfin **10.11.x** (`targetAbi 10.11.0.0`)
-- Jellyfin 10.11 moved to .NET 9, so the plugin targets `net9.0` and will
-  not load on 10.10 or older. Building it needs the .NET 9 SDK (or newer).
+- Jellyfin **10.11.x** uses plugin 1.2.0 (`targetAbi 10.11.0.0`, `net9.0`).
+- Jellyfin **12.x** uses plugin 1.3.0 (`targetAbi 12.0.0.0`, `net10.0`).
+- Jellyfin 10.10 and older are not supported.
 
 ## Automatic install (recommended)
 

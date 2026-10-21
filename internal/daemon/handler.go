@@ -17,6 +17,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
+	"github.com/Nomadcxx/plex2jellyfin/internal/library"
 	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/Nomadcxx/plex2jellyfin/internal/notify"
@@ -31,6 +32,7 @@ import (
 type MediaHandler struct {
 	tvOrganizer      *organizer.Organizer // NEW: TV-specific organizer
 	movieOrganizer   *organizer.Organizer // NEW: Movie-specific organizer
+	movieSelector    *library.Selector
 	notifyManager    *notify.Manager
 	tvLibraries      []string
 	movieLibs        []string
@@ -388,6 +390,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 	handler := &MediaHandler{
 		tvOrganizer:       tvOrganizer,
 		movieOrganizer:    movieOrganizer,
+		movieSelector:     library.NewSelectorWithConfig(library.SelectorConfig{Libraries: cfg.MovieLibs, DB: cfg.Database}),
 		notifyManager:     cfg.NotifyManager,
 		tvLibraries:       cfg.TVLibraries,
 		movieLibs:         cfg.MovieLibs,
@@ -1109,28 +1112,40 @@ func (h *MediaHandler) processFile(path string) {
 				}
 			}
 
-			confidence := naming.CalculateTitleConfidence(movieInfo.Title, filename)
-			if h.shouldQueueForAI(path, filename, nil, movieInfo, confidence) {
-				h.markDecisionQueued(decisionID)
-				h.queueForAI(path, filename, nil, movieInfo, "movie", confidence, targetLib, decisionID)
-				return
+			selectedLibrary, selectErr := h.selectMovieLibrary(path, movieInfo.Title, movieInfo.Year)
+			if selectErr != nil {
+				err = fmt.Errorf("select movie library: %w", selectErr)
+				h.updateDecisionOrganize(decisionID, nil, err)
+			} else {
+				targetLib = selectedLibrary
 			}
-			if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
-				h.logger.Info("handler", "AI enhancement skipped for deterministic movie parse",
-					logging.F("filename", filename),
-					logging.F("confidence", confidence))
+
+			if err == nil {
+				confidence := naming.CalculateTitleConfidence(movieInfo.Title, filename)
+				if h.shouldQueueForAI(path, filename, nil, movieInfo, confidence) {
+					h.markDecisionQueued(decisionID)
+					h.queueForAI(path, filename, nil, movieInfo, "movie", confidence, targetLib, decisionID)
+					return
+				}
+				if h.aiEnabled && confidence < h.aiConfig.AutoTriggerThreshold {
+					h.logger.Info("handler", "AI enhancement skipped for deterministic movie parse",
+						logging.F("filename", filename),
+						logging.F("confidence", confidence))
+				}
 			}
 		}
 
-		if !h.checkTargetHealth(targetLib) {
+		if err == nil && !h.checkTargetHealth(targetLib) {
 			h.logger.Warn("handler", "Target library unhealthy, skipping", logging.F("filename", filename), logging.F("target", targetLib))
 			h.updateDecisionOrganize(decisionID, nil, fmt.Errorf("target library unhealthy: %s", targetLib))
 			return
 		}
 
-		result, err = h.movieOrganizer.OrganizeMovieFinalized(path, targetLib, func(result *organizer.OrganizationResult, err error) {
-			h.updateDecisionOrganize(decisionID, result, err)
-		})
+		if err == nil {
+			result, err = h.movieOrganizer.OrganizeMovieFinalized(path, targetLib, func(result *organizer.OrganizationResult, err error) {
+				h.updateDecisionOrganize(decisionID, result, err)
+			})
+		}
 	}
 
 	duration := time.Since(startTime)
@@ -1142,6 +1157,9 @@ func (h *MediaHandler) processFile(path string) {
 	if err != nil {
 		if IsFailureWorthBackoff(err.Error()) {
 			h.retryCache.Record(path, err.Error())
+		}
+		if result == nil {
+			result = &organizer.OrganizationResult{SourcePath: path, Error: err}
 		}
 		if h.shouldLogError(path, err.Error()) {
 			h.logger.Error("handler", "Organization failed", err, logging.F("filename", filename))
@@ -2464,11 +2482,19 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 		}
 		if aiResult.Year != nil && aiResult.Year.Int() != nil {
 			movieInfo.Year = fmt.Sprintf("%d", *aiResult.Year.Int())
+		} else if item.MovieInfo != nil {
+			movieInfo.Year = item.MovieInfo.Year
 		}
 
-		result, err = h.movieOrganizer.OrganizeMovieWithParsedFinalized(item.Path, item.TargetLib, movieInfo, func(result *organizer.OrganizationResult, err error) {
-			h.updateDecisionOrganize(item.ParseDecisionID, result, err)
-		})
+		targetLib, selectErr := h.selectMovieLibrary(item.Path, movieInfo.Title, movieInfo.Year)
+		if selectErr != nil {
+			err = fmt.Errorf("select movie library for AI result: %w", selectErr)
+			h.updateDecisionOrganize(item.ParseDecisionID, nil, err)
+		} else {
+			result, err = h.movieOrganizer.OrganizeMovieWithParsedFinalized(item.Path, targetLib, movieInfo, func(result *organizer.OrganizationResult, err error) {
+				h.updateDecisionOrganize(item.ParseDecisionID, result, err)
+			})
+		}
 	}
 
 	if h.db != nil && item.ParseDecisionID != 0 {
@@ -2624,20 +2650,18 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 			}
 		}
 		targetLib := item.TargetLib
-		if targetLib == "" && len(h.movieLibs) > 0 {
-			targetLib = h.movieLibs[0]
-		}
 		if targetLib == "" {
-			h.logger.Warn("handler", "No movie libraries configured for fallback", logging.F("filename", filename))
-			h.stats.RecordError()
-			h.logEntry(&organizer.OrganizationResult{
-				Success:    false,
-				SourcePath: item.Path,
-				Error:      fmt.Errorf("no movie libraries configured"),
-			}, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, time.Since(startTime), false, false)
-			return
+			if item.MovieInfo == nil {
+				err = fmt.Errorf("movie identity unavailable for library selection")
+			} else {
+				targetLib, err = h.selectMovieLibrary(item.Path, item.MovieInfo.Title, item.MovieInfo.Year)
+			}
+			if err != nil {
+				err = fmt.Errorf("select movie library for regex fallback: %w", err)
+				h.updateDecisionOrganize(item.ParseDecisionID, nil, err)
+			}
 		}
-		if !h.checkTargetHealth(targetLib) {
+		if err == nil && !h.checkTargetHealth(targetLib) {
 			h.logger.Warn("handler", "Target library unhealthy, deferring fallback",
 				logging.F("filename", filename), logging.F("target", targetLib))
 			h.stats.RecordError()
@@ -2650,9 +2674,11 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 			}, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, time.Since(startTime), false, false)
 			return
 		}
-		result, err = h.movieOrganizer.OrganizeMovieFinalized(item.Path, targetLib, func(result *organizer.OrganizationResult, err error) {
-			h.updateDecisionOrganize(item.ParseDecisionID, result, err)
-		})
+		if err == nil {
+			result, err = h.movieOrganizer.OrganizeMovieFinalized(item.Path, targetLib, func(result *organizer.OrganizationResult, err error) {
+				h.updateDecisionOrganize(item.ParseDecisionID, result, err)
+			})
+		}
 	}
 
 	duration := time.Since(startTime)
@@ -2660,6 +2686,9 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 	radarrNotified := false
 
 	if err != nil {
+		if result == nil {
+			result = &organizer.OrganizationResult{SourcePath: item.Path, Error: err}
+		}
 		h.logger.Error("handler", "Regex-fallback organization failed", err, logging.F("filename", filename))
 		h.stats.RecordError()
 		h.logEntry(result, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, duration, sonarrNotified, radarrNotified)
@@ -2691,6 +2720,22 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 	}
 
 	h.logEntry(result, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, duration, sonarrNotified, radarrNotified)
+}
+
+func (h *MediaHandler) selectMovieLibrary(path, title, year string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("stat movie source: %w", err)
+	}
+	selector := h.movieSelector
+	if selector == nil {
+		selector = library.NewSelectorWithConfig(library.SelectorConfig{Libraries: h.movieLibs, DB: h.db})
+	}
+	selection, err := selector.SelectMovieLibrary(title, year, info.Size())
+	if err != nil {
+		return "", err
+	}
+	return selection.Library, nil
 }
 
 func (h *MediaHandler) PruneActivityLogs(days int) error {
