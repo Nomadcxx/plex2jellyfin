@@ -79,7 +79,7 @@ make                                                                   # fronten
 - Go 1.25+ for source / script / TUI builds
 - npm for building the embedded web UI (script and `make` paths)
 - Root or sudo for systemd unit install and `CAP_CHOWN` on bare metal
-- Jellyfin 10.11.x if you use the companion plugin
+- Jellyfin 10.11.x or 12.x if you use the companion plugin
 
 ## Verify
 

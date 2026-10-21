@@ -212,6 +212,134 @@ func TestMediaHandlerRecordsOrganizedMovieAsP2JTruth(t *testing.T) {
 	assert.Equal(t, filepath.Join(movieLib, "Truthers (2026)"), movie.CanonicalPath)
 }
 
+func TestMediaHandlerPlacesMovieInKnownCanonicalLibrary(t *testing.T) {
+	root := t.TempDir()
+	firstLib := filepath.Join(root, "movies1")
+	canonicalLib := filepath.Join(root, "movies2")
+	watchDir := filepath.Join(root, "downloads")
+	source := filepath.Join(watchDir, "Canonical.Placement.2026.1080p.WEB-DL.mkv")
+	require.NoError(t, os.MkdirAll(firstLib, 0o755))
+	require.NoError(t, os.MkdirAll(canonicalLib, 0o755))
+	require.NoError(t, os.MkdirAll(watchDir, 0o755))
+	require.NoError(t, os.WriteFile(source, []byte("movie"), 0o644))
+
+	db, err := database.OpenPath(filepath.Join(root, "media.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.UpsertMovie(&database.Movie{
+		Title:          "Canonical Placement",
+		Year:           2026,
+		CanonicalPath:  filepath.Join(canonicalLib, "Canonical Placement (2026)"),
+		LibraryRoot:    canonicalLib,
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
+	})
+	require.NoError(t, err)
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		TVLibraries:     []string{filepath.Join(root, "tv")},
+		MovieLibs:       []string{firstLib, canonicalLib},
+		MovieWatchPaths: []string{watchDir},
+		Backend:         transfer.BackendNative,
+		Database:        db,
+		Logger:          logging.Nop(),
+	})
+	require.NoError(t, err)
+
+	handler.processFile(source)
+
+	target := filepath.Join(canonicalLib, "Canonical Placement (2026)", "Canonical Placement (2026).mkv")
+	assert.FileExists(t, target)
+	assert.NoFileExists(t, filepath.Join(firstLib, "Canonical Placement (2026)", "Canonical Placement (2026).mkv"))
+}
+
+func TestMediaHandlerAIResultReselectsCorrectedMovieTitle(t *testing.T) {
+	root := t.TempDir()
+	firstLib := filepath.Join(root, "movies1")
+	canonicalLib := filepath.Join(root, "movies2")
+	source := filepath.Join(root, "downloads", "Possible.Title.2024.mkv")
+	require.NoError(t, os.MkdirAll(firstLib, 0o755))
+	require.NoError(t, os.MkdirAll(canonicalLib, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	require.NoError(t, os.WriteFile(source, []byte("movie"), 0o644))
+
+	db, err := database.OpenPath(filepath.Join(root, "media.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.UpsertMovie(&database.Movie{
+		Title:          "Corrected Title",
+		Year:           2024,
+		CanonicalPath:  filepath.Join(canonicalLib, "Corrected Title (2024)"),
+		LibraryRoot:    canonicalLib,
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
+	})
+	require.NoError(t, err)
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		MovieLibs: []string{firstLib, canonicalLib},
+		Database:  db,
+		Backend:   transfer.BackendNative,
+		Logger:    logging.Nop(),
+	})
+	require.NoError(t, err)
+	parsedYear := "2024"
+	item := &PendingItem{
+		Path:      source,
+		Filename:  filepath.Base(source),
+		MediaType: "movie",
+		MovieInfo: &naming.MovieInfo{Title: "Possible Title", Year: parsedYear},
+		TargetLib: firstLib,
+	}
+	handler.applyAIResult(item, &ai.Result{Title: "Corrected Title", Confidence: 0.99})
+
+	target := filepath.Join(canonicalLib, "Corrected Title (2024)", "Corrected Title (2024).mkv")
+	assert.FileExists(t, target)
+	assert.NoFileExists(t, filepath.Join(firstLib, "Corrected Title (2024)", "Corrected Title (2024).mkv"))
+}
+
+func TestMediaHandlerRegexFallbackSelectsKnownCanonicalMovieLibrary(t *testing.T) {
+	root := t.TempDir()
+	firstLib := filepath.Join(root, "movies1")
+	canonicalLib := filepath.Join(root, "movies2")
+	source := filepath.Join(root, "downloads", "Canonical.Placement.2026.1080p.WEB-DL.mkv")
+	require.NoError(t, os.MkdirAll(firstLib, 0o755))
+	require.NoError(t, os.MkdirAll(canonicalLib, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	require.NoError(t, os.WriteFile(source, []byte("movie"), 0o644))
+
+	db, err := database.OpenPath(filepath.Join(root, "media.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.UpsertMovie(&database.Movie{
+		Title:          "Canonical Placement",
+		Year:           2026,
+		CanonicalPath:  filepath.Join(canonicalLib, "Canonical Placement (2026)"),
+		LibraryRoot:    canonicalLib,
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
+	})
+	require.NoError(t, err)
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		MovieLibs: []string{firstLib, canonicalLib},
+		Database:  db,
+		Backend:   transfer.BackendNative,
+		Logger:    logging.Nop(),
+	})
+	require.NoError(t, err)
+	handler.organizeWithRegexFallback(&PendingItem{
+		Path:      source,
+		Filename:  filepath.Base(source),
+		MediaType: "movie",
+		MovieInfo: &naming.MovieInfo{Title: "Canonical Placement", Year: "2026"},
+	})
+
+	target := filepath.Join(canonicalLib, "Canonical Placement (2026)", "Canonical Placement (2026).mkv")
+	assert.FileExists(t, target)
+	assert.NoFileExists(t, filepath.Join(firstLib, "Canonical Placement (2026)", "Canonical Placement (2026).mkv"))
+}
+
 func TestMediaHandlerDoesNotReprocessUnchangedDuplicateSource(t *testing.T) {
 	tvLib := t.TempDir()
 	watchDir := t.TempDir()

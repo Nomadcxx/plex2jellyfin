@@ -179,7 +179,7 @@ func installJellyfinPlugin(m *model) error {
 	}
 	if !insp.ABISupported {
 		st.outcome = "failed"
-		return fmt.Errorf("jellyfin %s does not support the plugin (needs 10.11.x)", insp.ServerVersion)
+		return fmt.Errorf("Jellyfin %s does not support the plugin (requires 10.11.x or 12.x)", insp.ServerVersion)
 	}
 	if insp.InstalledVersion != "" && insp.PluginResponding {
 		st.loaded = true

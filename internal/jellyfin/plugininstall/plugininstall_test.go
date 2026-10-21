@@ -13,6 +13,7 @@ import (
 // fakeJellyfin serves just enough of the admin API for the engine.
 type fakeJellyfin struct {
 	version       string
+	authorization string
 	repos         []map[string]any
 	plugins       []map[string]any
 	pluginHealthy bool
@@ -26,6 +27,7 @@ type fakeJellyfin struct {
 func (f *fakeJellyfin) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /System/Info", func(w http.ResponseWriter, r *http.Request) {
+		f.authorization = r.Header.Get("Authorization")
 		json.NewEncoder(w).Encode(map[string]string{"Version": f.version})
 	})
 	mux.HandleFunc("GET /Repositories", func(w http.ResponseWriter, r *http.Request) {
@@ -100,16 +102,38 @@ func TestInspectReportsServerAndPluginState(t *testing.T) {
 	if insp.InstalledVersion != "1.2.0.0" || !insp.PluginResponding {
 		t.Errorf("plugin detection wrong: %+v", insp)
 	}
+	if !strings.Contains(f.authorization, `MediaBrowser Token="test-key"`) || !strings.Contains(f.authorization, `Client="plex2jellyfin"`) {
+		t.Errorf("Authorization = %q, want MediaBrowser authorization with API token", f.authorization)
+	}
 }
 
 func TestInspectGatesOldServers(t *testing.T) {
-	f := &fakeJellyfin{version: "10.10.7"}
-	insp, err := newTestEngine(t, f).Inspect(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	for _, version := range []string{"10.10.7", "13.0.0"} {
+		t.Run(version, func(t *testing.T) {
+			f := &fakeJellyfin{version: version}
+			insp, err := newTestEngine(t, f).Inspect(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if insp.ABISupported {
+				t.Errorf("%s must not pass the ABI gate", version)
+			}
+		})
 	}
-	if insp.ABISupported {
-		t.Error("10.10.x must not pass the ABI gate")
+}
+
+func TestInspectSupportsJellyfin12(t *testing.T) {
+	for _, version := range []string{"12.0.0", "12.2.0"} {
+		t.Run(version, func(t *testing.T) {
+			f := &fakeJellyfin{version: version}
+			insp, err := newTestEngine(t, f).Inspect(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !insp.ABISupported {
+				t.Errorf("%s should pass the ABI gate", version)
+			}
+		})
 	}
 }
 

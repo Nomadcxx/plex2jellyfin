@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,11 +36,13 @@ func TestPluginClientHealth(t *testing.T) {
 		Version: "1.0.0",
 		Time:    time.Now(),
 	}
+	var gotAuthorization string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/Plex2Jellyfin/health" {
 			t.Errorf("expected path '/Plex2Jellyfin/health', got '%s'", r.URL.Path)
 		}
+		gotAuthorization = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(mockResponse)
 	}))
@@ -58,6 +61,9 @@ func TestPluginClientHealth(t *testing.T) {
 
 	if health.Status != "healthy" {
 		t.Errorf("expected status 'healthy', got '%s'", health.Status)
+	}
+	if !strings.Contains(gotAuthorization, `Token="test-key"`) || !strings.Contains(gotAuthorization, `Client="plex2jellyfin"`) {
+		t.Fatalf("expected MediaBrowser authorization with API token, got %q", gotAuthorization)
 	}
 }
 
