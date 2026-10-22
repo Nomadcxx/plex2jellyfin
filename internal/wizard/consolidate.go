@@ -18,6 +18,7 @@ func (w *Wizard) handleScattered(analysis *service.ScatteredAnalysis) error {
 	consolidatedCount := 0
 	applyAll := false
 
+scatteredItems:
 	for i, item := range analysis.Items {
 		yearStr := ""
 		if item.Year != nil {
@@ -63,7 +64,7 @@ func (w *Wizard) handleScattered(analysis *service.ScatteredAnalysis) error {
 			consolidatedCount++
 		case "q":
 			fmt.Println("Quitting consolidation step.")
-			break
+			break scatteredItems
 		}
 		fmt.Println()
 	}
