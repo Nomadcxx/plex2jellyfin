@@ -97,6 +97,77 @@ func TestNegativeCacheLowSpaceBackoffCapsAtSixHours(t *testing.T) {
 	}
 }
 
+func TestNegativeCacheResourceFailureWaitsForDestinationSpace(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "low-space.mkv")
+	destination := filepath.Join(root, "library")
+	if err := os.WriteFile(path, []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(destination, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	available := int64(99)
+	cache := NewNegativeCache()
+	cache.availableSpace = func(got string) (int64, error) {
+		if got != destination {
+			t.Fatalf("space checked at %q, want destination %q", got, destination)
+		}
+		return available, nil
+	}
+	cache.RecordResourceFailure(path, destination, 100, "insufficient space: need 100 bytes, have 99 bytes")
+
+	cache.mu.Lock()
+	cache.entries[path].failedAt = time.Now().Add(-24 * time.Hour)
+	cache.mu.Unlock()
+	deferred, remaining, _ := cache.IsDeferred(path)
+	if !deferred {
+		t.Fatal("resource failure should stay deferred while destination remains too small")
+	}
+	if remaining != 0 {
+		t.Fatalf("capacity-gated retry should have no time deadline, got %v", remaining)
+	}
+
+	available = 100
+	if deferred, _, _ := cache.IsDeferred(path); deferred {
+		t.Fatal("resource failure should become eligible when destination has enough space")
+	}
+	if len(cache.Snapshot()) != 0 {
+		t.Fatal("eligible retry should clear its stale capacity block")
+	}
+}
+
+func TestNegativeCacheDoesNotByteGateOtherResourceFailures(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "low-space.mkv")
+	destination := filepath.Join(root, "library")
+	if err := os.WriteFile(path, []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(destination, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	checks := 0
+	cache := NewNegativeCache()
+	cache.availableSpace = func(string) (int64, error) {
+		checks++
+		return 100, nil
+	}
+	cache.RecordResourceFailure(path, destination, 50, "no space left on device")
+	if deferred, _, _ := cache.IsDeferred(path); !deferred {
+		t.Fatal("non-byte resource failures should retain the bounded retry delay")
+	}
+	if checks != 0 {
+		t.Fatalf("byte capacity was queried for a non-byte error: %d checks", checks)
+	}
+}
+
 func TestNegativeCacheModifiedFileRetriesImmediately(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Show.S01E01.mkv")
 	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {

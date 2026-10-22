@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 27
+const currentSchemaVersion = 28
 
 // SQL migration scripts
 var migrations = []migration{
@@ -776,6 +776,14 @@ var migrations = []migration{
 			`ALTER TABLE parse_decisions ADD COLUMN source_size INTEGER NOT NULL DEFAULT 0`,
 			`ALTER TABLE parse_decisions ADD COLUMN source_modified_at DATETIME`,
 			`INSERT INTO schema_version (version) VALUES (27)`,
+		},
+	},
+	{
+		version: 28,
+		up: []string{
+			`ALTER TABLE parse_decisions ADD COLUMN retry_destination TEXT`,
+			`ALTER TABLE parse_decisions ADD COLUMN retry_required_bytes INTEGER NOT NULL DEFAULT 0`,
+			`INSERT INTO schema_version (version) VALUES (28)`,
 		},
 	},
 }

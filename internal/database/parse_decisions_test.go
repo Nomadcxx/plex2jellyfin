@@ -291,6 +291,30 @@ func TestGetRecentRetryableFailuresIncludesLowSpaceSkippedOutcome(t *testing.T) 
 	require.Equal(t, d.OrganizeError, rows[0].LastError)
 }
 
+func TestGetRecentRetryableFailuresIncludesDestinationAndSourceSize(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	d := makeDecision()
+	d.SourcePath = "/downloads/movie.mkv"
+	d.SourceSize = 1234
+	d.TargetPath = "/movies/Movie (2026)/Movie (2026).mkv"
+	d.RetryDestination = "/movies"
+	d.RetryRequiredBytes = 5678
+	d.EventAt = time.Now().UTC()
+	d.OrganizeOutcome = "failed"
+	d.OrganizeError = "transfer failed: insufficient space"
+	_, err := db.InsertDecision(d)
+	require.NoError(t, err)
+
+	rows, err := db.GetRecentRetryableFailures(time.Hour, 6)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, d.SourceSize, rows[0].SourceSize)
+	assert.Equal(t, d.RetryDestination, rows[0].RetryDestination)
+	assert.Equal(t, d.RetryRequiredBytes, rows[0].RetryRequiredBytes)
+}
+
 func TestParseDecisionUpdateOutcome(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

@@ -12,6 +12,10 @@ func rewindToMigration25(t *testing.T, db *MediaDB) {
 	require.NoError(t, err)
 	_, err = db.SQL().Exec(`ALTER TABLE parse_decisions DROP COLUMN source_modified_at`)
 	require.NoError(t, err)
+	_, err = db.SQL().Exec(`ALTER TABLE parse_decisions DROP COLUMN retry_required_bytes`)
+	require.NoError(t, err)
+	_, err = db.SQL().Exec(`ALTER TABLE parse_decisions DROP COLUMN retry_destination`)
+	require.NoError(t, err)
 	_, err = db.SQL().Exec(`DELETE FROM schema_version WHERE version >= 26`)
 	require.NoError(t, err)
 }

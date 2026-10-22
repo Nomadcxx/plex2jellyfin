@@ -64,6 +64,30 @@ type SelectionResult struct {
 	Available int64
 }
 
+// InsufficientSpaceError identifies the library whose capacity prevented an
+// organize attempt.
+type InsufficientSpaceError struct {
+	Path          string
+	RequiredBytes int64
+	Available     int64
+	Context       string
+}
+
+func (e *InsufficientSpaceError) Error() string {
+	if e.Path == "" {
+		if e.Context != "" {
+			return fmt.Sprintf("insufficient space across %s: need %d, best available %d", e.Context, e.RequiredBytes, e.Available)
+		}
+		return fmt.Sprintf("insufficient space: need %d, have %d", e.RequiredBytes, e.Available)
+	}
+	if e.Context != "" {
+		return fmt.Sprintf("insufficient space in %s %s: need %d, have %d", e.Context, e.Path, e.RequiredBytes, e.Available)
+	}
+	return fmt.Sprintf("insufficient space in %s: need %d, have %d", e.Path, e.RequiredBytes, e.Available)
+}
+
+func (e *InsufficientSpaceError) DestinationPath() string { return e.Path }
+
 func (s *Selector) SelectMovieLibrary(movieTitle string, year string, fileSize int64) (*SelectionResult, error) {
 	if len(s.libraries) == 0 {
 		return nil, fmt.Errorf("no libraries configured")
@@ -90,12 +114,15 @@ func (s *Selector) SelectMovieLibrary(movieTitle string, year string, fileSize i
 
 			canonicalLibrary := libraryContainingPath(placementPath, s.libraries)
 			if canonicalLibrary != "" {
-				available, err := getAvailableSpace(canonicalLibrary)
+				available, err := AvailableSpace(canonicalLibrary)
 				if err != nil {
 					return nil, fmt.Errorf("movie exists in canonical library %s but free space is unavailable: %w", canonicalLibrary, err)
 				}
 				if available < fileSize {
-					return nil, fmt.Errorf("insufficient space in canonical movie library %s: need %d, have %d", canonicalLibrary, fileSize, available)
+					return nil, &InsufficientSpaceError{
+						Path: canonicalLibrary, RequiredBytes: fileSize, Available: available,
+						Context: "canonical movie library",
+					}
 				}
 				sourceDesc := fmt.Sprintf("Database %s (%s): %s", placementKind, movie.Source, placementPath)
 				return &SelectionResult{
@@ -110,12 +137,12 @@ func (s *Selector) SelectMovieLibrary(movieTitle string, year string, fileSize i
 
 	if len(s.libraries) == 1 {
 		lib := s.libraries[0]
-		available, err := getAvailableSpace(lib)
+		available, err := AvailableSpace(lib)
 		if err != nil {
 			return nil, err
 		}
 		if available < fileSize {
-			return nil, fmt.Errorf("insufficient space in %s: need %d, have %d", lib, fileSize, available)
+			return nil, &InsufficientSpaceError{Path: lib, RequiredBytes: fileSize, Available: available}
 		}
 		return &SelectionResult{
 			Library:   lib,
@@ -126,7 +153,7 @@ func (s *Selector) SelectMovieLibrary(movieTitle string, year string, fileSize i
 
 	var candidates []SelectionResult
 	for _, lib := range s.libraries {
-		available, err := getAvailableSpace(lib)
+		available, err := AvailableSpace(lib)
 		if err != nil || available < fileSize {
 			continue
 		}
@@ -200,8 +227,12 @@ func (s *Selector) SelectTVShowLibrary(showName string, year string, fileSize in
 
 	// STEP 3: If single match, use it
 	if len(matches) == 1 {
-		if !s.hasSpace(matches[0].Library, fileSize) {
-			return nil, fmt.Errorf("show exists in %s but insufficient space", matches[0].Library)
+		available, err := AvailableSpace(matches[0].Library)
+		if err != nil {
+			return nil, err
+		}
+		if available < fileSize {
+			return nil, &InsufficientSpaceError{Path: matches[0].Library, RequiredBytes: fileSize, Available: available}
 		}
 		return &SelectionResult{
 			Library:   matches[0].Library,
@@ -216,12 +247,12 @@ func (s *Selector) SelectTVShowLibrary(showName string, year string, fileSize in
 
 // selectSingleLibrary handles the case where only one library is available
 func (s *Selector) selectSingleLibrary(lib string, fileSize int64) (*SelectionResult, error) {
-	available, err := getAvailableSpace(lib)
+	available, err := AvailableSpace(lib)
 	if err != nil {
 		return nil, err
 	}
 	if available < fileSize {
-		return nil, fmt.Errorf("insufficient space in %s: need %d, have %d", lib, fileSize, available)
+		return nil, &InsufficientSpaceError{Path: lib, RequiredBytes: fileSize, Available: available}
 	}
 	return &SelectionResult{
 		Library:   lib,
@@ -232,7 +263,7 @@ func (s *Selector) selectSingleLibrary(lib string, fileSize int64) (*SelectionRe
 
 // hasSpace checks if a library has sufficient space for a file
 func (s *Selector) hasSpace(lib string, fileSize int64) bool {
-	available, err := getAvailableSpace(lib)
+	available, err := AvailableSpace(lib)
 	if err != nil {
 		return false
 	}
@@ -285,10 +316,22 @@ func (s *Selector) resolveMultipleLocations(showName, year string, fileSize int6
 		}
 	}
 
-	// 4b: Fall back to episode count
+	// 4b: Fall back to episode count among libraries with enough space.
 	var best *ShowLocation
+	var maxAvailable int64
+	spaceChecked := false
+	spaceUnavailable := false
 	for i := range matches {
-		if !s.hasSpace(matches[i].Library, fileSize) {
+		available, err := AvailableSpace(matches[i].Library)
+		if err != nil {
+			spaceUnavailable = true
+			continue
+		}
+		spaceChecked = true
+		if available > maxAvailable {
+			maxAvailable = available
+		}
+		if available < fileSize {
 			continue
 		}
 		if best == nil || matches[i].EpisodeCount > best.EpisodeCount {
@@ -297,7 +340,10 @@ func (s *Selector) resolveMultipleLocations(showName, year string, fileSize int6
 	}
 
 	if best == nil {
-		return nil, fmt.Errorf("show exists in multiple libraries but none have sufficient space")
+		if spaceChecked && !spaceUnavailable {
+			return nil, &InsufficientSpaceError{RequiredBytes: fileSize, Available: maxAvailable, Context: "matching TV libraries"}
+		}
+		return nil, fmt.Errorf("free space is unavailable in libraries containing this show")
 	}
 
 	return &SelectionResult{
@@ -318,9 +364,20 @@ func (s *Selector) selectForNewShow(showName, year string, fileSize int64) (*Sel
 	}
 
 	var candidates []candidate
+	var maxAvailable int64
+	spaceChecked := false
+	spaceUnavailable := false
 	for _, lib := range s.libraries {
-		available, err := getAvailableSpace(lib)
-		if err != nil || available < fileSize {
+		available, err := AvailableSpace(lib)
+		if err != nil {
+			spaceUnavailable = true
+			continue
+		}
+		spaceChecked = true
+		if available > maxAvailable {
+			maxAvailable = available
+		}
+		if available < fileSize {
 			continue
 		}
 		count := s.countMediaItems(lib, false)
@@ -332,7 +389,10 @@ func (s *Selector) selectForNewShow(showName, year string, fileSize int64) (*Sel
 	}
 
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("no suitable library with sufficient space for new show")
+		if spaceChecked && !spaceUnavailable {
+			return nil, &InsufficientSpaceError{RequiredBytes: fileSize, Available: maxAvailable, Context: "configured TV libraries"}
+		}
+		return nil, fmt.Errorf("free space is unavailable in configured TV libraries")
 	}
 
 	// Find min show count for scoring
@@ -382,7 +442,7 @@ func (s *Selector) scoreLibrary(library, title, year string, fileSize int64, isM
 		score += 1000 + itemCount*100
 	}
 
-	available, _ := getAvailableSpace(library)
+	available, _ := AvailableSpace(library)
 	spaceScore := int(available / (1024 * 1024 * 1024))
 	if spaceScore > 100 {
 		spaceScore = 100
@@ -451,7 +511,8 @@ func (s *Selector) countMediaItems(library string, isMovie bool) int {
 	return count
 }
 
-func getAvailableSpace(path string) (int64, error) {
+// AvailableSpace reports the free space in bytes at a library directory.
+func AvailableSpace(path string) (int64, error) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return 0, fmt.Errorf("unable to get disk space for %s: %w", path, err)

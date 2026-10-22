@@ -33,7 +33,7 @@ func (s *Selector) findAllShowLocations(showName, year string) ([]ShowLocation, 
 		}
 
 		episodeCount := countEpisodesInShow(showDir)
-		available, _ := getAvailableSpace(lib)
+		available, _ := AvailableSpace(lib)
 
 		locations = append(locations, ShowLocation{
 			Library:      lib,

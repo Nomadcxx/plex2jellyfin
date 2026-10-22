@@ -456,13 +456,45 @@ func hydrateNegativeCacheFromDB(cache *NegativeCache, db *database.MediaDB, logg
 		if failures == 0 {
 			continue
 		}
-		cache.HydrateEntry(r.SourcePath, r.LastError, r.LastAt, failures)
+		requiredBytes := r.RetryRequiredBytes
+		if requiredBytes <= 0 {
+			requiredBytes = r.SourceSize
+		}
+		cache.HydrateResourceFailure(retryCacheKey(r.SourcePath), r.LastError, r.LastAt, failures, r.RetryDestination, requiredBytes)
 		hydrated++
 	}
 	if logger != nil && hydrated > 0 {
 		logger.Info("handler", "Hydrated negative cache from prior failures",
 			logging.F("entries", hydrated))
 	}
+}
+
+func retryDestinationPath(failure error, result *organizer.OrganizationResult, fallback string) string {
+	var capacityErr *library.InsufficientSpaceError
+	if errors.As(failure, &capacityErr) && capacityErr.Path != "" {
+		return capacityErr.Path
+	}
+	if result != nil && result.TargetPath != "" {
+		return filepath.Dir(result.TargetPath)
+	}
+	return fallback
+}
+
+func (h *MediaHandler) recordRetryFailure(path string, result *organizer.OrganizationResult, fallbackDestination string, requiredBytes int64, failure error) {
+	if failure == nil || !IsFailureWorthBackoff(failure.Error()) {
+		return
+	}
+	errMsg := failure.Error()
+	if IsRetryableResourceFailure(errMsg) {
+		fallbackDestination = retryDestinationPath(failure, result, fallbackDestination)
+		var capacityErr *library.InsufficientSpaceError
+		if errors.As(failure, &capacityErr) && capacityErr.RequiredBytes > 0 {
+			requiredBytes = capacityErr.RequiredBytes
+		}
+		h.retryCache.RecordResourceFailure(path, fallbackDestination, requiredBytes, errMsg)
+		return
+	}
+	h.retryCache.Record(path, errMsg)
 }
 
 // RetryCache returns deferred parse and resource failures to the IPC layer.
@@ -477,7 +509,7 @@ func (h *MediaHandler) ShouldSuppressRetry(path string) bool {
 		return false
 	}
 	path = filepath.Clean(path)
-	if deferred, _, _ := h.retryCache.IsDeferred(path); deferred {
+	if deferred, _, _ := h.retryCache.IsDeferred(retryCacheKey(path)); deferred {
 		return true
 	}
 	info, err := os.Stat(path)
@@ -737,6 +769,15 @@ func seasonPackReleaseDir(path string) (string, bool) {
 	return releaseDir, true
 }
 
+func retryCacheKey(path string) string {
+	path = filepath.Clean(path)
+	// Season-pack siblings organize and roll back as one unit, so they share one retry state.
+	if releaseDir, ok := seasonPackReleaseDir(path); ok {
+		return releaseDir
+	}
+	return path
+}
+
 func (h *MediaHandler) beginSeasonPack(releaseDir string, now time.Time) (bool, string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -884,9 +925,9 @@ func (h *MediaHandler) processFile(path string) {
 		return
 	}
 
-	// Skip known parse failures and low-space errors until their retry window.
-	if deferred, remaining, lastErr := h.retryCache.IsDeferred(path); deferred {
-		h.logger.Debug("handler", "Skipping deferred unparseable file",
+	// Skip unchanged failures until their backoff expires or destination capacity recovers.
+	if deferred, remaining, lastErr := h.retryCache.IsDeferred(retryCacheKey(path)); deferred {
+		h.logger.Debug("handler", "Skipping deferred organize retry",
 			logging.F("path", path),
 			logging.F("remaining", remaining.String()),
 			logging.F("last_error", lastErr))
@@ -1121,6 +1162,7 @@ func (h *MediaHandler) processFile(path string) {
 
 			selectedLibrary, selectErr := h.selectMovieLibrary(path, movieInfo.Title, movieInfo.Year)
 			if selectErr != nil {
+				targetLib = ""
 				err = fmt.Errorf("select movie library: %w", selectErr)
 				h.updateDecisionOrganize(decisionID, nil, err)
 			} else {
@@ -1162,12 +1204,14 @@ func (h *MediaHandler) processFile(path string) {
 	radarrNotified := false
 
 	if err != nil {
-		if IsFailureWorthBackoff(err.Error()) {
-			h.retryCache.Record(path, err.Error())
-		}
 		if result == nil {
 			result = &organizer.OrganizationResult{SourcePath: path, Error: err}
 		}
+		var sourceSize int64
+		if sourceInfo != nil {
+			sourceSize = sourceInfo.Size()
+		}
+		h.recordRetryFailure(path, result, targetLib, sourceSize, err)
 		if h.shouldLogError(path, err.Error()) {
 			h.logger.Error("handler", "Organization failed", err, logging.F("filename", filename))
 		}
@@ -1198,15 +1242,24 @@ func (h *MediaHandler) processFile(path string) {
 		h.cleanupSourceDir(path)
 		h.retryCache.Forget(path)
 	} else if result.Skipped {
+		if result.Error != nil && IsRetryableResourceFailure(result.Error.Error()) {
+			var sourceSize int64
+			if sourceInfo != nil {
+				sourceSize = sourceInfo.Size()
+			}
+			h.recordRetryFailure(path, result, targetLib, sourceSize, result.Error)
+		}
 		h.logger.Info("handler", "Skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
 	} else {
 		errMsg := ""
 		if result.Error != nil {
 			errMsg = result.Error.Error()
 		}
-		if IsFailureWorthBackoff(errMsg) {
-			h.retryCache.Record(path, errMsg)
+		var sourceSize int64
+		if sourceInfo != nil {
+			sourceSize = sourceInfo.Size()
 		}
+		h.recordRetryFailure(path, result, targetLib, sourceSize, result.Error)
 		if h.shouldLogError(path, errMsg) {
 			h.logger.Error("handler", "Organization failed", result.Error, logging.F("filename", filename))
 		}
@@ -1326,7 +1379,7 @@ func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID i
 	result := h.seasonPackOrganizationResult(path, releaseDir, packResult, err)
 
 	sonarrNotified := false
-	if packResult != nil {
+	if packResult != nil && packResult.Success {
 		for _, imported := range packResult.Imported {
 			if imported == nil || !imported.Success {
 				continue
@@ -1343,6 +1396,20 @@ func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID i
 		}
 	}
 
+	if !result.Success && result.Error != nil && IsFailureWorthBackoff(result.Error.Error()) {
+		failedEpisode := result
+		if packResult != nil && packResult.FailedEpisode != nil {
+			failedEpisode = packResult.FailedEpisode
+		}
+		var requiredBytes int64
+		if failedEpisode.SourcePath != "" {
+			if info, statErr := os.Stat(failedEpisode.SourcePath); statErr == nil {
+				requiredBytes = info.Size()
+			}
+		}
+		h.recordRetryFailure(releaseDir, failedEpisode, "", requiredBytes, result.Error)
+	}
+
 	if result.Success {
 		h.logger.Info("handler", "Season pack organized",
 			logging.F("dir", releaseDir),
@@ -1351,9 +1418,6 @@ func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID i
 		h.retryCache.Forget(path)
 		h.retryCache.Forget(releaseDir)
 	} else if result.Skipped {
-		if result.Error != nil && IsFailureWorthBackoff(result.Error.Error()) {
-			h.retryCache.Record(path, result.Error.Error())
-		}
 		h.logger.Info("handler", "Season pack requires review",
 			logging.F("dir", releaseDir),
 			logging.F("reason", result.SkipReason))
@@ -1393,15 +1457,21 @@ func (h *MediaHandler) seasonPackOrganizationResult(path, releaseDir string, pac
 		}
 	}
 	targetPath := ""
-	for _, imported := range packResult.Imported {
-		if imported != nil && imported.TargetPath != "" {
-			targetPath = imported.TargetPath
-			break
+	sourcePath := releaseDir
+	if packResult.FailedEpisode != nil {
+		sourcePath = packResult.FailedEpisode.SourcePath
+		targetPath = packResult.FailedEpisode.TargetPath
+	} else {
+		for _, imported := range packResult.Imported {
+			if imported != nil && imported.TargetPath != "" {
+				targetPath = imported.TargetPath
+				break
+			}
 		}
 	}
 	return &organizer.OrganizationResult{
 		Success:     packResult.Success,
-		SourcePath:  releaseDir,
+		SourcePath:  sourcePath,
 		TargetPath:  targetPath,
 		BytesCopied: packResult.BytesCopied,
 		Error:       packResult.Error,
@@ -2440,6 +2510,22 @@ func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.Organi
 		}
 	}
 
+	failure := err
+	if failure == nil && result != nil {
+		failure = result.Error
+	}
+	if failure != nil && IsKnownCapacityShortfall(failure.Error()) {
+		u.RetryDestination = retryDestinationPath(failure, result, "")
+		var capacityErr *library.InsufficientSpaceError
+		if errors.As(failure, &capacityErr) {
+			u.RetryRequiredBytes = capacityErr.RequiredBytes
+		} else if result != nil && result.SourcePath != "" {
+			if info, statErr := os.Stat(result.SourcePath); statErr == nil {
+				u.RetryRequiredBytes = info.Size()
+			}
+		}
+	}
+
 	if updateErr := h.db.UpdateOrganize(id, u); updateErr != nil {
 		h.logger.Warn("handler", "failed to update parse decision organize columns",
 			logging.F("decision_id", id),
@@ -2452,6 +2538,7 @@ func (h *MediaHandler) updateDecisionOrganize(id int64, result *organizer.Organi
 func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 	var result *organizer.OrganizationResult
 	var err error
+	var targetLib string
 
 	if item.MediaType == "tv" {
 		tvInfo := naming.TVShowInfo{
@@ -2493,7 +2580,8 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 			movieInfo.Year = item.MovieInfo.Year
 		}
 
-		targetLib, selectErr := h.selectMovieLibrary(item.Path, movieInfo.Title, movieInfo.Year)
+		var selectErr error
+		targetLib, selectErr = h.selectMovieLibrary(item.Path, movieInfo.Title, movieInfo.Year)
 		if selectErr != nil {
 			err = fmt.Errorf("select movie library for AI result: %w", selectErr)
 			h.updateDecisionOrganize(item.ParseDecisionID, nil, err)
@@ -2529,8 +2617,22 @@ func (h *MediaHandler) applyAIResult(item *PendingItem, aiResult *ai.Result) {
 		}
 	}
 
-	if err != nil {
-		h.logger.Error("handler", "AI-enhanced organization failed", err,
+	failureErr := err
+	if failureErr == nil && result != nil {
+		failureErr = result.Error
+	}
+	if failureErr != nil {
+		if result == nil {
+			result = &organizer.OrganizationResult{SourcePath: item.Path, Error: failureErr}
+		}
+		var sourceSize int64
+		if info, statErr := os.Stat(item.Path); statErr == nil {
+			sourceSize = info.Size()
+		}
+		if IsRetryableResourceFailure(failureErr.Error()) {
+			h.recordRetryFailure(item.Path, result, targetLib, sourceSize, failureErr)
+		}
+		h.logger.Error("handler", "AI-enhanced organization failed", failureErr,
 			logging.F("filename", item.Filename))
 		h.stats.RecordError()
 		return
@@ -2622,6 +2724,7 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 	var parsedTitle string
 	var parsedYear *int
 	var parsedSeason, parsedEpisode int
+	var targetLib string
 
 	if item.MediaType == "tv" {
 		mediaType = notify.MediaTypeTVEpisode
@@ -2656,7 +2759,7 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 				}
 			}
 		}
-		targetLib := item.TargetLib
+		targetLib = item.TargetLib
 		if targetLib == "" {
 			if item.MovieInfo == nil {
 				err = fmt.Errorf("movie identity unavailable for library selection")
@@ -2696,6 +2799,13 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 		if result == nil {
 			result = &organizer.OrganizationResult{SourcePath: item.Path, Error: err}
 		}
+		var sourceSize int64
+		if info, statErr := os.Stat(item.Path); statErr == nil {
+			sourceSize = info.Size()
+		}
+		if IsRetryableResourceFailure(err.Error()) {
+			h.recordRetryFailure(item.Path, result, targetLib, sourceSize, err)
+		}
 		h.logger.Error("handler", "Regex-fallback organization failed", err, logging.F("filename", filename))
 		h.stats.RecordError()
 		h.logEntry(result, mediaType, parsedTitle, parsedYear, activity.MethodRegex, 0.0, duration, sonarrNotified, radarrNotified)
@@ -2720,8 +2830,22 @@ func (h *MediaHandler) organizeWithRegexFallback(item *PendingItem) {
 		sonarrNotified, radarrNotified = h.sendNotificationsWithTracking(result, mediaType, parsedTitle, yearStr, parsedSeason, parsedEpisode)
 		h.cleanupSourceDir(item.Path)
 	} else if result != nil && result.Skipped {
+		if result.Error != nil && IsRetryableResourceFailure(result.Error.Error()) {
+			var sourceSize int64
+			if info, statErr := os.Stat(item.Path); statErr == nil {
+				sourceSize = info.Size()
+			}
+			h.recordRetryFailure(item.Path, result, targetLib, sourceSize, result.Error)
+		}
 		h.logger.Info("handler", "Regex-fallback skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
 	} else if result != nil && result.Error != nil {
+		var sourceSize int64
+		if info, statErr := os.Stat(item.Path); statErr == nil {
+			sourceSize = info.Size()
+		}
+		if IsRetryableResourceFailure(result.Error.Error()) {
+			h.recordRetryFailure(item.Path, result, targetLib, sourceSize, result.Error)
+		}
 		h.logger.Error("handler", "Regex-fallback organization failed", result.Error, logging.F("filename", filename))
 		h.stats.RecordError()
 	}
