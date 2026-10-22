@@ -426,6 +426,36 @@ func TestPeriodicScanner_RetryTransferForwardsFullPath(t *testing.T) {
 	}
 }
 
+func TestPeriodicScannerRetryRejectsSiblingWatchRoot(t *testing.T) {
+	root := t.TempDir()
+	watchRoot := filepath.Join(root, "movies")
+	sibling := filepath.Join(root, "movies-old")
+	if err := os.MkdirAll(watchRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(sibling, "retry.mkv")
+	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := &recordingHandler{}
+	s := NewPeriodicScanner(ScannerConfig{
+		WatchPaths: []string{watchRoot},
+		Handler:    handler,
+		Logger:     logging.Nop(),
+	})
+	err := s.retryTransfer(activity.Entry{Source: filePath})
+	if err == nil || !strings.Contains(err.Error(), "outside watch roots") {
+		t.Fatalf("retry error = %v, want outside watch roots", err)
+	}
+	if len(handler.events) != 0 {
+		t.Fatalf("retry events = %+v, want none", handler.events)
+	}
+}
+
 // writeActivityEntry appends a single JSON-encoded activity entry to path.
 func writeActivityEntry(t *testing.T, path string, entry activity.Entry) {
 	t.Helper()
