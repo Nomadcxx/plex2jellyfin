@@ -94,21 +94,77 @@ func (c *Client) GetOrphanedEpisodes() ([]Item, error) {
 	query.Set("IncludeItemTypes", "Episode")
 	query.Set("Recursive", "true")
 	query.Set("Fields", "Path,ProviderIds,ParentId,SeriesId")
-	query.Set("Limit", "10000")
 
-	var resp ItemsResponse
-	if err := c.get("/Items?"+query.Encode(), &resp); err != nil {
+	items, err := c.listItemsCtx(context.Background(), "/Items", query)
+	if err != nil {
 		return nil, fmt.Errorf("querying episodes: %w", err)
 	}
 
-	orphans := make([]Item, 0, len(resp.Items))
-	for _, item := range resp.Items {
+	orphans := make([]Item, 0, len(items))
+	for _, item := range items {
 		if item.SeriesID == "" {
 			orphans = append(orphans, item)
 		}
 	}
 
 	return orphans, nil
+}
+
+// listItemsCtx pages through a Jellyfin /Items endpoint until every reported
+// item has been read. It rejects changing or inconsistent totals so callers
+// never treat a partial listing as complete.
+func (c *Client) listItemsCtx(ctx context.Context, endpoint string, query url.Values) ([]Item, error) {
+	const pageSize = 10000
+
+	var items []Item
+	seenIDs := make(map[string]struct{})
+	total := -1
+	for start := 0; ; {
+		pageQuery := make(url.Values, len(query)+2)
+		for key, values := range query {
+			pageQuery[key] = append([]string(nil), values...)
+		}
+		pageQuery.Set("StartIndex", strconv.Itoa(start))
+		pageQuery.Set("Limit", strconv.Itoa(pageSize))
+
+		var page ItemsResponse
+		if err := c.getCtx(ctx, endpoint+"?"+pageQuery.Encode(), &page); err != nil {
+			return nil, err
+		}
+		if page.TotalRecordCount < 0 {
+			return nil, fmt.Errorf("invalid total record count %d", page.TotalRecordCount)
+		}
+		if total == -1 {
+			total = page.TotalRecordCount
+		} else if page.TotalRecordCount != total {
+			return nil, fmt.Errorf("incomplete item listing: total changed from %d to %d", total, page.TotalRecordCount)
+		}
+		if len(page.Items) == 0 {
+			if start != total {
+				return nil, fmt.Errorf("incomplete item listing: received %d of %d items", start, total)
+			}
+			return items, nil
+		}
+		if start+len(page.Items) > total {
+			return nil, fmt.Errorf("incomplete item listing: received more than %d items", total)
+		}
+		for i, item := range page.Items {
+			id := strings.TrimSpace(item.ID)
+			if id == "" {
+				return nil, fmt.Errorf("incomplete item listing: item at index %d has no id", start+i)
+			}
+			if _, exists := seenIDs[id]; exists {
+				return nil, fmt.Errorf("incomplete item listing: duplicate item id %q", id)
+			}
+			seenIDs[id] = struct{}{}
+		}
+
+		items = append(items, page.Items...)
+		start += len(page.Items)
+		if start == total {
+			return items, nil
+		}
+	}
 }
 
 // ListItemsPage returns a single page of items (Movies/Episodes) starting at
