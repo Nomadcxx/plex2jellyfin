@@ -12,6 +12,36 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 )
 
+func TestDuplicatePromptDoesNotOfferUnimplementedSwap(t *testing.T) {
+	w := &Wizard{reader: bufio.NewReader(strings.NewReader("y\nskip\n"))}
+	analysis := &service.DuplicateAnalysis{Groups: []service.DuplicateGroup{{
+		Title:      "Example",
+		BestFileID: 1,
+		Files:      []service.MediaFile{{ID: 1}, {ID: 2}},
+	}}}
+
+	oldStdout := os.Stdout
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	os.Stdout = stdoutW
+	handleErr := w.handleDuplicates(analysis)
+	_ = stdoutW.Close()
+	os.Stdout = oldStdout
+	output, err := io.ReadAll(stdoutR)
+	_ = stdoutR.Close()
+	if err != nil {
+		t.Fatalf("read captured output: %v", err)
+	}
+	if handleErr != nil {
+		t.Fatalf("handleDuplicates: %v", handleErr)
+	}
+	if strings.Contains(string(output), "[S]wap") || strings.Contains(string(output), "Swap not implemented") {
+		t.Fatalf("duplicate prompt still offers the unsupported swap action:\n%s", output)
+	}
+}
+
 func TestHandleDuplicatesReportsUnreconciledDatabaseFailures(t *testing.T) {
 	for _, action := range []string{"k", "a"} {
 		t.Run(action, func(t *testing.T) {
