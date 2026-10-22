@@ -2,7 +2,9 @@ package organizer
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/analyzer"
@@ -20,6 +23,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/library"
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
+	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	"github.com/Nomadcxx/plex2jellyfin/internal/quality"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 	syncsvc "github.com/Nomadcxx/plex2jellyfin/internal/sync"
@@ -70,7 +74,7 @@ func organizationTargetLockKey(targetPath string) string {
 	return key
 }
 
-func lockOrganizationKey(key string) func() {
+func lockOrganizationKey(key string) (func(), error) {
 	organizationTargetLocks.Lock()
 	lock := organizationTargetLocks.locks[key]
 	if lock == nil {
@@ -81,7 +85,8 @@ func lockOrganizationKey(key string) func() {
 	organizationTargetLocks.Unlock()
 
 	lock.mu.Lock()
-	return func() {
+	file, err := acquireOrganizationFileLock(key)
+	if err != nil {
 		lock.mu.Unlock()
 		organizationTargetLocks.Lock()
 		lock.refs--
@@ -89,24 +94,125 @@ func lockOrganizationKey(key string) func() {
 			delete(organizationTargetLocks.locks, key)
 		}
 		organizationTargetLocks.Unlock()
+		return nil, err
 	}
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+		lock.mu.Unlock()
+		organizationTargetLocks.Lock()
+		lock.refs--
+		if lock.refs == 0 {
+			delete(organizationTargetLocks.locks, key)
+		}
+		organizationTargetLocks.Unlock()
+	}, nil
+}
+
+func acquireOrganizationFileLock(key string) (*os.File, error) {
+	configDir, err := paths.Plex2JellyfinDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve organizer lock directory: %w", err)
+	}
+	lockDir := filepath.Join(configDir, "organizer-locks")
+	configParent := filepath.Dir(configDir)
+	for _, dir := range []string{configParent, configDir, lockDir} {
+		info, err := os.Lstat(dir)
+		if err == nil && !info.IsDir() {
+			return nil, fmt.Errorf("organizer lock path %q is not a directory", dir)
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect organizer lock path %q: %w", dir, err)
+		}
+	}
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create organizer config directory: %w", err)
+	}
+	info, err := os.Lstat(configDir)
+	if err != nil {
+		return nil, fmt.Errorf("inspect organizer config directory: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("organizer config path %q is not a directory", configDir)
+	}
+	if err := paths.ChownToActualUser(configDir); err != nil {
+		return nil, fmt.Errorf("set organizer config directory owner: %w", err)
+	}
+	if err := os.Mkdir(lockDir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return nil, fmt.Errorf("create organizer lock directory: %w", err)
+	}
+	info, err = os.Lstat(lockDir)
+	if err != nil {
+		return nil, fmt.Errorf("inspect organizer lock directory: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("organizer lock path %q is not a directory", lockDir)
+	}
+	if err := os.Chmod(lockDir, 0o700); err != nil {
+		return nil, fmt.Errorf("secure organizer lock directory: %w", err)
+	}
+	if err := paths.ChownToActualUser(lockDir); err != nil {
+		return nil, fmt.Errorf("set organizer lock directory owner: %w", err)
+	}
+
+	hash := sha256.Sum256([]byte(key))
+	path := filepath.Join(lockDir, hex.EncodeToString(hash[:])+".lock")
+	// Keep lock files after release so waiters continue to use the same inode.
+	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o444)
+	if err != nil {
+		return nil, fmt.Errorf("open organizer lock file: %w", err)
+	}
+	file := os.NewFile(uintptr(fd), path)
+	fileInfo, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("inspect organizer lock file: %w", err)
+	}
+	if !fileInfo.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("organizer lock path %q is not a regular file", path)
+	}
+	// Read-only descriptors can hold flock; the private directory limits access to the config owner.
+	if err := file.Chmod(0o444); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("set organizer lock file permissions: %w", err)
+	}
+	for {
+		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX)
+		if errors.Is(err, syscall.EINTR) {
+			continue
+		}
+		if err != nil {
+			_ = file.Close()
+			return nil, fmt.Errorf("acquire organizer file lock: %w", err)
+		}
+		break
+	}
+	return file, nil
 }
 
 // lockOrganizationKeys takes multiple season locks in stable order to avoid deadlocks.
-func lockOrganizationKeys(keys []string) func() {
+func lockOrganizationKeys(keys []string) (func(), error) {
 	sort.Strings(keys)
 	unlock := make([]func(), 0, len(keys))
 	for i, key := range keys {
 		if i > 0 && key == keys[i-1] {
 			continue
 		}
-		unlock = append(unlock, lockOrganizationKey(key))
+		release, err := lockOrganizationKey(key)
+		if err != nil {
+			for j := len(unlock) - 1; j >= 0; j-- {
+				unlock[j]()
+			}
+			return nil, fmt.Errorf("lock organizer key %q: %w", key, err)
+		}
+		unlock = append(unlock, release)
 	}
 	return func() {
 		for i := len(unlock) - 1; i >= 0; i-- {
 			unlock[i]()
 		}
-	}
+	}, nil
 }
 
 func organizeWithTargetLock(targetPath string, finalize OrganizationFinalizer, organize func() (*OrganizationResult, error)) (*OrganizationResult, error) {
@@ -114,7 +220,14 @@ func organizeWithTargetLock(targetPath string, finalize OrganizationFinalizer, o
 }
 
 func organizeWithKeyLock(key string, finalize OrganizationFinalizer, organize func() (*OrganizationResult, error)) (*OrganizationResult, error) {
-	unlock := lockOrganizationKey(key)
+	unlock, err := lockOrganizationKey(key)
+	if err != nil {
+		lockErr := fmt.Errorf("acquire organizer lock: %w", err)
+		if finalize != nil {
+			finalize(nil, lockErr)
+		}
+		return nil, lockErr
+	}
 	defer unlock()
 
 	result, err := organize()
@@ -1362,7 +1475,15 @@ func (o *Organizer) OrganizeTVSeasonPackAutoFinalized(releaseDir string, getFile
 	}
 	var runErr error
 	func() {
-		unlock := lockOrganizationKeys(keys)
+		unlock, err := lockOrganizationKeys(keys)
+		if err != nil {
+			runErr = fmt.Errorf("acquire season-pack organizer locks: %w", err)
+			result.Error = runErr
+			if finalize != nil {
+				finalize(result, runErr)
+			}
+			return
+		}
 		defer unlock()
 
 		for _, episode := range episodes {
