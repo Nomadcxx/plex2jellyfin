@@ -1947,6 +1947,21 @@ func TestHandleJellyfinWebhookEvent_ItemAddedUpdatesParseDecision(t *testing.T) 
 	assert.True(t, *dec.JellyfinIdentified)
 }
 
+func TestHandleJellyfinWebhookEvent_PlaybackStoppedUnlocksPath(t *testing.T) {
+	path := "/library/show.mkv"
+	locks := jellyfin.NewPlaybackLockManager()
+	locks.Lock(path, jellyfin.PlaybackInfo{UserName: "tester"})
+	handler := &MediaHandler{playbackLocks: locks, deferredQueue: jellyfin.NewDeferredQueue()}
+
+	err := handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventPlaybackStopped,
+		ItemPath:         path,
+	})
+	require.NoError(t, err)
+	locked, _ := locks.IsLocked(path)
+	assert.False(t, locked, "PlaybackStopped must release the playback lock")
+}
+
 func TestHandleJellyfinWebhookEvent_ItemAddedReturnsDBError(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
 	db, err := database.OpenPath(dbPath)
