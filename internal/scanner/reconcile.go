@@ -3,6 +3,7 @@ package scanner
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,6 +60,7 @@ func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err err
 	}
 
 	var toClean []string
+	var reconcileErrors []error
 	for _, filePath := range activityPaths {
 		name := filepath.Base(filePath)
 		fileRetried, fileToClean, fileErr := s.processActivityFileWithLatest(filePath, retryWindow, cleanupWindow, latestBySource)
@@ -66,6 +68,7 @@ func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err err
 			s.logger.Warn("scanner", "Error processing activity file",
 				logging.F("file", name),
 				logging.F("error", fileErr.Error()))
+			reconcileErrors = append(reconcileErrors, fmt.Errorf("processing activity file %s: %w", name, fileErr))
 			continue
 		}
 
@@ -81,6 +84,7 @@ func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err err
 			s.logger.Warn("scanner", "Error cleaning activity file",
 				logging.F("path", path),
 				logging.F("error", err.Error()))
+			reconcileErrors = append(reconcileErrors, fmt.Errorf("cleaning activity file %s: %w", filepath.Base(path), err))
 		} else {
 			cleaned++
 		}
@@ -90,7 +94,7 @@ func (s *PeriodicScanner) reconcileActivity() (retried int, cleaned int, err err
 		logging.F("retried", retried),
 		logging.F("cleaned", cleaned))
 
-	return retried, cleaned, nil
+	return retried, cleaned, errors.Join(reconcileErrors...)
 }
 
 func (s *PeriodicScanner) processActivityFile(path string, retryWindow, cleanupWindow time.Time) (retried int, shouldClean bool, err error) {
