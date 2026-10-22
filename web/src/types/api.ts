@@ -753,10 +753,16 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Scan triggered */
-      202: {
+      /** @description Media manager is unknown or not configured */
+      404: {
         content: {
-          "application/json": components["schemas"]["OperationResult"];
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Scan trigger is not implemented for this manager */
+      501: {
+        content: {
+          "application/json": components["schemas"]["Error"];
         };
       };
     };

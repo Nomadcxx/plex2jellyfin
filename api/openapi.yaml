@@ -178,12 +178,18 @@ paths:
                 path:
                   type: string
       responses:
-        '202':
-          description: Scan triggered
+        '404':
+          description: Media manager is unknown or not configured
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OperationResult'
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: Scan trigger is not implemented for this manager
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   # ============ LLM PROVIDERS ============
   /llm-providers:
