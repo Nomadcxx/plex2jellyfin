@@ -1,6 +1,7 @@
 package library
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,12 +19,15 @@ type ShowLocation struct {
 }
 
 // findAllShowLocations scans all libraries for directories matching the show name
-func (s *Selector) findAllShowLocations(showName, year string) []ShowLocation {
+func (s *Selector) findAllShowLocations(showName, year string) ([]ShowLocation, error) {
 	var locations []ShowLocation
 	normalizedTitle := normalizeTitle(showName)
 
 	for _, lib := range s.libraries {
-		showDir := s.findShowDirInLibrary(lib, normalizedTitle, year)
+		showDir, err := s.findShowDirInLibrary(lib, normalizedTitle, year)
+		if err != nil {
+			return nil, fmt.Errorf("read TV library root %s: %w", lib, err)
+		}
 		if showDir == "" {
 			continue
 		}
@@ -39,16 +43,16 @@ func (s *Selector) findAllShowLocations(showName, year string) []ShowLocation {
 		})
 	}
 
-	return locations
+	return locations, nil
 }
 
 var yearParenRegex = regexp.MustCompile(`\((\d{4})\)`)
 
 // findShowDirInLibrary finds a show directory in a single library
-func (s *Selector) findShowDirInLibrary(library, normalizedTitle, year string) string {
+func (s *Selector) findShowDirInLibrary(library, normalizedTitle, year string) (string, error) {
 	entries, err := os.ReadDir(library)
 	if err != nil {
-		return ""
+		return "", err
 	}
 
 	for _, entry := range entries {
@@ -72,11 +76,11 @@ func (s *Selector) findShowDirInLibrary(library, normalizedTitle, year string) s
 
 		// Match patterns (now year-safe):
 		if normalizedDir == normalizedTitle || normalizedDir == normalizedTitle+year || strings.HasPrefix(normalizedDir, normalizedTitle+"(") {
-			return filepath.Join(library, dirName)
+			return filepath.Join(library, dirName), nil
 		}
 	}
 
-	return ""
+	return "", nil
 }
 
 // countEpisodesInShow counts video files in a show directory (recursively)

@@ -188,7 +188,10 @@ func (s *Selector) SelectTVShowLibrary(showName string, year string, fileSize in
 	}
 
 	// STEP 1: Find ALL libraries that have this show
-	matches := s.findAllShowLocations(showName, year)
+	matches, err := s.findAllShowLocations(showName, year)
+	if err != nil {
+		return nil, err
+	}
 
 	// STEP 2: If no matches, this is a new show
 	if len(matches) == 0 {

@@ -68,6 +68,24 @@ func TestSelectTVShowLibrary_NewShow(t *testing.T) {
 	t.Logf("Selected: %s - Reason: %s", result.Library, result.Reason)
 }
 
+func TestSelectTVShowLibraryReturnsErrorWhenRootCannotBeRead(t *testing.T) {
+	tmpDir := t.TempDir()
+	readableRoot := filepath.Join(tmpDir, "TVSHOWS")
+	if err := os.MkdirAll(readableRoot, 0755); err != nil {
+		t.Fatalf("Failed to create readable root: %v", err)
+	}
+	fileRoot := filepath.Join(tmpDir, "not-a-directory")
+	if err := os.WriteFile(fileRoot, []byte("x"), 0644); err != nil {
+		t.Fatalf("Failed to create invalid root: %v", err)
+	}
+
+	selector := NewSelector([]string{readableRoot, fileRoot})
+	selection, err := selector.SelectTVShowLibrary("New Show", "2025", 1)
+	if err == nil {
+		t.Fatalf("selected %q even though a configured TV root could not be read", selection.Library)
+	}
+}
+
 func TestFindExistingShowDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	library := filepath.Join(tmpDir, "TVSHOWS")
