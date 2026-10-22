@@ -94,6 +94,26 @@ func TestPruneMissingMediaFilesRemovesOnlyMissingRows(t *testing.T) {
 	}
 }
 
+func TestReconcileMissingMediaFileRemovesStaleRow(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	path := filepath.Join(t.TempDir(), "missing.mkv")
+	file := &database.MediaFile{Path: path, MediaType: "movie", Size: 5}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("insert stale row: %v", err)
+	}
+
+	if err := NewCleanupService(db).ReconcileMissingMediaFile(path); err != nil {
+		t.Fatalf("ReconcileMissingMediaFile: %v", err)
+	}
+	if got, err := db.GetMediaFile(path); err != nil {
+		t.Fatalf("GetMediaFile: %v", err)
+	} else if got != nil {
+		t.Fatal("stale media row should be removed")
+	}
+}
+
 func TestAnalyzeDuplicates_FindsMovieDuplicates(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

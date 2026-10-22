@@ -115,6 +115,46 @@ func TestDeleteDuplicateKeepsDatabaseRowWhenRemovalFails(t *testing.T) {
 	}
 }
 
+func TestDeleteDuplicateReportsDatabaseCleanupFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	db, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "duplicate.mkv")
+	if err := os.WriteFile(path, []byte("video"), 0644); err != nil {
+		t.Fatalf("create duplicate: %v", err)
+	}
+	if err := db.UpsertMediaFile(&database.MediaFile{Path: path, MediaType: "movie", Size: 5}); err != nil {
+		t.Fatalf("insert media file: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	if err := deleteDuplicateFile(db, path, -1, -1); err == nil {
+		t.Fatal("expected database cleanup failure")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("file should be removed before the database error, stat err=%v", err)
+	}
+
+	checkDB, err := database.OpenPath(dbPath)
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	defer checkDB.Close()
+	file, err := checkDB.GetMediaFile(path)
+	if err != nil {
+		t.Fatalf("read media file row: %v", err)
+	}
+	if file == nil {
+		t.Fatal("expected failed cleanup to leave the row for later reconciliation")
+	}
+}
+
 func TestDuplicatePlanRootIssuesBlocksPathsOutsideConfiguredLibraries(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Libraries.Movies = []string{"/library-movies"}
