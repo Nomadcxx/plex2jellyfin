@@ -348,6 +348,45 @@ func TestPeriodicScannerReplaceWatchPathsConcurrentWithScan(t *testing.T) {
 	<-done
 }
 
+func TestPeriodicScannerReplaceWatchPathsConcurrentWithRetry(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "old")
+	newPath := filepath.Join(root, "new")
+	for _, path := range []string{oldPath, newPath} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	filePath := filepath.Join(oldPath, "retry.mkv")
+	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewPeriodicScanner(ScannerConfig{
+		WatchPaths: []string{oldPath, newPath},
+		Handler:    &recordingHandler{},
+		Logger:     logging.Nop(),
+	})
+	entry := activity.Entry{Source: filePath}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			_ = s.retryTransfer(entry)
+		}
+	}()
+	for i := 0; i < 2000; i++ {
+		if i%2 == 0 {
+			s.ReplaceWatchPaths([]string{oldPath, newPath})
+		} else {
+			s.ReplaceWatchPaths([]string{newPath, oldPath})
+		}
+	}
+	wg.Wait()
+}
+
 func TestPeriodicScanner_RunScanIgnoresTypedNilOrphanChecker(t *testing.T) {
 	var checker *jellyfin.Client
 	s := NewPeriodicScanner(ScannerConfig{

@@ -270,7 +270,7 @@ func (s *PeriodicScanner) retryTransfer(entry activity.Entry) error {
 
 	// Only retry files inside configured watch paths
 	insideWatch := false
-	for _, wp := range s.watchPaths {
+	for _, wp := range s.WatchPaths() {
 		if strings.HasPrefix(entry.Source, wp) {
 			insideWatch = true
 			break
