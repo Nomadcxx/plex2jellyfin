@@ -86,6 +86,35 @@ func TestDeleteDuplicateDatabaseCleanupOnFailure(t *testing.T) {
 	}
 }
 
+func TestDeleteDuplicateKeepsDatabaseRowWhenRemovalFails(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	path := filepath.Join(t.TempDir(), "nonempty-directory")
+	if err := os.Mkdir(path, 0755); err != nil {
+		t.Fatalf("Failed to create directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "keep.txt"), []byte("keep"), 0644); err != nil {
+		t.Fatalf("Failed to create directory entry: %v", err)
+	}
+	if err := db.UpsertMediaFile(&database.MediaFile{Path: path, MediaType: "movie", Size: 4}); err != nil {
+		t.Fatalf("Failed to insert media file: %v", err)
+	}
+
+	if err := deleteDuplicateFile(db, path, -1, -1); err == nil {
+		t.Fatal("expected removal error for non-empty directory")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("media path should remain after failed removal: %v", err)
+	}
+	if file, err := db.GetMediaFile(path); err != nil || file == nil {
+		t.Fatalf("database row should remain after failed removal, file=%v err=%v", file, err)
+	}
+}
+
 func TestDuplicatePlanRootIssuesBlocksPathsOutsideConfiguredLibraries(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Libraries.Movies = []string{"/library-movies"}
