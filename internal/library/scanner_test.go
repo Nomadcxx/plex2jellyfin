@@ -127,7 +127,10 @@ func TestFindShowDirInLibrary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.showName, func(t *testing.T) {
 			normalized := normalizeTitle(tt.showName)
-			result := selector.findShowDirInLibrary(library, normalized, tt.year)
+			result, err := selector.findShowDirInLibrary(library, normalized, tt.year)
+			if err != nil {
+				t.Fatalf("findShowDirInLibrary returned an error: %v", err)
+			}
 			found := result != ""
 
 			if found != tt.wantFound {
@@ -182,7 +185,10 @@ func TestFindAllShowLocations(t *testing.T) {
 		libraries: []string{storage1, storage2, storage3},
 	}
 
-	locations := selector.findAllShowLocations("Fallout", "2024")
+	locations, err := selector.findAllShowLocations("Fallout", "2024")
+	if err != nil {
+		t.Fatalf("findAllShowLocations() returned error: %v", err)
+	}
 
 	// Should find 2 locations (STORAGE1 and STORAGE2)
 	if len(locations) != 2 {
@@ -227,7 +233,10 @@ func TestFindAllShowLocations_NoMatches(t *testing.T) {
 
 	selector := &Selector{libraries: []string{library}}
 
-	locations := selector.findAllShowLocations("Nonexistent Show", "2024")
+	locations, err := selector.findAllShowLocations("Nonexistent Show", "2024")
+	if err != nil {
+		t.Fatalf("findAllShowLocations() returned error: %v", err)
+	}
 
 	if len(locations) != 0 {
 		t.Errorf("findAllShowLocations(nonexistent) found %d locations, want 0", len(locations))
@@ -247,17 +256,26 @@ func TestFindShowDirInLibrary_YearAware(t *testing.T) {
 		libraries: []string{libDir},
 	}
 
-	result := selector.findShowDirInLibrary(libDir, "dracula", "2020")
+	result, err := selector.findShowDirInLibrary(libDir, "dracula", "2020")
+	if err != nil {
+		t.Fatalf("findShowDirInLibrary returned error: %v", err)
+	}
 	if result != seasonDir {
 		t.Errorf("year 2020: got %q, want %q", result, seasonDir)
 	}
 
-	result = selector.findShowDirInLibrary(libDir, "dracula", "2025")
+	result, err = selector.findShowDirInLibrary(libDir, "dracula", "2025")
+	if err != nil {
+		t.Fatalf("findShowDirInLibrary returned error: %v", err)
+	}
 	if result != seasonDir2025 {
 		t.Errorf("year 2025: got %q, want %q", result, seasonDir2025)
 	}
 
-	result = selector.findShowDirInLibrary(libDir, "dracula", "")
+	result, err = selector.findShowDirInLibrary(libDir, "dracula", "")
+	if err != nil {
+		t.Fatalf("findShowDirInLibrary returned error: %v", err)
+	}
 	if result == "" {
 		t.Errorf("no year: should match any, got empty")
 	}
