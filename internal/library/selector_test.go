@@ -156,6 +156,13 @@ func TestSelectTVShowLibrarySonarrPathMustBeWithinLibraryRoot(t *testing.T) {
 	}
 }
 
+func TestGetAvailableSpaceDoesNotUseParentWhenPathIsMissing(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "unavailable", "library")
+	if _, err := getAvailableSpace(missingPath); err == nil {
+		t.Fatal("expected missing library path to fail instead of using parent filesystem space")
+	}
+}
+
 func TestFindExistingShowDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	library := filepath.Join(tmpDir, "TVSHOWS")

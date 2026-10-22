@@ -453,24 +453,8 @@ func (s *Selector) countMediaItems(library string, isMovie bool) int {
 
 func getAvailableSpace(path string) (int64, error) {
 	var stat syscall.Statfs_t
-
-	err := syscall.Statfs(path, &stat)
-	if err != nil {
-		current := path
-		for {
-			dir := filepath.Dir(current)
-			if dir == current {
-				break
-			}
-			current = dir
-			err = syscall.Statfs(current, &stat)
-			if err == nil {
-				break
-			}
-		}
-		if err != nil {
-			return 0, fmt.Errorf("unable to get disk space for %s: %w", path, err)
-		}
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0, fmt.Errorf("unable to get disk space for %s: %w", path, err)
 	}
 
 	return int64(stat.Bavail) * int64(stat.Bsize), nil
