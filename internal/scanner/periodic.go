@@ -247,51 +247,76 @@ func (s *PeriodicScanner) runScan() (err error) {
 	s.publish(ScanEvent{Type: "scan_started"})
 
 	// Phase 1: Scan watch directories
-	processed, errors := s.scanWatchDirectories()
+	processed, scanErrorCount := s.scanWatchDirectories()
+	var scanFailures []error
+	if scanErrorCount > 0 {
+		scanFailures = append(scanFailures, fmt.Errorf("watch directory scan had %d errors", scanErrorCount))
+	}
 
 	// Phase 2: Reconcile activity logs
 	retried, cleaned, reconcileErr := s.reconcileActivity()
 	if reconcileErr != nil {
 		s.logger.Warn("scanner", "Activity reconciliation had errors",
 			logging.F("error", reconcileErr.Error()))
+		scanFailures = append(scanFailures, fmt.Errorf("activity reconciliation: %w", reconcileErr))
 	}
 
-	s.checkOrphans()
+	if err := s.checkOrphans(); err != nil {
+		scanFailures = append(scanFailures, err)
+	}
 	_ = s.checkArrHealth()
 
+	scanErr := errors.Join(scanFailures...)
 	elapsed := time.Since(start)
-	s.logger.Info("scanner", "Periodic scan complete",
-		logging.F("duration_ms", elapsed.Milliseconds()),
-		logging.F("processed", processed),
-		logging.F("errors", errors),
-		logging.F("retried", retried),
-		logging.F("cleaned", cleaned))
+	if scanErr != nil {
+		s.logger.Warn("scanner", "Periodic scan finished with errors",
+			logging.F("duration_ms", elapsed.Milliseconds()),
+			logging.F("processed", processed),
+			logging.F("errors", scanErrorCount),
+			logging.F("retried", retried),
+			logging.F("cleaned", cleaned),
+			logging.F("error", scanErr.Error()))
+	} else {
+		s.logger.Info("scanner", "Periodic scan complete",
+			logging.F("duration_ms", elapsed.Milliseconds()),
+			logging.F("processed", processed),
+			logging.F("errors", scanErrorCount),
+			logging.F("retried", retried),
+			logging.F("cleaned", cleaned))
+	}
 
+	scanType := "scan_completed"
+	scanError := ""
+	if scanErr != nil {
+		scanType = "scan_failed"
+		scanError = scanErr.Error()
+	}
 	s.publish(ScanEvent{
-		Type:  "scan_completed",
-		Total: processed + errors,
+		Type:  scanType,
+		Total: processed + scanErrorCount,
 		Done:  processed,
+		Error: scanError,
 	})
 
-	return nil
+	return scanErr
 }
 
-func (s *PeriodicScanner) checkOrphans() {
+func (s *PeriodicScanner) checkOrphans() error {
 	if isNilOrphanChecker(s.orphanCheck) {
-		return
+		return nil
 	}
 
 	orphans, err := s.orphanCheck.GetOrphanedEpisodes()
 	if err != nil {
 		s.logger.Warn("scanner", "Orphan check failed", logging.F("error", err.Error()))
-		return
+		return fmt.Errorf("orphan check failed: %w", err)
 	}
 
 	if len(orphans) == 0 {
 		// Previously silent on the zero case; a single INFO per scan makes
 		// it obvious the check is running and Jellyfin is clean.
 		s.logger.Info("scanner", "Orphan check complete", logging.F("orphans", 0))
-		return
+		return nil
 	}
 
 	s.logger.Warn("scanner", "Orphaned episodes detected", logging.F("count", len(orphans)))
@@ -302,6 +327,7 @@ func (s *PeriodicScanner) checkOrphans() {
 			logging.F("path", orphan.Path),
 		)
 	}
+	return nil
 }
 
 func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
@@ -314,6 +340,7 @@ func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
 				s.logger.Warn("scanner", "Directory inaccessible during scan",
 					logging.F("path", path),
 					logging.F("error", walkErr.Error()))
+				errors++
 				return nil // Continue scanning other directories
 			}
 
@@ -348,6 +375,7 @@ func (s *PeriodicScanner) scanWatchDirectories() (processed int, errors int) {
 			s.logger.Warn("scanner", "Error walking directory",
 				logging.F("path", watchPath),
 				logging.F("error", err.Error()))
+			errors++
 		}
 	}
 

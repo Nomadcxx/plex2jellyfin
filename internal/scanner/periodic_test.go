@@ -3,10 +3,12 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -186,6 +188,92 @@ func TestPeriodicScanner_ScanWatchDirectoriesForwardsFullPath(t *testing.T) {
 		t.Fatalf("expected full path %q, got %q", filePath, handler.events[0].Path)
 	}
 }
+
+func TestPeriodicScannerTickMarksIncompleteWatchScanUnhealthy(t *testing.T) {
+	root := t.TempDir()
+	goodRoot := filepath.Join(root, "good")
+	if err := os.Mkdir(goodRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goodFile := filepath.Join(goodRoot, "movie.mkv")
+	if err := os.WriteFile(goodFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := &recordingHandler{}
+	s := NewPeriodicScanner(ScannerConfig{
+		WatchPaths: []string{filepath.Join(root, "missing"), goodRoot},
+		Handler:    handler,
+		Logger:     logging.Nop(),
+	})
+	events, cancel := s.Subscribe()
+	defer cancel()
+	s.tick()
+
+	status := s.Status()
+	if status.Healthy || !status.LastSuccess.IsZero() || status.LastError == "" {
+		t.Fatalf("incomplete scan status = %+v, want unhealthy with no successful scan and an error", status)
+	}
+	if len(handler.events) != 1 || handler.events[0].Path != goodFile {
+		t.Fatalf("scanner stopped after one root failed; events = %+v", handler.events)
+	}
+	var scanFailed bool
+	for len(events) > 0 {
+		event := <-events
+		if event.Type == "scan_failed" && event.Error != "" {
+			scanFailed = true
+		}
+	}
+	if !scanFailed {
+		t.Fatal("incomplete scan did not publish a scan_failed event")
+	}
+}
+
+func TestPeriodicScannerTickMarksActivityReconcileFailureUnhealthy(t *testing.T) {
+	activityPath := filepath.Join(t.TempDir(), "activity")
+	if err := os.WriteFile(activityPath, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewPeriodicScanner(ScannerConfig{
+		Handler:     &recordingHandler{},
+		Logger:      logging.Nop(),
+		ActivityDir: activityPath,
+	})
+	s.tick()
+
+	status := s.Status()
+	if status.Healthy || !status.LastSuccess.IsZero() || !strings.Contains(status.LastError, "activity") {
+		t.Fatalf("activity reconciliation failure status = %+v", status)
+	}
+}
+
+func TestPeriodicScannerTickMarksFileProcessingFailureUnhealthy(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "failed.mkv")
+	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewPeriodicScanner(ScannerConfig{
+		WatchPaths: []string{root},
+		Handler:    failingHandler{err: errors.New("handler failed")},
+		Logger:     logging.Nop(),
+	})
+	s.tick()
+
+	status := s.Status()
+	if status.Healthy || !status.LastSuccess.IsZero() || !strings.Contains(status.LastError, "watch") {
+		t.Fatalf("file processing failure status = %+v", status)
+	}
+}
+
+type failingHandler struct {
+	err error
+}
+
+func (h failingHandler) HandleFileEvent(watcher.FileEvent) error { return h.err }
+func (failingHandler) IsMediaFile(path string) bool              { return filepath.Ext(path) == ".mkv" }
 
 func TestPeriodicScannerReplaceWatchPaths(t *testing.T) {
 	root := t.TempDir()

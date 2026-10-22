@@ -53,3 +53,20 @@ func TestPeriodicScannerCheckOrphansHandlesError(t *testing.T) {
 	})
 	assert.True(t, checker.called)
 }
+
+func TestPeriodicScannerTickMarksOrphanCheckFailureUnhealthy(t *testing.T) {
+	checker := &mockOrphanChecker{err: errors.New("Jellyfin request failed")}
+	scanner := NewPeriodicScanner(ScannerConfig{
+		Handler:     &recordingHandler{},
+		Logger:      logging.Nop(),
+		OrphanCheck: checker,
+	})
+
+	scanner.tick()
+
+	status := scanner.Status()
+	assert.True(t, checker.called)
+	assert.False(t, status.Healthy)
+	assert.True(t, status.LastSuccess.IsZero())
+	assert.Contains(t, status.LastError, "orphan check")
+}
