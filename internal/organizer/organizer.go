@@ -245,14 +245,16 @@ func finalizeOrganization(result *OrganizationResult, err error, finalize Organi
 }
 
 type SeasonPackResult struct {
-	Success     bool
-	SourceDir   string
-	Imported    []*OrganizationResult
-	Unresolved  []string
-	Skipped     bool
-	SkipReason  string
-	Error       error
-	BytesCopied int64
+	Success   bool
+	SourceDir string
+	Imported  []*OrganizationResult
+	// FailedEpisode retains the item that aborted the pack after earlier imports rolled back.
+	FailedEpisode *OrganizationResult
+	Unresolved    []string
+	Skipped       bool
+	SkipReason    string
+	Error         error
+	BytesCopied   int64
 }
 
 // SeasonPackFinalizer records a pack outcome before its show-season locks release.
@@ -1501,6 +1503,10 @@ func (o *Organizer) OrganizeTVSeasonPackAutoFinalized(releaseDir string, getFile
 			if itemErr != nil {
 				result.Error = itemErr
 				runErr = itemErr
+				result.FailedEpisode = itemResult
+				if result.FailedEpisode == nil {
+					result.FailedEpisode = &OrganizationResult{SourcePath: episode.path, Error: itemErr}
+				}
 				if finalize != nil {
 					finalize(result, runErr)
 				}
@@ -1511,6 +1517,7 @@ func (o *Organizer) OrganizeTVSeasonPackAutoFinalized(releaseDir string, getFile
 				result.BytesCopied += itemResult.BytesCopied
 				if itemResult.Error != nil && !itemResult.Skipped {
 					result.Error = itemResult.Error
+					result.FailedEpisode = itemResult
 					result.SkipReason = "season_pack_partial_failure"
 					if rollbackErr := rollbackSeasonPackImports(result.Imported); rollbackErr != nil {
 						result.Error = fmt.Errorf("%w; rollback failed: %v", result.Error, rollbackErr)

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1603,7 +1604,7 @@ func TestNewMediaHandler_HydratesSeasonPackUnresolvedNegativeCache(t *testing.T)
 	handler, err := NewMediaHandler(cfg)
 	require.NoError(t, err)
 
-	deferred, remaining, lastErr := handler.retryCache.IsDeferred(srcFile)
+	deferred, remaining, lastErr := handler.retryCache.IsDeferred(packDir)
 	assert.True(t, deferred)
 	assert.Greater(t, remaining, time.Duration(0))
 	assert.Contains(t, lastErr, "season_pack_unresolved")
@@ -1801,6 +1802,100 @@ func TestProcessFile_SeasonPackConcurrentEventsSingleFlight(t *testing.T) {
 	assert.Equal(t, "success", rows[0].OrganizeOutcome)
 }
 
+func TestSeasonPackCapacityFailureDefersWholePackAfterRollback(t *testing.T) {
+	watchDir := t.TempDir()
+	releaseDir := filepath.Join(watchDir, "Capacity.Show.S01.1080p.GROUP")
+	require.NoError(t, os.MkdirAll(releaseDir, 0o755))
+	episodeOne := filepath.Join(releaseDir, "Capacity.Show.S01E01.1080p.mkv")
+	episodeTwo := filepath.Join(releaseDir, "Capacity.Show.S01E02.1080p.mkv")
+	require.NoError(t, os.WriteFile(episodeOne, []byte("episode-one"), 0o644))
+	require.NoError(t, os.WriteFile(episodeTwo, []byte("episode-two-is-larger"), 0o644))
+
+	libraryRoot := t.TempDir()
+	tvOrganizer, err := organizer.NewOrganizer([]string{libraryRoot}, organizer.WithTransferer(&failSecondEpisodeTransferer{}))
+	require.NoError(t, err)
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "handler-test.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	decisionID, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:     episodeOne,
+		SourceFilename: filepath.Base(episodeOne),
+		SourceSize:     int64(len("episode-one")),
+		EventAt:        time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	cache := NewNegativeCache()
+	cache.availableSpace = func(string) (int64, error) { return 0, nil }
+	handler := &MediaHandler{
+		tvOrganizer: tvOrganizer,
+		db:          db,
+		logger:      logging.Nop(),
+		stats:       NewStats(),
+		retryCache:  cache,
+	}
+	handled, completed := handler.processTVSeasonPackIfApplicable(episodeOne, decisionID, time.Now())
+	require.True(t, handled)
+	require.False(t, completed)
+
+	assert.FileExists(t, episodeOne, "the first import must be rolled back")
+	assert.FileExists(t, episodeTwo, "the failed episode must remain in the release directory")
+	assert.NoFileExists(t, filepath.Join(libraryRoot, "Capacity Show", "Season 01", "Capacity Show S01E01.mkv"))
+
+	entry := cache.entries[releaseDir]
+	require.NotNil(t, entry, "the whole season pack should be deferred")
+	assert.Equal(t, filepath.Join(libraryRoot, "Capacity Show", "Season 01"), entry.destinationPath)
+	assert.Equal(t, int64(len("episode-two-is-larger")), entry.requiredBytes)
+	assert.True(t, handler.ShouldSuppressRetry(episodeTwo), "sibling files must share the season-pack retry key")
+
+	decision, err := db.GetDecision(decisionID)
+	require.NoError(t, err)
+	require.Equal(t, "failed", decision.OrganizeOutcome)
+	assert.Empty(t, decision.TargetPath, "a rolled-back target must not be recorded as landed media")
+	assert.Equal(t, entry.destinationPath, decision.RetryDestination)
+	assert.Equal(t, entry.requiredBytes, decision.RetryRequiredBytes)
+	assert.Zero(t, handler.stats.Snapshot().TVProcessed, "rolled-back imports must not count as completed media")
+
+	retryRows, err := db.GetRecentRetryableFailures(24*time.Hour, maxRetryBackoffFailures)
+	require.NoError(t, err)
+	require.Len(t, retryRows, 1)
+	assert.Equal(t, filepath.Clean(episodeOne), retryRows[0].SourcePath)
+	assert.Equal(t, entry.requiredBytes, retryRows[0].RetryRequiredBytes)
+	hydrated := NewNegativeCache()
+	hydrated.availableSpace = func(string) (int64, error) { return 0, nil }
+	hydrateNegativeCacheFromDB(hydrated, db, logging.Nop())
+	restartedHandler := &MediaHandler{retryCache: hydrated}
+	assert.True(t, restartedHandler.ShouldSuppressRetry(episodeTwo), "a restart must restore the shared pack retry state")
+	assert.Equal(t, entry.requiredBytes, hydrated.entries[releaseDir].requiredBytes)
+}
+
+type failSecondEpisodeTransferer struct{}
+
+func (*failSecondEpisodeTransferer) Move(source, target string, _ transfer.TransferOptions) (*transfer.TransferResult, error) {
+	if filepath.Base(target) == "Capacity Show S01E02.mkv" {
+		err := errors.New("insufficient space: simulated capacity shortfall")
+		return &transfer.TransferResult{Error: err}, err
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if err := os.Rename(source, target); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	return &transfer.TransferResult{Success: true, SourceRemoved: true, BytesCopied: info.Size(), BytesTotal: info.Size()}, nil
+}
+
+func (*failSecondEpisodeTransferer) Copy(string, string, transfer.TransferOptions) (*transfer.TransferResult, error) {
+	return nil, errors.New("unexpected copy")
+}
+
+func (*failSecondEpisodeTransferer) CanResume() bool { return false }
+func (*failSecondEpisodeTransferer) Name() string    { return "fail-second-episode" }
+
 func TestAIItemHasParseDecisionID(t *testing.T) {
 	tmpLib := t.TempDir()
 	watchDir := t.TempDir()
@@ -1850,6 +1945,247 @@ func TestUpdateDecisionOrganizeReturnsDBError(t *testing.T) {
 	err = handler.updateDecisionOrganize(1, &organizer.OrganizationResult{Success: true, TargetPath: "/library/movie.mkv"}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "UpdateOrganize")
+}
+
+func TestUpdateDecisionOrganizeKeepsFailedDestinationOutOfTargetPath(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "handler-test.db"))
+	require.NoError(t, err)
+	defer db.Close()
+
+	source := filepath.Join(t.TempDir(), "movie.mkv")
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:     source,
+		SourceFilename: filepath.Base(source),
+		SourceSize:     1234,
+		EventAt:        time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	handler := &MediaHandler{db: db, logger: logging.Nop()}
+	result := &organizer.OrganizationResult{
+		SourcePath: source,
+		TargetPath: "/movies/Movie (2026)/Movie (2026).mkv",
+		Error:      errors.New("transfer failed: insufficient space"),
+	}
+	require.NoError(t, handler.updateDecisionOrganize(id, result, nil))
+
+	decision, err := db.GetDecision(id)
+	require.NoError(t, err)
+	assert.Empty(t, decision.TargetPath)
+	assert.Equal(t, filepath.Dir(result.TargetPath), decision.RetryDestination)
+	assert.Equal(t, "failed", decision.OrganizeOutcome)
+
+	returnedErrorID, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:     source + ".returned-error",
+		SourceFilename: filepath.Base(source) + ".returned-error",
+		EventAt:        time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	returnedErrorResult := &organizer.OrganizationResult{
+		SourcePath: source + ".returned-error",
+		TargetPath: "/movies/Other Movie/Other Movie.mkv",
+	}
+	require.NoError(t, handler.updateDecisionOrganize(returnedErrorID, returnedErrorResult, errors.New("insufficient space")))
+	returnedErrorDecision, err := db.GetDecision(returnedErrorID)
+	require.NoError(t, err)
+	assert.Empty(t, returnedErrorDecision.TargetPath)
+	assert.Equal(t, filepath.Dir(returnedErrorResult.TargetPath), returnedErrorDecision.RetryDestination)
+}
+
+func TestUpdateDecisionOrganizePersistsRetryRequiredBytes(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "handler-test.db"))
+	require.NoError(t, err)
+	defer db.Close()
+
+	source := filepath.Join(t.TempDir(), "failed-episode.mkv")
+	require.NoError(t, os.WriteFile(source, []byte("small"), 0o644))
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:     filepath.Join(filepath.Dir(source), "triggering-episode.mkv"),
+		SourceFilename: "triggering-episode.mkv",
+		SourceSize:     5,
+		EventAt:        time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	destination := t.TempDir()
+	handler := &MediaHandler{db: db, logger: logging.Nop()}
+	failure := &library.InsufficientSpaceError{Path: destination, RequiredBytes: 99, Available: 10}
+	require.NoError(t, handler.updateDecisionOrganize(id, &organizer.OrganizationResult{
+		SourcePath: source,
+		TargetPath: filepath.Join(destination, "failed-episode.mkv"),
+		Error:      failure,
+	}, nil))
+
+	var requiredBytes int64
+	require.NoError(t, db.SQL().QueryRow(`SELECT retry_required_bytes FROM parse_decisions WHERE id = ?`, id).Scan(&requiredBytes))
+	assert.Equal(t, int64(99), requiredBytes, "the failed episode size must be persisted independently of the triggering file")
+}
+
+func TestHydrateNegativeCacheUsesPersistedRetryRequiredBytes(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "handler-test.db"))
+	require.NoError(t, err)
+	defer db.Close()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "triggering-episode.mkv")
+	require.NoError(t, os.WriteFile(source, []byte("small"), 0o644))
+	destination := t.TempDir()
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:       source,
+		SourceFilename:   filepath.Base(source),
+		SourceSize:       5,
+		EventAt:          time.Now().UTC(),
+		RetryDestination: destination,
+		OrganizeOutcome:  "failed",
+		OrganizeError:    "insufficient space: simulated capacity shortfall",
+	})
+	require.NoError(t, err)
+	_, err = db.SQL().Exec(`UPDATE parse_decisions SET retry_required_bytes = ? WHERE id = ?`, 99, id)
+	require.NoError(t, err)
+
+	cache := NewNegativeCache()
+	cache.availableSpace = func(string) (int64, error) { return 10, nil }
+	hydrateNegativeCacheFromDB(cache, db, logging.Nop())
+	entry := cache.entries[source]
+	require.NotNil(t, entry)
+	assert.Equal(t, int64(99), entry.requiredBytes)
+	if deferred, _, _ := cache.IsDeferred(source); !deferred {
+		t.Fatal("retry should remain deferred until the failed episode's capacity is available")
+	}
+}
+
+func TestRetryDestinationPrefersTypedCapacityErrorPath(t *testing.T) {
+	capacityRoot := t.TempDir()
+	previousTarget := filepath.Join(t.TempDir(), "rolled-back", "episode.mkv")
+	failure := &library.InsufficientSpaceError{Path: capacityRoot, RequiredBytes: 10, Available: 1}
+	result := &organizer.OrganizationResult{TargetPath: previousTarget}
+
+	if got := retryDestinationPath(failure, result, ""); got != capacityRoot {
+		t.Fatalf("retry destination = %q, want failed episode library %q", got, capacityRoot)
+	}
+}
+
+func TestMultiLibraryTVCapacityErrorsAreRetryable(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "tv1")
+	second := filepath.Join(root, "tv2")
+	require.NoError(t, os.MkdirAll(filepath.Join(first, "Capacity Show"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(second, "Capacity Show"), 0o755))
+
+	selector := library.NewSelector([]string{first, second})
+	_, err := selector.SelectTVShowLibrary("Capacity Show", "", int64(^uint64(0)>>1))
+	require.Error(t, err)
+	assert.True(t, IsFailureWorthBackoff(err.Error()), "the daemon must defer aggregate TV capacity failures")
+}
+
+func TestUpdateDecisionOrganizePersistsCapacitySelectorDestination(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "handler-test.db"))
+	require.NoError(t, err)
+	defer db.Close()
+
+	source := filepath.Join(t.TempDir(), "movie.mkv")
+	id, err := db.InsertDecision(database.ParseDecision{
+		SourcePath:     source,
+		SourceFilename: filepath.Base(source),
+		SourceSize:     1234,
+		EventAt:        time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	destination := t.TempDir()
+	selector := library.NewSelector([]string{destination})
+	_, capacityErr := selector.SelectMovieLibrary("Full Movie", "", int64(^uint64(0)>>1))
+	require.Error(t, capacityErr)
+
+	handler := &MediaHandler{db: db, logger: logging.Nop()}
+	require.NoError(t, handler.updateDecisionOrganize(id, nil, capacityErr))
+
+	decision, err := db.GetDecision(id)
+	require.NoError(t, err)
+	assert.Empty(t, decision.TargetPath)
+	assert.Equal(t, destination, decision.RetryDestination)
+}
+
+func TestRecordRetryFailureStoresDestinationAndRequiredSize(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "movie.mkv")
+	require.NoError(t, os.WriteFile(source, []byte("media"), 0o644))
+	destination := filepath.Join(root, "library")
+	require.NoError(t, os.Mkdir(destination, 0o755))
+
+	cache := NewNegativeCache()
+	handler := &MediaHandler{retryCache: cache}
+	handler.recordRetryFailure(source, &organizer.OrganizationResult{
+		TargetPath: filepath.Join(destination, "Movie", "movie.mkv"),
+	}, "/fallback", 5, errors.New("transfer failed: insufficient space"))
+
+	entry := cache.entries[source]
+	require.NotNil(t, entry)
+	assert.True(t, entry.resourceFailure)
+	assert.Equal(t, filepath.Join(destination, "Movie"), entry.destinationPath)
+	assert.Equal(t, int64(5), entry.requiredBytes)
+}
+
+func TestRecordRetryFailureUsesCapacityErrorDestination(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "movie.mkv")
+	require.NoError(t, os.WriteFile(source, []byte("media"), 0o644))
+	destination := filepath.Join(root, "library")
+	require.NoError(t, os.Mkdir(destination, 0o755))
+
+	selector := library.NewSelector([]string{destination})
+	_, failure := selector.SelectMovieLibrary("Full Movie", "", int64(^uint64(0)>>1))
+	require.Error(t, failure)
+
+	cache := NewNegativeCache()
+	handler := &MediaHandler{retryCache: cache}
+	handler.recordRetryFailure(source, nil, "", 5, failure)
+
+	entry := cache.entries[source]
+	require.NotNil(t, entry)
+	assert.Equal(t, destination, entry.destinationPath)
+}
+
+func TestHydrateNegativeCacheWaitsForPersistedDestinationCapacity(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "handler-test.db"))
+	require.NoError(t, err)
+	defer db.Close()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "movie.mkv")
+	require.NoError(t, os.WriteFile(source, []byte("media"), 0o644))
+	destination := filepath.Join(root, "library")
+	require.NoError(t, os.Mkdir(destination, 0o755))
+	now := time.Now().UTC()
+	sourceModifiedAt := now.Add(-2 * time.Hour)
+	require.NoError(t, os.Chtimes(source, sourceModifiedAt, sourceModifiedAt))
+	_, err = db.InsertDecision(database.ParseDecision{
+		SourcePath:       source,
+		SourceFilename:   filepath.Base(source),
+		SourceSize:       5,
+		SourceModifiedAt: &sourceModifiedAt,
+		EventAt:          now.Add(-time.Hour),
+		TargetPath:       filepath.Join(destination, "movie.mkv"),
+		RetryDestination: destination,
+		OrganizeOutcome:  "failed",
+		OrganizeError:    "transfer failed: insufficient space: need 5 bytes, have 4 bytes",
+	})
+	require.NoError(t, err)
+
+	available := int64(4)
+	cache := NewNegativeCache()
+	cache.availableSpace = func(path string) (int64, error) {
+		assert.Equal(t, destination, path)
+		return available, nil
+	}
+	hydrateNegativeCacheFromDB(cache, db, logging.Nop())
+	if deferred, _, _ := cache.IsDeferred(source); !deferred {
+		t.Fatal("persisted low-space failure should remain blocked while capacity is insufficient")
+	}
+	available = 5
+	if deferred, _, _ := cache.IsDeferred(source); deferred {
+		t.Fatal("persisted low-space failure should resume after capacity is freed")
+	}
 }
 
 func TestRegexFallback_WritesParseDecision(t *testing.T) {

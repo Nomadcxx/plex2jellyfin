@@ -25,6 +25,8 @@ type ParseDecision struct {
 	ParsedEpisode        *int
 	ParserStrippedTokens string
 	TargetPath           string
+	RetryDestination     string
+	RetryRequiredBytes   int64
 	TargetAt             *time.Time
 	ExistingMatchMethod  string
 	OrganizeOutcome      string
@@ -160,6 +162,8 @@ type ParseUpdate struct {
 // OrganizeUpdate carries updated organize metadata for a decision row.
 type OrganizeUpdate struct {
 	TargetPath          string
+	RetryDestination    string
+	RetryRequiredBytes  int64
 	TargetAt            *time.Time
 	ExistingMatchMethod string
 	OrganizeOutcome     string
@@ -202,15 +206,15 @@ func (m *MediaDB) InsertDecision(d ParseDecision) (int64, error) {
 			(source_path, source_filename, source_size, source_modified_at, event_at,
 			 media_type_guessed, parse_method, parsed_title,
 			 parsed_year, parsed_season, parsed_episode,
-			 parser_stripped_tokens, target_path, target_at,
+			 parser_stripped_tokens, target_path, retry_destination, retry_required_bytes, target_at,
 			 existing_match_method, organize_outcome, organize_error,
 			 jellyfin_item_id, jellyfin_imdb_id, jellyfin_tmdb_id, jellyfin_tvdb_id,
 			 jellyfin_resolved_at, auto_label, human_label_override)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		d.SourcePath, d.SourceFilename, d.SourceSize, nullTimePtr(d.SourceModifiedAt), d.EventAt,
 		nullStr(d.MediaTypeGuessed), nullStr(d.ParseMethod), nullStr(d.ParsedTitle),
 		nullIntPtr(d.ParsedYear), nullIntPtr(d.ParsedSeason), nullIntPtr(d.ParsedEpisode),
-		nullStr(d.ParserStrippedTokens), nullStr(d.TargetPath), nullTimePtr(d.TargetAt),
+		nullStr(d.ParserStrippedTokens), nullStr(d.TargetPath), nullStr(d.RetryDestination), d.RetryRequiredBytes, nullTimePtr(d.TargetAt),
 		nullStr(d.ExistingMatchMethod), nullStr(d.OrganizeOutcome), nullStr(d.OrganizeError),
 		nullStr(d.JellyfinItemID), nullStr(d.JellyfinImdbID), nullStr(d.JellyfinTmdbID), nullStr(d.JellyfinTvdbID),
 		nullTimePtr(d.JellyfinResolvedAt), nullStr(d.AutoLabel), nullStr(d.HumanLabelOverride),
@@ -268,12 +272,14 @@ func (m *MediaDB) UpdateOrganize(id int64, u OrganizeUpdate) error {
 	_, err := m.db.Exec(`
 		UPDATE parse_decisions SET
 			target_path = ?,
+			retry_destination = ?,
+			retry_required_bytes = ?,
 			target_at = ?,
 			existing_match_method = ?,
 			organize_outcome = ?,
 			organize_error = ?
 		WHERE id = ?`,
-		nullStr(u.TargetPath), nullTimePtr(u.TargetAt),
+		nullStr(u.TargetPath), nullStr(u.RetryDestination), u.RetryRequiredBytes, nullTimePtr(u.TargetAt),
 		nullStr(u.ExistingMatchMethod), nullStr(u.OrganizeOutcome), nullStr(u.OrganizeError),
 		id,
 	)
@@ -727,7 +733,7 @@ type scanner interface {
 const decisionColumns = `id, source_path, source_filename, event_at,
 	media_type_guessed, parse_method, parsed_title,
 	parsed_year, parsed_season, parsed_episode,
-	parser_stripped_tokens, target_path, target_at,
+	parser_stripped_tokens, target_path, retry_destination, retry_required_bytes, target_at,
 	existing_match_method, organize_outcome, organize_error,
 	jellyfin_item_id, jellyfin_imdb_id, jellyfin_tmdb_id, jellyfin_tvdb_id,
 	jellyfin_resolved_at, jellyfin_identified, jellyfin_first_seen_at,
@@ -747,6 +753,8 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		parsedEpisode        sql.NullInt64
 		parserStrippedTokens sql.NullString
 		targetPath           sql.NullString
+		retryDestination     sql.NullString
+		retryRequiredBytes   sql.NullInt64
 		targetAt             sql.NullTime
 		existingMatchMethod  sql.NullString
 		organizeOutcome      sql.NullString
@@ -776,7 +784,7 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 		&d.ID, &d.SourcePath, &d.SourceFilename, &d.EventAt,
 		&mediaTypeGuessed, &parseMethod, &parsedTitle,
 		&parsedYear, &parsedSeason, &parsedEpisode,
-		&parserStrippedTokens, &targetPath, &targetAt,
+		&parserStrippedTokens, &targetPath, &retryDestination, &retryRequiredBytes, &targetAt,
 		&existingMatchMethod, &organizeOutcome, &organizeError,
 		&jellyfinItemID, &jellyfinImdbID, &jellyfinTmdbID, &jellyfinTvdbID,
 		&jellyfinResolvedAt, &jellyfinIdentified, &jellyfinFirstSeenAt,
@@ -806,6 +814,10 @@ func scanDecision(s scanner) (*ParseDecision, error) {
 	}
 	d.ParserStrippedTokens = parserStrippedTokens.String
 	d.TargetPath = targetPath.String
+	d.RetryDestination = retryDestination.String
+	if retryRequiredBytes.Valid {
+		d.RetryRequiredBytes = retryRequiredBytes.Int64
+	}
 	if targetAt.Valid {
 		t := targetAt.Time
 		d.TargetAt = &t
@@ -1047,10 +1059,13 @@ func (m *MediaDB) GetMostRecentDecisionBySourcePath(sourcePath string) (*ParseDe
 // RetryableFailureRow is a source path's latest failed or skipped organize
 // attempt and the bounded history needed to restore its retry class streak.
 type RetryableFailureRow struct {
-	SourcePath   string
-	RecentErrors []string
-	LastError    string
-	LastAt       time.Time
+	SourcePath         string
+	SourceSize         int64
+	RetryDestination   string
+	RetryRequiredBytes int64
+	RecentErrors       []string
+	LastError          string
+	LastAt             time.Time
 }
 
 // GetRecentRetryableFailures returns paths whose latest failure-or-skip
@@ -1066,7 +1081,7 @@ func (m *MediaDB) GetRecentRetryableFailures(lookback time.Duration, historyLimi
 	cutoff := time.Now().UTC().Add(-lookback)
 	rows, err := m.db.Query(`
 		WITH retry_paths AS (
-			SELECT p1.source_path, p1.id AS latest_id,
+			SELECT p1.source_path, p1.id AS latest_id, p1.source_size, p1.retry_destination, p1.retry_required_bytes,
 			       COALESCE((
 			           SELECT MAX(p3.id)
 			             FROM parse_decisions p3
@@ -1085,6 +1100,7 @@ func (m *MediaDB) GetRecentRetryableFailures(lookback time.Duration, historyLimi
 			   AND p1.organize_outcome IN ('failed', 'skipped')
 		), ranked_history AS (
 			SELECT p.source_path, p.event_at, p.organize_error,
+			       r.source_size, r.retry_destination, r.retry_required_bytes,
 			       ROW_NUMBER() OVER (
 			           PARTITION BY p.source_path ORDER BY p.id DESC
 			       ) AS history_rank
@@ -1094,7 +1110,7 @@ func (m *MediaDB) GetRecentRetryableFailures(lookback time.Duration, historyLimi
 		   AND p.id > r.prior_nonfailure_id
 		   AND p.organize_outcome IN ('failed', 'skipped')
 		)
-		SELECT source_path, event_at, organize_error
+		SELECT source_path, event_at, organize_error, source_size, retry_destination, retry_required_bytes
 		  FROM ranked_history
 		 WHERE history_rank <= ?
 		 ORDER BY source_path, history_rank`, cutoff, historyLimit)
@@ -1106,15 +1122,23 @@ func (m *MediaDB) GetRecentRetryableFailures(lookback time.Duration, historyLimi
 	var out []RetryableFailureRow
 	for rows.Next() {
 		var (
-			sourcePath string
-			lastAtRaw  string
-			lastErr    sql.NullString
+			sourcePath         string
+			lastAtRaw          string
+			lastErr            sql.NullString
+			sourceSize         sql.NullInt64
+			retryDestination   sql.NullString
+			retryRequiredBytes sql.NullInt64
 		)
-		if err := rows.Scan(&sourcePath, &lastAtRaw, &lastErr); err != nil {
+		if err := rows.Scan(&sourcePath, &lastAtRaw, &lastErr, &sourceSize, &retryDestination, &retryRequiredBytes); err != nil {
 			return nil, fmt.Errorf("GetRecentRetryableFailures scan: %w", err)
 		}
 		if len(out) == 0 || out[len(out)-1].SourcePath != sourcePath {
-			out = append(out, RetryableFailureRow{SourcePath: sourcePath})
+			out = append(out, RetryableFailureRow{
+				SourcePath:         sourcePath,
+				SourceSize:         sourceSize.Int64,
+				RetryDestination:   retryDestination.String,
+				RetryRequiredBytes: retryRequiredBytes.Int64,
+			})
 			r := &out[len(out)-1]
 			// Event timestamps may use either the Go driver format or SQLite's
 			// default UTC format, depending on when the row was written.

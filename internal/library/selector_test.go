@@ -1,6 +1,7 @@
 package library
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,8 +159,70 @@ func TestSelectTVShowLibrarySonarrPathMustBeWithinLibraryRoot(t *testing.T) {
 
 func TestGetAvailableSpaceDoesNotUseParentWhenPathIsMissing(t *testing.T) {
 	missingPath := filepath.Join(t.TempDir(), "unavailable", "library")
-	if _, err := getAvailableSpace(missingPath); err == nil {
+	if _, err := AvailableSpace(missingPath); err == nil {
 		t.Fatal("expected missing library path to fail instead of using parent filesystem space")
+	}
+}
+
+func TestSelectMovieLibraryCapacityErrorCarriesDestination(t *testing.T) {
+	libraryRoot := t.TempDir()
+	selector := NewSelector([]string{libraryRoot})
+	_, err := selector.SelectMovieLibrary("New Film", "", int64(^uint64(0)>>1))
+	if err == nil {
+		t.Fatal("expected insufficient-space error")
+	}
+
+	var destinationError interface{ DestinationPath() string }
+	if !errors.As(err, &destinationError) {
+		t.Fatalf("capacity error %T does not expose its destination", err)
+	}
+	if got := destinationError.DestinationPath(); got != libraryRoot {
+		t.Fatalf("destination = %q, want %q", got, libraryRoot)
+	}
+}
+
+func TestSelectTVShowLibraryReturnsTypedCapacityErrorAcrossLibraries(t *testing.T) {
+	const tooLarge = int64(^uint64(0) >> 1)
+
+	t.Run("existing show", func(t *testing.T) {
+		base := t.TempDir()
+		first := filepath.Join(base, "tv1")
+		second := filepath.Join(base, "tv2")
+		requireDir(t, filepath.Join(first, "Capacity Show"))
+		requireDir(t, filepath.Join(second, "Capacity Show"))
+
+		selector := NewSelector([]string{first, second})
+		_, err := selector.SelectTVShowLibrary("Capacity Show", "", tooLarge)
+		assertTVCapacityError(t, err, tooLarge)
+	})
+
+	t.Run("new show", func(t *testing.T) {
+		base := t.TempDir()
+		first := filepath.Join(base, "tv1")
+		second := filepath.Join(base, "tv2")
+		requireDir(t, first)
+		requireDir(t, second)
+
+		selector := NewSelector([]string{first, second})
+		_, err := selector.SelectTVShowLibrary("Capacity Show", "", tooLarge)
+		assertTVCapacityError(t, err, tooLarge)
+	})
+}
+
+func assertTVCapacityError(t *testing.T, err error, requiredBytes int64) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected capacity error")
+	}
+	var capacityErr *InsufficientSpaceError
+	if !errors.As(err, &capacityErr) {
+		t.Fatalf("error %T is not an InsufficientSpaceError: %v", err, err)
+	}
+	if capacityErr.RequiredBytes != requiredBytes {
+		t.Fatalf("required bytes = %d, want %d", capacityErr.RequiredBytes, requiredBytes)
+	}
+	if capacityErr.Path != "" {
+		t.Fatalf("aggregate capacity error path = %q, want empty path", capacityErr.Path)
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Nomadcxx/plex2jellyfin/internal/library"
 )
 
 // obfuscatedHashName matches SAB temp-hash filenames such as
@@ -40,22 +42,21 @@ func IsObfuscatedSABFilename(path string) bool {
 	return true
 }
 
-// NegativeCache defers re-processing of files that fail with deterministic,
-// non-recoverable parse/organize errors. The periodic scanner re-walks watch
-// folders every few minutes; without this cache, a single unparseable file
-// (obfuscated SAB temp hash, season-pack-only release with no episode marker,
-// release like "Crime 101" / "Catch.22" with a numeric token confused for an
-// episode code) generates an unbounded retry loop.
+// NegativeCache defers files after deterministic failures and until known
+// destination capacity is available. The periodic scanner re-walks watch
+// folders every few minutes; without this cache, failures can generate an
+// unbounded retry loop.
 //
-// Entries expire on an exponential backoff. After the backoff window passes,
-// the file gets exactly one more chance to parse; if it fails again, the
-// failure count increments and the next defer is longer.
+// Parse failures use exponential backoff. Resource failures with a known
+// destination remain deferred until that destination has enough space; if
+// capacity cannot be checked, they fall back to a capped backoff.
 //
 // Cache entries are also evicted when the source file disappears (renamed by
 // SAB post-processing, deleted by user, or moved by another tool).
 type NegativeCache struct {
-	mu      sync.Mutex
-	entries map[string]*negEntry
+	mu             sync.Mutex
+	entries        map[string]*negEntry
+	availableSpace func(string) (int64, error)
 }
 
 type negEntry struct {
@@ -63,6 +64,8 @@ type negEntry struct {
 	failures        int
 	errMsg          string
 	resourceFailure bool
+	destinationPath string
+	requiredBytes   int64
 }
 
 // backoffSchedule returns how long to defer a path after `failures` failures.
@@ -111,10 +114,13 @@ func (e *negEntry) backoff() time.Duration {
 
 // NewNegativeCache returns an initialized NegativeCache.
 func NewNegativeCache() *NegativeCache {
-	return &NegativeCache{entries: make(map[string]*negEntry)}
+	return &NegativeCache{
+		entries:        make(map[string]*negEntry),
+		availableSpace: library.AvailableSpace,
+	}
 }
 
-// IsDeferred reports whether `path` is currently within its defer window.
+// IsDeferred reports whether `path` is currently blocked by backoff or capacity.
 // As a side effect it evicts entries whose source file no longer exists
 // (because rename/delete makes the original key meaningless).
 func (n *NegativeCache) IsDeferred(path string) (bool, time.Duration, string) {
@@ -132,9 +138,22 @@ func (n *NegativeCache) IsDeferred(path string) (bool, time.Duration, string) {
 		delete(n.entries, path)
 		return false, 0, ""
 	}
-	if info.ModTime().After(e.failedAt) {
+	// ponytail: capacity retries keyed by a season-pack directory ignore its
+	// mtime because rollback changes it; changed contents wait for capacity
+	// recovery. Member snapshots can enable immediate invalidation if needed.
+	if info.ModTime().After(e.failedAt) && !(info.IsDir() && e.resourceFailure) {
 		delete(n.entries, path)
 		return false, 0, ""
+	}
+	if e.resourceFailure && e.destinationPath != "" && e.requiredBytes > 0 && n.availableSpace != nil {
+		available, err := n.availableSpace(e.destinationPath)
+		if err == nil {
+			if available < e.requiredBytes {
+				return true, 0, e.errMsg
+			}
+			delete(n.entries, path)
+			return false, 0, ""
+		}
 	}
 	wait := e.backoff()
 	elapsed := time.Since(e.failedAt)
@@ -147,8 +166,23 @@ func (n *NegativeCache) IsDeferred(path string) (bool, time.Duration, string) {
 // Record marks `path` as having failed with `errMsg`. Increments the failure
 // count if an entry already exists, extending the backoff window.
 func (n *NegativeCache) Record(path, errMsg string) {
+	n.record(path, errMsg, "", 0)
+}
+
+// RecordResourceFailure defers a known byte-capacity failure until its
+// destination has room for the source file. Other resource failures and
+// unqueryable destinations use the normal bounded backoff.
+func (n *NegativeCache) RecordResourceFailure(path, destinationPath string, requiredBytes int64, errMsg string) {
+	n.record(path, errMsg, destinationPath, requiredBytes)
+}
+
+func (n *NegativeCache) record(path, errMsg, destinationPath string, requiredBytes int64) {
 	if n == nil {
 		return
+	}
+	if !IsKnownCapacityShortfall(errMsg) {
+		destinationPath = ""
+		requiredBytes = 0
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -164,6 +198,8 @@ func (n *NegativeCache) Record(path, errMsg string) {
 		e.resourceFailure = resourceFailure
 	}
 	e.failedAt = time.Now()
+	e.destinationPath = destinationPath
+	e.requiredBytes = requiredBytes
 	// ponytail: counts saturate once parser backoff reaches 30 days; exact lifetime totals need separate storage if operators need them.
 	if e.failures < maxRetryBackoffFailures {
 		e.failures++
@@ -188,8 +224,18 @@ func (n *NegativeCache) Forget(path string) {
 // produces a fresh attempt every time the daemon comes up, which over a
 // day's worth of build-deploys looks like an event-storm in the audit.
 func (n *NegativeCache) HydrateEntry(path, errMsg string, failedAt time.Time, failures int) {
+	n.HydrateResourceFailure(path, errMsg, failedAt, failures, "", 0)
+}
+
+// HydrateResourceFailure restores retry state, including destination capacity
+// details, from persisted organize decisions.
+func (n *NegativeCache) HydrateResourceFailure(path, errMsg string, failedAt time.Time, failures int, destinationPath string, requiredBytes int64) {
 	if n == nil || failures <= 0 {
 		return
+	}
+	if !IsKnownCapacityShortfall(errMsg) {
+		destinationPath = ""
+		requiredBytes = 0
 	}
 	if failures > maxRetryBackoffFailures {
 		failures = maxRetryBackoffFailures
@@ -201,6 +247,8 @@ func (n *NegativeCache) HydrateEntry(path, errMsg string, failedAt time.Time, fa
 		failures:        failures,
 		errMsg:          errMsg,
 		resourceFailure: IsRetryableResourceFailure(errMsg),
+		destinationPath: destinationPath,
+		requiredBytes:   requiredBytes,
 	}
 }
 
@@ -273,9 +321,9 @@ func IsDeterministicUnparseable(errMsg string) bool {
 	return false
 }
 
-// IsRetryableResourceFailure identifies transient low-space errors. These get
-// a short capped backoff because capacity can recover without the source file
-// changing.
+// IsRetryableResourceFailure identifies transient low-space errors. When the
+// destination is known, capacity checks release the retry without waiting for
+// the source file to change.
 func IsRetryableResourceFailure(errMsg string) bool {
 	msg := strings.ToLower(errMsg)
 	for _, pattern := range []string{
@@ -289,6 +337,12 @@ func IsRetryableResourceFailure(errMsg string) bool {
 		}
 	}
 	return false
+}
+
+// IsKnownCapacityShortfall distinguishes byte-capacity errors from resource
+// failures such as exhausted inodes, which free-byte checks cannot resolve.
+func IsKnownCapacityShortfall(errMsg string) bool {
+	return strings.Contains(strings.ToLower(errMsg), "insufficient space")
 }
 
 func IsFailureWorthBackoff(errMsg string) bool {
