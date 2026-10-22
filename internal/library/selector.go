@@ -250,9 +250,9 @@ func (s *Selector) resolveMultipleLocations(showName, year string, fileSize int6
 
 		series, err := s.db.GetSeriesByTitle(showName, yearInt)
 		if err == nil && series != nil && series.CanonicalPath != "" {
-			// Database has a canonical path - find which library contains it
+			canonicalLibrary := libraryContainingPath(series.CanonicalPath, s.libraries)
 			for _, m := range matches {
-				if strings.HasPrefix(series.CanonicalPath, m.Library) {
+				if canonicalLibrary == m.Library {
 					if s.hasSpace(m.Library, fileSize) {
 						sourceDesc := fmt.Sprintf("Database canonical path (%s): %s", series.Source, series.CanonicalPath)
 						return &SelectionResult{
@@ -270,8 +270,9 @@ func (s *Selector) resolveMultipleLocations(showName, year string, fileSize int6
 	if s.cache != nil {
 		series := s.cache.FindSeries(showName, year)
 		if series != nil && series.Path != "" {
+			sonarrLibrary := libraryContainingPath(series.Path, s.libraries)
 			for _, m := range matches {
-				if strings.HasPrefix(series.Path, m.Library) {
+				if sonarrLibrary == m.Library {
 					if s.hasSpace(m.Library, fileSize) {
 						return &SelectionResult{
 							Library:   m.Library,
