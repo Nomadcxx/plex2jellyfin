@@ -206,6 +206,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	var jellyfinClient *jellyfin.Client
+	var pluginClient *jellyfin.PluginClient
 	// ponytail: when the boot probe fails, skip per-file playback API polling
 	// until restart; webhook locks and all other Jellyfin integrations remain active.
 	var organizerJellyfinClient *jellyfin.Client
@@ -228,6 +229,14 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			organizerJellyfinClient = jellyfinClient
 			logger.Info("daemon", "Jellyfin integration enabled", logging.F("url", cfg.Jellyfin.URL))
 		}
+	}
+	if cfg.Jellyfin.PluginEnabled {
+		pluginClient = jellyfin.NewPluginClient(jellyfin.Config{
+			URL:     cfg.Jellyfin.URL,
+			APIKey:  cfg.Jellyfin.APIKey,
+			Timeout: 30 * time.Second,
+		})
+		logger.Info("daemon", "Jellyfin scan coordination enabled")
 	}
 
 	var playbackLocks *jellyfin.PlaybackLockManager
@@ -340,6 +349,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		DirMode:                      dirMode,
 		SonarrClient:                 sonarrClient,
 		JellyfinClient:               organizerJellyfinClient,
+		PluginClient:                 pluginClient,
 		PlaybackSafety:               cfg.Jellyfin.PlaybackSafety,
 		Database:                     db,
 		ConfigDir:                    configDir,

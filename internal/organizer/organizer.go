@@ -457,6 +457,10 @@ func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
 }
 
 func (o *Organizer) transferSource(sourcePath, targetPath string, opts transfer.TransferOptions) (*transfer.TransferResult, bool, error) {
+	if err := o.waitIfScanning(o.timeout); err != nil {
+		return &transfer.TransferResult{Error: err}, false, err
+	}
+
 	mode := TransferMove
 	if o.transferModeResolver != nil {
 		mode = o.transferModeResolver(sourcePath)
@@ -592,32 +596,33 @@ func (o *Organizer) IsPaused() bool {
 	return o.paused
 }
 
-func (o *Organizer) shouldWaitForScan() bool {
-	if !o.pauseOnScan || o.pluginClient == nil {
-		return false
-	}
-
-	scans, err := o.pluginClient.GetActiveScans()
-	if err != nil {
-		return false
-	}
-
-	return len(scans.Scans) > 0
-}
-
 func (o *Organizer) waitIfScanning(timeout time.Duration) error {
-	if !o.pauseOnScan || o.pluginClient == nil {
+	if !o.pauseOnScan {
 		return nil
 	}
+	if o.pluginClient == nil {
+		return fmt.Errorf("Jellyfin scan coordination is enabled without a plugin client")
+	}
 
-	start := time.Now()
-	for o.shouldWaitForScan() {
-		if time.Since(start) > timeout {
+	deadline := time.Now().Add(timeout)
+	for {
+		scans, err := o.pluginClient.GetActiveScans()
+		if err != nil {
+			return fmt.Errorf("checking Jellyfin scan status: %w", err)
+		}
+		if scans == nil || len(scans.Scans) == 0 {
+			return nil
+		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
 			return fmt.Errorf("timeout waiting for Jellyfin scan to complete")
 		}
-		time.Sleep(5 * time.Second)
+		if remaining > 5*time.Second {
+			remaining = 5 * time.Second
+		}
+		time.Sleep(remaining)
 	}
-	return nil
 }
 
 func (o *Organizer) checkPlaybackSafetyWithOp(sourcePath, opType, targetPath string) error {
