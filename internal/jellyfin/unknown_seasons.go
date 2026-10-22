@@ -348,14 +348,13 @@ func (c *Client) listUnknownSeasons(ctx context.Context, userID string) ([]Item,
 	query.Set("Recursive", "true")
 	query.Set("SearchTerm", "Season Unknown")
 	query.Set("Fields", "Path,DateCreated,ParentId,SeriesName,SeriesId")
-	query.Set("Limit", "10000")
 
-	var resp ItemsResponse
-	if err := c.getCtx(ctx, "/Users/"+url.PathEscape(userID)+"/Items?"+query.Encode(), &resp); err != nil {
+	items, err := c.listItemsCtx(ctx, "/Users/"+url.PathEscape(userID)+"/Items", query)
+	if err != nil {
 		return nil, fmt.Errorf("listing unknown seasons: %w", err)
 	}
-	out := make([]Item, 0, len(resp.Items))
-	for _, item := range resp.Items {
+	out := make([]Item, 0, len(items))
+	for _, item := range items {
 		if strings.EqualFold(strings.TrimSpace(item.Name), "Season Unknown") {
 			out = append(out, item)
 		}

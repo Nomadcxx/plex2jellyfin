@@ -2,8 +2,10 @@ package jellyfin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,36 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestListUnknownSeasonsPaginatesPastFirstPage(t *testing.T) {
+	var requestedStarts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/Users/test-user/Items", r.URL.Path)
+		require.Equal(t, "Season", r.URL.Query().Get("IncludeItemTypes"))
+		require.Equal(t, "10000", r.URL.Query().Get("Limit"))
+		startIndex := r.URL.Query().Get("StartIndex")
+		requestedStarts = append(requestedStarts, startIndex)
+
+		items := make([]Item, 10000)
+		for i := range items {
+			items[i] = Item{ID: "season-" + strconv.Itoa(i), Name: "Season 01", Type: "Season"}
+		}
+		if startIndex == "10000" {
+			items = []Item{{ID: "unknown-season", Name: "Season Unknown", Type: "Season"}}
+		} else if startIndex != "0" {
+			t.Errorf("unexpected page start index %q", startIndex)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(ItemsResponse{Items: items, TotalRecordCount: 10001}))
+	}))
+	defer server.Close()
+
+	items, err := NewClient(Config{URL: server.URL}).listUnknownSeasons(context.Background(), "test-user")
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "unknown-season", items[0].ID)
+	assert.Equal(t, []string{"0", "10000"}, requestedStarts)
+}
 
 func TestClassifyUnknownSeasonEpisodes(t *testing.T) {
 	t.Parallel()
@@ -110,7 +142,7 @@ func TestAuditUnknownSeasonsUsesUserScopedChildren(t *testing.T) {
 			_, _ = w.Write([]byte(`{"Items":[
 				{"Id":"season-1","Name":"Season Unknown","SeriesId":"series-1","SeriesName":"Clear Show"},
 				{"Id":"season-2","Name":"Season Unknown","SeriesId":"series-2","SeriesName":"Obfuscated Show"}
-			],"TotalRecordCount":3}`))
+			],"TotalRecordCount":2}`))
 		case r.URL.Path == "/Users/admin/Items" && r.URL.Query().Get("ParentId") == "season-1":
 			_, _ = w.Write([]byte(`{"Items":[
 				{"Id":"ep-1","Type":"Episode","Path":"/tv/Clear Show/Season 01/Clear Show S01E01.mkv","SeriesId":"series-1"},
