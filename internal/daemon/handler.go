@@ -1906,7 +1906,7 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) e
 			h.logger.Info("handler", "Jellyfin task completed", logging.F("task", event.TaskName), logging.F("item", event.ItemName))
 		}
 		h.logJellyfinActivity("jellyfin_task_completed", event.TaskName, event.ItemName, true, "")
-		if h.db != nil && h.activityLogger != nil {
+		if h.db != nil && h.activityLogger != nil && strings.EqualFold(strings.TrimSpace(event.TaskCategory), "Library") {
 			h.runJellyfinVerificationPass()
 		}
 	case jellyfin.EventLibraryChanged:
