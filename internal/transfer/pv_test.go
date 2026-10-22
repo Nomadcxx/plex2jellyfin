@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,6 +97,28 @@ func TestPV_PreservesExistingFileOnFailure(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, "original content", string(data),
 		"existing file content must be preserved when transfer fails")
+}
+
+func TestPVMoveKeepsSourceWhenPermissionsFail(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.mkv")
+	dstDir := filepath.Join(dir, "library")
+	dst := filepath.Join(dstDir, "movie.mkv")
+	fakePV := filepath.Join(dir, "pv")
+	require.NoError(t, os.WriteFile(src, nil, 0644))
+	script := fmt.Sprintf("#!/bin/sh\nfor path in %q/.movie.mkv.tmp-*; do\n  [ -e \"$path\" ] || continue\n  rm -f \"$path\"\n  ln -s /proc/version \"$path\"\ndone\n", dstDir)
+	require.NoError(t, os.WriteFile(fakePV, []byte(script), 0755))
+
+	opts := DefaultOptions()
+	opts.FileMode = 0600
+	opts.SkipHealthCheck = true
+	opts.RetryAttempts = 0
+	result, err := NewPVTransferer(fakePV).Move(src, dst, opts)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "permission application failed")
+	assert.False(t, result.Success, "permission failure must mark the move unsuccessful")
+	assert.False(t, result.SourceRemoved, "permission failure must retain the source")
+	assert.FileExists(t, src)
 }
 
 func TestBackendString(t *testing.T) {
