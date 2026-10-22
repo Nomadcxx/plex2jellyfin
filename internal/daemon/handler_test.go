@@ -1900,6 +1900,45 @@ func TestRegexFallback_WritesParseDecision(t *testing.T) {
 	assert.NotEmpty(t, d.OrganizeOutcome, "organize_outcome should be set after fallback organize")
 }
 
+func TestHandleJellyfinWebhookEventTaskCompletedOnlyVerifiesLibraryTasks(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "task-test.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	activityLog, err := activity.NewLogger(t.TempDir())
+	require.NoError(t, err)
+	defer activityLog.Close()
+	events, cancel := activityLog.Subscribe()
+	defer cancel()
+	handler := &MediaHandler{db: db, activityLogger: activityLog}
+	drainActions := func() []string {
+		var actions []string
+		for {
+			select {
+			case entry := <-events:
+				actions = append(actions, entry.Action)
+			default:
+				return actions
+			}
+		}
+	}
+
+	err = handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventTaskCompleted,
+		TaskName:         "Daily cleanup",
+		TaskCategory:     "Maintenance",
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, drainActions(), "jellyfin_verification_summary")
+
+	err = handler.HandleJellyfinWebhookEvent(jellyfin.WebhookEvent{
+		NotificationType: jellyfin.EventTaskCompleted,
+		TaskName:         "Scan Media Library",
+		TaskCategory:     "Library",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, drainActions(), "jellyfin_verification_summary")
+}
+
 func TestHandleJellyfinWebhookEvent_ItemAddedUpdatesParseDecision(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "handler-test.db")
 	db, err := database.OpenPath(dbPath)

@@ -27,7 +27,8 @@ type WebhookEvent struct {
 	DeviceName string `json:"DeviceName,omitempty"`
 	ClientName string `json:"ClientName,omitempty"`
 
-	TaskName string `json:"TaskName,omitempty"`
+	TaskName     string `json:"TaskName,omitempty"`
+	TaskCategory string `json:"TaskCategory,omitempty"`
 
 	Timestamp string `json:"Timestamp,omitempty"`
 }
@@ -45,7 +46,7 @@ const (
 )
 
 // UnmarshalJSON normalizes both the flat Jellyfin Webhook plugin format and the
-// nested companion plugin format ({"eventType":"...","payload":{"item":{...}}})
+// nested companion plugin format ({"eventType":"...","payload":{"item":{...},"task":{...}}})
 // into a single WebhookEvent representation.
 func (e *WebhookEvent) UnmarshalJSON(data []byte) error {
 	type Alias WebhookEvent
@@ -69,6 +70,10 @@ func (e *WebhookEvent) UnmarshalJSON(data []byte) error {
 				Type        string            `json:"type"`
 				ProviderIDs map[string]string `json:"providerIds"`
 			} `json:"item"`
+			Task struct {
+				Name     string `json:"name"`
+				Category string `json:"category"`
+			} `json:"task"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(data, &nested); err != nil {
@@ -100,6 +105,12 @@ func (e *WebhookEvent) UnmarshalJSON(data []byte) error {
 		}
 		if e.ProviderTvdb == "" {
 			e.ProviderTvdb = nested.Payload.Item.ProviderIDs["Tvdb"]
+		}
+		if e.TaskName == "" {
+			e.TaskName = nested.Payload.Task.Name
+		}
+		if e.TaskCategory == "" {
+			e.TaskCategory = nested.Payload.Task.Category
 		}
 	}
 
