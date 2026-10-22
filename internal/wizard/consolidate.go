@@ -15,7 +15,8 @@ func (w *Wizard) handleScattered(analysis *service.ScatteredAnalysis) error {
 	}
 	fmt.Println()
 
-	consolidatedCount := 0
+	wouldConsolidateCount := 0
+	unsupportedCount := 0
 	applyAll := false
 
 scatteredItems:
@@ -43,25 +44,21 @@ scatteredItems:
 			action = w.prompt("  [M]ove / [S]kip / [A]ll remaining / [Q]uit: ")
 		}
 
+		if action == "a" {
+			applyAll = true
+		}
+
 		switch action {
-		case "m", "":
+		case "m", "", "a":
 			if w.dryRun {
 				fmt.Println("  Would consolidate files to target location")
+				wouldConsolidateCount++
 			} else {
-				// TODO: Implement actual move using consolidate package
-				fmt.Println("  ⚠️ Consolidation execution not yet implemented")
+				fmt.Println("  ⚠️ Move execution is unavailable in the wizard; skipping")
+				unsupportedCount++
 			}
-			consolidatedCount++
 		case "skip", "s":
 			fmt.Println("  Skipped")
-		case "a":
-			applyAll = true
-			if w.dryRun {
-				fmt.Println("  Would consolidate files to target location")
-			} else {
-				fmt.Println("  ⚠️ Consolidation execution not yet implemented")
-			}
-			consolidatedCount++
 		case "q":
 			fmt.Println("Quitting consolidation step.")
 			break scatteredItems
@@ -70,9 +67,11 @@ scatteredItems:
 	}
 
 	if w.dryRun {
-		fmt.Printf("✅ Would consolidate %d items\n\n", consolidatedCount)
+		fmt.Printf("✅ Would consolidate %d items\n\n", wouldConsolidateCount)
+	} else if unsupportedCount > 0 {
+		fmt.Printf("⚠️ No items consolidated. Skipped %d item(s) because move execution is unavailable in the wizard. Run `plex2jellyfin consolidate generate` and then `execute`.\n\n", unsupportedCount)
 	} else {
-		fmt.Printf("✅ Consolidated %d items\n\n", consolidatedCount)
+		fmt.Println("No items consolidated.")
 	}
 
 	return nil
