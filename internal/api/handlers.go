@@ -643,11 +643,12 @@ func (s *Server) ClearQueueItem(w http.ResponseWriter, r *http.Request, managerI
 
 // TriggerManagerScan implements api.ServerInterface
 func (s *Server) TriggerManagerScan(w http.ResponseWriter, r *http.Request, managerId string) {
-	// TODO: Implement manager scan trigger
-	writeJSON(w, http.StatusOK, api.OperationResult{
-		Success: ptrBool(true),
-		Message: ptrString("Not implemented yet"),
-	})
+	if !isManagerConfigured(s.cfg, managerId) {
+		writeError(w, http.StatusNotFound, "not_found", fmt.Sprintf("Media manager '%s' not configured", managerId))
+		return
+	}
+
+	writeError(w, http.StatusNotImplemented, "not_implemented", fmt.Sprintf("Scan trigger is not implemented for media manager '%s'", managerId))
 }
 
 // GetMediaManagerStatus implements api.ServerInterface
