@@ -96,6 +96,76 @@ func TestNativeCopyFailurePreservesExistingDestination(t *testing.T) {
 	}
 }
 
+func TestNativeMoveUsesUmaskForDefaultFileMode(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "movie.mkv")
+	if err := os.WriteFile(src, []byte("media"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	probePath := filepath.Join(dir, "umask-probe")
+	probe, err := os.OpenFile(probePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeInfo, err := probe.Stat()
+	if err != nil {
+		_ = probe.Close()
+		t.Fatal(err)
+	}
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := TransferOptions{RetryAttempts: 0, SkipHealthCheck: true, TargetUID: -1, TargetGID: -1}
+	result, err := NewNativeTransferer(1024).Move(src, dst, opts)
+	if err != nil {
+		t.Fatalf("Move: %v", err)
+	}
+	if !result.Success || !result.SourceRemoved {
+		t.Fatalf("Move result = %+v, want successful transfer with source removed", result)
+	}
+	if _, err := os.Stat(src); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source stat error = %v, want source removed", err)
+	}
+
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := dstInfo.Mode().Perm(), probeInfo.Mode().Perm(); got != want {
+		t.Fatalf("destination mode = %04o, want umask-filtered mode %04o", got, want)
+	}
+}
+
+func TestNativeMovePreservesSourceModeWhenRequested(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "movie.mkv")
+	if err := os.WriteFile(src, []byte("media"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(src, 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultOptions()
+	opts.RetryAttempts = 0
+	opts.SkipHealthCheck = true
+	if _, err := NewNativeTransferer(1024).Move(src, dst, opts); err != nil {
+		t.Fatalf("Move: %v", err)
+	}
+
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := dstInfo.Mode().Perm(), os.FileMode(0640); got != want {
+		t.Fatalf("destination mode = %04o, want preserved source mode %04o", got, want)
+	}
+}
+
 func TestNativeMoveKeepsSourceWhenPermissionsFail(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "source.mkv")
@@ -116,10 +186,10 @@ func TestNativeMoveKeepsSourceWhenPermissionsFail(t *testing.T) {
 			return
 		}
 		for _, entry := range entries {
-			if !strings.HasPrefix(entry.Name(), "."+filepath.Base(dst)+".tmp-") {
+			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "."+filepath.Base(dst)+".tmp-") {
 				continue
 			}
-			tempPath := filepath.Join(filepath.Dir(dst), entry.Name())
+			tempPath := filepath.Join(filepath.Dir(dst), entry.Name(), filepath.Base(dst))
 			if err := os.Remove(tempPath); err != nil {
 				t.Errorf("remove temporary destination: %v", err)
 				return

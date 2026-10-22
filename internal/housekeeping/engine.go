@@ -201,7 +201,11 @@ func NewEngine(cfg Config, db *database.MediaDB, logger *logging.Logger) *Engine
 	if cfg.StuckSyncAfter <= 0 {
 		cfg.StuckSyncAfter = 24 * time.Hour
 	}
-	tr, _ := transfer.New(transfer.BackendRsync)
+	tr, err := transfer.New(transfer.BackendRsync)
+	if err != nil {
+		// ponytail: use native when optional rsync is missing; install rsync for resumable transfers.
+		tr = transfer.NewNativeTransferer(32 * 1024 * 1024)
+	}
 	return &Engine{
 		cfg:        cfg,
 		db:         db,

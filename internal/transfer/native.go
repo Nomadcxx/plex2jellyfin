@@ -87,7 +87,7 @@ func (n *NativeTransferer) Copy(src, dst string, opts TransferOptions) (*Transfe
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result.Attempts = attempt
 
-		bytesCopied, checksum, err := n.copyFile(src, dst, srcInfo.Size(), opts)
+		bytesCopied, checksum, err := n.copyFile(src, dst, srcInfo.Size(), srcInfo.Mode(), opts)
 		if err == nil {
 			result.Success = true
 			result.BytesCopied = bytesCopied
@@ -108,7 +108,7 @@ func (n *NativeTransferer) Copy(src, dst string, opts TransferOptions) (*Transfe
 	return result, result.Error
 }
 
-func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts TransferOptions) (int64, string, error) {
+func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, sourceMode os.FileMode, opts TransferOptions) (int64, string, error) {
 	timeout := opts.Timeout
 	if timeout == 0 {
 		timeout = 30 * time.Minute
@@ -124,18 +124,22 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 	defer srcFile.Close()
 
 	dstDir := filepath.Dir(dst)
-	tmpFile, err := os.CreateTemp(dstDir, "."+filepath.Base(dst)+".tmp-*")
+	tmpDir, err := os.MkdirTemp(dstDir, "."+filepath.Base(dst)+".tmp-*")
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to create temporary destination: %w", err)
 	}
-	tmpPath := tmpFile.Name()
-	committed := false
-	defer func() {
-		_ = tmpFile.Close()
-		if !committed {
-			_ = os.Remove(tmpPath)
-		}
-	}()
+	defer os.RemoveAll(tmpDir)
+
+	tmpPath := filepath.Join(tmpDir, filepath.Base(dst))
+	createMode := os.FileMode(0666)
+	if opts.PreserveAttrs || opts.FileMode != 0 {
+		createMode = 0600
+	}
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, createMode)
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to create temporary destination: %w", err)
+	}
+	defer tmpFile.Close()
 
 	var bytesCopied int64
 	var lastProgress atomic.Int64
@@ -193,6 +197,11 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 			return bytesCopied, "", fmt.Errorf("read error: %w", readErr)
 		}
 	}
+	if opts.PreserveAttrs && opts.FileMode == 0 {
+		if err := tmpFile.Chmod(sourceMode.Perm()); err != nil {
+			return bytesCopied, "", fmt.Errorf("chmod temporary destination: %w", err)
+		}
+	}
 
 	if err := tmpFile.Sync(); err != nil {
 		return bytesCopied, "", fmt.Errorf("sync error: %w", err)
@@ -210,7 +219,6 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 	if err := os.Rename(tmpPath, dst); err != nil {
 		return bytesCopied, "", fmt.Errorf("commit temporary destination: %w", err)
 	}
-	committed = true
 
 	return bytesCopied, checksum, nil
 }

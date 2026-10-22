@@ -39,7 +39,11 @@ func NewExecutor(db *database.MediaDB, dryRun bool, writer io.Writer) *Executor 
 	if writer == nil {
 		writer = os.Stdout
 	}
-	transferer, _ := transfer.New(transfer.BackendRsync)
+	transferer, err := transfer.New(transfer.BackendRsync)
+	if err != nil {
+		// ponytail: use native when optional rsync is missing; install rsync for resumable transfers.
+		transferer = transfer.NewNativeTransferer(32 * 1024 * 1024)
+	}
 	return &Executor{
 		db:         db,
 		planner:    NewPlanner(db),

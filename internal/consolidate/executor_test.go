@@ -9,6 +9,18 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 )
 
+func TestNewExecutorFallsBackWhenRsyncIsUnavailable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	executor := NewExecutor(nil, false, nil)
+	if executor.transferer == nil {
+		t.Fatal("executor has no transferer when rsync is unavailable")
+	}
+	if got := executor.transferer.Name(); got != "native" {
+		t.Fatalf("transferer = %q, want native fallback", got)
+	}
+}
+
 func TestExecuteRename_CrossDevice(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

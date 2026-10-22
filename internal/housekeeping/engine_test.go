@@ -45,6 +45,17 @@ func openTestDB(t *testing.T) *database.MediaDB {
 	return db
 }
 
+func TestNewEngineFallsBackWhenRsyncIsUnavailable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	engine := NewEngine(Config{}, openTestDB(t), nil)
+	if engine.transferer == nil {
+		t.Fatal("engine has no transferer when rsync is unavailable")
+	}
+	if got := engine.transferer.Name(); got != "native" {
+		t.Fatalf("transferer = %q, want native fallback", got)
+	}
+}
+
 func TestDetectFlagsProviderIdentityMovieDuplicate(t *testing.T) {
 	db := openTestDB(t)
 	now := time.Now().UTC()
