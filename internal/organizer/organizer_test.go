@@ -1,12 +1,14 @@
 package organizer
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -21,6 +23,178 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	if os.Getenv("P2J_ORGANIZATION_LOCK_HELPER") == "1" {
+		os.Exit(m.Run())
+	}
+
+	configHome, err := os.MkdirTemp("", "p2j-organizer-tests-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := os.Setenv("XDG_CONFIG_HOME", configHome); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		_ = os.RemoveAll(configHome)
+		os.Exit(1)
+	}
+	_ = os.Unsetenv("SUDO_USER")
+
+	code := m.Run()
+	_ = os.RemoveAll(configHome)
+	os.Exit(code)
+}
+
+func TestOrganizationLockProcessHelper(t *testing.T) {
+	if os.Getenv("P2J_ORGANIZATION_LOCK_HELPER") != "1" {
+		return
+	}
+
+	unlock, err := lockOrganizationKey(os.Getenv("P2J_ORGANIZATION_LOCK_KEY"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("locked")
+	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+	unlock()
+}
+
+func TestOrganizationLockSerializesAcrossProcesses(t *testing.T) {
+	t.Setenv("SUDO_USER", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	key := filepath.Join(t.TempDir(), "library", "Movie (2026)")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestOrganizationLockProcessHelper$")
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(),
+		"P2J_ORGANIZATION_LOCK_HELPER=1",
+		"P2J_ORGANIZATION_LOCK_KEY="+key,
+	)
+	stdin, err := cmd.StdinPipe()
+	require.NoError(t, err)
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, cmd.Start())
+
+	childReleased := false
+	childWaited := false
+	t.Cleanup(func() {
+		if !childReleased {
+			_, _ = io.WriteString(stdin, "release\n")
+		}
+		_ = stdin.Close()
+		if !childWaited {
+			_ = cmd.Wait()
+		}
+	})
+
+	output := bufio.NewScanner(stdout)
+	require.True(t, output.Scan(), "lock helper exited before acquiring the lock: %v", output.Err())
+	require.Equal(t, "locked", output.Text())
+	lockDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "plex2jellyfin", "organizer-locks")
+	dirInfo, err := os.Stat(lockDir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), dirInfo.Mode().Perm())
+	entries, err := os.ReadDir(lockDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	lockPath := filepath.Join(lockDir, entries[0].Name())
+	lockInfo, err := os.Stat(lockPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o444), lockInfo.Mode().Perm())
+
+	acquired := make(chan error, 1)
+	go func() {
+		unlock, err := lockOrganizationKey(key)
+		if err != nil {
+			acquired <- err
+			return
+		}
+		unlock()
+		acquired <- nil
+	}()
+
+	select {
+	case err := <-acquired:
+		require.NoError(t, err)
+		t.Fatal("parent acquired the organization lock while the child process held it")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	_, err = io.WriteString(stdin, "release\n")
+	require.NoError(t, err)
+	childReleased = true
+	select {
+	case err := <-acquired:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("parent did not acquire the organization lock after child released it")
+	}
+	require.NoError(t, cmd.Wait())
+	childWaited = true
+	lockInfoAfter, err := os.Stat(lockPath)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(lockInfo, lockInfoAfter), "persistent lock file must keep one inode")
+}
+
+func TestMovieOrganizationLockFailurePropagates(t *testing.T) {
+	configHome := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(configHome, []byte("file"), 0o600))
+	t.Setenv("SUDO_USER", "")
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	source := filepath.Join(t.TempDir(), "Movie.2026.1080p.WEB-DL.mkv")
+	require.NoError(t, os.WriteFile(source, []byte("media"), 0o600))
+	org, err := NewOrganizer([]string{t.TempDir()}, WithTransferer(&recordingTransferer{}))
+	require.NoError(t, err)
+
+	finalized := false
+	result, err := org.OrganizeMovieWithParsedFinalized(source, t.TempDir(), naming.MovieInfo{
+		Title: "Movie",
+		Year:  "2026",
+	}, func(result *OrganizationResult, finalizeErr error) {
+		finalized = true
+		assert.Nil(t, result)
+		assert.ErrorContains(t, finalizeErr, "organizer lock path")
+	})
+	require.ErrorContains(t, err, "organizer lock path")
+	assert.Nil(t, result)
+	assert.True(t, finalized)
+	assert.FileExists(t, source)
+}
+
+func TestSeasonPackLockFailurePropagates(t *testing.T) {
+	configHome := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(configHome, []byte("file"), 0o600))
+	t.Setenv("SUDO_USER", "")
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	packDir := filepath.Join(t.TempDir(), "Supergirl.S03.1080p.BluRay.x264-GROUP")
+	source := filepath.Join(packDir, "Supergirl.S03E01.1080p.BluRay.x264-GROUP.mkv")
+	require.NoError(t, os.MkdirAll(packDir, 0o700))
+	require.NoError(t, os.WriteFile(source, []byte("media"), 0o600))
+	org, err := NewOrganizer([]string{t.TempDir()}, WithTransferer(&recordingTransferer{}))
+	require.NoError(t, err)
+
+	finalized := false
+	result, err := org.OrganizeTVSeasonPackAutoFinalized(packDir, func(path string) (int64, error) {
+		info, err := os.Stat(path)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	}, func(result *SeasonPackResult, finalizeErr error) {
+		finalized = true
+		assert.NotNil(t, result)
+		assert.ErrorIs(t, finalizeErr, result.Error)
+	})
+	require.ErrorContains(t, err, "organizer lock path")
+	require.NotNil(t, result)
+	require.ErrorIs(t, result.Error, err)
+	assert.True(t, finalized)
+	assert.FileExists(t, source)
+}
 
 type failAfterFirstMoveTransferer struct {
 	moves int
@@ -332,6 +506,7 @@ func TestOrganizerSeasonPackTransferPolicy(t *testing.T) {
 			root := t.TempDir()
 			packDir := filepath.Join(root, "incoming", "Policy.Show.S01.1080p-GROUP")
 			libraryDir := filepath.Join(root, "library")
+			require.NoError(t, os.MkdirAll(libraryDir, 0o755))
 			ep1 := filepath.Join(packDir, "Policy.Show.S01E01.1080p-GROUP.mkv")
 			ep2 := filepath.Join(packDir, "Policy.Show.S01E02.1080p-GROUP.mkv")
 			createTestFile(t, ep1, 64)
@@ -2254,6 +2429,7 @@ func TestConcurrentOverlappingTVImportsSerializeBySeason(t *testing.T) {
 func TestConcurrentTVImportWaitsForSeasonPackDecisionUpdate(t *testing.T) {
 	root := t.TempDir()
 	libraryDir := filepath.Join(root, "library")
+	require.NoError(t, os.MkdirAll(libraryDir, 0o755))
 	packDir := filepath.Join(root, "incoming", "Supergirl.S03.1080p.BluRay.x264-GROUP")
 	packSource := filepath.Join(packDir, "Supergirl.S03E01.1080p.BluRay.x264-GROUP.mkv")
 	competingSource := filepath.Join(root, "other", "Supergirl.S03E01.720p.HDTV.mkv")
