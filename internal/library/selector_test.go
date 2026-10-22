@@ -86,6 +86,42 @@ func TestSelectTVShowLibraryReturnsErrorWhenRootCannotBeRead(t *testing.T) {
 	}
 }
 
+func TestSelectTVShowLibraryCanonicalPathMustBeWithinLibraryRoot(t *testing.T) {
+	base := t.TempDir()
+	prefixRoot := filepath.Join(base, "tv")
+	canonicalRoot := filepath.Join(base, "tv-archive")
+	for _, root := range []string{prefixRoot, canonicalRoot} {
+		if err := os.MkdirAll(filepath.Join(root, "Boundary Show (2022)"), 0755); err != nil {
+			t.Fatalf("Failed to create show directory: %v", err)
+		}
+	}
+
+	db := openSelectorTestDB(t)
+	_, err := db.UpsertSeries(&database.Series{
+		Title:          "Boundary Show",
+		Year:           2022,
+		CanonicalPath:  filepath.Join(canonicalRoot, "Boundary Show (2022)"),
+		LibraryRoot:    canonicalRoot,
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
+	})
+	if err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+
+	selector := NewSelectorWithConfig(SelectorConfig{
+		Libraries: []string{prefixRoot, canonicalRoot},
+		DB:        db,
+	})
+	selection, err := selector.SelectTVShowLibrary("Boundary Show", "2022", 1)
+	if err != nil {
+		t.Fatalf("SelectTVShowLibrary: %v", err)
+	}
+	if selection.Library != canonicalRoot {
+		t.Fatalf("selected %q, want canonical root %q", selection.Library, canonicalRoot)
+	}
+}
+
 func TestFindExistingShowDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	library := filepath.Join(tmpDir, "TVSHOWS")
