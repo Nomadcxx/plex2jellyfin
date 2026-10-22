@@ -39,8 +39,9 @@ func (p *PVTransferer) Move(src, dst string, opts TransferOptions) (*TransferRes
 	if result.Success {
 		// Apply configured permissions (chown/chmod)
 		if err := ApplyPermissions(dst, opts); err != nil {
-			// Log warning but don't fail - file was transferred successfully
+			result.Success = false
 			result.Error = fmt.Errorf("transfer succeeded but permission application failed: %w", err)
+			return result, result.Error
 		}
 
 		if err := RemoveWithTimeout(src, 30*time.Second); err != nil {
