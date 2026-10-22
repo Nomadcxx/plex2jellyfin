@@ -87,31 +87,28 @@ func (n *NativeTransferer) Copy(src, dst string, opts TransferOptions) (*Transfe
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result.Attempts = attempt
 
-		bytesCopied, err := n.copyFile(src, dst, srcInfo.Size(), opts)
+		bytesCopied, checksum, err := n.copyFile(src, dst, srcInfo.Size(), opts)
 		if err == nil {
 			result.Success = true
 			result.BytesCopied = bytesCopied
+			result.Checksum = checksum
 			result.Duration = time.Since(startTime)
 			return result, nil
 		}
 
 		lastErr = err
 
-		if opts.DeletePartial {
-			os.Remove(dst)
-		}
-
 		if attempt < maxAttempts {
 			time.Sleep(opts.RetryDelay)
 		}
 	}
 
-	result.Error = fmt.Errorf("%w: %v", ErrRetryExhausted, lastErr)
+	result.Error = fmt.Errorf("%w: %w", ErrRetryExhausted, lastErr)
 	result.Duration = time.Since(startTime)
 	return result, result.Error
 }
 
-func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts TransferOptions) (int64, error) {
+func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts TransferOptions) (int64, string, error) {
 	timeout := opts.Timeout
 	if timeout == 0 {
 		timeout = 30 * time.Minute
@@ -122,14 +119,14 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 
 	srcFile, err := OpenWithTimeout(src, os.O_RDONLY, 0, 10*time.Second)
 	if err != nil {
-		return 0, fmt.Errorf("failed to open source: %w", err)
+		return 0, "", fmt.Errorf("failed to open source: %w", err)
 	}
 	defer srcFile.Close()
 
 	dstDir := filepath.Dir(dst)
 	tmpFile, err := os.CreateTemp(dstDir, "."+filepath.Base(dst)+".tmp-*")
 	if err != nil {
-		return 0, fmt.Errorf("failed to create temporary destination: %w", err)
+		return 0, "", fmt.Errorf("failed to create temporary destination: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	committed := false
@@ -166,7 +163,7 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 	for {
 		select {
 		case <-ctx.Done():
-			return bytesCopied, fmt.Errorf("%w: no progress for %s", ErrTimeout, timeout)
+			return bytesCopied, "", fmt.Errorf("%w: no progress for %s", ErrTimeout, timeout)
 		default:
 		}
 
@@ -182,10 +179,10 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 				}
 			}
 			if writeErr != nil {
-				return bytesCopied, fmt.Errorf("write error: %w", writeErr)
+				return bytesCopied, "", fmt.Errorf("write error: %w", writeErr)
 			}
 			if nr != nw {
-				return bytesCopied, fmt.Errorf("short write: %d != %d", nr, nw)
+				return bytesCopied, "", fmt.Errorf("short write: %d != %d", nr, nw)
 			}
 		}
 
@@ -193,20 +190,27 @@ func (n *NativeTransferer) copyFile(src, dst string, totalSize int64, opts Trans
 			break
 		}
 		if readErr != nil {
-			return bytesCopied, fmt.Errorf("read error: %w", readErr)
+			return bytesCopied, "", fmt.Errorf("read error: %w", readErr)
 		}
 	}
 
 	if err := tmpFile.Sync(); err != nil {
-		return bytesCopied, fmt.Errorf("sync error: %w", err)
+		return bytesCopied, "", fmt.Errorf("sync error: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return bytesCopied, fmt.Errorf("close error: %w", err)
+		return bytesCopied, "", fmt.Errorf("close error: %w", err)
+	}
+	checksum := ""
+	if opts.Checksum {
+		checksum, err = verifyChecksum(src, tmpPath)
+		if err != nil {
+			return bytesCopied, "", err
+		}
 	}
 	if err := os.Rename(tmpPath, dst); err != nil {
-		return bytesCopied, fmt.Errorf("commit temporary destination: %w", err)
+		return bytesCopied, "", fmt.Errorf("commit temporary destination: %w", err)
 	}
 	committed = true
 
-	return bytesCopied, nil
+	return bytesCopied, checksum, nil
 }

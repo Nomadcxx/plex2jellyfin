@@ -1,6 +1,9 @@
 package transfer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +15,52 @@ import (
 
 func TestPVImplementation(t *testing.T) {
 	var _ Transferer = &PVTransferer{}
+}
+
+func TestPVCopyReportsVerifiedChecksum(t *testing.T) {
+	pvPath, err := exec.LookPath("pv")
+	if err != nil {
+		t.Skip("pv is not installed")
+	}
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "movie.mkv")
+	content := []byte("checksum this transfer")
+	require.NoError(t, os.WriteFile(src, content, 0644))
+
+	opts := DefaultOptions()
+	opts.Checksum = true
+	opts.SkipHealthCheck = true
+	opts.RetryAttempts = 0
+	result, err := NewPVTransferer(pvPath).Copy(src, dst, opts)
+	require.NoError(t, err)
+	want := sha256.Sum256(content)
+	assert.Equal(t, hex.EncodeToString(want[:]), result.Checksum)
+}
+
+func TestPVChecksumMismatchPreservesExistingDestination(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "movie.mkv")
+	fakePV := filepath.Join(dir, "pv")
+	require.NoError(t, os.WriteFile(src, []byte("original"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Dir(dst), 0755))
+	require.NoError(t, os.WriteFile(dst, []byte("keep old"), 0644))
+	require.NoError(t, os.WriteFile(fakePV, []byte("#!/bin/sh\nprintf modified\n"), 0755))
+
+	opts := DefaultOptions()
+	opts.Checksum = true
+	opts.DeletePartial = true
+	opts.SkipHealthCheck = true
+	opts.RetryAttempts = 0
+	_, err := NewPVTransferer(fakePV).Copy(src, dst, opts)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrChecksumMismatch), "error should preserve checksum mismatch")
+
+	data, readErr := os.ReadFile(dst)
+	require.NoError(t, readErr)
+	assert.Equal(t, "keep old", string(data), "checksum failure must preserve the existing destination")
 }
 
 func TestPVDetection(t *testing.T) {
