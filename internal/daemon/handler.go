@@ -1793,7 +1793,7 @@ func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) e
 		if h.logger != nil {
 			h.logger.Info("handler", "Playback lock added", logging.F("path", path), logging.F("user", event.UserName))
 		}
-	case jellyfin.EventPlaybackStop:
+	case jellyfin.EventPlaybackStop, jellyfin.EventPlaybackStopped:
 		if path == "" {
 			return nil
 		}

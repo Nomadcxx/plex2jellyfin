@@ -38,6 +38,7 @@ const (
 	EventItemRemoved      = "ItemRemoved"
 	EventPlaybackStart    = "PlaybackStart"
 	EventPlaybackStop     = "PlaybackStop"
+	EventPlaybackStopped  = "PlaybackStopped"
 	EventLibraryChanged   = "LibraryChanged"
 	EventTaskCompleted    = "TaskCompleted"
 	EventTestNotification = "TestNotification"
