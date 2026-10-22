@@ -22,6 +22,7 @@ func (w *Wizard) handleDuplicates(analysis *service.DuplicateAnalysis) error {
 	applyAll := false
 	var cleanupErrors []error
 
+duplicateGroups:
 	for i, group := range analysis.Groups {
 		yearStr := ""
 		if group.Year != nil {
@@ -85,7 +86,7 @@ func (w *Wizard) handleDuplicates(analysis *service.DuplicateAnalysis) error {
 			fmt.Println("  Skipped")
 		case "q":
 			fmt.Println("Quitting duplicates step.")
-			break
+			break duplicateGroups
 		}
 		fmt.Println()
 	}
