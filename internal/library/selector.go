@@ -270,8 +270,9 @@ func (s *Selector) resolveMultipleLocations(showName, year string, fileSize int6
 	if s.cache != nil {
 		series := s.cache.FindSeries(showName, year)
 		if series != nil && series.Path != "" {
+			sonarrLibrary := libraryContainingPath(series.Path, s.libraries)
 			for _, m := range matches {
-				if strings.HasPrefix(series.Path, m.Library) {
+				if sonarrLibrary == m.Library {
 					if s.hasSpace(m.Library, fileSize) {
 						return &SelectionResult{
 							Library:   m.Library,

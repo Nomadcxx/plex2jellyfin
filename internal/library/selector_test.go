@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 )
 
 func TestSelectTVShowLibrary_PreferExistingShow(t *testing.T) {
@@ -119,6 +121,38 @@ func TestSelectTVShowLibraryCanonicalPathMustBeWithinLibraryRoot(t *testing.T) {
 	}
 	if selection.Library != canonicalRoot {
 		t.Fatalf("selected %q, want canonical root %q", selection.Library, canonicalRoot)
+	}
+}
+
+func TestSelectTVShowLibrarySonarrPathMustBeWithinLibraryRoot(t *testing.T) {
+	base := t.TempDir()
+	prefixRoot := filepath.Join(base, "tv")
+	sonarrRoot := filepath.Join(base, "tv-archive")
+	for _, root := range []string{prefixRoot, sonarrRoot} {
+		if err := os.MkdirAll(filepath.Join(root, "Boundary Show (2022)"), 0755); err != nil {
+			t.Fatalf("Failed to create show directory: %v", err)
+		}
+	}
+
+	cache := &SeriesCache{
+		series: map[string]*sonarr.Series{
+			normalizeTitle("Boundary Show"): {
+				Title: "Boundary Show",
+				Year:  2022,
+				Path:  filepath.Join(sonarrRoot, "Boundary Show (2022)"),
+			},
+		},
+		expiry: time.Now().Add(time.Hour),
+	}
+	selector := NewSelectorWithConfig(SelectorConfig{Libraries: []string{prefixRoot, sonarrRoot}})
+	selector.cache = cache
+
+	selection, err := selector.SelectTVShowLibrary("Boundary Show", "2022", 1)
+	if err != nil {
+		t.Fatalf("SelectTVShowLibrary: %v", err)
+	}
+	if selection.Library != sonarrRoot {
+		t.Fatalf("selected %q, want Sonarr root %q", selection.Library, sonarrRoot)
 	}
 }
 
