@@ -384,6 +384,38 @@ func TestExecuteAuditAction_Delete(t *testing.T) {
 	}
 }
 
+func TestExecuteAuditAction_DeleteKeepsDatabaseRowWhenRemovalFails(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer db.Close()
+
+	path := filepath.Join(t.TempDir(), "nonempty-directory")
+	if err := os.Mkdir(path, 0755); err != nil {
+		t.Fatalf("Failed to create directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "keep.txt"), []byte("keep"), 0644); err != nil {
+		t.Fatalf("Failed to create directory entry: %v", err)
+	}
+	file := &database.MediaFile{Path: path, MediaType: "movie", Size: 4, LibraryRoot: filepath.Dir(path)}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("Failed to insert media file: %v", err)
+	}
+
+	item := AuditItem{ID: file.ID, Path: path}
+	err = ExecuteAuditAction(db, item, AuditAction{Action: "delete"}, false, nil)
+	if err == nil {
+		t.Fatal("expected removal error for non-empty directory")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("media path should remain after failed removal: %v", err)
+	}
+	if row, err := db.GetMediaFileByID(file.ID); err != nil || row == nil {
+		t.Fatalf("database row should remain after failed removal, row=%v err=%v", row, err)
+	}
+}
+
 func TestExecuteAuditAction_UnknownAction(t *testing.T) {
 	item := AuditItem{
 		ID:   1,

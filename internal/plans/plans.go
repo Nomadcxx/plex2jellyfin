@@ -292,15 +292,18 @@ func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction, dry
 		}
 		if err := permissions.FixPermissions(file.Path, uid, gid); err != nil {
 			if removeErr := os.Remove(file.Path); removeErr != nil {
-				_ = db.DeleteMediaFileByID(file.ID)
+				if os.IsNotExist(removeErr) {
+					_ = db.DeleteMediaFileByID(file.ID)
+					return nil
+				}
 				return permissions.NewPermissionError(file.Path, "delete", removeErr, uid, gid)
 			}
 		}
 	}
 
 	if err := os.Remove(file.Path); err != nil {
-		_ = db.DeleteMediaFileByID(file.ID)
 		if os.IsNotExist(err) {
+			_ = db.DeleteMediaFileByID(file.ID)
 			return nil
 		}
 		return fmt.Errorf("failed to delete file: %w", err)

@@ -26,8 +26,8 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 	if !canDelete {
 		if err := permissions.FixPermissions(filePath, uid, gid); err != nil {
 			if removeErr := os.Remove(filePath); removeErr != nil {
-				_ = db.DeleteMediaFile(filePath)
 				if os.IsNotExist(removeErr) {
+					_ = db.DeleteMediaFile(filePath)
 					return nil
 				}
 				return permissions.NewPermissionError(filePath, "delete", removeErr, uid, gid)
@@ -36,9 +36,8 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 	}
 
 	if err := os.Remove(filePath); err != nil {
-		_ = db.DeleteMediaFile(filePath)
-
 		if os.IsNotExist(err) {
+			_ = db.DeleteMediaFile(filePath)
 			return nil
 		}
 		return fmt.Errorf("failed to delete file: %w", err)
