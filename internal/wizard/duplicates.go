@@ -51,7 +51,7 @@ func (w *Wizard) handleDuplicates(analysis *service.DuplicateAnalysis) error {
 		if applyAll {
 			action = "k"
 		} else {
-			action = w.prompt("  [K]eep suggestion / [S]wap / [Skip] / [A]ll remaining / [Q]uit: ")
+			action = w.prompt("  [K]eep suggestion / [Skip] / [A]ll remaining / [Q]uit: ")
 		}
 
 		if action == "a" {
@@ -81,8 +81,6 @@ func (w *Wizard) handleDuplicates(analysis *service.DuplicateAnalysis) error {
 					reclaimedBytes += f.Size
 				}
 			}
-		case "s":
-			fmt.Println("  Swap not implemented yet - skipping")
 		case "skip":
 			fmt.Println("  Skipped")
 		case "q":
