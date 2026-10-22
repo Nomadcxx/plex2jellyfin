@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -19,6 +20,7 @@ func (w *Wizard) handleDuplicates(analysis *service.DuplicateAnalysis) error {
 	deletedCount := 0
 	reclaimedBytes := int64(0)
 	applyAll := false
+	var cleanupErrors []error
 
 	for i, group := range analysis.Groups {
 		yearStr := ""
@@ -52,18 +54,27 @@ func (w *Wizard) handleDuplicates(analysis *service.DuplicateAnalysis) error {
 			action = w.prompt("  [K]eep suggestion / [S]wap / [Skip] / [A]ll remaining / [Q]uit: ")
 		}
 
+		if action == "a" {
+			applyAll = true
+		}
+
 		switch action {
-		case "k", "":
+		case "k", "", "a":
 			for _, f := range group.Files {
 				if f.ID != group.BestFileID {
 					if w.dryRun {
 						fmt.Printf("  Would delete: %s\n", f.Path)
 					} else {
-						if err := os.Remove(f.Path); err != nil {
+						fileRemoved, err := w.deleteDuplicateFile(f.Path)
+						if err != nil && !fileRemoved {
 							fmt.Printf("  ❌ Failed to delete %s: %v\n", f.Path, err)
 							continue
 						}
-						_ = w.db.DeleteMediaFile(f.Path)
+						if err != nil {
+							fmt.Printf("  ❌ Removed from disk, but database cleanup remains incomplete for %s: %v\n", f.Path, err)
+							cleanupErrors = append(cleanupErrors, fmt.Errorf("%s: %w", f.Path, err))
+							continue
+						}
 						fmt.Printf("  ✅ Deleted: %s\n", f.Path)
 					}
 					deletedCount++
@@ -74,24 +85,6 @@ func (w *Wizard) handleDuplicates(analysis *service.DuplicateAnalysis) error {
 			fmt.Println("  Swap not implemented yet - skipping")
 		case "skip":
 			fmt.Println("  Skipped")
-		case "a":
-			applyAll = true
-			for _, f := range group.Files {
-				if f.ID != group.BestFileID {
-					if w.dryRun {
-						fmt.Printf("  Would delete: %s\n", f.Path)
-					} else {
-						if err := os.Remove(f.Path); err != nil {
-							fmt.Printf("  ❌ Failed to delete %s: %v\n", f.Path, err)
-							continue
-						}
-						_ = w.db.DeleteMediaFile(f.Path)
-						fmt.Printf("  ✅ Deleted: %s\n", f.Path)
-					}
-					deletedCount++
-					reclaimedBytes += f.Size
-				}
-			}
 		case "q":
 			fmt.Println("Quitting duplicates step.")
 			break
@@ -101,9 +94,25 @@ func (w *Wizard) handleDuplicates(analysis *service.DuplicateAnalysis) error {
 
 	if w.dryRun {
 		fmt.Printf("✅ Would delete %d files, reclaim %s\n\n", deletedCount, formatBytes(reclaimedBytes))
+	} else if len(cleanupErrors) > 0 {
+		fmt.Printf("❌ Cleanup incomplete: %d database reconciliation failure(s); completed %d other deletions, reclaimed %s. Run `plex2jellyfin scan` to retry reconciliation.\n\n",
+			len(cleanupErrors), deletedCount, formatBytes(reclaimedBytes))
 	} else {
 		fmt.Printf("✅ Deleted %d files, reclaimed %s\n\n", deletedCount, formatBytes(reclaimedBytes))
 	}
 
-	return nil
+	return errors.Join(cleanupErrors...)
+}
+
+func (w *Wizard) deleteDuplicateFile(path string) (bool, error) {
+	if err := os.Remove(path); err != nil {
+		return false, err
+	}
+	if err := w.db.DeleteMediaFile(path); err != nil {
+		if reconcileErr := w.service.ReconcileMissingMediaFile(path); reconcileErr != nil {
+			return true, fmt.Errorf("database cleanup failed: %v; missing-file reconciliation failed: %w; run `plex2jellyfin scan` to retry", err, reconcileErr)
+		}
+		fmt.Printf("  ⚠ Database cleanup failed, but missing-file reconciliation removed the stale row: %v\n", err)
+	}
+	return true, nil
 }

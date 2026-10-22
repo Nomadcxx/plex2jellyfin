@@ -232,6 +232,23 @@ func (s *CleanupService) PruneMissingMediaFiles() (*MissingMediaPruneResult, err
 	return result, nil
 }
 
+// ReconcileMissingMediaFile prunes stale inventory and verifies that path no
+// longer has a media row.
+func (s *CleanupService) ReconcileMissingMediaFile(path string) error {
+	if _, err := s.PruneMissingMediaFiles(); err != nil {
+		return fmt.Errorf("reconciling missing media files: %w", err)
+	}
+
+	file, err := s.db.GetMediaFile(path)
+	if err != nil {
+		return fmt.Errorf("verifying media file row for %s: %w", path, err)
+	}
+	if file != nil {
+		return fmt.Errorf("media file row still exists for %s", path)
+	}
+	return nil
+}
+
 // AnalyzeScattered finds media scattered across multiple locations
 func (s *CleanupService) AnalyzeScattered() (*ScatteredAnalysis, error) {
 	analysis := &ScatteredAnalysis{

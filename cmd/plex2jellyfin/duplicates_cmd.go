@@ -11,14 +11,24 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/permissions"
 	"github.com/Nomadcxx/plex2jellyfin/internal/plans"
 	"github.com/Nomadcxx/plex2jellyfin/internal/privilege"
+	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 )
+
+func deleteDuplicateInventoryRow(db *database.MediaDB, filePath string) error {
+	if err := db.DeleteMediaFile(filePath); err != nil {
+		if reconcileErr := service.NewCleanupService(db).ReconcileMissingMediaFile(filePath); reconcileErr != nil {
+			return fmt.Errorf("database cleanup failed for %s: %v; missing-file reconciliation failed: %w; run `plex2jellyfin scan` to retry", filePath, err, reconcileErr)
+		}
+		fmt.Printf("  [warn] Database cleanup failed for %s, but missing-file reconciliation removed the stale row: %v\n", filePath, err)
+	}
+	return nil
+}
 
 func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) error {
 	canDelete, err := permissions.CanDelete(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			_ = db.DeleteMediaFile(filePath)
-			return nil
+			return deleteDuplicateInventoryRow(db, filePath)
 		}
 		return fmt.Errorf("failed to check permissions: %w", err)
 	}
@@ -27,8 +37,7 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 		if err := permissions.FixPermissions(filePath, uid, gid); err != nil {
 			if removeErr := os.Remove(filePath); removeErr != nil {
 				if os.IsNotExist(removeErr) {
-					_ = db.DeleteMediaFile(filePath)
-					return nil
+					return deleteDuplicateInventoryRow(db, filePath)
 				}
 				return permissions.NewPermissionError(filePath, "delete", removeErr, uid, gid)
 			}
@@ -37,17 +46,12 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 
 	if err := os.Remove(filePath); err != nil {
 		if os.IsNotExist(err) {
-			_ = db.DeleteMediaFile(filePath)
-			return nil
+			return deleteDuplicateInventoryRow(db, filePath)
 		}
 		return fmt.Errorf("failed to delete file: %w", err)
 	}
 
-	if err := db.DeleteMediaFile(filePath); err != nil {
-		fmt.Printf("  [warn] Warning: File deleted but database cleanup failed: %v\n", err)
-	}
-
-	return nil
+	return deleteDuplicateInventoryRow(db, filePath)
 }
 
 func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
