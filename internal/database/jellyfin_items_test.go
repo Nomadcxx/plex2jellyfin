@@ -1,6 +1,9 @@
 package database
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestUpsertAndGetJellyfinItem(t *testing.T) {
 	db := setupTestDB(t)
@@ -156,6 +159,69 @@ func TestJellyfinInventoryCompletenessRequiresUnmodifiedReconciliation(t *testin
 	}
 	if complete {
 		t.Fatal("webhook mutation must invalidate inventory completeness")
+	}
+}
+
+func TestUpsertJellyfinItemSkipsUnchangedValues(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	item := JellyfinItem{
+		Path:           "/library/Movies/No-op (2026)/No-op (2026).mkv",
+		JellyfinItemID: "jf-no-op",
+		ItemName:       "No-op",
+		ItemType:       "Movie",
+	}
+	if err := db.UpsertJellyfinItem(item.Path, item.JellyfinItemID, item.ItemName, item.ItemType); err != nil {
+		t.Fatalf("seed Jellyfin item: %v", err)
+	}
+	if _, err := db.ReconcileJellyfinItems([]JellyfinItem{item}); err != nil {
+		t.Fatalf("complete Jellyfin inventory: %v", err)
+	}
+
+	sentinel := time.Date(2000, time.January, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := db.DB().Exec(`UPDATE jellyfin_items SET updated_at = ? WHERE path = ?`, sentinel, item.Path); err != nil {
+		t.Fatalf("set timestamp sentinel: %v", err)
+	}
+	before, err := db.GetJellyfinItemByPath(item.Path)
+	if err != nil {
+		t.Fatalf("read item before no-op: %v", err)
+	}
+	beforeGeneration, complete, err := db.JellyfinInventoryGeneration()
+	if err != nil {
+		t.Fatalf("read inventory before no-op: %v", err)
+	}
+	if !complete {
+		t.Fatal("inventory should start complete")
+	}
+
+	if err := db.UpsertJellyfinItem(item.Path, item.JellyfinItemID, item.ItemName, item.ItemType); err != nil {
+		t.Fatalf("repeat unchanged upsert: %v", err)
+	}
+	after, err := db.GetJellyfinItemByPath(item.Path)
+	if err != nil {
+		t.Fatalf("read item after no-op: %v", err)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("unchanged upsert updated timestamp: before=%v after=%v", before.UpdatedAt, after.UpdatedAt)
+	}
+	afterGeneration, complete, err := db.JellyfinInventoryGeneration()
+	if err != nil {
+		t.Fatalf("read inventory after no-op: %v", err)
+	}
+	if !complete || afterGeneration != beforeGeneration {
+		t.Fatalf("unchanged upsert changed inventory state: generation %d -> %d, complete=%v", beforeGeneration, afterGeneration, complete)
+	}
+
+	if err := db.UpsertJellyfinItem(item.Path, item.JellyfinItemID, "Changed", item.ItemType); err != nil {
+		t.Fatalf("update changed item: %v", err)
+	}
+	changedGeneration, complete, err := db.JellyfinInventoryGeneration()
+	if err != nil {
+		t.Fatalf("read inventory after changed item: %v", err)
+	}
+	if complete || changedGeneration <= afterGeneration {
+		t.Fatalf("changed upsert did not invalidate inventory: generation %d -> %d, complete=%v", afterGeneration, changedGeneration, complete)
 	}
 }
 

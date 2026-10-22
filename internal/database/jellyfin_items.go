@@ -32,6 +32,22 @@ func (m *MediaDB) UpsertJellyfinItem(path, jellyfinItemID, itemName, itemType st
 		return fmt.Errorf("jellyfin item id is required")
 	}
 
+	var unchanged bool
+	if err := m.db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM jellyfin_items
+			WHERE path = ?
+			  AND jellyfin_item_id IS ?
+			  AND item_name IS ?
+			  AND item_type IS ?
+		)
+	`, path, jellyfinItemID, itemName, itemType).Scan(&unchanged); err != nil {
+		return fmt.Errorf("failed to check existing jellyfin item: %w", err)
+	}
+	if unchanged {
+		return nil
+	}
+
 	tx, err := m.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin jellyfin item upsert: %w", err)
@@ -46,9 +62,20 @@ func (m *MediaDB) UpsertJellyfinItem(path, jellyfinItemID, itemName, itemType st
 			item_name = excluded.item_name,
 			item_type = excluded.item_type,
 			updated_at = CURRENT_TIMESTAMP
+		WHERE jellyfin_items.jellyfin_item_id IS NOT excluded.jellyfin_item_id
+		   OR jellyfin_items.item_name IS NOT excluded.item_name
+		   OR jellyfin_items.item_type IS NOT excluded.item_type
 	`
-	if _, err := tx.Exec(query, path, jellyfinItemID, itemName, itemType); err != nil {
+	res, err := tx.Exec(query, path, jellyfinItemID, itemName, itemType)
+	if err != nil {
 		return fmt.Errorf("failed to upsert jellyfin item: %w", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect jellyfin item upsert: %w", err)
+	}
+	if changed == 0 {
+		return nil
 	}
 	if err := bumpJellyfinInventoryIncompleteTx(tx); err != nil {
 		return err
