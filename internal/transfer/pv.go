@@ -87,7 +87,7 @@ func (p *PVTransferer) Copy(src, dst string, opts TransferOptions) (*TransferRes
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result.Attempts = attempt
 
-		bytesCopied, err := p.runPV(src, dst, result.BytesTotal, opts)
+		bytesCopied, checksum, err := p.runPV(src, dst, result.BytesTotal, opts)
 		if err == nil {
 			dstInfo, statErr := StatWithTimeout(dst, 10*time.Second)
 			if statErr != nil {
@@ -97,6 +97,7 @@ func (p *PVTransferer) Copy(src, dst string, opts TransferOptions) (*TransferRes
 			} else {
 				result.Success = true
 				result.BytesCopied = bytesCopied
+				result.Checksum = checksum
 				result.Duration = time.Since(startTime)
 				return result, nil
 			}
@@ -104,21 +105,17 @@ func (p *PVTransferer) Copy(src, dst string, opts TransferOptions) (*TransferRes
 			lastErr = err
 		}
 
-		if opts.DeletePartial {
-			os.Remove(dst)
-		}
-
 		if attempt < maxAttempts {
 			time.Sleep(opts.RetryDelay)
 		}
 	}
 
-	result.Error = fmt.Errorf("%w: %v", ErrRetryExhausted, lastErr)
+	result.Error = fmt.Errorf("%w: %w", ErrRetryExhausted, lastErr)
 	result.Duration = time.Since(startTime)
 	return result, result.Error
 }
 
-func (p *PVTransferer) runPV(src, dst string, totalSize int64, opts TransferOptions) (int64, error) {
+func (p *PVTransferer) runPV(src, dst string, totalSize int64, opts TransferOptions) (int64, string, error) {
 	timeout := opts.Timeout
 	if timeout == 0 {
 		timeout = 5 * time.Minute
@@ -130,7 +127,7 @@ func (p *PVTransferer) runPV(src, dst string, totalSize int64, opts TransferOpti
 	dstDir := filepath.Dir(dst)
 	tmpFile, err := os.CreateTemp(dstDir, "."+filepath.Base(dst)+".tmp-*")
 	if err != nil {
-		return 0, fmt.Errorf("failed to create temporary destination: %w", err)
+		return 0, "", fmt.Errorf("failed to create temporary destination: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	committed := false
@@ -149,11 +146,11 @@ func (p *PVTransferer) runPV(src, dst string, totalSize int64, opts TransferOpti
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return 0, fmt.Errorf("failed to create stderr pipe: %w", err)
+		return 0, "", fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return 0, fmt.Errorf("failed to start pv: %w", err)
+		return 0, "", fmt.Errorf("failed to start pv: %w", err)
 	}
 
 	var lastProgress atomic.Int64
@@ -190,23 +187,30 @@ func (p *PVTransferer) runPV(src, dst string, totalSize int64, opts TransferOpti
 	err = cmd.Wait()
 	if err != nil {
 		if ctx.Err() != nil {
-			return bytesCopied.Load(), fmt.Errorf("%w: transfer stalled - no progress for %s", ErrTimeout, timeout)
+			return bytesCopied.Load(), "", fmt.Errorf("%w: transfer stalled - no progress for %s", ErrTimeout, timeout)
 		}
-		return bytesCopied.Load(), fmt.Errorf("pv failed: %w", err)
+		return bytesCopied.Load(), "", fmt.Errorf("pv failed: %w", err)
 	}
 
 	if err := tmpFile.Sync(); err != nil {
-		return bytesCopied.Load(), fmt.Errorf("sync error: %w", err)
+		return bytesCopied.Load(), "", fmt.Errorf("sync error: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return bytesCopied.Load(), fmt.Errorf("close error: %w", err)
+		return bytesCopied.Load(), "", fmt.Errorf("close error: %w", err)
+	}
+	checksum := ""
+	if opts.Checksum {
+		checksum, err = verifyChecksum(src, tmpPath)
+		if err != nil {
+			return bytesCopied.Load(), "", err
+		}
 	}
 	if err := os.Rename(tmpPath, dst); err != nil {
-		return bytesCopied.Load(), fmt.Errorf("commit temporary destination: %w", err)
+		return bytesCopied.Load(), "", fmt.Errorf("commit temporary destination: %w", err)
 	}
 	committed = true
 
-	return totalSize, nil
+	return totalSize, checksum, nil
 }
 
 func (p *PVTransferer) buildArgs(totalSize int64) []string {

@@ -73,6 +73,10 @@ func (r *RsyncTransferer) transfer(src, dst string, opts TransferOptions, remove
 		result.Attempts = attempt
 
 		err := r.runRsync(src, stagedDst, opts)
+		checksum := ""
+		if err == nil && opts.Checksum {
+			checksum, err = verifyChecksum(src, stagedDst)
+		}
 		if err == nil {
 			if err := os.Rename(stagedDst, dst); err != nil {
 				lastErr = fmt.Errorf("publishing completed transfer: %w", err)
@@ -87,6 +91,7 @@ func (r *RsyncTransferer) transfer(src, dst string, opts TransferOptions, remove
 				}
 				result.Success = true
 				result.BytesCopied = result.BytesTotal
+				result.Checksum = checksum
 				result.Duration = time.Since(startTime)
 				return result, nil
 			}
@@ -99,7 +104,7 @@ func (r *RsyncTransferer) transfer(src, dst string, opts TransferOptions, remove
 		}
 	}
 
-	result.Error = fmt.Errorf("%w: %v", ErrRetryExhausted, lastErr)
+	result.Error = fmt.Errorf("%w: %w", ErrRetryExhausted, lastErr)
 	result.Duration = time.Since(startTime)
 	return result, result.Error
 }

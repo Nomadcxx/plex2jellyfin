@@ -1,12 +1,75 @@
 package transfer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestNativeCopyReportsVerifiedChecksum(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "movie.mkv")
+	content := []byte("checksum this transfer")
+	if err := os.WriteFile(src, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultOptions()
+	opts.Checksum = true
+	opts.SkipHealthCheck = true
+	opts.RetryAttempts = 0
+	result, err := NewNativeTransferer(1024).Copy(src, dst, opts)
+	if err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	want := sha256.Sum256(content)
+	if result.Checksum != hex.EncodeToString(want[:]) {
+		t.Fatalf("checksum = %q, want %x", result.Checksum, want)
+	}
+}
+
+func TestNativeChecksumMismatchPreservesExistingDestination(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.mkv")
+	dst := filepath.Join(dir, "library", "movie.mkv")
+	if err := os.WriteFile(src, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("keep old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultOptions()
+	opts.Checksum = true
+	opts.DeletePartial = true
+	opts.SkipHealthCheck = true
+	opts.RetryAttempts = 0
+	opts.Progress = func(_, _ int64) {
+		if err := os.WriteFile(src, []byte("modified"), 0644); err != nil {
+			t.Errorf("modify source during transfer: %v", err)
+		}
+	}
+	_, err := NewNativeTransferer(1024).Copy(src, dst, opts)
+	if !errors.Is(err, ErrChecksumMismatch) {
+		t.Fatalf("Copy error = %v, want %v", err, ErrChecksumMismatch)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("existing destination was not preserved: %v", err)
+	}
+	if string(got) != "keep old" {
+		t.Fatalf("existing destination = %q, want %q", got, "keep old")
+	}
+}
 
 func TestNativeCopyFailurePreservesExistingDestination(t *testing.T) {
 	dir := t.TempDir()
