@@ -93,6 +93,9 @@ func (o *OllamaAdapter) ListModels(ctx context.Context) ([]Model, error) {
 		return nil, fmt.Errorf("failed to list models: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Ollama returned status %d", resp.StatusCode)
+	}
 
 	var result struct {
 		Models []struct {

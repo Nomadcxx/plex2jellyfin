@@ -238,6 +238,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AISettings'
+    put:
+      operationId: updateAISettings
+      summary: Update AI provider settings
+      tags: [AI]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AISettingsUpdate'
+      responses:
+        '200':
+          description: Updated AI settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AISettings'
 
   # ============ ACTIVITY ============
   /activity:
@@ -1495,6 +1512,8 @@ components:
           enum: [ollama, openai, anthropic, lmstudio, custom]
         name:
           type: string
+        endpoint:
+          type: string
         enabled:
           type: boolean
         currentModel:
@@ -1561,6 +1580,24 @@ components:
           type: number
         autoApply:
           type: boolean
+        endpoint:
+          type: string
+        primaryModel:
+          type: string
+        fallbackModel:
+          type: string
+
+    AISettingsUpdate:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        endpoint:
+          type: string
+        primaryModel:
+          type: string
+        fallbackModel:
+          type: string
 
     # Activity
     ActivityEvent:

@@ -46,6 +46,8 @@ export interface paths {
   "/ai/settings": {
     /** Get current AI settings */
     get: operations["getAISettings"];
+    /** Update AI provider settings */
+    put: operations["updateAISettings"];
   };
   "/activity": {
     /** Get paginated activity log */
@@ -424,6 +426,7 @@ export interface components {
       /** @enum {string} */
       type?: "ollama" | "openai" | "anthropic" | "lmstudio" | "custom";
       name?: string;
+      endpoint?: string;
       enabled?: boolean;
       currentModel?: string;
       capabilities?: components["schemas"]["LLMCapabilities"];
@@ -456,6 +459,15 @@ export interface components {
       defaultProvider?: string;
       confidenceThreshold?: number;
       autoApply?: boolean;
+      endpoint?: string;
+      primaryModel?: string;
+      fallbackModel?: string;
+    };
+    AISettingsUpdate: {
+      enabled?: boolean;
+      endpoint?: string;
+      primaryModel?: string;
+      fallbackModel?: string;
     };
     ActivityEvent: {
       id?: string;
@@ -798,6 +810,22 @@ export interface operations {
   getAISettings: {
     responses: {
       /** @description AI settings */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AISettings"];
+        };
+      };
+    };
+  };
+  /** Update AI provider settings */
+  updateAISettings: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AISettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Updated AI settings */
       200: {
         content: {
           "application/json": components["schemas"]["AISettings"];

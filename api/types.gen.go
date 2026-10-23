@@ -18,6 +18,12 @@ const (
 	SYNCCOMPLETED  ActivityEventType = "SYNC_COMPLETED"
 )
 
+// Defines values for CompatibilityIssueSeverity.
+const (
+	Critical CompatibilityIssueSeverity = "critical"
+	Warning  CompatibilityIssueSeverity = "warning"
+)
+
 // Defines values for DuplicateGroupMediaType.
 const (
 	Movie  DuplicateGroupMediaType = "movie"
@@ -57,6 +63,12 @@ const (
 	Scanning  ScanStatusStatus = "scanning"
 )
 
+// Defines values for SetupRuntimeInfoKind.
+const (
+	Container SetupRuntimeInfoKind = "container"
+	Native    SetupRuntimeInfoKind = "native"
+)
+
 // Defines values for RemoveSettingsLibraryParamsKind.
 const (
 	RemoveSettingsLibraryParamsKindMovies RemoveSettingsLibraryParamsKind = "movies"
@@ -65,8 +77,10 @@ const (
 
 // Defines values for RemoveSettingsPathParamsKind.
 const (
-	RemoveSettingsPathParamsKindMovies RemoveSettingsPathParamsKind = "movies"
-	RemoveSettingsPathParamsKindTv     RemoveSettingsPathParamsKind = "tv"
+	RemoveSettingsPathParamsKindMovies        RemoveSettingsPathParamsKind = "movies"
+	RemoveSettingsPathParamsKindSeedingMovies RemoveSettingsPathParamsKind = "seeding_movies"
+	RemoveSettingsPathParamsKindSeedingTv     RemoveSettingsPathParamsKind = "seeding_tv"
+	RemoveSettingsPathParamsKindTv            RemoveSettingsPathParamsKind = "tv"
 )
 
 // Defines values for GetSettingsSectionParamsReveal.
@@ -80,6 +94,17 @@ type AISettings struct {
 	ConfidenceThreshold *float32 `json:"confidenceThreshold,omitempty"`
 	DefaultProvider     *string  `json:"defaultProvider,omitempty"`
 	Enabled             *bool    `json:"enabled,omitempty"`
+	Endpoint            *string  `json:"endpoint,omitempty"`
+	FallbackModel       *string  `json:"fallbackModel,omitempty"`
+	PrimaryModel        *string  `json:"primaryModel,omitempty"`
+}
+
+// AISettingsUpdate defines model for AISettingsUpdate.
+type AISettingsUpdate struct {
+	Enabled       *bool   `json:"enabled,omitempty"`
+	Endpoint      *string `json:"endpoint,omitempty"`
+	FallbackModel *string `json:"fallbackModel,omitempty"`
+	PrimaryModel  *string `json:"primaryModel,omitempty"`
 }
 
 // ActivityEvent defines model for ActivityEvent.
@@ -97,6 +122,34 @@ type ActivityEventType string
 type AuthStatus struct {
 	Authenticated *bool `json:"authenticated,omitempty"`
 	Enabled       *bool `json:"enabled,omitempty"`
+}
+
+// CompatibilityIssue defines model for CompatibilityIssue.
+type CompatibilityIssue struct {
+	Current  string                     `json:"current"`
+	Expected string                     `json:"expected"`
+	FixCmd   *string                    `json:"fix_cmd,omitempty"`
+	Service  string                     `json:"service"`
+	Setting  string                     `json:"setting"`
+	Severity CompatibilityIssueSeverity `json:"severity"`
+}
+
+// CompatibilityIssueSeverity defines model for CompatibilityIssue.Severity.
+type CompatibilityIssueSeverity string
+
+// CompatibilityResult defines model for CompatibilityResult.
+type CompatibilityResult struct {
+	Error   *string              `json:"error,omitempty"`
+	Fixed   *int                 `json:"fixed,omitempty"`
+	Healthy bool                 `json:"healthy"`
+	Issues  []CompatibilityIssue `json:"issues"`
+	Ok      bool                 `json:"ok"`
+}
+
+// ConnectionTestRequest defines model for ConnectionTestRequest.
+type ConnectionTestRequest struct {
+	ApiKey string `json:"api_key"`
+	Url    string `json:"url"`
 }
 
 // ConsolidationResult defines model for ConsolidationResult.
@@ -147,6 +200,12 @@ type DuplicateGroup struct {
 
 // DuplicateGroupMediaType defines model for DuplicateGroup.MediaType.
 type DuplicateGroupMediaType string
+
+// Error defines model for Error.
+type Error struct {
+	Code    *string `json:"code,omitempty"`
+	Message *string `json:"message,omitempty"`
+}
 
 // JellyfinMismatch defines model for JellyfinMismatch.
 type JellyfinMismatch struct {
@@ -208,6 +267,7 @@ type LLMProviderInfo struct {
 	Capabilities *LLMCapabilities     `json:"capabilities,omitempty"`
 	CurrentModel *string              `json:"currentModel,omitempty"`
 	Enabled      *bool                `json:"enabled,omitempty"`
+	Endpoint     *string              `json:"endpoint,omitempty"`
 	Id           *string              `json:"id,omitempty"`
 	Name         *string              `json:"name,omitempty"`
 	Type         *LLMProviderInfoType `json:"type,omitempty"`
@@ -380,6 +440,106 @@ type ServiceStatus struct {
 	Version    *string `json:"version,omitempty"`
 }
 
+// SetupAI defines model for SetupAI.
+type SetupAI struct {
+	Enabled       bool   `json:"enabled"`
+	Endpoint      string `json:"endpoint"`
+	FallbackModel string `json:"fallback_model"`
+	PrimaryModel  string `json:"primary_model"`
+}
+
+// SetupDraft defines model for SetupDraft.
+type SetupDraft struct {
+	Ai        SetupAI         `json:"ai"`
+	Jellyfin  SetupJellyfin   `json:"jellyfin"`
+	Libraries SetupPaths      `json:"libraries"`
+	Radarr    SetupService    `json:"radarr"`
+	Runtime   SetupRuntime    `json:"runtime"`
+	Sonarr    SetupService    `json:"sonarr"`
+	Watch     SetupWatchPaths `json:"watch"`
+}
+
+// SetupJellyfin defines model for SetupJellyfin.
+type SetupJellyfin struct {
+	ApiKey       string             `json:"api_key"`
+	Enabled      bool               `json:"enabled"`
+	PathMappings []SetupPathMapping `json:"path_mappings"`
+
+	// PluginDaemonUrl Base URL the companion plugin calls back to
+	PluginDaemonUrl *string `json:"plugin_daemon_url,omitempty"`
+
+	// PluginInstall Install the companion plugin via Jellyfin's package API
+	PluginInstall *bool `json:"plugin_install,omitempty"`
+
+	// PluginRestart Restart Jellyfin after install so the plugin loads
+	PluginRestart *bool  `json:"plugin_restart,omitempty"`
+	Url           string `json:"url"`
+}
+
+// SetupPathMapping defines model for SetupPathMapping.
+type SetupPathMapping struct {
+	Daemon   string `json:"daemon"`
+	Jellyfin string `json:"jellyfin"`
+}
+
+// SetupPaths defines model for SetupPaths.
+type SetupPaths struct {
+	Movies []string `json:"movies"`
+	Tv     []string `json:"tv"`
+}
+
+// SetupPermissions defines model for SetupPermissions.
+type SetupPermissions struct {
+	DirMode  string `json:"dir_mode"`
+	FileMode string `json:"file_mode"`
+	Group    string `json:"group"`
+	User     string `json:"user"`
+}
+
+// SetupRuntime defines model for SetupRuntime.
+type SetupRuntime struct {
+	DeleteSource    bool             `json:"delete_source"`
+	Permissions     SetupPermissions `json:"permissions"`
+	ScanFrequency   string           `json:"scan_frequency"`
+	VerifyChecksums bool             `json:"verify_checksums"`
+}
+
+// SetupRuntimeInfo defines model for SetupRuntimeInfo.
+type SetupRuntimeInfo struct {
+	Gid  int                  `json:"gid"`
+	Kind SetupRuntimeInfoKind `json:"kind"`
+	Uid  int                  `json:"uid"`
+}
+
+// SetupRuntimeInfoKind defines model for SetupRuntimeInfo.Kind.
+type SetupRuntimeInfoKind string
+
+// SetupService defines model for SetupService.
+type SetupService struct {
+	ApiKey  string `json:"api_key"`
+	Enabled bool   `json:"enabled"`
+	Url     string `json:"url"`
+}
+
+// SetupStatus defines model for SetupStatus.
+type SetupStatus struct {
+	AdvertiseIp        *string          `json:"advertise_ip,omitempty"`
+	Complete           bool             `json:"complete"`
+	DaemonState        string           `json:"daemon_state"`
+	DefaultCallbackUrl *string          `json:"default_callback_url,omitempty"`
+	Draft              SetupDraft       `json:"draft"`
+	Required           bool             `json:"required"`
+	Runtime            SetupRuntimeInfo `json:"runtime"`
+}
+
+// SetupWatchPaths defines model for SetupWatchPaths.
+type SetupWatchPaths struct {
+	Movies        []string `json:"movies"`
+	SeedingMovies []string `json:"seeding_movies"`
+	SeedingTv     []string `json:"seeding_tv"`
+	Tv            []string `json:"tv"`
+}
+
 // UnidentifiableItem defines model for UnidentifiableItem.
 type UnidentifiableItem struct {
 	DateAdded *time.Time `json:"dateAdded,omitempty"`
@@ -413,6 +573,13 @@ type SetupAuthJSONBody struct {
 // DeleteDuplicateParams defines parameters for DeleteDuplicate.
 type DeleteDuplicateParams struct {
 	FileId *int64 `form:"fileId,omitempty" json:"fileId,omitempty"`
+}
+
+// GetFileTraceParams defines parameters for GetFileTrace.
+type GetFileTraceParams struct {
+	// Q Substring filter on the source path
+	Q     *string `form:"q,omitempty" json:"q,omitempty"`
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetJellyfinUnidentifiableItemsParams defines parameters for GetJellyfinUnidentifiableItems.
@@ -500,6 +667,9 @@ type PutSettingsSectionJSONBody = map[string]interface{}
 // JellyfinWebhookJSONBody defines parameters for JellyfinWebhook.
 type JellyfinWebhookJSONBody map[string]interface{}
 
+// UpdateAISettingsJSONRequestBody defines body for UpdateAISettings for application/json ContentType.
+type UpdateAISettingsJSONRequestBody = AISettingsUpdate
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody LoginJSONBody
 
@@ -545,14 +715,29 @@ type AddSettingsPathJSONRequestBody = AddSettingsPathJSONBody
 // ReplaceSettingsPathsJSONRequestBody defines body for ReplaceSettingsPaths for application/json ContentType.
 type ReplaceSettingsPathsJSONRequestBody = ReplaceSettingsPathsJSONBody
 
+// CheckRadarrCompatibilityJSONRequestBody defines body for CheckRadarrCompatibility for application/json ContentType.
+type CheckRadarrCompatibilityJSONRequestBody = ConnectionTestRequest
+
+// FixRadarrCompatibilityJSONRequestBody defines body for FixRadarrCompatibility for application/json ContentType.
+type FixRadarrCompatibilityJSONRequestBody = ConnectionTestRequest
+
 // TestRadarrConnectionJSONRequestBody defines body for TestRadarrConnection for application/json ContentType.
 type TestRadarrConnectionJSONRequestBody = TestRadarrConnectionJSONBody
+
+// CheckSonarrCompatibilityJSONRequestBody defines body for CheckSonarrCompatibility for application/json ContentType.
+type CheckSonarrCompatibilityJSONRequestBody = ConnectionTestRequest
+
+// FixSonarrCompatibilityJSONRequestBody defines body for FixSonarrCompatibility for application/json ContentType.
+type FixSonarrCompatibilityJSONRequestBody = ConnectionTestRequest
 
 // TestSonarrConnectionJSONRequestBody defines body for TestSonarrConnection for application/json ContentType.
 type TestSonarrConnectionJSONRequestBody = TestSonarrConnectionJSONBody
 
 // PutSettingsSectionJSONRequestBody defines body for PutSettingsSection for application/json ContentType.
 type PutSettingsSectionJSONRequestBody = PutSettingsSectionJSONBody
+
+// ApplySetupJSONRequestBody defines body for ApplySetup for application/json ContentType.
+type ApplySetupJSONRequestBody = SetupDraft
 
 // JellyfinWebhookJSONRequestBody defines body for JellyfinWebhook for application/json ContentType.
 type JellyfinWebhookJSONRequestBody JellyfinWebhookJSONBody

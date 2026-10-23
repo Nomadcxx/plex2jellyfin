@@ -9,15 +9,9 @@ import (
 	"strings"
 	"time"
 
+	openapi "github.com/Nomadcxx/plex2jellyfin/api"
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 )
-
-type aiSettingsApplyRequest struct {
-	Enabled       *bool   `json:"enabled,omitempty"`
-	Endpoint      *string `json:"endpoint,omitempty"`
-	PrimaryModel  *string `json:"primaryModel,omitempty"`
-	FallbackModel *string `json:"fallbackModel,omitempty"`
-}
 
 type aiTestConnectionRequest struct {
 	Endpoint *string `json:"endpoint,omitempty"`
@@ -29,7 +23,7 @@ type aiPromptTestRequest struct {
 }
 
 func (s *Server) UpdateAISettings(w http.ResponseWriter, r *http.Request) {
-	var req aiSettingsApplyRequest
+	var req openapi.AISettingsUpdate
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json", "Invalid request payload")
@@ -259,18 +253,25 @@ func fetchOllamaModels(endpoint string) ([]string, error) {
 	return out, nil
 }
 
-func currentAISettingsPayload(cfg *config.Config) map[string]interface{} {
+func currentAISettingsPayload(cfg *config.Config) openapi.AISettings {
 	if cfg == nil {
-		return map[string]interface{}{}
+		return openapi.AISettings{}
 	}
 
-	return map[string]interface{}{
-		"enabled":             cfg.AI.Enabled,
-		"defaultProvider":     "ollama",
-		"confidenceThreshold": float32(cfg.AI.ConfidenceThreshold),
-		"autoApply":           cfg.AI.AutoResolveRisky,
-		"endpoint":            cfg.AI.OllamaEndpoint,
-		"primaryModel":        cfg.AI.Model,
-		"fallbackModel":       cfg.AI.FallbackModel,
+	enabled := cfg.AI.Enabled
+	defaultProvider := "ollama"
+	confidenceThreshold := float32(cfg.AI.ConfidenceThreshold)
+	autoApply := cfg.AI.AutoResolveRisky
+	endpoint := cfg.AI.OllamaEndpoint
+	primaryModel := cfg.AI.Model
+	fallbackModel := cfg.AI.FallbackModel
+	return openapi.AISettings{
+		Enabled:             &enabled,
+		DefaultProvider:     &defaultProvider,
+		ConfidenceThreshold: &confidenceThreshold,
+		AutoApply:           &autoApply,
+		Endpoint:            &endpoint,
+		PrimaryModel:        &primaryModel,
+		FallbackModel:       &fallbackModel,
 	}
 }
