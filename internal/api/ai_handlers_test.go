@@ -18,7 +18,7 @@ func newTestAIHandler(t *testing.T, cfg *config.Config) http.Handler {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
-	return (&Server{cfg: cfg}).apiRouter()
+	return (&Server{cfg: cfg, ipc: &stubIPC{}}).apiRouter()
 }
 
 func TestAISettingsGetReturnsConfiguredValues(t *testing.T) {
@@ -66,6 +66,44 @@ func TestAISettingsPutRoundTripsThroughGet(t *testing.T) {
 	}
 	if getResponse.Code != http.StatusOK || got["enabled"] != true || got["endpoint"] != "http://ollama.example:11434" || got["primaryModel"] != "qwen2.5:14b" || got["fallbackModel"] != "llama3.1:8b" {
 		t.Fatalf("GET after PUT status=%d body=%#v", getResponse.Code, got)
+	}
+}
+
+func TestAISettingsPutRestoresPreviousConfigWhenReloadFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SUDO_USER", "")
+	cfg := config.DefaultConfig()
+	cfg.AI.Model = "previous-model"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &Server{
+		cfg: cfg,
+		ipc: &stubIPC{result: json.RawMessage(`{"ok":false,"failed":[{"name":"ai","error":"invalid model"}]}`)},
+	}
+	response := httptest.NewRecorder()
+	server.apiRouter().ServeHTTP(response, httptest.NewRequest(
+		http.MethodPut,
+		"/ai/settings",
+		strings.NewReader(`{"primaryModel":"new-model"}`),
+	))
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("PUT /ai/settings status = %d, want %d: %s", response.Code, http.StatusBadGateway, response.Body.String())
+	}
+	if !server.ipc.(*stubIPC).called {
+		t.Fatal("expected daemon reload")
+	}
+	if cfg.AI.Model != "previous-model" {
+		t.Fatalf("in-memory model = %q, want previous-model", cfg.AI.Model)
+	}
+	disk, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disk.AI.Model != "previous-model" {
+		t.Fatalf("saved model = %q, want previous-model", disk.AI.Model)
 	}
 }
 

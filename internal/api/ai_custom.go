@@ -33,6 +33,10 @@ func (s *Server) UpdateAISettings(w http.ResponseWriter, r *http.Request) {
 
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
+	if s.ipc == nil {
+		writeError(w, http.StatusServiceUnavailable, "ipc_unavailable", "daemon IPC not connected")
+		return
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -56,8 +60,21 @@ func (s *Server) UpdateAISettings(w http.ResponseWriter, r *http.Request) {
 		cfg.AI.FallbackModel = ""
 	}
 
-	if err := cfg.Save(); err != nil {
+	configPath, err := config.ConfigPath()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "config_path_error", err.Error())
+		return
+	}
+	reload, err := SaveConfigAndReloadSection(r.Context(), configPath, cfg, s.ipc, "ai")
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "config_save_error", fmt.Sprintf("Failed to save config: %v", err))
+		return
+	}
+	if !reload.Reload.OK {
+		if restored, err := config.Load(); err == nil {
+			s.replaceConfigLocked(restored)
+		}
+		writeError(w, http.StatusBadGateway, "config_reload_error", "AI settings were not applied; previous config restored")
 		return
 	}
 
