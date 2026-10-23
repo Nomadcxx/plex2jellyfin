@@ -1,16 +1,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/api"
 	"github.com/Nomadcxx/plex2jellyfin/internal/activity"
 	"github.com/Nomadcxx/plex2jellyfin/internal/consolidate"
+	"github.com/Nomadcxx/plex2jellyfin/internal/llm"
 	"github.com/google/uuid"
 )
 
@@ -548,22 +551,91 @@ func ptrActivityEventType(t api.ActivityEventType) *api.ActivityEventType {
 
 // GetAISettings implements api.ServerInterface
 func (s *Server) GetAISettings(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement AI settings retrieval
-	writeJSON(w, http.StatusOK, api.AISettings{})
+	s.configMu.RLock()
+	settings := currentAISettingsPayload(s.cfg)
+	s.configMu.RUnlock()
+	writeJSON(w, http.StatusOK, settings)
 }
 
 // ListLLMProviders implements api.ServerInterface
 func (s *Server) ListLLMProviders(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement LLM providers listing
-	writeJSON(w, http.StatusOK, []api.LLMProviderInfo{})
+	s.configMu.RLock()
+	if s.cfg == nil {
+		s.configMu.RUnlock()
+		writeJSON(w, http.StatusOK, []api.LLMProviderInfo{})
+		return
+	}
+	aiCfg := s.cfg.AI
+	s.configMu.RUnlock()
+
+	endpoint := strings.TrimRight(strings.TrimSpace(aiCfg.OllamaEndpoint), "/")
+	provider := llm.NewOllamaAdapter("ollama", "Ollama", endpoint, aiCfg.Model).Info()
+	providerType := api.LLMProviderInfoType(provider.Type)
+	capabilities := api.LLMCapabilities{
+		SupportsStreaming:   ptrBool(provider.Capabilities.SupportsStreaming),
+		SupportsVision:      ptrBool(provider.Capabilities.SupportsVision),
+		SupportsModelSwitch: ptrBool(provider.Capabilities.SupportsModelSwitch),
+		LocalOnly:           ptrBool(provider.Capabilities.LocalOnly),
+	}
+	writeJSON(w, http.StatusOK, []api.LLMProviderInfo{{
+		Id:           ptrString(provider.ID),
+		Type:         &providerType,
+		Name:         ptrString(provider.Name),
+		Endpoint:     ptrString(provider.Endpoint),
+		Enabled:      ptrBool(aiCfg.Enabled),
+		CurrentModel: ptrString(provider.CurrentModel),
+		Capabilities: &capabilities,
+	}})
 }
 
 // GetLLMProviderStatus implements api.ServerInterface
 func (s *Server) GetLLMProviderStatus(w http.ResponseWriter, r *http.Request, providerId string) {
-	// TODO: Implement LLM provider status check
-	writeJSON(w, http.StatusOK, api.LLMProviderStatus{
-		Online: ptrBool(false),
-	})
+	if providerId != "ollama" {
+		writeError(w, http.StatusNotFound, "unknown_provider", fmt.Sprintf("LLM provider %q is not configured", providerId))
+		return
+	}
+
+	s.configMu.RLock()
+	if s.cfg == nil {
+		s.configMu.RUnlock()
+		writeError(w, http.StatusNotFound, "unknown_provider", "LLM provider \"ollama\" is not configured")
+		return
+	}
+	aiCfg := s.cfg.AI
+	s.configMu.RUnlock()
+
+	endpoint := strings.TrimRight(strings.TrimSpace(aiCfg.OllamaEndpoint), "/")
+	provider := llm.NewOllamaAdapter("ollama", "Ollama", endpoint, aiCfg.Model)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	status, err := provider.Status(ctx)
+	if status == nil {
+		status = &llm.ProviderStatus{Model: aiCfg.Model}
+	}
+	if err != nil {
+		status.Online = false
+		status.Error = err.Error()
+	}
+
+	response := api.LLMProviderStatus{
+		Online: ptrBool(status.Online),
+		Model:  ptrString(status.Model),
+	}
+	if status.Error != "" {
+		response.Error = ptrString(status.Error)
+	}
+	if status.ModelList != nil {
+		models := make([]api.LLMModel, 0, len(status.ModelList))
+		for _, model := range status.ModelList {
+			models = append(models, api.LLMModel{
+				Id:   ptrString(model.ID),
+				Name: ptrString(model.Name),
+				Size: ptrString(model.Size),
+			})
+		}
+		response.ModelList = &models
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // ListMediaManagers implements api.ServerInterface

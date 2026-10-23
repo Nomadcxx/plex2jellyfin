@@ -69,12 +69,8 @@ export function useApplyAISettings() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (payload: {
-      enabled?: boolean;
-      endpoint?: string;
-      primaryModel?: string;
-      fallbackModel?: string;
-    }) => api.post('/ai/settings/apply', payload),
+    mutationFn: (payload: components['schemas']['AISettingsUpdate']) =>
+      api.put('/ai/settings', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: settingsKeys.aiSettings });
       queryClient.invalidateQueries({ queryKey: settingsKeys.llmProviders });
