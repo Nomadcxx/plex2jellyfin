@@ -413,9 +413,12 @@ func TestSelectMovieLibraryDoesNotRerouteFullCanonicalMovie(t *testing.T) {
 	}
 
 	selector := NewSelectorWithConfig(SelectorConfig{Libraries: []string{otherRoot, canonicalRoot}, DB: db})
-	_, err = selector.SelectMovieLibrary("Pinned Film", "2022", 1<<62)
-	if err == nil || !strings.Contains(err.Error(), canonicalRoot) || !strings.Contains(err.Error(), "insufficient space") {
-		t.Fatalf("SelectMovieLibrary error = %v, want insufficient-space error naming canonical root %q", err, canonicalRoot)
+	selection, err := selector.SelectMovieLibrary("Pinned Film", "2022", 1<<62)
+	if err != nil {
+		t.Fatalf("SelectMovieLibrary: %v", err)
+	}
+	if selection.Library != canonicalRoot {
+		t.Fatalf("selected %q, want full canonical library %q", selection.Library, canonicalRoot)
 	}
 }
 

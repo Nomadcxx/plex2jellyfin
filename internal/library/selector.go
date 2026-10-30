@@ -118,12 +118,8 @@ func (s *Selector) SelectMovieLibrary(movieTitle string, year string, fileSize i
 				if err != nil {
 					return nil, fmt.Errorf("movie exists in canonical library %s but free space is unavailable: %w", canonicalLibrary, err)
 				}
-				if available < fileSize {
-					return nil, &InsufficientSpaceError{
-						Path: canonicalLibrary, RequiredBytes: fileSize, Available: available,
-						Context: "canonical movie library",
-					}
-				}
+				// ponytail: defer the byte-capacity check until transfer, after the
+				// organizer can skip an existing equal-or-better copy at this path.
 				sourceDesc := fmt.Sprintf("Database %s (%s): %s", placementKind, movie.Source, placementPath)
 				return &SelectionResult{
 					Library:   canonicalLibrary,
