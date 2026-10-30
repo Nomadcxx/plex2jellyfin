@@ -253,6 +253,7 @@ func isDeterministicActivityFailure(entry activity.Entry) bool {
 		"unable to parse tv show name",
 		"could not extract movie info from path",
 		"unable to parse movie name",
+		"incoming file quality evidence is unavailable",
 	}
 	for _, p := range patterns {
 		if strings.Contains(msg, p) {
