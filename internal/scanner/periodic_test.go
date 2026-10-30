@@ -690,6 +690,43 @@ func TestPeriodicScanner_ProcessActivityFile_LegacyDeterministicErrorSkip(t *tes
 	}
 }
 
+func TestPeriodicScanner_ProcessActivityFile_LegacyQualityEvidenceSkip(t *testing.T) {
+	tempDir := t.TempDir()
+	src := filepath.Join(tempDir, "incoming.mkv")
+	if err := os.WriteFile(src, []byte("x"), 0644); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	activityPath := filepath.Join(tempDir, "activity.jsonl")
+	writeActivityEntry(t, activityPath, activity.Entry{
+		Timestamp: time.Now().Add(-1 * time.Hour),
+		Action:    "organize",
+		Source:    src,
+		Success:   false,
+		Error:     "incoming file quality evidence is unavailable",
+	})
+
+	handler := &recordingHandler{}
+	s := &PeriodicScanner{
+		watchPaths: []string{tempDir},
+		handler:    handler,
+		logger:     logging.Nop(),
+	}
+
+	now := time.Now()
+	retried, _, err := s.processActivityFile(
+		activityPath,
+		now.Add(-retryWindowHours*time.Hour),
+		now.Add(-cleanupWindowDays*24*time.Hour),
+	)
+	if err != nil {
+		t.Fatalf("processActivityFile: %v", err)
+	}
+	if retried != 0 || len(handler.events) != 0 {
+		t.Fatalf("retried=%d events=%d, want no retry for legacy quality-evidence failure", retried, len(handler.events))
+	}
+}
+
 // TestPeriodicScanner_ProcessActivityFile_DeterministicMtimeChange verifies
 // that a deterministic failure IS retried when the source mtime changes
 // (file replaced/re-downloaded).

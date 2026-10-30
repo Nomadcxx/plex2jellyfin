@@ -1566,6 +1566,74 @@ func TestProcessFile_SeasonPackUnresolvedIsDeferredAfterSkip(t *testing.T) {
 	assert.Contains(t, rows[0].OrganizeError, "season_pack_unresolved")
 }
 
+func TestProcessFile_QualityEvidenceUnavailableIsDeferredAndMarkedDeterministic(t *testing.T) {
+	movieLibrary := filepath.Join(t.TempDir(), "movies")
+	watchDir := t.TempDir()
+	sourcePath := filepath.Join(watchDir, "Needle.Movie.2026.mkv")
+	require.NoError(t, os.MkdirAll(movieLibrary, 0o755))
+	require.NoError(t, os.WriteFile(sourcePath, []byte("incoming"), 0o644))
+	sourceMtime := time.Now().Add(-time.Hour).Truncate(time.Second)
+	require.NoError(t, os.Chtimes(sourcePath, sourceMtime, sourceMtime))
+
+	movieDir := filepath.Join(movieLibrary, "Needle Movie (2026)")
+	require.NoError(t, os.MkdirAll(movieDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(movieDir, "Needle Movie (2026).1080p.WEB-DL.mkv"), []byte("existing"), 0o644))
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "media.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.UpsertMovie(&database.Movie{
+		Title:          "Needle Movie",
+		Year:           2026,
+		CanonicalPath:  movieDir,
+		LibraryRoot:    movieLibrary,
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
+	})
+	require.NoError(t, err)
+
+	handler, err := NewMediaHandler(MediaHandlerConfig{
+		MovieLibs: []string{movieLibrary},
+		Watch:     config.WatchConfig{Movies: []string{watchDir}},
+		Database:  db,
+		Logger:    logging.Nop(),
+	})
+	require.NoError(t, err)
+
+	activityLogger, err := activity.NewLogger(t.TempDir())
+	require.NoError(t, err)
+	defer activityLogger.Close()
+	entries, unsubscribe := activityLogger.Subscribe()
+	defer unsubscribe()
+	handler.activityLogger = activityLogger
+
+	handler.processFile(sourcePath)
+	entry := <-entries
+	assert.False(t, entry.Success)
+	assert.True(t, entry.Deterministic)
+	assert.Equal(t, sourceMtime.Unix(), entry.SourceMtime)
+	assert.Equal(t, "incoming file quality evidence is unavailable", entry.Error)
+
+	deferred, _, reason := handler.retryCache.IsDeferred(sourcePath)
+	assert.True(t, deferred, "unchanged quality-evidence skip should enter retry backoff")
+	assert.Equal(t, "incoming file quality evidence is unavailable", reason)
+
+	handler.processFile(sourcePath)
+	rows, err := db.QueryDecisions(database.QueryFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "unchanged source should be suppressed by retry backoff")
+
+	changedMtime := time.Now().Add(time.Second)
+	require.NoError(t, os.Chtimes(sourcePath, changedMtime, changedMtime))
+	if deferred, _, _ := handler.retryCache.IsDeferred(sourcePath); deferred {
+		t.Fatal("changed source must be released from retry backoff")
+	}
+	handler.processFile(sourcePath)
+	rows, err = db.QueryDecisions(database.QueryFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "changed source should be retried")
+}
+
 func TestNewMediaHandler_HydratesSeasonPackUnresolvedNegativeCache(t *testing.T) {
 	tmpLib := t.TempDir()
 	watchDir := t.TempDir()
