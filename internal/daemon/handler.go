@@ -673,16 +673,16 @@ func (h *MediaHandler) logEntry(
 	if !activitySuccess {
 		if result.Error != nil {
 			entry.Error = result.Error.Error()
-			if errors.Is(result.Error, naming.ErrParseFailed) || IsDeterministicUnparseable(entry.Error) {
-				entry.Deterministic = true
-				if result.SourcePath != "" {
-					if st, serr := os.Stat(result.SourcePath); serr == nil {
-						entry.SourceMtime = st.ModTime().Unix()
-					}
-				}
-			}
 		} else if result.Skipped {
 			entry.Error = result.SkipReason
+		}
+		if errors.Is(result.Error, naming.ErrParseFailed) || IsDeterministicUnparseable(entry.Error) {
+			entry.Deterministic = true
+			if result.SourcePath != "" {
+				if st, serr := os.Stat(result.SourcePath); serr == nil {
+					entry.SourceMtime = st.ModTime().Unix()
+				}
+			}
 		}
 	}
 
@@ -1248,6 +1248,8 @@ func (h *MediaHandler) processFile(path string) {
 				sourceSize = sourceInfo.Size()
 			}
 			h.recordRetryFailure(path, result, targetLib, sourceSize, result.Error)
+		} else if IsDeterministicUnparseable(result.SkipReason) {
+			h.retryCache.Record(path, result.SkipReason)
 		}
 		h.logger.Info("handler", "Skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
 	} else {
