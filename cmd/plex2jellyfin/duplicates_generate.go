@@ -7,6 +7,7 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/Nomadcxx/plex2jellyfin/internal/plans"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 )
@@ -113,6 +114,34 @@ func buildSafeDuplicatePlanEntry(group service.DuplicateGroup, svc *service.Clea
 	}
 	if keepFile == nil || deleteFile == nil || keepFile.ID == deleteFile.ID {
 		return plans.DuplicateGroup{}, "no unambiguous keeper and delete candidate"
+	}
+	if group.MediaType == "series" {
+		if group.Season == nil || group.Episode == nil {
+			return plans.DuplicateGroup{}, "episode identity is incomplete"
+		}
+		deleteEpisode, err := naming.ParseTVShowFromPath(deleteFile.Path)
+		if err != nil {
+			return plans.DuplicateGroup{}, "cannot verify delete candidate episode range"
+		}
+		keepEpisode, err := naming.ParseTVShowFromPath(keepFile.Path)
+		if err != nil {
+			return plans.DuplicateGroup{}, "cannot verify keeper episode range"
+		}
+		if deleteEpisode.Season != *group.Season || deleteEpisode.Episode != *group.Episode ||
+			keepEpisode.Season != *group.Season || keepEpisode.Episode != *group.Episode {
+			return plans.DuplicateGroup{}, "file paths do not match the grouped episode identity"
+		}
+		deleteEnd := deleteEpisode.EpisodeEnd
+		if deleteEnd < deleteEpisode.Episode {
+			deleteEnd = deleteEpisode.Episode
+		}
+		keepEnd := keepEpisode.EpisodeEnd
+		if keepEnd < keepEpisode.Episode {
+			keepEnd = keepEpisode.Episode
+		}
+		if keepEnd < deleteEnd {
+			return plans.DuplicateGroup{}, fmt.Sprintf("keeper does not cover delete candidate episode range through E%02d", deleteEnd)
+		}
 	}
 
 	fileInfo := func(file *service.MediaFile) (plans.FileInfo, string) {

@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // ErrParseFailed is returned when filename/path parsing cannot extract the
@@ -601,7 +603,7 @@ func hasUnsupportedMultiEpisodeRange(s string) bool {
 		end, consumed, ok := parseEpisodeRangeSuffix(suffix)
 		if ok {
 			start, _ := strconv.Atoi(s[loc[4]:loc[5]])
-			if end <= start {
+			if end <= start || hasAttachedRangeText(s, loc[5]+consumed) {
 				return true
 			}
 			_, _, another := parseEpisodeRangeSuffix(suffix[consumed:])
@@ -610,7 +612,33 @@ func hasUnsupportedMultiEpisodeRange(s string) bool {
 			}
 		}
 	}
+	for _, loc := range episodeXRegex.FindAllStringSubmatchIndex(s, -1) {
+		if len(loc) > 5 && hasEpisodeRangeSuffix(s, loc[5]) {
+			return true
+		}
+	}
+	for _, loc := range episodeEPRegex.FindAllStringSubmatchIndex(s, -1) {
+		if len(loc) > 3 && hasEpisodeRangeSuffix(s, loc[3]) {
+			return true
+		}
+	}
 	return false
+}
+
+func hasAttachedRangeText(s string, offset int) bool {
+	if offset < 0 || offset >= len(s) {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(s[offset:])
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func hasEpisodeRangeSuffix(s string, end int) bool {
+	if end < 0 || end > len(s) {
+		return false
+	}
+	_, _, ok := parseEpisodeRangeSuffix(s[end:])
+	return ok
 }
 
 func parseEpisodeRangeSuffix(s string) (episode, consumed int, ok bool) {
@@ -651,7 +679,7 @@ func consumeEpisodeRangeNumber(s string) (int, bool) {
 	if end == 0 {
 		return 0, false
 	}
-	if end < len(s) && (s[end] == 'p' || s[end] == 'P' || s[end] == 'i' || s[end] == 'I') {
+	if end < len(s) && (s[end] == 'p' || s[end] == 'P' || s[end] == 'i' || s[end] == 'I' || s[end] == 'd' || s[end] == 'D') {
 		return 0, false
 	}
 	episode, err := strconv.Atoi(s[:end])
