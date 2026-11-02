@@ -32,10 +32,12 @@ func TestSaveAndLoadDuplicatePlans(t *testing.T) {
 				Year:      &year,
 				MediaType: "movie",
 				Keep: FileInfo{
-					ID:           1,
-					Path:         "/storage1/Robots.mkv",
-					Size:         4300000000,
-					QualityScore: 284,
+					ID:              1,
+					Path:            "/storage1/Robots.mkv",
+					Size:            4300000000,
+					QualityScore:    284,
+					HasStatSnapshot: true,
+					ModTimeUnixNano: 123456789,
 				},
 				Delete: FileInfo{
 					ID:           2,
@@ -80,6 +82,9 @@ func TestSaveAndLoadDuplicatePlans(t *testing.T) {
 
 	if loaded.Plans[0].Title != "Robots" {
 		t.Errorf("Expected title 'Robots', got '%s'", loaded.Plans[0].Title)
+	}
+	if !loaded.Plans[0].Keep.HasStatSnapshot || loaded.Plans[0].Keep.ModTimeUnixNano != 123456789 {
+		t.Fatalf("loaded file stat snapshot = %+v, want preserved snapshot", loaded.Plans[0].Keep)
 	}
 
 	// Delete

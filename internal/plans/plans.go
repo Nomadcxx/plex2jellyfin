@@ -18,12 +18,14 @@ import (
 
 // FileInfo represents a media file in a plan
 type FileInfo struct {
-	ID           int64  `json:"id"`
-	Path         string `json:"path"`
-	Size         int64  `json:"size"`
-	QualityScore int    `json:"quality_score"`
-	Resolution   string `json:"resolution"`
-	SourceType   string `json:"source_type"`
+	ID              int64  `json:"id"`
+	Path            string `json:"path"`
+	Size            int64  `json:"size"`
+	QualityScore    int    `json:"quality_score"`
+	Resolution      string `json:"resolution"`
+	SourceType      string `json:"source_type"`
+	HasStatSnapshot bool   `json:"has_stat_snapshot,omitempty"`
+	ModTimeUnixNano int64  `json:"mod_time_unix_nano,omitempty"`
 }
 
 // DuplicateGroup represents a group of duplicate files
