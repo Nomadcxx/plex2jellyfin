@@ -464,6 +464,9 @@ func (m *MediaDB) GetMediaFilesByNormalizedKey(title string, year int, season, e
 func (m *MediaDB) UpsertEpisode(episode *Episode) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.rejectZeroByteBestFileLocked(episode.BestFileID); err != nil {
+		return fmt.Errorf("invalid episode best file: %w", err)
+	}
 
 	query := `
 		INSERT INTO episodes (
@@ -517,6 +520,9 @@ func (m *MediaDB) GetEpisode(seriesID int64, season, episode int) (*Episode, err
 func (m *MediaDB) UpdateMovieBestFile(movieID int64, fileID *int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.rejectZeroByteBestFileLocked(fileID); err != nil {
+		return fmt.Errorf("invalid movie best file: %w", err)
+	}
 
 	_, err := m.db.Exec("UPDATE movies SET best_file_id = ? WHERE id = ?", fileID, movieID)
 	if err != nil {
@@ -530,12 +536,32 @@ func (m *MediaDB) UpdateMovieBestFile(movieID int64, fileID *int64) error {
 func (m *MediaDB) UpdateEpisodeBestFile(episodeID int64, fileID *int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.rejectZeroByteBestFileLocked(fileID); err != nil {
+		return fmt.Errorf("invalid episode best file: %w", err)
+	}
 
 	_, err := m.db.Exec("UPDATE episodes SET best_file_id = ? WHERE id = ?", fileID, episodeID)
 	if err != nil {
 		return fmt.Errorf("failed to update episode best file: %w", err)
 	}
 
+	return nil
+}
+
+func (m *MediaDB) rejectZeroByteBestFileLocked(fileID *int64) error {
+	if fileID == nil {
+		return nil
+	}
+	var size int64
+	if err := m.db.QueryRow(`SELECT size FROM media_files WHERE id = ?`, *fileID).Scan(&size); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("read media file %d: %w", *fileID, err)
+	}
+	if size <= 0 {
+		return fmt.Errorf("media file %d has no media data", *fileID)
+	}
 	return nil
 }
 

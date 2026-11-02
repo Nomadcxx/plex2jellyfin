@@ -838,6 +838,10 @@ func seriesIdentityFromPath(seriesPath, fallbackTitle string, fallbackYear *int)
 
 // shouldIncludeFile determines if a file should be indexed
 func (s *FileScanner) shouldIncludeFile(path string, size int64, mediaType string) bool {
+	if size <= 0 {
+		return false
+	}
+
 	// Check if it's extra content (sample, trailer, etc.)
 	if s.isExtraContent(path) {
 		return false

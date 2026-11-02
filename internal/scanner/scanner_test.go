@@ -181,6 +181,20 @@ func TestShouldIncludeFile(t *testing.T) {
 	}
 }
 
+func TestShouldIncludeFileRejectsZeroByteFiles(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	scanner := NewFileScanner(db)
+	scanner.minMovieSize = 0
+	scanner.minEpisodeSize = 0
+
+	for _, mediaType := range []string{"movie", "episode"} {
+		if scanner.shouldIncludeFile("/media/empty.mkv", 0, mediaType) {
+			t.Errorf("shouldIncludeFile accepted a zero-byte %s", mediaType)
+		}
+	}
+}
+
 func TestProcessFile_Movie(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
