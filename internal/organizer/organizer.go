@@ -583,20 +583,26 @@ func (o *Organizer) transferSource(sourcePath, targetPath string, opts transfer.
 		mode = TransferCopy
 	}
 
+	var result *transfer.TransferResult
+	var err error
 	switch mode {
 	case TransferMove:
-		result, err := o.transferer.Move(sourcePath, targetPath, opts)
-		return result, false, err
+		result, err = o.transferer.Move(sourcePath, targetPath, opts)
 	case TransferCopy:
-		result, err := o.transferer.Copy(sourcePath, targetPath, opts)
-		return result, true, err
+		result, err = o.transferer.Copy(sourcePath, targetPath, opts)
 	case TransferSeed:
-		result, err := o.seedTransferer.Copy(sourcePath, targetPath, opts)
-		return result, true, err
+		result, err = o.seedTransferer.Copy(sourcePath, targetPath, opts)
 	default:
 		err := fmt.Errorf("unsupported source transfer mode %d", mode)
 		return &transfer.TransferResult{Error: err}, false, err
 	}
+	if err == nil {
+		err = result.Validate()
+	}
+	if result == nil {
+		result = &transfer.TransferResult{Error: err}
+	}
+	return result, mode != TransferMove, err
 }
 
 func (o *Organizer) applyDirOwnership(path string) error {
@@ -1910,7 +1916,10 @@ func (o *Organizer) copySubtitles(analysis *analyzer.FolderAnalysis, targetDir s
 			TargetGID:     o.targetGID,
 			FileMode:      o.fileMode,
 		}
-		_, err := o.transferer.Copy(sub.Path, targetPath, opts)
+		result, err := o.transferer.Copy(sub.Path, targetPath, opts)
+		if err == nil {
+			err = result.Validate()
+		}
 		if err == nil {
 			copied = append(copied, sub.Name)
 		} else {

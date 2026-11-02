@@ -363,8 +363,8 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 		if transferErr != nil {
 			return fmt.Errorf("failed to move file: %w", transferErr)
 		}
-		if !result.Success {
-			return fmt.Errorf("file transfer failed: %v", result.Error)
+		if err := result.Validate(); err != nil {
+			return fmt.Errorf("file transfer failed: %w", err)
 		}
 		duration := result.Duration
 		if duration == 0 {

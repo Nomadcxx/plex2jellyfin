@@ -130,8 +130,8 @@ func (e *Engine) renameWithFallback(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("cross-device move %s -> %s: %w", src, dst, err)
 	}
-	if !result.Success {
-		return fmt.Errorf("cross-device move failed: %v", result.Error)
+	if err := result.Validate(); err != nil {
+		return fmt.Errorf("cross-device move failed: %w", err)
 	}
 	if !result.SourceRemoved {
 		return fmt.Errorf("cross-device move did not remove source: %s", src)
@@ -171,8 +171,8 @@ func (e *Engine) moveDirWithFallback(srcDir, dstDir string) error {
 		if err != nil {
 			return fmt.Errorf("cross-device move %s -> %s: %w", path, target, err)
 		}
-		if !result.Success {
-			return fmt.Errorf("cross-device move failed %s -> %s: %v", path, target, result.Error)
+		if err := result.Validate(); err != nil {
+			return fmt.Errorf("cross-device move failed %s -> %s: %w", path, target, err)
 		}
 		if !result.SourceRemoved {
 			return fmt.Errorf("cross-device move did not remove source: %s", path)
@@ -1833,9 +1833,9 @@ func (e *Engine) execMergeMove(ctx context.Context, t *database.HousekeepingTask
 			prog.fileFailed(rel, err)
 			return fmt.Errorf("move %s -> %s: %w", path, target, err)
 		}
-		if res != nil && res.Error != nil {
-			prog.fileFailed(rel, res.Error)
-			return fmt.Errorf("move %s -> %s: %w", path, target, res.Error)
+		if err := res.Validate(); err != nil {
+			prog.fileFailed(rel, err)
+			return fmt.Errorf("move %s -> %s: %w", path, target, err)
 		}
 
 		if file, gerr := e.db.GetMediaFile(path); gerr == nil && file != nil {

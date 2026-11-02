@@ -219,8 +219,8 @@ func (e *Executor) executeMove(ctx context.Context, plan *ConsolidationPlan) err
 		return fmt.Errorf("transfer failed: %w", err)
 	}
 
-	if result.Error != nil {
-		return fmt.Errorf("transfer failed: %w", result.Error)
+	if err := result.Validate(); err != nil {
+		return fmt.Errorf("transfer failed: %w", err)
 	}
 
 	// Update database - remove old path, add new path
@@ -285,8 +285,8 @@ func (e *Executor) executeRename(ctx context.Context, plan *ConsolidationPlan) e
 		return fmt.Errorf("failed to move file: %w", err)
 	}
 
-	if result.Error != nil {
-		return fmt.Errorf("file transfer failed: %w", result.Error)
+	if err := result.Validate(); err != nil {
+		return fmt.Errorf("file transfer failed: %w", err)
 	}
 
 	// Update database path

@@ -228,8 +228,8 @@ func (c *Consolidator) executeOperation(op *Operation, dryRun bool) error {
 		return fmt.Errorf("transfer failed: %w", err)
 	}
 
-	if !result.Success {
-		return fmt.Errorf("transfer failed: %v", result.Error)
+	if err := result.Validate(); err != nil {
+		return fmt.Errorf("transfer failed: %w", err)
 	}
 
 	return nil

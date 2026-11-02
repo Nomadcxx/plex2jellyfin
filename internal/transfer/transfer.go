@@ -143,6 +143,20 @@ type TransferResult struct {
 	Error error
 }
 
+// Validate rejects transfer results that do not confirm a completed operation.
+func (r *TransferResult) Validate() error {
+	if r == nil {
+		return fmt.Errorf("%w: backend returned no result", ErrTransferFailed)
+	}
+	if r.Success {
+		return nil
+	}
+	if r.Error != nil {
+		return r.Error
+	}
+	return fmt.Errorf("%w: backend reported unsuccessful result without an error", ErrTransferFailed)
+}
+
 // Transferer is the interface for file transfer implementations.
 // Implementations must be safe for concurrent use.
 type Transferer interface {
