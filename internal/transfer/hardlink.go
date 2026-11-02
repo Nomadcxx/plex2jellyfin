@@ -117,8 +117,8 @@ func (t *HardlinkCopyTransferer) Copy(src, dst string, opts TransferOptions) (*T
 			result.Error = errors.New("copy fallback returned no result")
 			return result, result.Error
 		}
-		if !fallbackResult.Success {
-			return fallbackResult, nil
+		if err := fallbackResult.Validate(); err != nil {
+			return fallbackResult, err
 		}
 		result = fallbackResult
 	}

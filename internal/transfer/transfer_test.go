@@ -1,12 +1,41 @@
 package transfer
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 )
+
+func TestTransferResultValidate(t *testing.T) {
+	transferErr := errors.New("copy failed")
+	tests := []struct {
+		name   string
+		result *TransferResult
+		want   error
+	}{
+		{name: "nil result", want: ErrTransferFailed},
+		{name: "unsuccessful without error", result: &TransferResult{}, want: ErrTransferFailed},
+		{name: "unsuccessful with error", result: &TransferResult{Error: transferErr}, want: transferErr},
+		{name: "success", result: &TransferResult{Success: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.result.Validate()
+			if tt.want == nil {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Validate() = %v, want error matching %v", err, tt.want)
+			}
+		})
+	}
+}
 
 func TestNewTransferer(t *testing.T) {
 	tr, err := New(BackendAuto)

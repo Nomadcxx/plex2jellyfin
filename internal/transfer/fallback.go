@@ -76,8 +76,11 @@ func (f *FallbackTransferer) tryAll(src, dst string, opts TransferOptions, isMov
 			result, err = backend.Copy(src, dst, opts)
 		}
 
-		if err == nil && result.Success {
-			return result, nil
+		if err == nil {
+			err = result.Validate()
+			if err == nil {
+				return result, nil
+			}
 		}
 
 		lastResult = result
