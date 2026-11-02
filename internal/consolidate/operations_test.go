@@ -296,6 +296,42 @@ func TestExecutePlanFailsEarlyWhenTargetNotWritable(t *testing.T) {
 	}
 }
 
+func TestExecutePlanChecksCapacityBeforeMovingFiles(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source", "movie.mkv")
+	target := filepath.Join(root, "target")
+	destination := filepath.Join(target, "movie.mkv")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatalf("create source directory: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("media"), 0o644); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	consolidator := NewConsolidator(nil, &config.Config{})
+	consolidator.spaceAvailable = func(string) (int64, error) { return int64(len("media") - 1), nil }
+	plan := &Plan{
+		TargetPath: target,
+		CanProceed: true,
+		TotalBytes: int64(len("media")),
+		Operations: []*Operation{{SourcePath: source, DestinationPath: destination, Size: int64(len("media")), Type: "movie"}},
+		Collisions: []*Collision{{SourcePath: "existing duplicate"}},
+	}
+
+	if err := consolidator.ExecutePlan(plan, false); err == nil || !strings.Contains(err.Error(), "insufficient target space") {
+		t.Fatalf("ExecutePlan error = %v, want insufficient target space", err)
+	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("source changed before capacity check: %v", err)
+	}
+	if _, err := os.Stat(destination); !os.IsNotExist(err) {
+		t.Fatalf("destination exists before capacity check, stat error = %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target directory was created before capacity check, stat error = %v", err)
+	}
+}
+
 func TestExecutePlanUpdatesDatabaseAfterMove(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceRoot := filepath.Join(tempDir, "storage2", "TV")

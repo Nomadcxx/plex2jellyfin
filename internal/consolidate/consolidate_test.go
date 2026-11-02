@@ -595,13 +595,62 @@ func TestConsolidatorChooseTargetPath(t *testing.T) {
 	}
 
 	targetPath, err := cons.chooseTargetPath(conflict)
-	if err != nil {
-		t.Fatalf("Failed to choose target path: %v", err)
+	if targetPath != "" || err == nil || !strings.Contains(err.Error(), "no consolidation target has enough space") {
+		t.Errorf("chooseTargetPath = %q, %v; want no candidate when locations cannot be inspected", targetPath, err)
 	}
+}
 
-	// Should select first location as fallback since we can't count files
-	if targetPath != "/tmp/location1" {
-		t.Errorf("TargetPath = %s, want /tmp/location1", targetPath)
+func TestGeneratePlanChoosesTargetWithEnoughSpace(t *testing.T) {
+	root := t.TempDir()
+	locationA := filepath.Join(root, "location-a")
+	locationB := filepath.Join(root, "location-b")
+	createLargeMediaFile(t, filepath.Join(locationA, "one.mkv"))
+	createLargeMediaFile(t, filepath.Join(locationA, "two.mkv"))
+	createLargeMediaFile(t, filepath.Join(locationB, "three.mkv"))
+
+	space := map[string]int64{
+		locationA: MinConsolidationFileSize,
+		locationB: 3 * MinConsolidationFileSize,
+	}
+	consolidator := NewConsolidator(nil, nil)
+	consolidator.spaceAvailable = func(path string) (int64, error) { return space[path], nil }
+
+	plan, err := consolidator.GeneratePlan(&database.Conflict{
+		MediaType: "movie",
+		Locations: []string{locationA, locationB},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan: %v", err)
+	}
+	if plan.TargetPath != locationB {
+		t.Fatalf("target = %q, want capacity-safe target %q", plan.TargetPath, locationB)
+	}
+	if !plan.CanProceed || len(plan.Operations) != 2 || plan.TotalBytes != 2*(MinConsolidationFileSize+1) {
+		t.Fatalf("plan = %+v, want two moves that fit the selected target", plan)
+	}
+}
+
+func TestGeneratePlanBlocksWhenNoTargetHasEnoughSpace(t *testing.T) {
+	root := t.TempDir()
+	locationA := filepath.Join(root, "location-a")
+	locationB := filepath.Join(root, "location-b")
+	createLargeMediaFile(t, filepath.Join(locationA, "one.mkv"))
+	createLargeMediaFile(t, filepath.Join(locationB, "two.mkv"))
+
+	consolidator := NewConsolidator(nil, nil)
+	consolidator.spaceAvailable = func(string) (int64, error) { return 0, nil }
+	plan, err := consolidator.GeneratePlan(&database.Conflict{
+		MediaType: "movie",
+		Locations: []string{locationA, locationB},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlan: %v", err)
+	}
+	if plan.CanProceed || len(plan.Operations) != 0 {
+		t.Fatalf("plan = %+v, want no operations when no target has capacity", plan)
+	}
+	if !strings.Contains(strings.Join(plan.Reasons, " "), "space") {
+		t.Fatalf("reasons = %v, want an insufficient-space explanation", plan.Reasons)
 	}
 }
 
