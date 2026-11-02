@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,18 +16,57 @@ import (
 )
 
 type captureFrameWriter struct {
-	result json.RawMessage
-	code   ipc.ErrorCode
-	msg    string
+	result   json.RawMessage
+	code     ipc.ErrorCode
+	msg      string
+	progress []database.ProgressEvent
 }
 
 func (w *captureFrameWriter) Result(id string, data json.RawMessage) { w.result = data }
 func (w *captureFrameWriter) Progress(id string, phase, msg string, current, total int) {
+	w.progress = append(w.progress, database.ProgressEvent{Phase: phase, Msg: msg, Current: current, Total: total})
 }
 func (w *captureFrameWriter) Done(id string, data json.RawMessage) {}
 func (w *captureFrameWriter) Error(id string, code ipc.ErrorCode, msg string) {
 	w.code = code
 	w.msg = msg
+}
+
+func TestRelayProgressBoundsSkippedPathsAndReportsFinalSample(t *testing.T) {
+	const skippedCount = 100
+	progress := make(chan database.ProgressEvent, skippedCount+1)
+	var finalPath string
+	for i := 0; i < cap(progress); i++ {
+		if i == skippedCount {
+			progress <- database.ProgressEvent{Phase: "complete"}
+			continue
+		}
+		finalPath = filepath.Join("library", "sample", string(rune('a'+i)))
+		progress <- database.ProgressEvent{Phase: "skipped", Msg: finalPath}
+	}
+	close(progress)
+
+	w := &captureFrameWriter{}
+	done := make(chan struct{})
+	go relayProgress(progress, w, "rescan", done)
+	<-done
+
+	var skipped []database.ProgressEvent
+	for _, event := range w.progress {
+		if event.Phase == "skipped" {
+			skipped = append(skipped, event)
+		}
+	}
+	if len(skipped) > 2 {
+		t.Fatalf("forwarded %d skipped path events; want bounded output", len(skipped))
+	}
+	if len(skipped) == 0 {
+		t.Fatal("relay did not report skipped paths")
+	}
+	last := skipped[len(skipped)-1].Msg
+	if !strings.Contains(last, "100") || !strings.Contains(last, finalPath) {
+		t.Fatalf("final skipped report = %q, want count and final path sample", last)
+	}
 }
 
 func TestStatusHandlerReportsDaemonStatus(t *testing.T) {
