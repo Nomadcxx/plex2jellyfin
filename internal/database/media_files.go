@@ -276,71 +276,81 @@ func (m *MediaDB) UpdateMediaFile(file *MediaFile) error {
 
 // DeleteMediaFile removes a media file from the database
 func (m *MediaDB) DeleteMediaFile(path string) error {
+	if path == "" {
+		return nil
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	tx, err := m.db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin media file delete: %w", err)
-	}
-	defer tx.Rollback()
-
-	var id int64
-	err = tx.QueryRow("SELECT id FROM media_files WHERE path = ?", path).Scan(&id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil
-		}
-		return fmt.Errorf("failed to find media file: %w", err)
-	}
-	if err := rejectReservedMediaFileID(tx, id); err != nil {
-		return fmt.Errorf("failed to delete media file: %w", err)
-	}
-
-	_, err = tx.Exec("UPDATE movies SET best_file_id = NULL WHERE best_file_id = ?", id)
-	if err != nil {
-		return fmt.Errorf("failed to clear movie best_file references: %w", err)
-	}
-	_, err = tx.Exec("UPDATE episodes SET best_file_id = NULL WHERE best_file_id = ?", id)
-	if err != nil {
-		return fmt.Errorf("failed to clear episode best_file references: %w", err)
-	}
-
-	_, err = tx.Exec("DELETE FROM media_files WHERE id = ?", id)
-	if err != nil {
-		return fmt.Errorf("failed to delete media file: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit media file delete: %w", err)
-	}
-	return nil
+	return m.deleteMediaFile(path, 0)
 }
 
 // DeleteMediaFileByID removes a media file by ID
 func (m *MediaDB) DeleteMediaFileByID(id int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.deleteMediaFile("", id)
+}
+
+func (m *MediaDB) deleteMediaFile(path string, id int64) error {
 	tx, err := m.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin media file delete: %w", err)
 	}
 	defer tx.Rollback()
-	if err := rejectReservedMediaFileID(tx, id); err != nil {
-		return fmt.Errorf("failed to delete media file: %w", err)
+
+	byID := path == ""
+	if byID {
+		err = tx.QueryRow("SELECT path FROM media_files WHERE id = ?", id).Scan(&path)
+		if err == sql.ErrNoRows {
+			path = ""
+			err = nil
+		}
+	} else {
+		err = tx.QueryRow("SELECT id FROM media_files WHERE path = ?", path).Scan(&id)
+		if err == sql.ErrNoRows {
+			id = 0
+			err = nil
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("failed to find media file: %w", err)
+	}
+	if path != "" {
+		if err := rejectReservedMediaFilePath(tx, path); err != nil {
+			return fmt.Errorf("failed to delete media file: %w", err)
+		}
+	}
+	if id != 0 {
+		if err := rejectReservedMediaFileID(tx, id); err != nil {
+			return fmt.Errorf("failed to delete media file: %w", err)
+		}
 	}
 
-	_, err = tx.Exec("UPDATE movies SET best_file_id = NULL WHERE best_file_id = ?", id)
-	if err != nil {
-		return fmt.Errorf("failed to clear movie best_file references: %w", err)
+	if id != 0 {
+		if _, err := tx.Exec("UPDATE movies SET best_file_id = NULL WHERE best_file_id = ?", id); err != nil {
+			return fmt.Errorf("failed to clear movie best_file references: %w", err)
+		}
+		if _, err := tx.Exec("UPDATE episodes SET best_file_id = NULL WHERE best_file_id = ?", id); err != nil {
+			return fmt.Errorf("failed to clear episode best_file references: %w", err)
+		}
+		if _, err := tx.Exec("DELETE FROM media_files WHERE id = ?", id); err != nil {
+			return fmt.Errorf("failed to delete media file: %w", err)
+		}
 	}
-	_, err = tx.Exec("UPDATE episodes SET best_file_id = NULL WHERE best_file_id = ?", id)
-	if err != nil {
-		return fmt.Errorf("failed to clear episode best_file references: %w", err)
-	}
-
-	_, err = tx.Exec("DELETE FROM media_files WHERE id = ?", id)
-	if err != nil {
-		return fmt.Errorf("failed to delete media file: %w", err)
+	if path != "" {
+		result, err := tx.Exec("DELETE FROM jellyfin_items WHERE path = ?", path)
+		if err != nil {
+			return fmt.Errorf("failed to delete Jellyfin path mapping: %w", err)
+		}
+		deleted, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to check Jellyfin path mapping deletion: %w", err)
+		}
+		if deleted > 0 {
+			if err := bumpJellyfinInventoryIncompleteTx(tx); err != nil {
+				return err
+			}
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -2546,3 +2546,104 @@ func TestMigration8AddConflictID(t *testing.T) {
 		t.Errorf("Expected conflict_id = 123, got %d", conflictID)
 	}
 }
+
+func TestDeleteMediaFileRemovesJellyfinPathAndLeavesOtherPaths(t *testing.T) {
+	for _, deleteByID := range []bool{false, true} {
+		name := "by path"
+		if deleteByID {
+			name = "by ID"
+		}
+		t.Run(name, func(t *testing.T) {
+			db, err := OpenPath(filepath.Join(t.TempDir(), "test.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+
+			deletedPath := filepath.Join(t.TempDir(), "deleted.mkv")
+			otherPath := filepath.Join(t.TempDir(), "other.mkv")
+			var deletedFile *MediaFile
+			for _, path := range []string{deletedPath, otherPath} {
+				file := &MediaFile{Path: path, Size: 1, MediaType: "movie", NormalizedTitle: filepath.Base(path)}
+				if err := db.UpsertMediaFile(file); err != nil {
+					t.Fatalf("upsert media file %s: %v", path, err)
+				}
+				if path == deletedPath {
+					deletedFile = file
+				}
+				if err := db.UpsertJellyfinItem(path, "jf-"+filepath.Base(path), filepath.Base(path), "Movie"); err != nil {
+					t.Fatalf("upsert Jellyfin item %s: %v", path, err)
+				}
+			}
+			items, err := db.ListJellyfinItems()
+			if err != nil {
+				t.Fatalf("list Jellyfin items: %v", err)
+			}
+			if _, err := db.ReconcileJellyfinItems(items); err != nil {
+				t.Fatalf("reconcile Jellyfin items: %v", err)
+			}
+
+			if deleteByID {
+				err = db.DeleteMediaFileByID(deletedFile.ID)
+			} else {
+				err = db.DeleteMediaFile(deletedPath)
+			}
+			if err != nil {
+				t.Fatalf("delete media file: %v", err)
+			}
+
+			deleted, err := db.GetJellyfinItemByPath(deletedPath)
+			if err != nil {
+				t.Fatalf("read deleted Jellyfin path: %v", err)
+			}
+			if deleted != nil {
+				t.Fatalf("deleted Jellyfin path remains cached: %#v", deleted)
+			}
+			complete, err := db.IsJellyfinInventoryComplete()
+			if err != nil {
+				t.Fatalf("read Jellyfin inventory completeness: %v", err)
+			}
+			if complete {
+				t.Fatal("deleting a media file left the Jellyfin inventory marked complete")
+			}
+			other, err := db.GetJellyfinItemByPath(otherPath)
+			if err != nil {
+				t.Fatalf("read other Jellyfin path: %v", err)
+			}
+			if other == nil || other.JellyfinItemID != "jf-other.mkv" {
+				t.Fatalf("unrelated Jellyfin path = %#v, want its existing mapping", other)
+			}
+		})
+	}
+}
+
+func TestDeleteMediaFileRemovesJellyfinPathWhenMediaRowIsMissing(t *testing.T) {
+	db, err := OpenPath(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	deletedPath := filepath.Join(t.TempDir(), "deleted.mkv")
+	otherPath := filepath.Join(t.TempDir(), "other.mkv")
+	if err := db.UpsertMediaFile(&MediaFile{Path: otherPath, Size: 1, MediaType: "movie", NormalizedTitle: "other"}); err != nil {
+		t.Fatalf("upsert other media file: %v", err)
+	}
+	for _, path := range []string{deletedPath, otherPath} {
+		if err := db.UpsertJellyfinItem(path, "jf-"+filepath.Base(path), filepath.Base(path), "Movie"); err != nil {
+			t.Fatalf("upsert Jellyfin item %s: %v", path, err)
+		}
+	}
+
+	if err := db.DeleteMediaFile(deletedPath); err != nil {
+		t.Fatalf("delete stale Jellyfin path: %v", err)
+	}
+	deleted, err := db.GetJellyfinItemByPath(deletedPath)
+	if err != nil || deleted != nil {
+		t.Fatalf("stale Jellyfin mapping = %#v, error = %v", deleted, err)
+	}
+	other, err := db.GetJellyfinItemByPath(otherPath)
+	if err != nil || other == nil || other.JellyfinItemID != "jf-other.mkv" {
+		t.Fatalf("unrelated Jellyfin mapping = %#v, error = %v", other, err)
+	}
+}
