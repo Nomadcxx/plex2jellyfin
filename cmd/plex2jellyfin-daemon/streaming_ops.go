@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/ai"
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/consolidate"
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
@@ -52,7 +53,7 @@ type consolidateArgs struct {
 	DryRun bool `json:"dry_run"`
 }
 
-func consolidateHandler(db *database.MediaDB, log *ipc.OpLog) ipc.StreamingHandler {
+func consolidateHandler(db *database.MediaDB, log *ipc.OpLog, getConfig func() *config.Config) ipc.StreamingHandler {
 	return func(ctx context.Context, raw json.RawMessage, w ipc.FrameWriter, op *ipc.Op) {
 		var args consolidateArgs
 		if len(raw) > 0 {
@@ -62,7 +63,11 @@ func consolidateHandler(db *database.MediaDB, log *ipc.OpLog) ipc.StreamingHandl
 			map[string]any{"dry_run": args.DryRun}, op, w, log,
 			func(progress chan<- database.ProgressEvent) error {
 				progress <- database.ProgressEvent{Phase: "planning", Msg: "fetching pending plans"}
-				exec := consolidate.NewExecutor(db, args.DryRun, nil)
+				var cfg *config.Config
+				if getConfig != nil {
+					cfg = getConfig()
+				}
+				exec := consolidate.NewExecutor(db, args.DryRun, nil, cfg)
 				planner := consolidate.NewPlanner(db)
 
 				plans, err := planner.GetPendingPlans()

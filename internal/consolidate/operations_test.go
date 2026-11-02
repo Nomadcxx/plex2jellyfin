@@ -366,6 +366,10 @@ func TestExecutePlanUpdatesDatabaseAfterMove(t *testing.T) {
 	if _, err := db.UpsertSeries(series); err != nil {
 		t.Fatalf("failed to insert series: %v", err)
 	}
+	episode := &database.Episode{SeriesID: series.ID, Season: 1, Episode: 1, Title: "First Episode"}
+	if err := db.UpsertEpisode(episode); err != nil {
+		t.Fatalf("failed to insert episode: %v", err)
+	}
 
 	file := &database.MediaFile{
 		Path:            sourcePath,
@@ -373,6 +377,7 @@ func TestExecutePlanUpdatesDatabaseAfterMove(t *testing.T) {
 		ModifiedAt:      time.Now(),
 		MediaType:       "episode",
 		ParentSeriesID:  &series.ID,
+		ParentEpisodeID: &episode.ID,
 		NormalizedTitle: "silo",
 		Year:            &year,
 		Season:          intPtr(1),
@@ -383,6 +388,10 @@ func TestExecutePlanUpdatesDatabaseAfterMove(t *testing.T) {
 	}
 	if err := db.UpsertMediaFile(file); err != nil {
 		t.Fatalf("failed to insert media file: %v", err)
+	}
+	mediaFileID := file.ID
+	if err := db.UpdateEpisodeBestFile(episode.ID, &mediaFileID); err != nil {
+		t.Fatalf("failed to link episode best file: %v", err)
 	}
 
 	consolidator := NewConsolidator(db, &config.Config{
@@ -417,8 +426,18 @@ func TestExecutePlanUpdatesDatabaseAfterMove(t *testing.T) {
 	if got == nil {
 		t.Fatalf("target DB row was not inserted after move")
 	}
+	if got.ID != mediaFileID {
+		t.Fatalf("media file ID = %d after move, want preserved ID %d", got.ID, mediaFileID)
+	}
 	if got.LibraryRoot != targetRoot {
 		t.Fatalf("LibraryRoot = %q, want %q", got.LibraryRoot, targetRoot)
+	}
+	updatedEpisode, err := db.GetEpisode(series.ID, 1, 1)
+	if err != nil {
+		t.Fatalf("GetEpisode failed: %v", err)
+	}
+	if updatedEpisode.BestFileID == nil || *updatedEpisode.BestFileID != mediaFileID {
+		t.Fatalf("episode best file ID = %v, want %d", updatedEpisode.BestFileID, mediaFileID)
 	}
 	updatedSeries, err := db.GetSeriesByID(series.ID)
 	if err != nil {
@@ -429,5 +448,255 @@ func TestExecutePlanUpdatesDatabaseAfterMove(t *testing.T) {
 	}
 	if !updatedSeries.SonarrPathDirty {
 		t.Fatalf("series should be marked dirty after consolidation path change")
+	}
+}
+
+func TestExecutePlanPreservesMovieIdentityAfterMove(t *testing.T) {
+	tempDir := t.TempDir()
+	sourceRoot := filepath.Join(tempDir, "storage2", "Movies")
+	targetRoot := filepath.Join(tempDir, "storage1", "Movies")
+	sourceMovie := filepath.Join(sourceRoot, "Arrival (2016)")
+	targetMovie := filepath.Join(targetRoot, "Arrival (2016)")
+	sourcePath := filepath.Join(sourceMovie, "Arrival.mkv")
+	targetPath := filepath.Join(targetMovie, "Arrival.mkv")
+	if err := os.MkdirAll(sourceMovie, 0o755); err != nil {
+		t.Fatalf("create source directory: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("create source file: %v", err)
+	}
+
+	db, err := database.OpenPath(filepath.Join(tempDir, "test.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	year := 2016
+	movie := &database.Movie{
+		Title: "Arrival", Year: year, CanonicalPath: sourceMovie,
+		LibraryRoot: sourceRoot, Source: "plex2jellyfin", SourcePriority: 100,
+	}
+	if _, err := db.UpsertMovie(movie); err != nil {
+		t.Fatalf("insert movie: %v", err)
+	}
+	file := &database.MediaFile{
+		Path: sourcePath, Size: 5, ModifiedAt: time.Now(), MediaType: "movie",
+		ParentMovieID: &movie.ID, NormalizedTitle: "arrival", Year: &year,
+		Source: "plex2jellyfin", SourcePriority: 100, LibraryRoot: sourceRoot,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("insert media file: %v", err)
+	}
+	mediaFileID := file.ID
+	if err := db.UpdateMovieBestFile(movie.ID, &mediaFileID); err != nil {
+		t.Fatalf("link movie best file: %v", err)
+	}
+
+	consolidator := NewConsolidator(db, &config.Config{
+		Libraries: config.LibrariesConfig{Movies: []string{targetRoot}},
+	})
+	err = consolidator.ExecutePlan(&Plan{
+		CanProceed: true,
+		TargetPath: targetMovie,
+		Operations: []*Operation{{
+			SourcePath: sourcePath, DestinationPath: targetPath,
+			Size: 5, Type: "movie",
+		}},
+	}, false)
+	if err != nil {
+		t.Fatalf("ExecutePlan: %v", err)
+	}
+
+	movedFile, err := db.GetMediaFile(targetPath)
+	if err != nil {
+		t.Fatalf("GetMediaFile(target): %v", err)
+	}
+	if movedFile == nil || movedFile.ID != mediaFileID {
+		t.Fatalf("moved media row = %#v, want ID %d", movedFile, mediaFileID)
+	}
+	updatedMovie, err := db.GetMovieByID(movie.ID)
+	if err != nil {
+		t.Fatalf("GetMovieByID: %v", err)
+	}
+	if updatedMovie.CanonicalPath != targetMovie || !updatedMovie.RadarrPathDirty {
+		t.Fatalf("movie canonical path/dirty = %q/%v, want %q/true", updatedMovie.CanonicalPath, updatedMovie.RadarrPathDirty, targetMovie)
+	}
+	var bestFileID int64
+	if err := db.DB().QueryRow("SELECT best_file_id FROM movies WHERE id = ?", movie.ID).Scan(&bestFileID); err != nil {
+		t.Fatalf("read movie best file ID: %v", err)
+	}
+	if bestFileID != mediaFileID {
+		t.Fatalf("movie best file ID = %d, want %d", bestFileID, mediaFileID)
+	}
+}
+
+func TestExecutePlanLeavesDatabaseUnchangedOnDestinationPathConflict(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	targetRoot := filepath.Join(root, "target")
+	sourceSeriesPath := filepath.Join(sourceRoot, "Show (2023)")
+	targetSeriesPath := filepath.Join(targetRoot, "Show (2023)")
+	sourcePath := filepath.Join(sourceSeriesPath, "Season 01", "Show.S01E01.mkv")
+	targetPath := filepath.Join(targetSeriesPath, "Season 01", "Show.S01E01.mkv")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("create source directory: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("source media"), 0o644); err != nil {
+		t.Fatalf("create source file: %v", err)
+	}
+
+	db, err := database.OpenPath(filepath.Join(root, "test.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	series := &database.Series{Title: "Show", Year: 2023, CanonicalPath: sourceSeriesPath, LibraryRoot: sourceRoot, Source: "plex2jellyfin", SourcePriority: 100}
+	if _, err := db.UpsertSeries(series); err != nil {
+		t.Fatalf("insert source series: %v", err)
+	}
+	otherSeries := &database.Series{Title: "Other Show", Year: 2022, CanonicalPath: filepath.Join(targetRoot, "Other Show"), LibraryRoot: targetRoot, Source: "plex2jellyfin", SourcePriority: 100}
+	if _, err := db.UpsertSeries(otherSeries); err != nil {
+		t.Fatalf("insert target series: %v", err)
+	}
+	sourceFile := &database.MediaFile{Path: sourcePath, Size: 12, MediaType: "episode", ParentSeriesID: &series.ID, NormalizedTitle: "show", LibraryRoot: sourceRoot}
+	if err := db.UpsertMediaFile(sourceFile); err != nil {
+		t.Fatalf("insert source media row: %v", err)
+	}
+	conflictingFile := &database.MediaFile{Path: targetPath, Size: 99, MediaType: "episode", ParentSeriesID: &otherSeries.ID, NormalizedTitle: "other show", LibraryRoot: targetRoot}
+	if err := db.UpsertMediaFile(conflictingFile); err != nil {
+		t.Fatalf("insert conflicting destination row: %v", err)
+	}
+	sourceID, conflictingID := sourceFile.ID, conflictingFile.ID
+
+	consolidator := NewConsolidator(db, &config.Config{Libraries: config.LibrariesConfig{TV: []string{targetRoot}}})
+	err = consolidator.ExecutePlan(&Plan{
+		CanProceed: true,
+		TargetPath: targetSeriesPath,
+		Operations: []*Operation{{SourcePath: sourcePath, DestinationPath: targetPath, Size: 12, Type: "episode"}},
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "already tracked") {
+		t.Fatalf("ExecutePlan error = %v, want database path conflict", err)
+	}
+	if _, err := os.Stat(sourcePath); err != nil {
+		t.Fatalf("source file changed before database conflict was rejected: %v", err)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("destination file exists after database conflict, stat error = %v", err)
+	}
+
+	gotSource, err := db.GetMediaFile(sourcePath)
+	if err != nil {
+		t.Fatalf("read source media row: %v", err)
+	}
+	if gotSource == nil || gotSource.ID != sourceID {
+		t.Fatalf("source media row = %#v, want preserved ID %d", gotSource, sourceID)
+	}
+	gotTarget, err := db.GetMediaFile(targetPath)
+	if err != nil {
+		t.Fatalf("read conflicting destination row: %v", err)
+	}
+	if gotTarget == nil || gotTarget.ID != conflictingID || gotTarget.NormalizedTitle != "other show" {
+		t.Fatalf("destination row = %#v, want unchanged conflicting row ID %d", gotTarget, conflictingID)
+	}
+	updatedSeries, err := db.GetSeriesByID(series.ID)
+	if err != nil {
+		t.Fatalf("read source series: %v", err)
+	}
+	if updatedSeries.CanonicalPath != sourceSeriesPath || updatedSeries.SonarrPathDirty {
+		t.Fatalf("source series = %q dirty=%v, want unchanged path and clean flag", updatedSeries.CanonicalPath, updatedSeries.SonarrPathDirty)
+	}
+}
+
+func TestExecutePlanRestoresFileWhenParentDatabaseUpdateFails(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source", "TV")
+	targetRoot := filepath.Join(root, "target", "TV")
+	sourceSeriesPath := filepath.Join(sourceRoot, "Show (2024)")
+	targetSeriesPath := filepath.Join(targetRoot, "Show (2024)")
+	sourcePath := filepath.Join(sourceSeriesPath, "Season 01", "Episode.mkv")
+	targetPath := filepath.Join(targetSeriesPath, "Season 01", "Episode.mkv")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("create source directory: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("episode media"), 0o644); err != nil {
+		t.Fatalf("create source file: %v", err)
+	}
+
+	db, err := database.OpenPath(filepath.Join(root, "test.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	series := &database.Series{
+		Title: "Show", Year: 2024, CanonicalPath: sourceSeriesPath,
+		LibraryRoot: sourceRoot, Source: "plex2jellyfin", SourcePriority: 100,
+	}
+	if _, err := db.UpsertSeries(series); err != nil {
+		t.Fatalf("insert series: %v", err)
+	}
+	episode := &database.Episode{SeriesID: series.ID, Season: 1, Episode: 1, Title: "Episode 1"}
+	if err := db.UpsertEpisode(episode); err != nil {
+		t.Fatalf("insert episode: %v", err)
+	}
+	file := &database.MediaFile{
+		Path: sourcePath, Size: int64(len("episode media")), MediaType: "episode",
+		ParentSeriesID: &series.ID, ParentEpisodeID: &episode.ID,
+		NormalizedTitle: "show", LibraryRoot: sourceRoot,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("insert media file: %v", err)
+	}
+	mediaFileID := file.ID
+	if err := db.UpdateEpisodeBestFile(episode.ID, &mediaFileID); err != nil {
+		t.Fatalf("set episode best file: %v", err)
+	}
+	if _, err := db.DB().Exec(`CREATE TRIGGER fail_series_path_update BEFORE UPDATE OF canonical_path ON series BEGIN SELECT RAISE(ABORT, 'forced path update failure'); END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	consolidator := NewConsolidator(db, &config.Config{Libraries: config.LibrariesConfig{TV: []string{targetRoot}}})
+	err = consolidator.ExecutePlan(&Plan{
+		CanProceed: true,
+		TargetPath: targetSeriesPath,
+		Operations: []*Operation{{SourcePath: sourcePath, DestinationPath: targetPath, Type: "episode"}},
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "forced path update failure") {
+		t.Fatalf("ExecutePlan error = %v, want injected parent update failure", err)
+	}
+	if got, err := os.ReadFile(sourcePath); err != nil || string(got) != "episode media" {
+		t.Fatalf("source file = %q, error = %v; want original file restored", got, err)
+	}
+	if _, err := os.Lstat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after rollback, stat error = %v", err)
+	}
+	gotFile, err := db.GetMediaFile(sourcePath)
+	if err != nil || gotFile == nil || gotFile.ID != mediaFileID {
+		t.Fatalf("source media row = %#v, error = %v; want preserved ID %d", gotFile, err, mediaFileID)
+	}
+	if got, err := db.GetMediaFile(targetPath); err != nil || got != nil {
+		t.Fatalf("target media row = %#v, error = %v; want no target row", got, err)
+	}
+	updatedSeries, err := db.GetSeriesByID(series.ID)
+	if err != nil {
+		t.Fatalf("read series after rollback: %v", err)
+	}
+	if updatedSeries.CanonicalPath != sourceSeriesPath || updatedSeries.SonarrPathDirty {
+		t.Fatalf("series path/dirty = %q/%v, want original path and clean flag", updatedSeries.CanonicalPath, updatedSeries.SonarrPathDirty)
+	}
+	updatedEpisode, err := db.GetEpisode(series.ID, 1, 1)
+	if err != nil {
+		t.Fatalf("read episode after rollback: %v", err)
+	}
+	if updatedEpisode.BestFileID == nil || *updatedEpisode.BestFileID != mediaFileID {
+		t.Fatalf("episode best file ID = %v, want preserved ID %d", updatedEpisode.BestFileID, mediaFileID)
+	}
+	var reservations int
+	if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM media_file_move_reservations`).Scan(&reservations); err != nil {
+		t.Fatal(err)
+	}
+	if reservations != 0 {
+		t.Fatalf("remaining move reservations after rollback = %d, want 0", reservations)
 	}
 }

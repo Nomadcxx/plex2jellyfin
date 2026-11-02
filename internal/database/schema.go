@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 28
+const currentSchemaVersion = 34
 
 // SQL migration scripts
 var migrations = []migration{
@@ -784,6 +784,119 @@ var migrations = []migration{
 			`ALTER TABLE parse_decisions ADD COLUMN retry_destination TEXT`,
 			`ALTER TABLE parse_decisions ADD COLUMN retry_required_bytes INTEGER NOT NULL DEFAULT 0`,
 			`INSERT INTO schema_version (version) VALUES (28)`,
+		},
+	},
+	{
+		version: 29,
+		up: []string{
+			`CREATE TABLE media_file_move_reservations (
+				file_id INTEGER PRIMARY KEY,
+				source_path TEXT NOT NULL UNIQUE,
+				target_path TEXT NOT NULL UNIQUE,
+				canonical_path TEXT NOT NULL DEFAULT '',
+				library_root TEXT NOT NULL DEFAULT '',
+				clear_compliance INTEGER NOT NULL DEFAULT 0 CHECK(clear_compliance IN (0, 1)),
+				owner_pid INTEGER NOT NULL,
+				created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`CREATE TRIGGER media_files_reject_reserved_target_insert
+				BEFORE INSERT ON media_files
+				WHEN EXISTS (
+					SELECT 1 FROM media_file_move_reservations
+					WHERE source_path = NEW.path OR target_path = NEW.path
+				)
+				BEGIN SELECT RAISE(ABORT, 'media file path reserved for move'); END`,
+			`CREATE TRIGGER media_files_guard_reserved_path_update
+				BEFORE UPDATE OF path ON media_files
+				WHEN EXISTS (
+					SELECT 1 FROM media_file_move_reservations r
+					WHERE OLD.path IN (r.source_path, r.target_path)
+					   OR NEW.path IN (r.source_path, r.target_path)
+				)
+				BEGIN SELECT RAISE(ABORT, 'media file path reserved for move'); END`,
+			`CREATE TRIGGER media_files_reject_reserved_delete
+				BEFORE DELETE ON media_files
+				WHEN EXISTS (
+					SELECT 1 FROM media_file_move_reservations
+					WHERE file_id = OLD.id OR OLD.path IN (source_path, target_path)
+				)
+				BEGIN SELECT RAISE(ABORT, 'media file move in progress'); END`,
+			`CREATE TRIGGER movies_guard_reserved_best_file_update
+				BEFORE UPDATE OF best_file_id ON movies
+				WHEN OLD.best_file_id IS NOT NULL
+				  AND NEW.best_file_id IS NOT OLD.best_file_id
+				  AND EXISTS (
+					SELECT 1 FROM media_file_move_reservations WHERE file_id = OLD.best_file_id
+				  )
+				BEGIN SELECT RAISE(ABORT, 'media file move in progress'); END`,
+			`CREATE TRIGGER episodes_guard_reserved_best_file_update
+				BEFORE UPDATE OF best_file_id ON episodes
+				WHEN OLD.best_file_id IS NOT NULL
+				  AND NEW.best_file_id IS NOT OLD.best_file_id
+				  AND EXISTS (
+					SELECT 1 FROM media_file_move_reservations WHERE file_id = OLD.best_file_id
+				  )
+				BEGIN SELECT RAISE(ABORT, 'media file move in progress'); END`,
+			`INSERT INTO schema_version (version) VALUES (29)`,
+		},
+	},
+	{
+		version: 30,
+		up: []string{
+			`ALTER TABLE media_file_move_reservations ADD COLUMN source_removal_pending INTEGER NOT NULL DEFAULT 0 CHECK(source_removal_pending IN (0, 1))`,
+			`INSERT INTO schema_version (version) VALUES (30)`,
+		},
+	},
+	{
+		version: 31,
+		up: []string{
+			`ALTER TABLE media_file_move_reservations ADD COLUMN target_identity TEXT NOT NULL DEFAULT ''`,
+			`INSERT INTO schema_version (version) VALUES (31)`,
+		},
+	},
+	{
+		version: 32,
+		up: []string{
+			`ALTER TABLE media_file_move_reservations ADD COLUMN source_identity TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE media_file_move_reservations ADD COLUMN source_quarantine_path TEXT NOT NULL DEFAULT ''`,
+			`INSERT INTO schema_version (version) VALUES (32)`,
+		},
+	},
+	{
+		version: 33,
+		up: []string{
+			`ALTER TABLE media_file_move_reservations ADD COLUMN target_quarantine_path TEXT NOT NULL DEFAULT ''`,
+			`INSERT INTO schema_version (version) VALUES (33)`,
+		},
+	},
+	{
+		version: 34,
+		up: []string{
+			`ALTER TABLE media_file_move_reservations ADD COLUMN replace_file_id INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE media_file_move_reservations ADD COLUMN replace_identity TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE media_file_move_reservations ADD COLUMN replace_quarantine_path TEXT NOT NULL DEFAULT ''`,
+			`CREATE UNIQUE INDEX idx_media_file_move_replace_id ON media_file_move_reservations(replace_file_id) WHERE replace_file_id > 0`,
+			`DROP TRIGGER movies_guard_reserved_best_file_update`,
+			`CREATE TRIGGER movies_guard_reserved_best_file_update
+				BEFORE UPDATE OF best_file_id ON movies
+				WHEN OLD.best_file_id IS NOT NULL
+				  AND NEW.best_file_id IS NOT OLD.best_file_id
+				  AND EXISTS (
+					SELECT 1 FROM media_file_move_reservations
+					WHERE file_id = OLD.best_file_id OR replace_file_id = OLD.best_file_id
+				  )
+				BEGIN SELECT RAISE(ABORT, 'media file move in progress'); END`,
+			`DROP TRIGGER episodes_guard_reserved_best_file_update`,
+			`CREATE TRIGGER episodes_guard_reserved_best_file_update
+				BEFORE UPDATE OF best_file_id ON episodes
+				WHEN OLD.best_file_id IS NOT NULL
+				  AND NEW.best_file_id IS NOT OLD.best_file_id
+				  AND EXISTS (
+					SELECT 1 FROM media_file_move_reservations
+					WHERE file_id = OLD.best_file_id OR replace_file_id = OLD.best_file_id
+				  )
+				BEGIN SELECT RAISE(ABORT, 'media file move in progress'); END`,
+			`INSERT INTO schema_version (version) VALUES (34)`,
 		},
 	},
 }

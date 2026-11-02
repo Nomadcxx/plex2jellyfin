@@ -1,11 +1,26 @@
 package consolidate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// CheckDestinationAvailable prevents transfers from replacing an existing file
+// or symlink at their destination.
+func CheckDestinationAvailable(path string) error {
+	_, err := os.Lstat(path)
+	switch {
+	case err == nil:
+		return fmt.Errorf("destination already exists: %s", path)
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	default:
+		return fmt.Errorf("inspect destination %s: %w", path, err)
+	}
+}
 
 // SafetyIssues returns reasons a consolidation plan must not be executed.
 func SafetyIssues(plan *Plan) []string {
@@ -19,25 +34,32 @@ func SafetyIssues(plan *Plan) []string {
 	}
 
 	sourceCounts := make(map[string]int)
+	destinationCounts := make(map[string]int)
 	for _, op := range plan.Operations {
 		if op == nil {
 			continue
 		}
 		sourceCounts[filepath.Clean(op.SourcePath)]++
+		destinationCounts[filepath.Clean(op.DestinationPath)]++
 		if pathIsWithin(plan.TargetPath, op.SourcePath) {
 			issues = append(issues, fmt.Sprintf("source already under target location; not a consolidation move: %s", op.SourcePath))
 		}
 		if hasSeasonComponent(op.SourcePath) && !hasSeasonComponent(op.DestinationPath) {
 			issues = append(issues, fmt.Sprintf("target would drop season structure: %s -> %s", op.SourcePath, op.DestinationPath))
 		}
-		if _, err := os.Stat(op.DestinationPath); err == nil {
-			issues = append(issues, fmt.Sprintf("target already exists: %s", op.DestinationPath))
+		if err := CheckDestinationAvailable(op.DestinationPath); err != nil {
+			issues = append(issues, err.Error())
 		}
 	}
 
 	for source, count := range sourceCounts {
 		if count > 1 {
 			issues = append(issues, fmt.Sprintf("duplicate source appears in %d planned moves: %s", count, source))
+		}
+	}
+	for destination, count := range destinationCounts {
+		if count > 1 {
+			issues = append(issues, fmt.Sprintf("duplicate destination appears in %d planned moves: %s", count, destination))
 		}
 	}
 

@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 )
@@ -19,6 +21,7 @@ type Executor struct {
 	transferer transfer.Transferer
 	dryRun     bool
 	writer     io.Writer
+	cfg        *config.Config
 }
 
 // ExecutionResult contains statistics from plan execution
@@ -35,7 +38,7 @@ type ExecutionResult struct {
 }
 
 // NewExecutor creates a new plan executor
-func NewExecutor(db *database.MediaDB, dryRun bool, writer io.Writer) *Executor {
+func NewExecutor(db *database.MediaDB, dryRun bool, writer io.Writer, cfg *config.Config) *Executor {
 	if writer == nil {
 		writer = os.Stdout
 	}
@@ -50,6 +53,7 @@ func NewExecutor(db *database.MediaDB, dryRun bool, writer io.Writer) *Executor 
 		transferer: transferer,
 		dryRun:     dryRun,
 		writer:     writer,
+		cfg:        cfg,
 	}
 }
 
@@ -202,47 +206,93 @@ func (e *Executor) executeMove(ctx context.Context, plan *ConsolidationPlan) err
 	if e.dryRun {
 		return nil // Dry run - don't actually move
 	}
+	if err := e.db.CheckMediaFileMoveDestination(plan.SourcePath, plan.TargetPath); err != nil {
+		return fmt.Errorf("cannot move file: %w", err)
+	}
+	if err := CheckDestinationAvailable(plan.TargetPath); err != nil {
+		return err
+	}
 
 	// Check if source exists
 	if _, err := os.Stat(plan.SourcePath); os.IsNotExist(err) {
 		return fmt.Errorf("source file does not exist")
 	}
 
-	// Use transfer package for reliable file move (handles failing disks)
-	result, err := e.transferer.Move(plan.SourcePath, plan.TargetPath, transfer.TransferOptions{
-		Timeout:   5 * time.Minute,
-		TargetUID: -1, // Preserve ownership
-		TargetGID: -1,
-	})
-
-	if err != nil {
-		return fmt.Errorf("transfer failed: %w", err)
-	}
-
-	if err := result.Validate(); err != nil {
-		return fmt.Errorf("transfer failed: %w", err)
-	}
-
-	// Update database - remove old path, add new path
 	file, err := e.db.GetMediaFile(plan.SourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to get file from database: %w", err)
 	}
+	canonicalPath := ""
+	if file != nil {
+		canonicalPath, err = e.targetCanonicalPath(file, plan)
+		if err != nil {
+			return err
+		}
+		file.LibraryRoot = libraryRootForPath(plan.TargetPath, file.MediaType, e.cfg, file.LibraryRoot)
+	}
 
+	// Use transfer package for reliable file move (handles failing disks)
+	opts := transfer.TransferOptions{
+		Timeout:   5 * time.Minute,
+		TargetUID: -1, // Preserve ownership
+		TargetGID: -1,
+	}
+	if file != nil {
+		file.Path = plan.TargetPath
+	}
+	moved := false
+	movedIdentity := ""
+	move := func(sourceIdentity, sourceQuarantinePath string, recordPublished func(string, string) error) (database.MediaFileMoveAttempt, error) {
+		opts.MoveSourceIdentity = sourceIdentity
+		opts.MoveSourceQuarantinePath = sourceQuarantinePath
+		opts.OnPublished = recordPublished
+		result, err := e.transferer.Move(plan.SourcePath, plan.TargetPath, opts)
+		attempt := database.MediaFileMoveAttempt{}
+		if result != nil {
+			attempt.Published = result.Published
+			attempt.SourceRemoved = result.SourceRemoved
+			attempt.PublishedIdentity = result.PublishedIdentity
+			attempt.PendingSourceRemoval = result.PendingSourceRemoval
+		}
+		if err != nil {
+			return attempt, fmt.Errorf("transfer failed: %w", err)
+		}
+		if err := result.Validate(); err != nil {
+			return attempt, fmt.Errorf("transfer failed: %w", err)
+		}
+		if !result.SourceRemoved {
+			return attempt, fmt.Errorf("transfer completed without removing source: %s", plan.SourcePath)
+		}
+		moved = true
+		movedIdentity = result.PublishedIdentity
+		if file != nil {
+			info, err := os.Stat(plan.TargetPath)
+			if err != nil {
+				return attempt, fmt.Errorf("inspect moved file: %w", err)
+			}
+			file.Size = info.Size()
+			file.ModifiedAt = info.ModTime()
+		}
+		return attempt, nil
+	}
 	if file == nil {
-		// File not in DB — nothing to update
+		// File not in DB: move it without a row to update.
+		if _, err := move("", "", nil); err != nil {
+			return err
+		}
 		return nil
 	}
-
-	// Delete old entry
-	if err := e.db.DeleteMediaFile(plan.SourcePath); err != nil {
-		return fmt.Errorf("failed to delete old database entry: %w", err)
-	}
-
-	// Add new entry with updated path
-	file.Path = plan.TargetPath
-	if err := e.db.UpsertMediaFile(file); err != nil {
-		return fmt.Errorf("failed to insert new database entry: %w", err)
+	if err := e.db.MoveMediaFileWith(file, plan.SourcePath, canonicalPath, false, move); err != nil {
+		if moved {
+			if rollbackErr := transfer.RollbackMove(e.transferer, plan.SourcePath, plan.TargetPath, opts, movedIdentity); rollbackErr != nil {
+				return fmt.Errorf("failed to update media file after move: %v; filesystem rollback failed: %w", err, rollbackErr)
+			}
+			if cancelErr := e.db.CancelMediaFileMove(plan.SourcePath); cancelErr != nil {
+				return fmt.Errorf("failed to update media file after move: %v; file restored but reservation cleanup failed: %w", err, cancelErr)
+			}
+			return fmt.Errorf("failed to update media file after move; file restored to source: %w", err)
+		}
+		return fmt.Errorf("failed to update media file after move: %w", err)
 	}
 
 	// Verify file exists at new path
@@ -269,27 +319,18 @@ func (e *Executor) executeRename(ctx context.Context, plan *ConsolidationPlan) e
 	if e.dryRun {
 		return nil // Dry run - don't actually rename
 	}
+	if err := e.db.CheckMediaFileMoveDestination(plan.SourcePath, plan.TargetPath); err != nil {
+		return fmt.Errorf("cannot rename file: %w", err)
+	}
+	if err := CheckDestinationAvailable(plan.TargetPath); err != nil {
+		return err
+	}
 
 	// Check if source exists
 	if _, err := os.Stat(plan.SourcePath); os.IsNotExist(err) {
 		return fmt.Errorf("source file does not exist")
 	}
 
-	result, err := e.transferer.Move(plan.SourcePath, plan.TargetPath, transfer.TransferOptions{
-		Timeout:   5 * time.Minute,
-		TargetUID: -1,
-		TargetGID: -1,
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to move file: %w", err)
-	}
-
-	if err := result.Validate(); err != nil {
-		return fmt.Errorf("file transfer failed: %w", err)
-	}
-
-	// Update database path
 	file, err := e.db.GetMediaFile(plan.SourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to get file from database: %w", err)
@@ -297,21 +338,104 @@ func (e *Executor) executeRename(ctx context.Context, plan *ConsolidationPlan) e
 	if file == nil {
 		return fmt.Errorf("media file not found in database for rename: %s", plan.SourcePath)
 	}
-
-	// Delete old entry
-	if err := e.db.DeleteMediaFile(plan.SourcePath); err != nil {
-		return fmt.Errorf("failed to delete old database entry: %w", err)
+	canonicalPath, err := e.targetCanonicalPath(file, plan)
+	if err != nil {
+		return err
 	}
+	file.LibraryRoot = libraryRootForPath(plan.TargetPath, file.MediaType, e.cfg, file.LibraryRoot)
 
-	// Add new entry with compliant flag set
+	opts := transfer.TransferOptions{
+		Timeout:   5 * time.Minute,
+		TargetUID: -1,
+		TargetGID: -1,
+	}
 	file.Path = plan.TargetPath
 	file.IsJellyfinCompliant = true
 	file.ComplianceIssues = []string{} // Clear issues
-	if err := e.db.UpsertMediaFile(file); err != nil {
-		return fmt.Errorf("failed to insert new database entry: %w", err)
+	moved := false
+	movedIdentity := ""
+	move := func(sourceIdentity, sourceQuarantinePath string, recordPublished func(string, string) error) (database.MediaFileMoveAttempt, error) {
+		opts.MoveSourceIdentity = sourceIdentity
+		opts.MoveSourceQuarantinePath = sourceQuarantinePath
+		opts.OnPublished = recordPublished
+		result, err := e.transferer.Move(plan.SourcePath, plan.TargetPath, opts)
+		attempt := database.MediaFileMoveAttempt{}
+		if result != nil {
+			attempt.Published = result.Published
+			attempt.SourceRemoved = result.SourceRemoved
+			attempt.PublishedIdentity = result.PublishedIdentity
+			attempt.PendingSourceRemoval = result.PendingSourceRemoval
+		}
+		if err != nil {
+			return attempt, fmt.Errorf("failed to move file: %w", err)
+		}
+		if err := result.Validate(); err != nil {
+			return attempt, fmt.Errorf("file transfer failed: %w", err)
+		}
+		if !result.SourceRemoved {
+			return attempt, fmt.Errorf("transfer completed without removing source: %s", plan.SourcePath)
+		}
+		moved = true
+		movedIdentity = result.PublishedIdentity
+		info, err := os.Stat(plan.TargetPath)
+		if err != nil {
+			return attempt, fmt.Errorf("inspect renamed file: %w", err)
+		}
+		file.Size = info.Size()
+		file.ModifiedAt = info.ModTime()
+		return attempt, nil
+	}
+	if err := e.db.MoveMediaFileWith(file, plan.SourcePath, canonicalPath, true, move); err != nil {
+		if moved {
+			if rollbackErr := transfer.RollbackMove(e.transferer, plan.SourcePath, plan.TargetPath, opts, movedIdentity); rollbackErr != nil {
+				return fmt.Errorf("failed to update media file after rename: %v; filesystem rollback failed: %w", err, rollbackErr)
+			}
+			if cancelErr := e.db.CancelMediaFileMove(plan.SourcePath); cancelErr != nil {
+				return fmt.Errorf("failed to update media file after rename: %v; file restored but reservation cleanup failed: %w", err, cancelErr)
+			}
+			return fmt.Errorf("failed to update media file after rename; file restored to source: %w", err)
+		}
+		return fmt.Errorf("failed to update media file after rename: %w", err)
 	}
 
 	return nil
+}
+
+func (e *Executor) targetCanonicalPath(file *database.MediaFile, plan *ConsolidationPlan) (string, error) {
+	if plan.ConflictID > 0 {
+		conflict, err := e.db.GetConflict(plan.ConflictID)
+		if err != nil {
+			return "", fmt.Errorf("read move conflict %d: %w", plan.ConflictID, err)
+		}
+		if conflict != nil {
+			var target string
+			for _, location := range conflict.Locations {
+				location = filepath.Clean(location)
+				if pathIsWithin(location, plan.TargetPath) && len(location) > len(target) {
+					target = location
+				}
+			}
+			if target != "" {
+				return target, nil
+			}
+		}
+	}
+
+	switch file.MediaType {
+	case "movie":
+		return filepath.Dir(plan.TargetPath), nil
+	case "episode":
+		for current := filepath.Dir(plan.TargetPath); current != filepath.Dir(current); current = filepath.Dir(current) {
+			base := strings.ToLower(strings.TrimSpace(filepath.Base(current)))
+			if strings.HasPrefix(base, "season ") || strings.HasPrefix(base, "season_") ||
+				strings.HasPrefix(base, "season-") || base == "specials" {
+				return filepath.Dir(current), nil
+			}
+		}
+		return filepath.Dir(plan.TargetPath), nil
+	default:
+		return "", nil
+	}
 }
 
 // markPlanCompleted marks a plan as successfully completed

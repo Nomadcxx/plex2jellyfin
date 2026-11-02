@@ -58,6 +58,10 @@ func OpenPath(path string) (*MediaDB, error) {
 		db.Close()
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
+	if err := mdb.RecoverStaleMediaFileMoves(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to recover media file moves: %w", err)
+	}
 
 	// Root daemon (SUDO_USER set) creates DB/WAL as root; hand ownership back
 	// so the interactive user can run `plex2jellyfin scan` without sudo.

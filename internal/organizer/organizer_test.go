@@ -17,6 +17,7 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/analyzer"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/fileidentity"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
@@ -242,7 +243,7 @@ func (t *blockingConcurrentTransferer) Copy(string, string, transfer.TransferOpt
 func (t *blockingConcurrentTransferer) CanResume() bool { return false }
 func (t *blockingConcurrentTransferer) Name() string    { return "blocking-concurrent" }
 
-func (t *recordingTransferer) Move(src, dst string, _ transfer.TransferOptions) (*transfer.TransferResult, error) {
+func (t *recordingTransferer) Move(src, dst string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
 	t.moves++
 	info, err := os.Stat(src)
 	if err != nil {
@@ -251,15 +252,37 @@ func (t *recordingTransferer) Move(src, dst string, _ transfer.TransferOptions) 
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return &transfer.TransferResult{Error: err}, err
 	}
-	if err := os.Rename(src, dst); err != nil {
+	sourceIdentity, ok := fileidentity.FromLstat(src)
+	if !ok {
+		err := errors.New("source identity unavailable")
 		return &transfer.TransferResult{Error: err}, err
 	}
+	destinationQuarantinePath, err := fileidentity.NewQuarantinePath(dst)
+	if err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	if opts.OnPublished != nil {
+		if err := opts.OnPublished(sourceIdentity, destinationQuarantinePath); err != nil {
+			return &transfer.TransferResult{Error: err}, err
+		}
+	}
+	if err := fileidentity.RenameNoReplace(src, dst); err != nil {
+		return &transfer.TransferResult{Error: err}, err
+	}
+	destinationIdentity, ok := fileidentity.FromLstat(dst)
+	if !ok {
+		err := errors.New("destination identity unavailable")
+		return &transfer.TransferResult{Error: err, Published: true, SourceRemoved: true}, err
+	}
 	return &transfer.TransferResult{
-		Success:       true,
-		SourceRemoved: true,
-		BytesCopied:   info.Size(),
-		BytesTotal:    info.Size(),
-		Attempts:      1,
+		Success:                   true,
+		SourceRemoved:             true,
+		Published:                 true,
+		PublishedIdentity:         destinationIdentity,
+		DestinationQuarantinePath: destinationQuarantinePath,
+		BytesCopied:               info.Size(),
+		BytesTotal:                info.Size(),
+		Attempts:                  1,
 	}, nil
 }
 
@@ -301,20 +324,10 @@ func (t *failAfterFirstCopyTransferer) Copy(src, dst string, opts transfer.Trans
 
 func (t *failAfterFirstMoveTransferer) Move(src, dst string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
 	t.moves++
-	if t.moves > 1 {
+	if t.moves == 2 {
 		return &transfer.TransferResult{Success: false, Error: fmt.Errorf("forced move failure")}, fmt.Errorf("forced move failure")
 	}
-	info, err := os.Stat(src)
-	if err != nil {
-		return &transfer.TransferResult{Error: err}, err
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return &transfer.TransferResult{Error: err}, err
-	}
-	if err := os.Rename(src, dst); err != nil {
-		return &transfer.TransferResult{Error: err}, err
-	}
-	return &transfer.TransferResult{Success: true, SourceRemoved: true, BytesCopied: info.Size(), BytesTotal: info.Size(), Attempts: 1}, nil
+	return (&recordingTransferer{}).Move(src, dst, opts)
 }
 
 func (t *failAfterFirstMoveTransferer) Copy(src, dst string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
@@ -417,13 +430,14 @@ func TestOrganizerMovieTransferPolicy(t *testing.T) {
 
 			db, cleanup := setupTestDB(t)
 			defer cleanup()
-			require.NoError(t, db.UpsertMediaFile(&database.MediaFile{
+			sourceFile := &database.MediaFile{
 				Path:            sourcePath,
 				Size:            64,
 				ModifiedAt:      time.Now(),
 				MediaType:       "movie",
 				NormalizedTitle: "Policy Movie",
-			}))
+			}
+			require.NoError(t, db.UpsertMediaFile(sourceFile))
 
 			transferer := &recordingTransferer{}
 			indexCalls := 0
@@ -458,6 +472,9 @@ func TestOrganizerMovieTransferPolicy(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, targetRow)
 			assert.Equal(t, libraryDir, targetRow.LibraryRoot)
+			if tt.mode == TransferMove {
+				assert.Equal(t, sourceFile.ID, targetRow.ID, "tracked moves must preserve the media row identity")
+			}
 		})
 	}
 }
@@ -1679,6 +1696,8 @@ func TestOrganizeTVSeasonPackAuto_ImportsEpisodeFiles(t *testing.T) {
 func TestOrganizeTVSeasonPackAuto_RollsBackImportedFilesOnPartialFailure(t *testing.T) {
 	sourceDir, libraryDir, cleanup := setupTestEnv(t)
 	defer cleanup()
+	db, cleanupDB := setupTestDB(t)
+	defer cleanupDB()
 
 	packDir := filepath.Join(sourceDir, "Supergirl.S03.1080p.BluRay.x264-GROUP")
 	require.NoError(t, os.MkdirAll(packDir, 0755))
@@ -1686,8 +1705,10 @@ func TestOrganizeTVSeasonPackAuto_RollsBackImportedFilesOnPartialFailure(t *test
 	ep2 := filepath.Join(packDir, "Supergirl.S03E02.1080p.BluRay.x264-GROUP.mkv")
 	createTestFile(t, ep1, 1024)
 	createTestFile(t, ep2, 1024)
+	trackedSource := &database.MediaFile{Path: ep1, Size: 1024, MediaType: "episode", NormalizedTitle: "supergirl"}
+	require.NoError(t, db.UpsertMediaFile(trackedSource))
 
-	org, err := NewOrganizer([]string{libraryDir}, WithTransferer(&failAfterFirstMoveTransferer{}))
+	org, err := NewOrganizer([]string{libraryDir}, WithDatabase(db), WithTransferer(&failAfterFirstMoveTransferer{}))
 	require.NoError(t, err)
 
 	result, err := org.OrganizeTVSeasonPackAuto(packDir, func(p string) (int64, error) {
@@ -1703,7 +1724,137 @@ func TestOrganizeTVSeasonPackAuto_RollsBackImportedFilesOnPartialFailure(t *test
 	assert.Equal(t, "season_pack_partial_failure", result.SkipReason)
 	assert.FileExists(t, ep1, "first imported file should be rolled back to source")
 	assert.FileExists(t, ep2, "failed file should remain at source")
-	assert.NoFileExists(t, filepath.Join(libraryDir, "Supergirl", "Season 03", "Supergirl S03E01.mkv"))
+	targetPath := filepath.Join(libraryDir, "Supergirl", "Season 03", "Supergirl S03E01.mkv")
+	assert.NoFileExists(t, targetPath)
+	restored, err := db.GetMediaFile(ep1)
+	require.NoError(t, err)
+	require.NotNil(t, restored, "tracked row should follow the rolled-back file")
+	assert.Equal(t, trackedSource.ID, restored.ID)
+	targetRow, err := db.GetMediaFile(targetPath)
+	require.NoError(t, err)
+	assert.Nil(t, targetRow, "rollback should remove the stale destination row")
+}
+
+func TestOrganizeTVSeasonPackKeepsCompletedReplacementOnPartialFailure(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+	db, cleanupDB := setupTestDB(t)
+	defer cleanupDB()
+
+	packDir := filepath.Join(sourceDir, "Supergirl.S03.2160p.BluRay-GROUP")
+	require.NoError(t, os.MkdirAll(packDir, 0o755))
+	ep1 := filepath.Join(packDir, "Supergirl.S03E01.2160p.BluRay-GROUP.mkv")
+	ep2 := filepath.Join(packDir, "Supergirl.S03E02.2160p.BluRay-GROUP.mkv")
+	require.NoError(t, os.WriteFile(ep1, []byte("replacement episode"), 0o644))
+	require.NoError(t, os.WriteFile(ep2, []byte("second episode"), 0o644))
+
+	showDir := filepath.Join(libraryDir, "Supergirl")
+	targetPath := filepath.Join(showDir, "Season 03", "Supergirl S03E01.mkv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(targetPath), 0o755))
+	require.NoError(t, os.WriteFile(targetPath, []byte("existing episode"), 0o644))
+	series := &database.Series{
+		Title: "Supergirl", TitleNormalized: "supergirl", CanonicalPath: showDir,
+		LibraryRoot: libraryDir, Source: "test", SourcePriority: 100,
+	}
+	_, err := db.UpsertSeries(series)
+	require.NoError(t, err)
+	episode := &database.Episode{SeriesID: series.ID, Season: 3, Episode: 1, Title: "Episode 1"}
+	require.NoError(t, db.UpsertEpisode(episode))
+	destination := &database.MediaFile{
+		Path: targetPath, Size: int64(len("existing episode")), MediaType: "episode",
+		ParentSeriesID: &series.ID, ParentEpisodeID: &episode.ID, NormalizedTitle: "supergirl", Resolution: "720p",
+	}
+	incoming := &database.MediaFile{
+		Path: ep1, Size: int64(len("replacement episode")), MediaType: "episode",
+		ParentSeriesID: &series.ID, ParentEpisodeID: &episode.ID, NormalizedTitle: "supergirl", Resolution: "2160p",
+	}
+	require.NoError(t, db.UpsertMediaFile(destination))
+	require.NoError(t, db.UpsertMediaFile(incoming))
+	require.NoError(t, db.UpdateEpisodeBestFile(episode.ID, &destination.ID))
+
+	org, err := NewOrganizer([]string{libraryDir},
+		WithDatabase(db),
+		WithForceOverwrite(true),
+		WithTransferer(&failAfterFirstMoveTransferer{}),
+	)
+	require.NoError(t, err)
+	result, err := org.OrganizeTVSeasonPackAuto(packDir, func(path string) (int64, error) {
+		info, err := os.Stat(path)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	})
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	assert.Equal(t, "season_pack_partial_failure", result.SkipReason)
+	assert.FileExists(t, ep2, "failed episode should remain at source")
+	assert.NoFileExists(t, ep1, "completed move should remain published")
+	contents, err := os.ReadFile(targetPath)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement episode", string(contents), "completed replacement should remain canonical")
+	row, err := db.GetMediaFileByID(destination.ID)
+	require.NoError(t, err)
+	require.NotNil(t, row)
+	assert.Equal(t, targetPath, row.Path)
+	assert.Equal(t, "2160p", row.Resolution)
+	incomingRow, err := db.GetMediaFileByID(incoming.ID)
+	require.NoError(t, err)
+	assert.Nil(t, incomingRow)
+}
+
+func TestRollbackSeasonPackCopyRemovesDestinationRowAndKeepsSourceRow(t *testing.T) {
+	sourceDir, libraryDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+	db, cleanupDB := setupTestDB(t)
+	defer cleanupDB()
+
+	sourcePath := filepath.Join(sourceDir, "episode.mkv")
+	targetPath := filepath.Join(libraryDir, "Show", "Season 01", "Show S01E01.mkv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(targetPath), 0o755))
+	createTestFile(t, sourcePath, 64)
+	createTestFile(t, targetPath, 64)
+	series := &database.Series{
+		Title: "Show", TitleNormalized: "show", Year: 2026,
+		CanonicalPath: filepath.Join(libraryDir, "Show"), LibraryRoot: libraryDir,
+		Source: "test", SourcePriority: 100,
+	}
+	_, err := db.UpsertSeries(series)
+	require.NoError(t, err)
+	episode := &database.Episode{SeriesID: series.ID, Season: 1, Episode: 1, Title: "Show S01E01"}
+	require.NoError(t, db.UpsertEpisode(episode))
+	sourceRow := &database.MediaFile{Path: sourcePath, Size: 64, MediaType: "episode", ParentSeriesID: &series.ID, ParentEpisodeID: &episode.ID, NormalizedTitle: "show"}
+	targetRow := &database.MediaFile{Path: targetPath, Size: 64, MediaType: "episode", ParentSeriesID: &series.ID, ParentEpisodeID: &episode.ID, NormalizedTitle: "show"}
+	require.NoError(t, db.UpsertMediaFile(sourceRow))
+	require.NoError(t, db.UpsertMediaFile(targetRow))
+	require.NoError(t, db.UpdateEpisodeBestFile(episode.ID, &targetRow.ID))
+	targetIdentity, ok := fileidentity.FromLstat(targetPath)
+	require.True(t, ok)
+	org, err := NewOrganizer([]string{libraryDir}, WithDatabase(db))
+	require.NoError(t, err)
+
+	item := &OrganizationResult{
+		Success:           true,
+		SourcePath:        sourcePath,
+		TargetPath:        targetPath,
+		sourceRetained:    true,
+		publishedIdentity: targetIdentity,
+	}
+	require.NoError(t, org.rollbackSeasonPackImports([]*OrganizationResult{item}))
+	assert.FileExists(t, sourcePath)
+	assert.NoFileExists(t, targetPath)
+	gotSource, err := db.GetMediaFile(sourcePath)
+	require.NoError(t, err)
+	require.NotNil(t, gotSource)
+	assert.Equal(t, sourceRow.ID, gotSource.ID)
+	gotTarget, err := db.GetMediaFile(targetPath)
+	require.NoError(t, err)
+	assert.Nil(t, gotTarget)
+	gotEpisode, err := db.GetEpisode(series.ID, 1, 1)
+	require.NoError(t, err)
+	require.NotNil(t, gotEpisode)
+	require.NotNil(t, gotEpisode.BestFileID)
+	assert.Equal(t, sourceRow.ID, *gotEpisode.BestFileID)
 }
 
 func TestOrganizeTVSeasonPackAuto_SkipsUnresolvedSeasonOnlyFile(t *testing.T) {
@@ -2150,6 +2301,118 @@ func TestOrganizerUsesSuccessfulImportQualityForCanonicalTargets(t *testing.T) {
 			contents, err := os.ReadFile(targetPath)
 			require.NoError(t, err)
 			assert.Equal(t, []byte{0, 0, 0, 0}, contents)
+		})
+	}
+}
+
+func TestOrganizerKeepsCanonicalMediaIDWhenReplacingBetterDownload(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		mode           SourceTransferMode
+		mediaType      string
+		existingSource string
+		newSource      string
+	}{
+		{name: "move movie", mode: TransferMove, mediaType: "movie", existingSource: "Quality.Movie.2026.720p.WEB-DL.mkv", newSource: "Quality.Movie.2026.2160p.BluRay.mkv"},
+		{name: "copy movie", mode: TransferCopy, mediaType: "movie", existingSource: "Quality.Movie.2026.720p.WEB-DL.mkv", newSource: "Quality.Movie.2026.2160p.BluRay.mkv"},
+		{name: "seed movie", mode: TransferSeed, mediaType: "movie", existingSource: "Quality.Movie.2026.720p.WEB-DL.mkv", newSource: "Quality.Movie.2026.2160p.BluRay.mkv"},
+		{name: "move episode", mode: TransferMove, mediaType: "tv", existingSource: "Quality.Show.2026.S01E02.720p.WEB-DL.mkv", newSource: "Quality.Show.2026.S01E02.2160p.BluRay.mkv"},
+		{name: "copy episode", mode: TransferCopy, mediaType: "tv", existingSource: "Quality.Show.2026.S01E02.720p.WEB-DL.mkv", newSource: "Quality.Show.2026.S01E02.2160p.BluRay.mkv"},
+		{name: "seed episode", mode: TransferSeed, mediaType: "tv", existingSource: "Quality.Show.2026.S01E02.720p.WEB-DL.mkv", newSource: "Quality.Show.2026.S01E02.2160p.BluRay.mkv"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			libraryDir := filepath.Join(root, "library")
+			sourcePath := filepath.Join(root, "incoming", tc.newSource)
+			var targetPath, canonicalPath string
+			if tc.mediaType == "movie" {
+				canonicalPath = filepath.Join(libraryDir, "Quality Movie (2026)")
+				targetPath = filepath.Join(canonicalPath, "Quality Movie (2026).mkv")
+			} else {
+				canonicalPath = filepath.Join(libraryDir, "Quality Show (2026)")
+				targetPath = filepath.Join(canonicalPath, "Season 01", "Quality Show (2026) S01E02.mkv")
+			}
+			createTestFile(t, targetPath, 4)
+			createTestFile(t, sourcePath, 8)
+
+			db, err := database.OpenPath(filepath.Join(root, "media.db"))
+			require.NoError(t, err)
+			defer db.Close()
+
+			var destination, incoming *database.MediaFile
+			var movieID, episodeID int64
+			if tc.mediaType == "movie" {
+				movie := &database.Movie{Title: "Quality Movie", Year: 2026, CanonicalPath: canonicalPath, LibraryRoot: libraryDir, Source: "test", SourcePriority: 100}
+				_, err := db.UpsertMovie(movie)
+				require.NoError(t, err)
+				movieID = movie.ID
+				destination = &database.MediaFile{Path: targetPath, Size: 4, MediaType: "movie", ParentMovieID: &movie.ID, NormalizedTitle: "quality movie", Resolution: "720p", LibraryRoot: libraryDir}
+				incoming = &database.MediaFile{Path: sourcePath, Size: 8, MediaType: "movie", ParentMovieID: &movie.ID, NormalizedTitle: "quality movie", Resolution: "2160p", LibraryRoot: libraryDir}
+			} else {
+				series := &database.Series{Title: "Quality Show", Year: 2026, CanonicalPath: canonicalPath, LibraryRoot: libraryDir, Source: "test", SourcePriority: 100}
+				_, err := db.UpsertSeries(series)
+				require.NoError(t, err)
+				episode := &database.Episode{SeriesID: series.ID, Season: 1, Episode: 2, Title: "Episode"}
+				require.NoError(t, db.UpsertEpisode(episode))
+				episodeID = episode.ID
+				destination = &database.MediaFile{Path: targetPath, Size: 4, MediaType: "episode", ParentSeriesID: &series.ID, ParentEpisodeID: &episode.ID, NormalizedTitle: "quality show", Resolution: "720p", LibraryRoot: libraryDir}
+				incoming = &database.MediaFile{Path: sourcePath, Size: 8, MediaType: "episode", ParentSeriesID: &series.ID, ParentEpisodeID: &episode.ID, NormalizedTitle: "quality show", Resolution: "2160p", LibraryRoot: libraryDir}
+			}
+			require.NoError(t, db.UpsertMediaFile(destination))
+			require.NoError(t, db.UpsertMediaFile(incoming))
+			if tc.mediaType == "movie" {
+				require.NoError(t, db.UpdateMovieBestFile(movieID, &destination.ID))
+			} else {
+				require.NoError(t, db.UpdateEpisodeBestFile(episodeID, &destination.ID))
+			}
+			recordSuccessfulImport(t, db, targetPath, tc.existingSource, tc.mediaType)
+
+			transferer := transfer.NewNativeTransferer(0)
+			org, err := NewOrganizer([]string{libraryDir},
+				WithDatabase(db),
+				WithTransferer(transferer),
+				WithTransferModeResolver(func(string) SourceTransferMode { return tc.mode }),
+				WithPathIndexer(func(context.Context, string, string, string) error { return nil }),
+			)
+			require.NoError(t, err)
+			var result *OrganizationResult
+			if tc.mediaType == "movie" {
+				result, err = org.OrganizeMovieWithParsed(sourcePath, libraryDir, naming.MovieInfo{Title: "Quality Movie", Year: "2026"})
+			} else {
+				result, err = org.OrganizeTVWithParsed(sourcePath, libraryDir, naming.TVShowInfo{Title: "Quality Show", Year: "2026", Season: 1, Episode: 2})
+			}
+			require.NoError(t, err)
+			require.True(t, result.Success, "replacement result: %+v", result)
+			if tc.mode == TransferMove {
+				require.NoFileExists(t, sourcePath)
+			} else {
+				require.FileExists(t, sourcePath, "copy and seed replacements must retain their source")
+			}
+			contents, err := os.ReadFile(targetPath)
+			require.NoError(t, err)
+			assert.Equal(t, []byte{0, 0, 0, 0, 0, 0, 0, 0}, contents)
+
+			moved, err := db.GetMediaFileByID(destination.ID)
+			require.NoError(t, err)
+			require.NotNil(t, moved)
+			assert.Equal(t, targetPath, moved.Path)
+			assert.Equal(t, "2160p", moved.Resolution, "destination metadata should come from the incoming file")
+			incomingRow, err := db.GetMediaFileByID(incoming.ID)
+			require.NoError(t, err)
+			assert.Nil(t, incomingRow, "incoming row should be retired")
+			if tc.mediaType == "movie" {
+				var bestFileID int64
+				var dirty bool
+				require.NoError(t, db.SQL().QueryRow("SELECT best_file_id, radarr_path_dirty FROM movies WHERE id = ?", movieID).Scan(&bestFileID, &dirty))
+				assert.Equal(t, destination.ID, bestFileID)
+				assert.True(t, dirty)
+			} else {
+				var bestFileID int64
+				var dirty bool
+				require.NoError(t, db.SQL().QueryRow("SELECT e.best_file_id, s.sonarr_path_dirty FROM episodes e JOIN series s ON s.id = e.series_id WHERE e.id = ?", episodeID).Scan(&bestFileID, &dirty))
+				assert.Equal(t, destination.ID, bestFileID)
+				assert.True(t, dirty)
+			}
 		})
 	}
 }

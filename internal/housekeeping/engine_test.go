@@ -565,6 +565,13 @@ func TestDrainParserDriftTVRenameMovesMultipleEpisodeFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(oldDir, 0o755))
 	require.NoError(t, os.WriteFile(oldPath1, []byte("episode1"), 0o644))
 	require.NoError(t, os.WriteFile(oldPath2, []byte("episode2"), 0o644))
+	mediaRows := []*database.MediaFile{
+		{Path: oldPath1, Size: 8, MediaType: "episode", NormalizedTitle: "upload", LibraryRoot: lib},
+		{Path: oldPath2, Size: 8, MediaType: "episode", NormalizedTitle: "upload", LibraryRoot: lib},
+	}
+	for _, file := range mediaRows {
+		require.NoError(t, db.UpsertMediaFile(file))
+	}
 
 	now := time.Now().UTC()
 	insert := func(sourceFilename, oldPath string) int64 {
@@ -623,6 +630,12 @@ func TestDrainParserDriftTVRenameMovesMultipleEpisodeFiles(t *testing.T) {
 	require.NoDirExists(t, filepath.Join(lib, "Upload (2025)"))
 	require.FileExists(t, newPath1)
 	require.FileExists(t, newPath2)
+	for i, targetPath := range []string{newPath1, newPath2} {
+		moved, err := db.GetMediaFile(targetPath)
+		require.NoError(t, err)
+		require.NotNil(t, moved)
+		require.Equal(t, mediaRows[i].ID, moved.ID, "TV rename must preserve media row IDs")
+	}
 
 	decision1, err := db.GetDecision(id1)
 	require.NoError(t, err)
@@ -730,6 +743,8 @@ func TestParserDriftRenamePreservesTargetAt(t *testing.T) {
 	srcFile := filepath.Join(srcDir, "Scary Movie Cut (2026).mkv")
 	require.NoError(t, os.WriteFile(srcFile, []byte("x"), 0o644))
 	dstFile := filepath.Join(movieLib, "Scary Movie (2026)", "Scary Movie (2026).mkv")
+	mediaFile := &database.MediaFile{Path: srcFile, Size: 1, MediaType: "movie", NormalizedTitle: "scary movie", LibraryRoot: movieLib}
+	require.NoError(t, db.UpsertMediaFile(mediaFile))
 
 	originalTargetAt := time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second)
 	id := insertDecisionForDriftTest(t, db, srcFile, originalTargetAt)
@@ -748,6 +763,10 @@ func TestParserDriftRenamePreservesTargetAt(t *testing.T) {
 		},
 	}
 	require.NoError(t, e.execParserDriftRename(task))
+	movedFile, err := db.GetMediaFile(dstFile)
+	require.NoError(t, err)
+	require.NotNil(t, movedFile)
+	require.Equal(t, mediaFile.ID, movedFile.ID, "folder rename must preserve the media row ID")
 
 	got, err := db.GetDecision(id)
 	require.NoError(t, err)
@@ -766,6 +785,8 @@ func TestVerifierRenameWritesVerifierTitleAndStamps(t *testing.T) {
 	srcFile := filepath.Join(srcDir, "Scary Movie Cut (2026).mkv")
 	require.NoError(t, os.WriteFile(srcFile, []byte("x"), 0o644))
 	dstFile := filepath.Join(movieLib, "Scary Movie (2026)", "Scary Movie (2026).mkv")
+	mediaFile := &database.MediaFile{Path: srcFile, Size: 1, MediaType: "movie", NormalizedTitle: "scary movie", LibraryRoot: movieLib}
+	require.NoError(t, db.UpsertMediaFile(mediaFile))
 
 	originalTargetAt := time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second)
 	id := insertDecisionForDriftTest(t, db, srcFile, originalTargetAt)
@@ -786,6 +807,10 @@ func TestVerifierRenameWritesVerifierTitleAndStamps(t *testing.T) {
 		},
 	}
 	require.NoError(t, e.execVerifierRename(task))
+	movedFile, err := db.GetMediaFile(dstFile)
+	require.NoError(t, err)
+	require.NotNil(t, movedFile)
+	require.Equal(t, mediaFile.ID, movedFile.ID, "verifier folder rename must preserve the media row ID")
 
 	got, err := db.GetDecision(id)
 	require.NoError(t, err)
@@ -795,6 +820,41 @@ func TestVerifierRenameWritesVerifierTitleAndStamps(t *testing.T) {
 	require.NotNil(t, got.TargetAt, "TargetAt should be preserved")
 	require.True(t, got.TargetAt.Equal(originalTargetAt), "TargetAt = %v, want preserved %v", got.TargetAt, originalTargetAt)
 	require.NotEmpty(t, rescanner.paths, "expected a targeted rescan, got none")
+}
+
+func TestMoveOrganizedFolderResumesPartialMovePreservingRows(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	root := t.TempDir()
+	srcDir := filepath.Join(root, "Old Title (2025)")
+	dstDir := filepath.Join(root, "New Title (2025)")
+	srcPath := filepath.Join(srcDir, "Old Title (2025).mkv")
+	dstPath := filepath.Join(dstDir, "New Title (2025).mkv")
+	leftoverSource := filepath.Join(srcDir, "trailer.mkv")
+	leftoverTarget := filepath.Join(dstDir, "trailer.mkv")
+	require.NoError(t, os.MkdirAll(srcDir, 0o755))
+	require.NoError(t, os.MkdirAll(dstDir, 0o755))
+	require.NoError(t, os.WriteFile(dstPath, []byte("already moved"), 0o644))
+	require.NoError(t, os.WriteFile(leftoverSource, []byte("trailer"), 0o644))
+
+	mainRow := &database.MediaFile{Path: srcPath, Size: 12, MediaType: "movie", NormalizedTitle: "old title", LibraryRoot: root}
+	leftoverRow := &database.MediaFile{Path: leftoverSource, Size: 7, MediaType: "movie", NormalizedTitle: "trailer", LibraryRoot: root}
+	require.NoError(t, db.UpsertMediaFile(mainRow))
+	require.NoError(t, db.UpsertMediaFile(leftoverRow))
+
+	e := NewEngine(Config{MovieLibraries: []string{root}}, db, nil)
+	require.NoError(t, e.moveOrganizedFolder(srcPath, dstPath))
+	require.NoFileExists(t, leftoverSource)
+	require.FileExists(t, leftoverTarget)
+	for _, tc := range []struct {
+		path string
+		id   int64
+	}{{dstPath, mainRow.ID}, {leftoverTarget, leftoverRow.ID}} {
+		moved, err := db.GetMediaFile(tc.path)
+		require.NoError(t, err)
+		require.NotNil(t, moved)
+		require.Equal(t, tc.id, moved.ID)
+	}
 }
 
 func TestParserDriftSkipsVerifierCorrectedRows(t *testing.T) {

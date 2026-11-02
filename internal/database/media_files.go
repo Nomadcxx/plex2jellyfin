@@ -69,6 +69,9 @@ type Episode struct {
 func (m *MediaDB) UpsertMediaFile(file *MediaFile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := rejectReservedMediaFilePath(m.db, file.Path); err != nil {
+		return fmt.Errorf("failed to upsert media file: %w", err)
+	}
 
 	// Serialize compliance issues
 	complianceJSON, err := json.Marshal(file.ComplianceIssues)
@@ -209,7 +212,9 @@ func (m *MediaDB) GetMediaFileByID(id int64) (*MediaFile, error) {
 func (m *MediaDB) UpdateMediaFile(file *MediaFile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
+	if err := rejectReservedMediaFilePath(m.db, file.Path); err != nil {
+		return fmt.Errorf("failed to update media file: %w", err)
+	}
 	// Serialize compliance issues
 	complianceJSON, err := json.Marshal(file.ComplianceIssues)
 	if err != nil {
@@ -266,7 +271,6 @@ func (m *MediaDB) UpdateMediaFile(file *MediaFile) error {
 	if err != nil {
 		return fmt.Errorf("failed to update media file: %w", err)
 	}
-
 	return nil
 }
 
@@ -274,30 +278,41 @@ func (m *MediaDB) UpdateMediaFile(file *MediaFile) error {
 func (m *MediaDB) DeleteMediaFile(path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	tx, err := m.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin media file delete: %w", err)
+	}
+	defer tx.Rollback()
 
 	var id int64
-	err := m.db.QueryRow("SELECT id FROM media_files WHERE path = ?", path).Scan(&id)
+	err = tx.QueryRow("SELECT id FROM media_files WHERE path = ?", path).Scan(&id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil
 		}
 		return fmt.Errorf("failed to find media file: %w", err)
 	}
+	if err := rejectReservedMediaFileID(tx, id); err != nil {
+		return fmt.Errorf("failed to delete media file: %w", err)
+	}
 
-	_, err = m.db.Exec("UPDATE movies SET best_file_id = NULL WHERE best_file_id = ?", id)
+	_, err = tx.Exec("UPDATE movies SET best_file_id = NULL WHERE best_file_id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to clear movie best_file references: %w", err)
 	}
-	_, err = m.db.Exec("UPDATE episodes SET best_file_id = NULL WHERE best_file_id = ?", id)
+	_, err = tx.Exec("UPDATE episodes SET best_file_id = NULL WHERE best_file_id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to clear episode best_file references: %w", err)
 	}
 
-	_, err = m.db.Exec("DELETE FROM media_files WHERE id = ?", id)
+	_, err = tx.Exec("DELETE FROM media_files WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete media file: %w", err)
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit media file delete: %w", err)
+	}
 	return nil
 }
 
@@ -305,21 +320,32 @@ func (m *MediaDB) DeleteMediaFile(path string) error {
 func (m *MediaDB) DeleteMediaFileByID(id int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	tx, err := m.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin media file delete: %w", err)
+	}
+	defer tx.Rollback()
+	if err := rejectReservedMediaFileID(tx, id); err != nil {
+		return fmt.Errorf("failed to delete media file: %w", err)
+	}
 
-	_, err := m.db.Exec("UPDATE movies SET best_file_id = NULL WHERE best_file_id = ?", id)
+	_, err = tx.Exec("UPDATE movies SET best_file_id = NULL WHERE best_file_id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to clear movie best_file references: %w", err)
 	}
-	_, err = m.db.Exec("UPDATE episodes SET best_file_id = NULL WHERE best_file_id = ?", id)
+	_, err = tx.Exec("UPDATE episodes SET best_file_id = NULL WHERE best_file_id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to clear episode best_file references: %w", err)
 	}
 
-	_, err = m.db.Exec("DELETE FROM media_files WHERE id = ?", id)
+	_, err = tx.Exec("DELETE FROM media_files WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete media file: %w", err)
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit media file delete: %w", err)
+	}
 	return nil
 }
 
@@ -548,6 +574,43 @@ func (m *MediaDB) UpdateEpisodeBestFile(episodeID int64, fileID *int64) error {
 	return nil
 }
 
+// RestoreBestFileForMediaFile points unlinked parents back to a surviving file.
+func (m *MediaDB) RestoreBestFileForMediaFile(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tx, err := m.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin best-file restoration: %w", err)
+	}
+	defer tx.Rollback()
+	var fileID, size int64
+	var movieID, episodeID sql.NullInt64
+	if err := tx.QueryRow(`
+		SELECT id, size, parent_movie_id, parent_episode_id FROM media_files WHERE path = ?`, path).
+		Scan(&fileID, &size, &movieID, &episodeID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("read surviving media file: %w", err)
+	}
+	if size > 0 {
+		if movieID.Valid {
+			if _, err := tx.Exec(`UPDATE movies SET best_file_id = ? WHERE id = ? AND best_file_id IS NULL`, fileID, movieID.Int64); err != nil {
+				return fmt.Errorf("restore movie best-file link: %w", err)
+			}
+		}
+		if episodeID.Valid {
+			if _, err := tx.Exec(`UPDATE episodes SET best_file_id = ? WHERE id = ? AND best_file_id IS NULL`, fileID, episodeID.Int64); err != nil {
+				return fmt.Errorf("restore episode best-file link: %w", err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit best-file restoration: %w", err)
+	}
+	return nil
+}
+
 func (m *MediaDB) rejectZeroByteBestFileLocked(fileID *int64) error {
 	if fileID == nil {
 		return nil
@@ -758,12 +821,32 @@ WHERE (parse_method IS NULL OR parse_method != 'ai')
 func (m *MediaDB) RepointMediaFilesUnderFolder(srcDir, dstDir string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	_, err := m.db.Exec(`
+	tx, err := m.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin folder path update: %w", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`
 		UPDATE media_files SET path = replace(path, ?, ?)
 		WHERE path LIKE ? ESCAPE '\'`,
 		srcDir, dstDir, escapeLike(srcDir)+string(filepath.Separator)+"%")
 	if err != nil {
 		return fmt.Errorf("RepointMediaFilesUnderFolder: %w", err)
+	}
+	for _, query := range []string{
+		`UPDATE movies SET canonical_path = replace(canonical_path, ?, ?),
+			updated_at = CURRENT_TIMESTAMP, radarr_path_dirty = 1
+			WHERE canonical_path = ? OR canonical_path LIKE ? ESCAPE '\'`,
+		`UPDATE series SET canonical_path = replace(canonical_path, ?, ?),
+			updated_at = CURRENT_TIMESTAMP, sonarr_path_dirty = 1
+			WHERE canonical_path = ? OR canonical_path LIKE ? ESCAPE '\'`,
+	} {
+		if _, err := tx.Exec(query, srcDir, dstDir, srcDir, escapeLike(srcDir)+string(filepath.Separator)+"%"); err != nil {
+			return fmt.Errorf("RepointMediaFilesUnderFolder parent paths: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit folder path update: %w", err)
 	}
 	return nil
 }

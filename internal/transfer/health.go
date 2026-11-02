@@ -222,7 +222,7 @@ func OpenWithTimeout(path string, flag int, perm os.FileMode, timeout time.Durat
 	}
 }
 
-func RemoveWithTimeout(path string, timeout time.Duration) error {
+func removeWithTimeout(path string, timeout time.Duration) (<-chan error, error) {
 	ch := make(chan error, 1)
 
 	go func() {
@@ -231,8 +231,13 @@ func RemoveWithTimeout(path string, timeout time.Duration) error {
 
 	select {
 	case err := <-ch:
-		return err
+		return nil, err
 	case <-time.After(timeout):
-		return fmt.Errorf("remove timed out after %s for path: %s", timeout, path)
+		return ch, fmt.Errorf("%w: remove timed out after %s for path: %s", ErrTimeout, timeout, path)
 	}
+}
+
+func RemoveWithTimeout(path string, timeout time.Duration) error {
+	_, err := removeWithTimeout(path, timeout)
+	return err
 }

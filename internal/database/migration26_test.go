@@ -8,6 +8,7 @@ import (
 
 func rewindToMigration25(t *testing.T, db *MediaDB) {
 	t.Helper()
+	dropMediaFileMoveMigration(t, db)
 	_, err := db.SQL().Exec(`ALTER TABLE parse_decisions DROP COLUMN source_size`)
 	require.NoError(t, err)
 	_, err = db.SQL().Exec(`ALTER TABLE parse_decisions DROP COLUMN source_modified_at`)
@@ -17,6 +18,22 @@ func rewindToMigration25(t *testing.T, db *MediaDB) {
 	_, err = db.SQL().Exec(`ALTER TABLE parse_decisions DROP COLUMN retry_destination`)
 	require.NoError(t, err)
 	_, err = db.SQL().Exec(`DELETE FROM schema_version WHERE version >= 26`)
+	require.NoError(t, err)
+}
+
+func dropMediaFileMoveMigration(t *testing.T, db *MediaDB) {
+	t.Helper()
+	for _, name := range []string{
+		"media_files_reject_reserved_target_insert",
+		"media_files_guard_reserved_path_update",
+		"media_files_reject_reserved_delete",
+		"movies_guard_reserved_best_file_update",
+		"episodes_guard_reserved_best_file_update",
+	} {
+		_, err := db.SQL().Exec(`DROP TRIGGER IF EXISTS ` + name)
+		require.NoError(t, err)
+	}
+	_, err := db.SQL().Exec(`DROP TABLE IF EXISTS media_file_move_reservations`)
 	require.NoError(t, err)
 }
 
