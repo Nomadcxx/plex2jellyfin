@@ -13,14 +13,9 @@ const (
 // GroupConfidence classifies a duplicate group into "high" (safe to auto
 // delete the inferior copies) or "low" (must be flagged for human review).
 //
-// A group is downgraded to "low" when ANY of:
-//   - BestFileID is unset (no clear winner from quality scoring)
-//   - The two top files have identical quality scores
-//   - File sizes within the group differ by more than 50% AND resolution
-//     is identical (suggests different cuts or rip qualities, not pure
-//     duplicates: e.g. theatrical vs extended, or two different episodes
-//     misclassified as the same S/E)
-//   - Any file in the group has a non-positive size (record looks stale)
+// A group is downgraded to "low" when there is no clear winner, tied quality
+// scores without an overwhelming size difference, suspicious size divergence
+// at the same resolution, or a non-positive file size.
 func (s *CleanupService) GroupConfidence(group DuplicateGroup) (level string, reasons []string) {
 	if group.BestFileID == 0 || len(group.Files) < 2 {
 		return ConfidenceLow, []string{"no clear best file"}
@@ -47,17 +42,11 @@ func (s *CleanupService) GroupConfidence(group DuplicateGroup) (level string, re
 
 	for _, f := range rest {
 		if f.QualityScore == best.QualityScore {
-			// A tie is only ambiguous if the files actually differ.
-			// Auto-resolve when:
-			//   * files are byte-identical (same Size) — pure clones
-			//   * best is overwhelmingly larger (>=10x) — the smaller
-			//     is almost certainly a sample/trailer/broken artifact
-			switch {
-			case f.Size == best.Size && best.Size > 0:
-				// byte-identical clone, safe to delete the inferior copy
-			case best.Size > 0 && f.Size > 0 && best.Size >= 10*f.Size:
+			// Equal file sizes do not prove equal contents. Keep tied-quality
+			// files for review unless the smaller file is likely a sample.
+			if best.Size > 0 && f.Size > 0 && best.Size >= 10*f.Size {
 				// extreme size ratio, smaller looks like a sample
-			default:
+			} else {
 				reasons = append(reasons,
 					fmt.Sprintf("quality_score tie with id=%d (both %d)", f.ID, best.QualityScore))
 			}

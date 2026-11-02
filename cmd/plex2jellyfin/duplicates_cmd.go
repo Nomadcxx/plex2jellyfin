@@ -25,9 +25,54 @@ func deleteDuplicateInventoryRow(db *database.MediaDB, filePath string) error {
 }
 
 func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) error {
+	return deleteDuplicateFileWithSnapshot(db, filePath, nil, nil, uid, gid)
+}
+
+func deletePlannedDuplicateFile(db *database.MediaDB, group plans.DuplicateGroup, uid, gid int) error {
+	if !group.Keep.HasStatSnapshot || !group.Delete.HasStatSnapshot {
+		return fmt.Errorf("saved plan has no file stat snapshot")
+	}
+	return deleteDuplicateFileWithSnapshot(db, group.Delete.Path, &group.Delete, &group.Keep, uid, gid)
+}
+
+func verifyDuplicatePlanFileSnapshot(file plans.FileInfo) error {
+	if !file.HasStatSnapshot {
+		return fmt.Errorf("saved plan has no file stat snapshot for %s", file.Path)
+	}
+	info, err := os.Stat(file.Path)
+	if err != nil {
+		return fmt.Errorf("cannot verify planned file %s: %w", file.Path, err)
+	}
+	if !info.Mode().IsRegular() || info.Size() != file.Size || info.ModTime().UnixNano() != file.ModTimeUnixNano {
+		return fmt.Errorf("planned file %s changed since the plan was generated", file.Path)
+	}
+	return nil
+}
+
+func deleteDuplicateFileWithSnapshot(db *database.MediaDB, filePath string, expected, keeper *plans.FileInfo, uid, gid int) error {
+	remove := func() error {
+		if expected != nil {
+			if expected.Path != filePath {
+				return fmt.Errorf("saved file snapshot does not match %s", filePath)
+			}
+			if keeper != nil {
+				if err := verifyDuplicatePlanFileSnapshot(*keeper); err != nil {
+					return fmt.Errorf("keeper changed: %w", err)
+				}
+			}
+			if err := verifyDuplicatePlanFileSnapshot(*expected); err != nil {
+				return err
+			}
+		}
+		return os.Remove(filePath)
+	}
+
 	canDelete, err := permissions.CanDelete(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if expected != nil {
+				return fmt.Errorf("planned file %s no longer exists", filePath)
+			}
 			return deleteDuplicateInventoryRow(db, filePath)
 		}
 		return fmt.Errorf("failed to check permissions: %w", err)
@@ -35,7 +80,7 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 
 	if !canDelete {
 		if err := permissions.FixPermissions(filePath, uid, gid); err != nil {
-			if removeErr := os.Remove(filePath); removeErr != nil {
+			if removeErr := remove(); removeErr != nil {
 				if os.IsNotExist(removeErr) {
 					return deleteDuplicateInventoryRow(db, filePath)
 				}
@@ -44,7 +89,7 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 		}
 	}
 
-	if err := os.Remove(filePath); err != nil {
+	if err := remove(); err != nil {
 		if os.IsNotExist(err) {
 			return deleteDuplicateInventoryRow(db, filePath)
 		}
@@ -52,6 +97,47 @@ func deleteDuplicateFile(db *database.MediaDB, filePath string, uid, gid int) er
 	}
 
 	return deleteDuplicateInventoryRow(db, filePath)
+}
+
+func duplicatePlanCurrentIssues(db *database.MediaDB, cfg *config.Config, plan *plans.DuplicatePlan) ([]string, error) {
+	if plan == nil {
+		return nil, nil
+	}
+	svc := service.NewCleanupService(db)
+	analysis, err := svc.AnalyzeDuplicates()
+	if err != nil {
+		return nil, fmt.Errorf("failed to reanalyze duplicate groups: %w", err)
+	}
+	groups := make(map[string]service.DuplicateGroup, len(analysis.Groups))
+	for _, group := range analysis.Groups {
+		groups[group.ID] = group
+	}
+
+	var issues []string
+	for _, planned := range plan.Plans {
+		group, ok := groups[planned.GroupID]
+		if !ok {
+			issues = append(issues, fmt.Sprintf("%s is no longer a duplicate group", planned.Title))
+			continue
+		}
+		current, reason := buildSafeDuplicatePlanEntry(group, svc, cfg)
+		if reason != "" {
+			issues = append(issues, fmt.Sprintf("%s: %s", planned.Title, reason))
+			continue
+		}
+		if current.Keep != planned.Keep || current.Delete != planned.Delete {
+			issues = append(issues, fmt.Sprintf("%s no longer matches the saved files", planned.Title))
+		}
+	}
+	return issues, nil
+}
+
+func printDuplicatePlanSafetyIssues(issues []string) {
+	fmt.Println("[error] Duplicate deletion plan is low confidence or no longer matches the library; refusing to execute.")
+	for _, issue := range issues {
+		fmt.Printf("  - %s\n", issue)
+	}
+	fmt.Println("Regenerate the plan after reviewing these groups.")
 }
 
 func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
@@ -70,6 +156,14 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 		fmt.Println("[error] Duplicate deletion plan failed safety validation; refusing to execute.")
 		printConsolidateSafetyIssues(issues)
 		fmt.Println("\nRegenerate after planner fixes, or inspect the plan file.")
+		return nil
+	}
+	issues, err := duplicatePlanCurrentIssues(db, cfg, plan)
+	if err != nil {
+		return err
+	}
+	if len(issues) > 0 {
+		printDuplicatePlanSafetyIssues(issues)
 		return nil
 	}
 
@@ -92,6 +186,14 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 	response = strings.TrimSpace(strings.ToLower(response))
 	if response != "y" && response != "yes" {
 		fmt.Println("[error] Execution cancelled.")
+		return nil
+	}
+	issues, err = duplicatePlanCurrentIssues(db, cfg, plan)
+	if err != nil {
+		return err
+	}
+	if len(issues) > 0 {
+		printDuplicatePlanSafetyIssues(issues)
 		return nil
 	}
 
@@ -123,7 +225,7 @@ func runDuplicatesExecute(db *database.MediaDB, cfg *config.Config) error {
 			gid, _ = cfg.Permissions.ResolveGID()
 		}
 
-		if err := deleteDuplicateFile(db, filePath, uid, gid); err != nil {
+		if err := deletePlannedDuplicateFile(db, p, uid, gid); err != nil {
 			fmt.Printf("  [error] Failed to delete %s: %v\n", filePath, err)
 			failedCount++
 			continue

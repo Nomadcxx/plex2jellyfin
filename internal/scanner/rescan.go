@@ -65,7 +65,11 @@ func (s *FileScanner) FullRescan(ctx context.Context, roots []RescanRoot, dryRun
 		if dryRun {
 			continue
 		}
-		if err := s.indexOne(fe.path, fe.root, fe.mediaType); err != nil {
+		skipped, err := s.indexOne(fe.path, fe.root, fe.mediaType)
+		if skipped {
+			progress <- database.ProgressEvent{Phase: "skipped", Msg: fe.path, Current: i + 1, Total: len(files)}
+		}
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -74,12 +78,12 @@ func (s *FileScanner) FullRescan(ctx context.Context, roots []RescanRoot, dryRun
 	return errors.Join(errs...)
 }
 
-// indexOne calls processFile with the given media type. When mediaType is
-// empty, it falls back to inferring from the filename (legacy behavior).
-func (s *FileScanner) indexOne(path, root, mediaType string) error {
+// indexOne filters files like the regular scanner before processing them. When
+// mediaType is empty, it falls back to inferring from the filename (legacy behavior).
+func (s *FileScanner) indexOne(path, root, mediaType string) (bool, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("stat %s: %w", path, err)
+		return false, fmt.Errorf("stat %s: %w", path, err)
 	}
 	if mediaType == "" {
 		mediaType = "movie"
@@ -87,9 +91,12 @@ func (s *FileScanner) indexOne(path, root, mediaType string) error {
 			mediaType = "episode"
 		}
 	}
+	if !s.shouldIncludeFile(path, info.Size(), mediaType) {
+		return true, nil
+	}
 	result := &ScanResult{}
 	if err := s.processFile(path, info, root, mediaType, result); err != nil {
-		return fmt.Errorf("index %s: %w", path, err)
+		return false, fmt.Errorf("index %s: %w", path, err)
 	}
-	return nil
+	return false, nil
 }

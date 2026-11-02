@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/spf13/cobra"
@@ -17,6 +18,7 @@ func newRepairCmd() *cobra.Command {
 	cmd.AddCommand(newRepairSeriesDedupeCmd())
 	cmd.AddCommand(newRepairNestedSeriesCmd())
 	cmd.AddCommand(newRepairUnknownSeasonsCmd())
+	cmd.AddCommand(newRepairZeroByteMediaCmd())
 	return cmd
 }
 
@@ -89,6 +91,64 @@ func printNestedSeriesRepairReport(report *database.NestedSeriesRepairReport, li
 	if len(report.Groups) > limit {
 		fmt.Printf("  ... %d more groups omitted by --limit\n", len(report.Groups)-limit)
 	}
+}
+
+func newRepairZeroByteMediaCmd() *cobra.Command {
+	var execute bool
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "zero-byte-media",
+		Short: "Mark verified empty media rows unusable",
+		Long: `Verify indexed zero-byte paths, then mark confirmed empty rows for review and clear their best-file links.
+
+Dry-run is the default. This command keeps database rows and never removes media files.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			db, err := database.Open()
+			if err != nil {
+				return fmt.Errorf("failed to open database: %w", err)
+			}
+			defer db.Close()
+			return runRepairZeroByteMediaWithDB(db, execute, cmd.OutOrStdout(), limit)
+		},
+	}
+	cmd.Flags().BoolVar(&execute, "execute", false, "apply the repair instead of reporting a dry run")
+	cmd.Flags().IntVar(&limit, "limit", 30, "maximum verified paths to print; negative prints all")
+	return cmd
+}
+
+func runRepairZeroByteMediaWithDB(db *database.MediaDB, execute bool, out io.Writer, limit int) error {
+	report, err := db.RepairZeroByteMediaFiles(!execute)
+	if err != nil {
+		return fmt.Errorf("repair zero-byte media: %w", err)
+	}
+	mode := "DRY RUN"
+	if execute {
+		mode = "EXECUTED"
+	}
+	fmt.Fprintf(out, "Zero-byte media repair: %s\n\n", mode)
+	fmt.Fprintf(out, "Verified empty paths:    %d\n", len(report.VerifiedPaths))
+	if execute {
+		fmt.Fprintf(out, "Rows marked for review:  %d\n", report.RowsMarked)
+	} else {
+		fmt.Fprintf(out, "Rows to mark for review: %d\n", len(report.VerifiedPaths))
+	}
+	fmt.Fprintf(out, "Unavailable paths:       %d\n", report.Unavailable)
+	fmt.Fprintf(out, "Nonempty or non-file:    %d\n", report.NotEmpty)
+
+	if limit < 0 || limit > len(report.VerifiedPaths) {
+		limit = len(report.VerifiedPaths)
+	}
+	for _, path := range report.VerifiedPaths[:limit] {
+		fmt.Fprintf(out, "  %s\n", path)
+	}
+	if limit < len(report.VerifiedPaths) {
+		fmt.Fprintf(out, "  ... %d more verified paths omitted\n", len(report.VerifiedPaths)-limit)
+	}
+	if !execute && len(report.VerifiedPaths) > 0 {
+		fmt.Fprintln(out, "\nDry run only. Run 'plex2jellyfin repair zero-byte-media --execute' to mark these database rows for review.")
+	}
+	return nil
 }
 
 func newRepairSeriesDedupeCmd() *cobra.Command {

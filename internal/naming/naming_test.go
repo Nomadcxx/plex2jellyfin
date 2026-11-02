@@ -497,6 +497,37 @@ func TestParseTVShowFromPath_RejectsDescendingEpisodeRange(t *testing.T) {
 	}
 }
 
+func TestParseTVShowFromPathRejectsRangesWithoutEpisodeEndSupport(t *testing.T) {
+	for _, path := range []string{
+		"/downloads/The.Show.4x01-02.mkv",
+		"/downloads/The.Show.EP01-02.mkv",
+	} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			_, err := ParseTVShowFromPath(path)
+			if !errors.Is(err, ErrParseFailed) {
+				t.Fatalf("ParseTVShowFromPath(%q) error = %v, want ErrParseFailed", path, err)
+			}
+		})
+	}
+}
+
+func TestParseTVShowFromPath_ThreeDTagIsNotEpisodeRange(t *testing.T) {
+	got, err := ParseTVShowFromPath("/downloads/tv/The.Show.4x01-3D.mkv")
+	if err != nil {
+		t.Fatalf("ParseTVShowFromPath() unexpected error: %v", err)
+	}
+	if got.Season != 4 || got.Episode != 1 || got.EpisodeEnd != 0 {
+		t.Fatalf("ParseTVShowFromPath() = %#v, want single episode 4x01", got)
+	}
+}
+
+func TestParseTVShowFromPathRejectsRangeWithAttachedLetters(t *testing.T) {
+	_, err := ParseTVShowFromPath("/downloads/The.Show.S01E01-02A.mkv")
+	if !errors.Is(err, ErrParseFailed) {
+		t.Fatalf("ParseTVShowFromPath() error = %v, want ambiguous range rejected", err)
+	}
+}
+
 func TestParseTVShowFromPath_TwoEpisodeRange(t *testing.T) {
 	path := "/downloads/tv/Daniel.Tigers.Neighborhood.S08E03-04/Daniel.Tigers.Neighborhood.S08E03-04.Daniel.Jodi.Asks.Before.Touching.1080p.PBSK.WEB-DL.AAC.2.0.H.264.mkv"
 

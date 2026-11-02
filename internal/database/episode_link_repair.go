@@ -99,31 +99,37 @@ func (m *MediaDB) RepairEpisodeFileLinks(dryRun bool) (*EpisodeLinkRepairReport,
 	result, err = tx.Exec(`
 		UPDATE episodes
 		   SET best_file_id = (
-		           SELECT mf.id FROM media_files mf
-		            WHERE mf.media_type = 'episode'
-		              AND mf.parent_series_id = episodes.series_id
-		              AND mf.season = episodes.season
-		              AND mf.episode = episodes.episode
-		            ORDER BY mf.quality_score DESC, mf.size DESC, mf.id ASC
-		            LIMIT 1
-		       ),
+		       SELECT mf.id
+		         FROM media_files mf
+		        WHERE mf.media_type = 'episode'
+		          AND mf.size > 0
+		          AND mf.parent_series_id = episodes.series_id
+		          AND mf.season = episodes.season
+		          AND mf.episode = episodes.episode
+		        ORDER BY mf.quality_score DESC, mf.size DESC, mf.id ASC
+		        LIMIT 1
+		   ),
 		       updated_at = CURRENT_TIMESTAMP
 		 WHERE EXISTS (
-		       SELECT 1 FROM media_files mf
+		       SELECT 1
+		         FROM media_files mf
 		        WHERE mf.media_type = 'episode'
+		          AND mf.size > 0
 		          AND mf.parent_series_id = episodes.series_id
 		          AND mf.season = episodes.season
 		          AND mf.episode = episodes.episode
 		   )
 		   AND best_file_id IS NOT (
-		       SELECT mf.id FROM media_files mf
+		       SELECT mf.id
+		         FROM media_files mf
 		        WHERE mf.media_type = 'episode'
+		          AND mf.size > 0
 		          AND mf.parent_series_id = episodes.series_id
 		          AND mf.season = episodes.season
 		          AND mf.episode = episodes.episode
 		        ORDER BY mf.quality_score DESC, mf.size DESC, mf.id ASC
-	        LIMIT 1
-	   )`)
+		        LIMIT 1
+		   )`)
 	if err != nil {
 		return nil, fmt.Errorf("repair episode best-file references: %w", err)
 	}

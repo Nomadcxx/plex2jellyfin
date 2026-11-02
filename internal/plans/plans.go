@@ -18,12 +18,14 @@ import (
 
 // FileInfo represents a media file in a plan
 type FileInfo struct {
-	ID           int64  `json:"id"`
-	Path         string `json:"path"`
-	Size         int64  `json:"size"`
-	QualityScore int    `json:"quality_score"`
-	Resolution   string `json:"resolution"`
-	SourceType   string `json:"source_type"`
+	ID              int64  `json:"id"`
+	Path            string `json:"path"`
+	Size            int64  `json:"size"`
+	QualityScore    int    `json:"quality_score"`
+	Resolution      string `json:"resolution"`
+	SourceType      string `json:"source_type"`
+	HasStatSnapshot bool   `json:"has_stat_snapshot,omitempty"`
+	ModTimeUnixNano int64  `json:"mod_time_unix_nano,omitempty"`
 }
 
 // DuplicateGroup represents a group of duplicate files
@@ -361,8 +363,8 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 		if transferErr != nil {
 			return fmt.Errorf("failed to move file: %w", transferErr)
 		}
-		if !result.Success {
-			return fmt.Errorf("file transfer failed: %v", result.Error)
+		if err := result.Validate(); err != nil {
+			return fmt.Errorf("file transfer failed: %w", err)
 		}
 		duration := result.Duration
 		if duration == 0 {

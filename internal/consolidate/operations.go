@@ -18,6 +18,19 @@ func (c *Consolidator) ExecutePlan(plan *Plan, dryRun bool) error {
 	if issues := SafetyIssues(plan); len(issues) > 0 {
 		return fmt.Errorf("unsafe consolidation plan: %v", issues)
 	}
+	if len(plan.Operations) > 0 {
+		required, err := bytesForCurrentSources(plan.Operations)
+		if err != nil {
+			return err
+		}
+		available, err := c.availableSpace(plan.TargetPath)
+		if err != nil {
+			return fmt.Errorf("cannot read available space at %s: %w", plan.TargetPath, err)
+		}
+		if available < required {
+			return fmt.Errorf("insufficient target space at %s: need %d bytes, have %d", plan.TargetPath, required, available)
+		}
+	}
 
 	var failures []string
 
@@ -62,6 +75,24 @@ func (c *Consolidator) ExecutePlan(plan *Plan, dryRun bool) error {
 	}
 
 	return nil
+}
+
+func bytesForCurrentSources(operations []*Operation) (int64, error) {
+	var total int64
+	for _, operation := range operations {
+		info, err := os.Stat(operation.SourcePath)
+		if err != nil {
+			return 0, fmt.Errorf("cannot inspect source %s before consolidation: %w", operation.SourcePath, err)
+		}
+		if !info.Mode().IsRegular() {
+			return 0, fmt.Errorf("source is not a regular file: %s", operation.SourcePath)
+		}
+		total, err = addByteCount(total, info.Size())
+		if err != nil {
+			return 0, fmt.Errorf("calculate consolidation size: %w", err)
+		}
+	}
+	return total, nil
 }
 
 func ensureTargetWritable(targetPath string) error {
@@ -197,8 +228,8 @@ func (c *Consolidator) executeOperation(op *Operation, dryRun bool) error {
 		return fmt.Errorf("transfer failed: %w", err)
 	}
 
-	if !result.Success {
-		return fmt.Errorf("transfer failed: %v", result.Error)
+	if err := result.Validate(); err != nil {
+		return fmt.Errorf("transfer failed: %w", err)
 	}
 
 	return nil

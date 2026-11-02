@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
 	"github.com/Nomadcxx/plex2jellyfin/internal/plans"
 	"github.com/Nomadcxx/plex2jellyfin/internal/service"
 )
@@ -49,67 +52,24 @@ func runDuplicatesGenerate() error {
 			SpaceReclaimable: 0,
 		},
 	}
-	var skippedUnsafe []string
+	var skippedForReview []string
 
 	for _, group := range analysis.Groups {
-		if len(group.Files) < 2 {
+		item, reason := buildSafeDuplicatePlanEntry(group, svc, cfg)
+		if reason != "" {
+			skippedForReview = append(skippedForReview, fmt.Sprintf("%s: %s", group.Title, reason))
 			continue
 		}
-		if duplicateGroupLooksUnsafeTVMovie(group, cfg) {
-			skippedUnsafe = append(skippedUnsafe, group.Title)
-			continue
-		}
-
-		var keepFile, deleteFile *service.MediaFile
-		for i := range group.Files {
-			f := &group.Files[i]
-			if f.ID == group.BestFileID {
-				keepFile = f
-			} else if deleteFile == nil {
-				deleteFile = f
-			}
-		}
-
-		if keepFile == nil || deleteFile == nil {
-			continue
-		}
-
-		item := plans.DuplicateGroup{
-			GroupID:   group.ID,
-			MediaType: group.MediaType,
-			Title:     group.Title,
-			Year:      group.Year,
-			Season:    group.Season,
-			Episode:   group.Episode,
-			Keep: plans.FileInfo{
-				ID:           keepFile.ID,
-				Path:         keepFile.Path,
-				Size:         keepFile.Size,
-				Resolution:   keepFile.Resolution,
-				SourceType:   keepFile.SourceType,
-				QualityScore: keepFile.QualityScore,
-			},
-			Delete: plans.FileInfo{
-				ID:           deleteFile.ID,
-				Path:         deleteFile.Path,
-				Size:         deleteFile.Size,
-				Resolution:   deleteFile.Resolution,
-				SourceType:   deleteFile.SourceType,
-				QualityScore: deleteFile.QualityScore,
-			},
-		}
-
 		plan.Plans = append(plan.Plans, item)
 		plan.Summary.FilesToDelete++
-		plan.Summary.SpaceReclaimable += deleteFile.Size
+		plan.Summary.SpaceReclaimable += item.Delete.Size
 	}
 
 	if len(plan.Plans) == 0 {
 		_ = plans.DeleteDuplicatePlans()
 		fmt.Println("No safe duplicate deletion plan was generated.")
-		if len(skippedUnsafe) > 0 {
-			fmt.Printf("\nSkipped %d unsafe duplicate groups because they are marked as movies but live under TV library roots.\n", len(skippedUnsafe))
-			fmt.Println("Run a scan or targeted scan to repair the media type before deleting anything.")
+		for _, reason := range skippedForReview {
+			fmt.Printf("  [review] %s\n", reason)
 		}
 		return nil
 	}
@@ -122,11 +82,108 @@ func runDuplicatesGenerate() error {
 	fmt.Println("[ok] Duplicate plan generated")
 	fmt.Printf("   Files to delete: %d\n", plan.Summary.FilesToDelete)
 	fmt.Printf("   Space reclaimable: %s\n\n", formatBytes(plan.Summary.SpaceReclaimable))
+	for _, reason := range skippedForReview {
+		fmt.Printf("  [review] %s\n", reason)
+	}
 	fmt.Println("Next steps:")
 	fmt.Println("  plex2jellyfin duplicates dry-run   # Preview deletions")
 	fmt.Println("  plex2jellyfin duplicates execute   # Execute deletions")
 
 	return nil
+}
+
+func buildSafeDuplicatePlanEntry(group service.DuplicateGroup, svc *service.CleanupService, cfg *config.Config) (plans.DuplicateGroup, string) {
+	if len(group.Files) != 2 {
+		return plans.DuplicateGroup{}, fmt.Sprintf("contains %d files; requires manual review", len(group.Files))
+	}
+	if duplicateGroupLooksUnsafeTVMovie(group, cfg) {
+		return plans.DuplicateGroup{}, "movie files are under a TV library root"
+	}
+	if level, reasons := svc.GroupConfidence(group); level != service.ConfidenceHigh {
+		return plans.DuplicateGroup{}, "low confidence: " + strings.Join(reasons, "; ")
+	}
+
+	var keepFile, deleteFile *service.MediaFile
+	for i := range group.Files {
+		f := &group.Files[i]
+		if f.ID == group.BestFileID {
+			keepFile = f
+		} else {
+			deleteFile = f
+		}
+	}
+	if keepFile == nil || deleteFile == nil || keepFile.ID == deleteFile.ID {
+		return plans.DuplicateGroup{}, "no unambiguous keeper and delete candidate"
+	}
+	if group.MediaType == "series" {
+		if group.Season == nil || group.Episode == nil {
+			return plans.DuplicateGroup{}, "episode identity is incomplete"
+		}
+		deleteEpisode, err := naming.ParseTVShowFromPath(deleteFile.Path)
+		if err != nil {
+			return plans.DuplicateGroup{}, "cannot verify delete candidate episode range"
+		}
+		keepEpisode, err := naming.ParseTVShowFromPath(keepFile.Path)
+		if err != nil {
+			return plans.DuplicateGroup{}, "cannot verify keeper episode range"
+		}
+		if deleteEpisode.Season != *group.Season || deleteEpisode.Episode != *group.Episode ||
+			keepEpisode.Season != *group.Season || keepEpisode.Episode != *group.Episode {
+			return plans.DuplicateGroup{}, "file paths do not match the grouped episode identity"
+		}
+		deleteEnd := deleteEpisode.EpisodeEnd
+		if deleteEnd < deleteEpisode.Episode {
+			deleteEnd = deleteEpisode.Episode
+		}
+		keepEnd := keepEpisode.EpisodeEnd
+		if keepEnd < keepEpisode.Episode {
+			keepEnd = keepEpisode.Episode
+		}
+		if keepEnd < deleteEnd {
+			return plans.DuplicateGroup{}, fmt.Sprintf("keeper does not cover delete candidate episode range through E%02d", deleteEnd)
+		}
+	}
+
+	fileInfo := func(file *service.MediaFile) (plans.FileInfo, string) {
+		info, err := os.Stat(file.Path)
+		if err != nil {
+			return plans.FileInfo{}, fmt.Sprintf("cannot stat %s: %v", file.Path, err)
+		}
+		if !info.Mode().IsRegular() {
+			return plans.FileInfo{}, fmt.Sprintf("%s is not a regular file", file.Path)
+		}
+		if info.Size() != file.Size {
+			return plans.FileInfo{}, fmt.Sprintf("%s size changed since indexing", file.Path)
+		}
+		return plans.FileInfo{
+			ID:              file.ID,
+			Path:            file.Path,
+			Size:            info.Size(),
+			QualityScore:    file.QualityScore,
+			Resolution:      file.Resolution,
+			SourceType:      file.SourceType,
+			HasStatSnapshot: true,
+			ModTimeUnixNano: info.ModTime().UnixNano(),
+		}, ""
+	}
+	keepInfo, reason := fileInfo(keepFile)
+	if reason != "" {
+		return plans.DuplicateGroup{}, reason
+	}
+	deleteInfo, reason := fileInfo(deleteFile)
+	if reason != "" {
+		return plans.DuplicateGroup{}, reason
+	}
+	return plans.DuplicateGroup{
+		GroupID:   group.ID,
+		MediaType: group.MediaType,
+		Title:     group.Title,
+		Year:      group.Year,
+		Season:    group.Season,
+		Episode:   group.Episode,
+		Keep:      keepInfo,
+		Delete:    deleteInfo,
+	}, ""
 }
 
 func duplicateGroupLooksUnsafeTVMovie(group service.DuplicateGroup, cfg *config.Config) bool {

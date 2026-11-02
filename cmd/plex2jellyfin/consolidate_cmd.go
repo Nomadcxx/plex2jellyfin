@@ -103,6 +103,11 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 				failedCount++
 				continue
 			}
+			if err := result.Validate(); err != nil {
+				fmt.Printf("  [error] Failed to move: %v\n", err)
+				failedCount++
+				continue
+			}
 
 			// Update database
 			if err := updateDatabaseAfterMove(db, op.SourcePath, op.TargetPath, op.Size); err != nil {

@@ -40,7 +40,7 @@ func (m *MediaDB) findDuplicateMoviesLocked() ([]DuplicateGroup, error) {
 	query := `
 		SELECT normalized_title, year
 		FROM media_files
-		WHERE media_type = 'movie'
+		WHERE media_type = 'movie' AND size > 0
 		GROUP BY normalized_title, year
 		HAVING COUNT(*) > 1
 		ORDER BY normalized_title, year
@@ -99,7 +99,7 @@ func (m *MediaDB) findDuplicateEpisodesLocked() ([]DuplicateGroup, error) {
 		SELECT parent_series_id, normalized_title, year, season, episode
 		FROM media_files
 		WHERE media_type = 'episode' AND parent_series_id IS NOT NULL
-		  AND season IS NOT NULL AND episode IS NOT NULL
+		  AND season IS NOT NULL AND episode IS NOT NULL AND size > 0
 		GROUP BY parent_series_id, normalized_title, year, season, episode
 		HAVING COUNT(*) > 1
 		ORDER BY normalized_title, year, season, episode
@@ -164,7 +164,7 @@ func (m *MediaDB) getMediaFilesForGroup(title string, year, season, episode *int
 			source, source_priority, library_root,
 			created_at, updated_at
 		FROM media_files
-		WHERE normalized_title = ? AND media_type = ?
+		WHERE normalized_title = ? AND media_type = ? AND size > 0
 	`
 	args := []interface{}{title, mediaType}
 	if parentSeriesID != nil {

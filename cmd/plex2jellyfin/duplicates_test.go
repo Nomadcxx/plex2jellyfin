@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -226,6 +227,265 @@ func TestDuplicateGroupLooksUnsafeTVMovie(t *testing.T) {
 	}
 }
 
+func TestRunDuplicatesGenerateSkipsLowConfidenceGroups(t *testing.T) {
+	root := t.TempDir()
+	configHome := filepath.Join(root, "config")
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("SUDO_USER", "")
+
+	db, err := database.Open()
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+
+	year := 2020
+	for i, size := range []int64{100, 80} {
+		path := filepath.Join(root, fmt.Sprintf("copy-%d.mkv", i))
+		if err := os.WriteFile(path, bytes.Repeat([]byte{'x'}, int(size)), 0644); err != nil {
+			t.Fatalf("create media file: %v", err)
+		}
+		if err := db.UpsertMediaFile(&database.MediaFile{
+			Path:            path,
+			Size:            size,
+			MediaType:       "movie",
+			NormalizedTitle: "example movie",
+			Year:            &year,
+			Resolution:      "1080p",
+		}); err != nil {
+			t.Fatalf("insert media file: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	if err := runDuplicatesGenerate(); err != nil {
+		t.Fatalf("generate duplicate plan: %v", err)
+	}
+
+	plan, err := plans.LoadDuplicatePlans()
+	if err != nil {
+		t.Fatalf("load duplicate plan: %v", err)
+	}
+	if plan != nil {
+		t.Fatalf("low-confidence group produced a deletable plan: %#v", plan.Plans)
+	}
+}
+
+func TestRunDuplicatesExecuteRefusesLowConfidencePlan(t *testing.T) {
+	root := t.TempDir()
+	configHome := filepath.Join(root, "config")
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("SUDO_USER", "")
+	t.Setenv("PLEX2JELLYFIN_TEST_NO_ESCALATE", "1")
+
+	db, err := database.Open()
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	year := 2020
+	paths := []string{filepath.Join(root, "keep.mkv"), filepath.Join(root, "delete.mkv")}
+	for i, size := range []int64{100, 80} {
+		if err := os.WriteFile(paths[i], bytes.Repeat([]byte{'x'}, int(size)), 0644); err != nil {
+			t.Fatalf("create media file: %v", err)
+		}
+		if err := db.UpsertMediaFile(&database.MediaFile{
+			Path:            paths[i],
+			Size:            size,
+			MediaType:       "movie",
+			NormalizedTitle: "example movie",
+			Year:            &year,
+			Resolution:      "1080p",
+		}); err != nil {
+			t.Fatalf("insert media file: %v", err)
+		}
+	}
+
+	analysis, err := service.NewCleanupService(db).AnalyzeDuplicates()
+	if err != nil {
+		t.Fatalf("analyze duplicates: %v", err)
+	}
+	if len(analysis.Groups) != 1 || len(analysis.Groups[0].Files) != 2 {
+		t.Fatalf("expected one two-file duplicate group, got %#v", analysis.Groups)
+	}
+	group := analysis.Groups[0]
+	plan := &plans.DuplicatePlan{
+		Plans: []plans.DuplicateGroup{{
+			GroupID:   group.ID,
+			Title:     group.Title,
+			Year:      group.Year,
+			MediaType: group.MediaType,
+			Keep:      plans.FileInfo{ID: group.Files[0].ID, Path: group.Files[0].Path, Size: group.Files[0].Size},
+			Delete:    plans.FileInfo{ID: group.Files[1].ID, Path: group.Files[1].Path, Size: group.Files[1].Size},
+		}},
+	}
+	if err := plans.SaveDuplicatePlans(plan); err != nil {
+		t.Fatalf("save duplicate plan: %v", err)
+	}
+
+	oldStdin := os.Stdin
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	os.Stdin = stdinR
+	t.Cleanup(func() { os.Stdin = oldStdin })
+	if _, err := stdinW.WriteString("y\n"); err != nil {
+		t.Fatalf("write confirmation: %v", err)
+	}
+	_ = stdinW.Close()
+
+	if err := runDuplicatesExecute(db, nil); err != nil {
+		t.Fatalf("execute duplicate plan: %v", err)
+	}
+	if _, err := os.Stat(paths[1]); err != nil {
+		t.Fatalf("low-confidence duplicate was deleted: %v", err)
+	}
+}
+
+func TestDuplicatePlanCurrentIssuesRejectsChangedFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+
+	db, err := database.Open()
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	group := addHighConfidenceDuplicatePlanGroup(t, db, root, "changed", false)
+	before, err := os.Stat(group.Delete.Path)
+	if err != nil {
+		t.Fatalf("stat planned delete file: %v", err)
+	}
+	changedContents := bytes.Repeat([]byte{'n'}, int(group.Delete.Size))
+	if err := os.WriteFile(group.Delete.Path, changedContents, 0o644); err != nil {
+		t.Fatalf("replace planned delete file: %v", err)
+	}
+	changedTime := before.ModTime().Add(time.Hour)
+	if err := os.Chtimes(group.Delete.Path, changedTime, changedTime); err != nil {
+		t.Fatalf("change planned file modification time: %v", err)
+	}
+
+	issues, err := duplicatePlanCurrentIssues(db, nil, &plans.DuplicatePlan{Plans: []plans.DuplicateGroup{group}})
+	if err != nil {
+		t.Fatalf("revalidate changed duplicate plan: %v", err)
+	}
+	if len(issues) == 0 {
+		t.Fatal("changed planned file was accepted for deletion")
+	}
+	if err := deletePlannedDuplicateFile(db, group, -1, -1); err == nil {
+		t.Fatal("changed planned file passed the final deletion check")
+	}
+	if _, err := os.Stat(group.Delete.Path); err != nil {
+		t.Fatalf("changed planned file was deleted: %v", err)
+	}
+	if _, err := db.GetMediaFile(group.Delete.Path); err != nil {
+		t.Fatalf("changed planned file inventory row was removed: %v", err)
+	}
+}
+
+func TestDeletePlannedDuplicateFileRejectsChangedKeeper(t *testing.T) {
+	root := t.TempDir()
+	db, err := database.OpenPath(filepath.Join(root, "media.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	group := addHighConfidenceDuplicatePlanGroup(t, db, root, "changed-keeper", false)
+	before, err := os.Stat(group.Keep.Path)
+	if err != nil {
+		t.Fatalf("stat planned keeper: %v", err)
+	}
+	if err := os.WriteFile(group.Keep.Path, bytes.Repeat([]byte{'n'}, int(group.Keep.Size)), 0o644); err != nil {
+		t.Fatalf("replace planned keeper: %v", err)
+	}
+	changedTime := before.ModTime().Add(time.Hour)
+	if err := os.Chtimes(group.Keep.Path, changedTime, changedTime); err != nil {
+		t.Fatalf("change keeper modification time: %v", err)
+	}
+
+	if err := deletePlannedDuplicateFile(db, group, -1, -1); err == nil {
+		t.Fatal("delete candidate was removed after its keeper changed")
+	}
+	if _, err := os.Stat(group.Delete.Path); err != nil {
+		t.Fatalf("delete candidate was removed: %v", err)
+	}
+	if _, err := db.GetMediaFile(group.Delete.Path); err != nil {
+		t.Fatalf("delete candidate inventory row was removed: %v", err)
+	}
+}
+
+func addHighConfidenceDuplicatePlanGroup(t *testing.T, db *database.MediaDB, root, title string, blockDelete bool) plans.DuplicateGroup {
+	t.Helper()
+	if blockDelete && os.Geteuid() == 0 {
+		t.Skip("read-only-directory delete failure cannot be simulated as root")
+	}
+
+	deleteDir := root
+	if blockDelete {
+		deleteDir = filepath.Join(root, "readonly-"+title)
+		if err := os.Mkdir(deleteDir, 0755); err != nil {
+			t.Fatalf("create read-only directory: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(deleteDir, 0755) })
+	}
+
+	files := []struct {
+		path  string
+		data  []byte
+		score int
+	}{
+		{path: filepath.Join(root, title+"-keep.mkv"), data: bytes.Repeat([]byte{'k'}, 100), score: 10},
+		{path: filepath.Join(deleteDir, title+"-delete.mkv"), data: bytes.Repeat([]byte{'d'}, 80), score: 0},
+	}
+	for _, file := range files {
+		if err := os.WriteFile(file.path, file.data, 0644); err != nil {
+			t.Fatalf("create duplicate media file: %v", err)
+		}
+		if err := db.UpsertMediaFile(&database.MediaFile{
+			Path:            file.path,
+			Size:            int64(len(file.data)),
+			MediaType:       "movie",
+			NormalizedTitle: title,
+			Year:            intPtr(2020),
+			Resolution:      "1080p",
+			QualityScore:    file.score,
+		}); err != nil {
+			t.Fatalf("insert duplicate media row: %v", err)
+		}
+	}
+	if blockDelete {
+		if err := os.Chmod(deleteDir, 0555); err != nil {
+			t.Fatalf("make delete directory read-only: %v", err)
+		}
+	}
+
+	svc := service.NewCleanupService(db)
+	analysis, err := svc.AnalyzeDuplicates()
+	if err != nil {
+		t.Fatalf("analyze duplicate group: %v", err)
+	}
+	for _, group := range analysis.Groups {
+		if group.Title != title {
+			continue
+		}
+		entry, reason := buildSafeDuplicatePlanEntry(group, svc, nil)
+		if reason != "" {
+			t.Fatalf("expected high-confidence plan group, got %q", reason)
+		}
+		return entry
+	}
+	t.Fatalf("duplicate group %q not found", title)
+	return plans.DuplicateGroup{}
+}
+
 func TestRunDuplicatesExecuteReportsDeleteFailures(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
@@ -238,13 +498,7 @@ func TestRunDuplicatesExecuteReportsDeleteFailures(t *testing.T) {
 	}
 	defer db.Close()
 
-	nonEmptyDir := filepath.Join(tmpDir, "not-a-file")
-	if err := os.Mkdir(nonEmptyDir, 0755); err != nil {
-		t.Fatalf("Failed to create directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(nonEmptyDir, "child.txt"), []byte("x"), 0644); err != nil {
-		t.Fatalf("Failed to create child file: %v", err)
-	}
+	group := addHighConfidenceDuplicatePlanGroup(t, db, tmpDir, "example", true)
 
 	plan := &plans.DuplicatePlan{
 		CreatedAt: time.Now(),
@@ -252,17 +506,9 @@ func TestRunDuplicatesExecuteReportsDeleteFailures(t *testing.T) {
 		Summary: plans.DuplicateSummary{
 			TotalGroups:      1,
 			FilesToDelete:    1,
-			SpaceReclaimable: 1,
+			SpaceReclaimable: group.Delete.Size,
 		},
-		Plans: []plans.DuplicateGroup{{
-			GroupID:   "g1",
-			Title:     "Example",
-			MediaType: "movie",
-			Delete: plans.FileInfo{
-				Path: nonEmptyDir,
-				Size: 1,
-			},
-		}},
+		Plans: []plans.DuplicateGroup{group},
 	}
 	if err := plans.SaveDuplicatePlans(plan); err != nil {
 		t.Fatalf("SaveDuplicatePlans failed: %v", err)
@@ -314,17 +560,8 @@ func TestRunDuplicatesExecuteArchivesPlanOnPartialFailure(t *testing.T) {
 	}
 	defer db.Close()
 
-	deletable := filepath.Join(tmpDir, "duplicate.mkv")
-	if err := os.WriteFile(deletable, []byte("x"), 0644); err != nil {
-		t.Fatalf("Failed to create duplicate file: %v", err)
-	}
-	nonEmptyDir := filepath.Join(tmpDir, "not-a-file")
-	if err := os.Mkdir(nonEmptyDir, 0755); err != nil {
-		t.Fatalf("Failed to create directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(nonEmptyDir, "child.txt"), []byte("x"), 0644); err != nil {
-		t.Fatalf("Failed to create child file: %v", err)
-	}
+	deletedGroup := addHighConfidenceDuplicatePlanGroup(t, db, tmpDir, "deleted", false)
+	failedGroup := addHighConfidenceDuplicatePlanGroup(t, db, tmpDir, "failed", true)
 
 	plan := &plans.DuplicatePlan{
 		CreatedAt: time.Now(),
@@ -332,28 +569,9 @@ func TestRunDuplicatesExecuteArchivesPlanOnPartialFailure(t *testing.T) {
 		Summary: plans.DuplicateSummary{
 			TotalGroups:      2,
 			FilesToDelete:    2,
-			SpaceReclaimable: 2,
+			SpaceReclaimable: deletedGroup.Delete.Size + failedGroup.Delete.Size,
 		},
-		Plans: []plans.DuplicateGroup{
-			{
-				GroupID:   "g1",
-				Title:     "Deleted",
-				MediaType: "movie",
-				Delete: plans.FileInfo{
-					Path: deletable,
-					Size: 1,
-				},
-			},
-			{
-				GroupID:   "g2",
-				Title:     "Failed",
-				MediaType: "movie",
-				Delete: plans.FileInfo{
-					Path: nonEmptyDir,
-					Size: 1,
-				},
-			},
-		},
+		Plans: []plans.DuplicateGroup{deletedGroup, failedGroup},
 	}
 	if err := plans.SaveDuplicatePlans(plan); err != nil {
 		t.Fatalf("SaveDuplicatePlans failed: %v", err)

@@ -31,7 +31,7 @@ func (s *CleanupService) RebuildMoviesFromMediaFiles(movieLibraries []string) (*
 	groups := make(map[string]*movieFileGroup)
 
 	for _, file := range files {
-		if file == nil || file.MediaType != "movie" || file.Year == nil {
+		if file == nil || file.MediaType != "movie" || file.Size <= 0 || file.Year == nil {
 			continue
 		}
 		if !mediaFileInLibraries(file, movieLibraries) {
