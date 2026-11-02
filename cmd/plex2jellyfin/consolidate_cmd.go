@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/consolidate"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/plans"
 	"github.com/Nomadcxx/plex2jellyfin/internal/privilege"
@@ -26,7 +27,9 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 		return nil
 	}
 
-	if issues := append(consolidatePlanSafetyIssues(plan), consolidatePlanRootIssues(plan, cfg)...); len(issues) > 0 {
+	issues := append(consolidatePlanSafetyIssues(plan), consolidatePlanRootIssues(plan, cfg)...)
+	issues = append(issues, consolidatePlanDatabaseIssues(db, plan)...)
+	if len(issues) > 0 {
 		fmt.Println("[error] Consolidation plan failed safety validation; refusing to execute.")
 		printConsolidateSafetyIssues(issues)
 		fmt.Println("\nRegenerate after planner fixes, or inspect with 'plex2jellyfin consolidate dry-run'.")
@@ -85,6 +88,11 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 				alreadyGoneCount++
 				continue
 			}
+			if err := consolidate.CheckDestinationAvailable(op.TargetPath); err != nil {
+				fmt.Printf("  [error] Failed to move: %v\n", err)
+				failedCount++
+				continue
+			}
 
 			fmt.Printf("  Moving: %s\n", op.SourcePath)
 
@@ -97,21 +105,54 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 			}
 
 			// Move file
-			result, err := transferer.Move(op.SourcePath, op.TargetPath, transfer.OptionsFromConfig(cfg))
-			if err != nil {
-				fmt.Printf("  [error] Failed to move: %v\n", err)
-				failedCount++
-				continue
-			}
-			if err := result.Validate(); err != nil {
-				fmt.Printf("  [error] Failed to move: %v\n", err)
-				failedCount++
-				continue
-			}
-
+			transferOptions := transfer.OptionsFromConfig(cfg)
 			// Update database
-			if err := updateDatabaseAfterMove(db, op.SourcePath, op.TargetPath, op.Size); err != nil {
-				fmt.Printf("  [warn] Moved but database update issue: %v\n", err)
+			targetLibraryRoot := configuredRootForPath(group.TargetLocation, allLibraryRoots)
+			moveBytes := int64(0)
+			moved := false
+			movedIdentity := ""
+			move := func(sourceIdentity, sourceQuarantinePath string, recordPublished func(string, string) error) (database.MediaFileMoveAttempt, error) {
+				transferOptions.MoveSourceIdentity = sourceIdentity
+				transferOptions.MoveSourceQuarantinePath = sourceQuarantinePath
+				transferOptions.OnPublished = recordPublished
+				result, err := transferer.Move(op.SourcePath, op.TargetPath, transferOptions)
+				attempt := database.MediaFileMoveAttempt{}
+				if result != nil {
+					attempt.Published = result.Published
+					attempt.SourceRemoved = result.SourceRemoved
+					attempt.PublishedIdentity = result.PublishedIdentity
+					attempt.PendingSourceRemoval = result.PendingSourceRemoval
+				}
+				if err != nil {
+					return attempt, fmt.Errorf("transfer failed: %w", err)
+				}
+				if err := result.Validate(); err != nil {
+					return attempt, fmt.Errorf("transfer failed: %w", err)
+				}
+				if !result.SourceRemoved {
+					return attempt, fmt.Errorf("transfer completed without removing source: %s", op.SourcePath)
+				}
+				moveBytes = result.BytesCopied
+				moved = true
+				movedIdentity = result.PublishedIdentity
+				return attempt, nil
+			}
+			if err := updateDatabaseAfterMove(db, op.SourcePath, op.TargetPath, op.Size, group.TargetLocation, targetLibraryRoot, move); err != nil {
+				if moved {
+					if rollbackErr := transfer.RollbackMove(transferer, op.SourcePath, op.TargetPath, transferOptions, movedIdentity); rollbackErr != nil {
+						fmt.Printf("  [warn] Database update issue: %v; filesystem rollback failed: %v\n", err, rollbackErr)
+					} else {
+						if cancelErr := db.CancelMediaFileMove(op.SourcePath); cancelErr != nil {
+							fmt.Printf("  [warn] Database update issue; file restored but reservation cleanup failed: %v\n", cancelErr)
+						} else {
+							fmt.Printf("  [warn] Database update issue; file restored to source: %v\n", err)
+						}
+					}
+				} else {
+					fmt.Printf("  [error] Failed to move: %v\n", err)
+				}
+				failedCount++
+				continue
 			}
 
 			// Cleanup source directory (delete cruft and empty dirs)
@@ -121,8 +162,8 @@ func runConsolidateExecute(db *database.MediaDB, cfg *config.Config) error {
 			}
 
 			movedCount++
-			movedBytes += result.BytesCopied
-			fmt.Printf("  [ok] Moved (%s)\n", formatBytes(result.BytesCopied))
+			movedBytes += moveBytes
+			fmt.Printf("  [ok] Moved (%s)\n", formatBytes(moveBytes))
 		}
 	}
 
@@ -184,6 +225,7 @@ func consolidatePlanSafetyIssues(plan *plans.ConsolidatePlan) []string {
 
 	var issues []string
 	sourceCounts := make(map[string]int)
+	destinationCounts := make(map[string]int)
 	for _, group := range plan.Plans {
 		if hasSeasonComponent(group.TargetLocation) {
 			issues = append(issues, fmt.Sprintf("target location includes season/release structure: %s", group.TargetLocation))
@@ -193,6 +235,7 @@ func consolidatePlanSafetyIssues(plan *plans.ConsolidatePlan) []string {
 				continue
 			}
 			sourceCounts[filepath.Clean(op.SourcePath)]++
+			destinationCounts[filepath.Clean(op.TargetPath)]++
 			if pathIsWithin(group.TargetLocation, op.SourcePath) {
 				issues = append(issues, fmt.Sprintf("source already under target location; not a consolidation move: %s", op.SourcePath))
 			}
@@ -210,8 +253,47 @@ func consolidatePlanSafetyIssues(plan *plans.ConsolidatePlan) []string {
 			issues = append(issues, fmt.Sprintf("duplicate source appears in %d planned moves: %s", count, source))
 		}
 	}
+	for destination, count := range destinationCounts {
+		if count > 1 {
+			issues = append(issues, fmt.Sprintf("duplicate destination appears in %d planned moves: %s", count, destination))
+		}
+	}
 
 	return issues
+}
+
+func consolidatePlanDatabaseIssues(db *database.MediaDB, plan *plans.ConsolidatePlan) []string {
+	if db == nil || plan == nil {
+		return nil
+	}
+	var issues []string
+	for _, group := range plan.Plans {
+		for _, op := range group.Operations {
+			if op.Action != "move" {
+				continue
+			}
+			if err := db.CheckMediaFileMoveDestination(op.SourcePath, op.TargetPath); err != nil {
+				issues = append(issues, fmt.Sprintf("cannot move to %s: %v", op.TargetPath, err))
+			}
+		}
+	}
+	return issues
+}
+
+func configuredRootForPath(path string, roots []string) string {
+	cleanPath := filepath.Clean(path)
+	best := ""
+	for _, root := range roots {
+		cleanRoot := filepath.Clean(root)
+		rel, err := filepath.Rel(cleanRoot, cleanPath)
+		if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if len(cleanRoot) > len(best) {
+			best = cleanRoot
+		}
+	}
+	return best
 }
 
 func printConsolidateSafetyIssues(issues []string) {
@@ -245,32 +327,55 @@ func hasSeasonComponent(path string) bool {
 	return false
 }
 
-// updateDatabaseAfterMove updates or creates a database entry after a file move
-func updateDatabaseAfterMove(db *database.MediaDB, sourcePath, targetPath string, size int64) error {
+// updateDatabaseAfterMove moves the file while reserving its destination row.
+func updateDatabaseAfterMove(db *database.MediaDB, sourcePath, targetPath string, size int64, targetCanonicalPath, targetLibraryRoot string, move func(string, string, func(string, string) error) (database.MediaFileMoveAttempt, error)) error {
 	// Try to get existing file entry
 	file, err := db.GetMediaFile(sourcePath)
-	if err != nil || file == nil {
-		// File not in DB - create new entry
+	if err != nil {
+		return fmt.Errorf("failed to read media file: %w", err)
+	}
+	if file == nil {
+		// Track the source first so a failed move still has a reserved DB row.
 		fmt.Printf("  File not tracked, adding to database\n")
-		return createMediaFileEntry(db, targetPath, size)
+		if err := createMediaFileEntry(db, sourcePath, targetPath, size); err != nil {
+			return fmt.Errorf("failed to track source file before move: %w", err)
+		}
+		file, err = db.GetMediaFile(sourcePath)
+		if err != nil {
+			return fmt.Errorf("failed to read newly tracked source file: %w", err)
+		}
+		if file == nil {
+			return fmt.Errorf("source file was not tracked before move: %s", sourcePath)
+		}
 	}
 
-	// Delete old entry
-	if err := db.DeleteMediaFile(sourcePath); err != nil {
-		return fmt.Errorf("failed to delete old entry: %w", err)
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to inspect source file: %w", err)
 	}
-
-	// Update path and upsert
 	file.Path = targetPath
-	if err := db.UpsertMediaFile(file); err != nil {
-		return fmt.Errorf("failed to update entry: %w", err)
+	file.Size = info.Size()
+	file.ModifiedAt = info.ModTime()
+	if targetLibraryRoot != "" {
+		file.LibraryRoot = targetLibraryRoot
 	}
-
-	return nil
+	return db.MoveMediaFileWith(file, sourcePath, targetCanonicalPath, false, func(sourceIdentity, sourceQuarantinePath string, recordPublished func(string, string) error) (database.MediaFileMoveAttempt, error) {
+		attempt, err := move(sourceIdentity, sourceQuarantinePath, recordPublished)
+		if err != nil {
+			return attempt, err
+		}
+		info, err := os.Stat(targetPath)
+		if err != nil {
+			return attempt, fmt.Errorf("failed to inspect moved file: %w", err)
+		}
+		file.Size = info.Size()
+		file.ModifiedAt = info.ModTime()
+		return attempt, nil
+	})
 }
 
 // createMediaFileEntry creates a minimal database entry for a moved file
-func createMediaFileEntry(db *database.MediaDB, path string, size int64) error {
+func createMediaFileEntry(db *database.MediaDB, path, classificationPath string, size int64) error {
 	// Get file info
 	info, err := os.Stat(path)
 	if err != nil {
@@ -279,9 +384,9 @@ func createMediaFileEntry(db *database.MediaDB, path string, size int64) error {
 
 	// Determine media type from path
 	mediaType := "movie"
-	if strings.Contains(strings.ToLower(path), "tvshow") ||
-		strings.Contains(strings.ToLower(path), "tv show") ||
-		strings.Contains(path, "Season") {
+	if strings.Contains(strings.ToLower(classificationPath), "tvshow") ||
+		strings.Contains(strings.ToLower(classificationPath), "tv show") ||
+		strings.Contains(classificationPath, "Season") {
 		mediaType = "episode"
 	}
 

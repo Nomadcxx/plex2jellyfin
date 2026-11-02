@@ -592,10 +592,7 @@ func setupTestDB(t *testing.T) *database.MediaDB {
 	return db
 }
 
-func TestExecuteRename_CrossDevice(t *testing.T) {
-	// This test documents that code uses transfer.Move() instead of os.Rename()
-	// We verify transfer package integration for cross-device moves
-
+func TestExecuteRenameUpdatesMediaFilePath(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
@@ -649,6 +646,38 @@ func TestExecuteRename_CrossDevice(t *testing.T) {
 	}
 	if updatedFile.Path != dstPath {
 		t.Errorf("Database path not updated: got %s, want %s", updatedFile.Path, dstPath)
+	}
+}
+
+func TestExecuteRenamePreservesExistingDestination(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "source.mkv")
+	destinationPath := filepath.Join(root, "destination.mkv")
+	if err := os.WriteFile(sourcePath, []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destinationPath, []byte("keep destination"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	file := &database.MediaFile{Path: sourcePath, Size: 6, MediaType: "movie", NormalizedTitle: "source"}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatal(err)
+	}
+	err := executeRename(db, AuditItem{ID: file.ID, Path: sourcePath}, AuditAction{Action: "rename", NewPath: destinationPath, NewTitle: "destination"}, false, nil)
+	if err == nil {
+		t.Fatal("executeRename overwrote an existing destination")
+	}
+	for path, want := range map[string]string{sourcePath: "source", destinationPath: "keep destination"} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Errorf("%s = %q, error = %v; want %q", path, got, err, want)
+		}
+	}
+	current, err := db.GetMediaFileByID(file.ID)
+	if err != nil || current == nil || current.Path != sourcePath {
+		t.Fatalf("media row after rejected rename = %#v, error = %v", current, err)
 	}
 }
 

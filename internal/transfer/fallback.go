@@ -82,6 +82,9 @@ func (f *FallbackTransferer) tryAll(src, dst string, opts TransferOptions, isMov
 				return result, nil
 			}
 		}
+		if result != nil && (result.PendingSourceRemoval != nil || result.Published) {
+			return result, err
+		}
 
 		lastResult = result
 		lastErr = err

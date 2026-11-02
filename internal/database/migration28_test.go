@@ -37,6 +37,7 @@ func TestMigration28AddsRetryMetadataAndPreservesFailures(t *testing.T) {
 		_, err = db.SQL().Exec(`ALTER TABLE parse_decisions DROP COLUMN retry_required_bytes`)
 		require.NoError(t, err)
 	}
+	dropMediaFileMoveMigration(t, db)
 	_, err = db.SQL().Exec(`DELETE FROM schema_version WHERE version >= 28`)
 	require.NoError(t, err)
 
@@ -60,5 +61,5 @@ func TestMigration28AddsRetryMetadataAndPreservesFailures(t *testing.T) {
 	require.Zero(t, retryRequiredBytes)
 	var version int
 	require.NoError(t, db.SQL().QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version))
-	require.Equal(t, 28, version)
+	require.Equal(t, currentSchemaVersion, version)
 }

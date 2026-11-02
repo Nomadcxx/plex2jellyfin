@@ -142,7 +142,7 @@ func (t *HardlinkCopyTransferer) Copy(src, dst string, opts TransferOptions) (*T
 		result.Error = fmt.Errorf("apply transfer permissions: %w", err)
 		return result, result.Error
 	}
-	if err := os.Rename(tmpPath, dst); err != nil {
+	if err := publishNoReplace(tmpPath, dst); err != nil {
 		result.Error = fmt.Errorf("publish transfer: %w", err)
 		return result, result.Error
 	}

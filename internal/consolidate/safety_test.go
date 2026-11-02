@@ -1,6 +1,7 @@
 package consolidate
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -36,6 +37,21 @@ func TestSafetyIssuesDetectsDuplicateSource(t *testing.T) {
 
 	if issues := SafetyIssues(plan); !hasIssue(issues, "duplicate source") {
 		t.Fatalf("expected duplicate source issue, got %#v", issues)
+	}
+}
+
+func TestSafetyIssuesDetectsDuplicateDestination(t *testing.T) {
+	destination := "/library/Show (2020)/Season 01/episode.mkv"
+	plan := &Plan{
+		TargetPath: "/library/Show (2020)",
+		Operations: []*Operation{
+			{SourcePath: "/source-a/episode.mkv", DestinationPath: destination},
+			{SourcePath: "/source-b/episode.mkv", DestinationPath: filepath.Join(filepath.Dir(destination), ".", filepath.Base(destination))},
+		},
+	}
+
+	if issues := SafetyIssues(plan); !hasIssue(issues, "duplicate destination") {
+		t.Fatalf("expected duplicate destination issue, got %#v", issues)
 	}
 }
 

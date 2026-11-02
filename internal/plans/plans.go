@@ -11,6 +11,7 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/fileidentity"
 	"github.com/Nomadcxx/plex2jellyfin/internal/paths"
 	"github.com/Nomadcxx/plex2jellyfin/internal/permissions"
 	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
@@ -335,49 +336,75 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 		return nil
 	}
 
-	// Fast path: for normal in-place renames, os.Rename is atomic and should
-	// complete in milliseconds. The generic transfer backend may copy the whole
-	// file, which is only appropriate for cross-device moves.
+	// Use atomic no-replace rename on the same filesystem and copy only for
+	// cross-device moves.
 	if err := os.MkdirAll(filepath.Dir(action.NewPath), 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 	transferOpts := transfer.OptionsFromConfig(cfg)
-	if err := os.Rename(file.Path, action.NewPath); err == nil {
-		if permErr := transfer.ApplyPermissions(action.NewPath, transferOpts); permErr != nil {
-			return fmt.Errorf("file renamed but permission application failed: %w", permErr)
-		}
-	} else {
-		if !errors.Is(err, syscall.EXDEV) {
-			return fmt.Errorf("failed to rename file: %w", err)
-		}
-		start := time.Now()
-		fmt.Printf("  Cross-device rename detected; using transfer fallback...\n")
+	originalPath := file.Path
+	usedAtomicRename := false
+	file.Path = action.NewPath
+	if filepath.Clean(originalPath) == filepath.Clean(action.NewPath) {
+		file.Path = originalPath
+	} else if err := db.MoveMediaFileWith(file, originalPath, "", false,
+		func(sourceIdentity, sourceQuarantinePath string, recordPublished func(string, string) error) (database.MediaFileMoveAttempt, error) {
+			transferOpts.MoveSourceIdentity = sourceIdentity
+			transferOpts.MoveSourceQuarantinePath = sourceQuarantinePath
+			transferOpts.OnPublished = recordPublished
+			result, moveErr := transfer.RenameMove(originalPath, action.NewPath, transferOpts)
+			if moveErr == nil {
+				usedAtomicRename = true
+				return database.MediaFileMoveAttempt{
+					Published:                 result.Published,
+					SourceRemoved:             result.SourceRemoved,
+					PublishedIdentity:         result.PublishedIdentity,
+					DestinationQuarantinePath: result.DestinationQuarantinePath,
+				}, nil
+			}
+			if (!errors.Is(moveErr, syscall.EXDEV) && !errors.Is(moveErr, fileidentity.ErrRenameNoReplaceUnsupported)) ||
+				!fileidentity.MatchesLstat(originalPath, sourceIdentity) {
+				return database.MediaFileMoveAttempt{}, fmt.Errorf("failed to rename file: %w", moveErr)
+			}
 
-		// Perform filesystem move using transfer package (handles cross-device)
-		transferer, transferErr := transfer.New(transfer.BackendAuto)
-		if transferErr != nil {
-			return fmt.Errorf("failed to create transferer: %w", transferErr)
+			started := time.Now()
+			transferer, err := transfer.New(transfer.BackendAuto)
+			if err != nil {
+				return database.MediaFileMoveAttempt{}, fmt.Errorf("create cross-device transferer: %w", err)
+			}
+			result, moveErr = transferer.Move(originalPath, action.NewPath, transferOpts)
+			attempt := database.MediaFileMoveAttempt{}
+			if result != nil {
+				attempt = database.MediaFileMoveAttempt{
+					Published:                 result.Published,
+					SourceRemoved:             result.SourceRemoved,
+					PublishedIdentity:         result.PublishedIdentity,
+					DestinationQuarantinePath: result.DestinationQuarantinePath,
+					PendingSourceRemoval:      result.PendingSourceRemoval,
+				}
+			}
+			if moveErr == nil {
+				moveErr = result.Validate()
+			}
+			if moveErr != nil {
+				return attempt, fmt.Errorf("failed to move file: %w", moveErr)
+			}
+			duration := result.Duration
+			if duration == 0 {
+				duration = time.Since(started)
+			}
+			fmt.Printf("  Transfer fallback completed via %s in %s (%d bytes, %d attempt(s))\n",
+				transferer.Name(), duration.Round(time.Millisecond), result.BytesCopied, result.Attempts)
+			return attempt, nil
+		}); err != nil {
+		return fmt.Errorf("move file: %w", err)
+	}
+	if usedAtomicRename {
+		if err := transfer.ApplyPermissions(action.NewPath, transferOpts); err != nil {
+			return fmt.Errorf("file moved but permission application failed: %w", err)
 		}
-
-		result, transferErr := transferer.Move(file.Path, action.NewPath, transferOpts)
-		if transferErr != nil {
-			return fmt.Errorf("failed to move file: %w", transferErr)
-		}
-		if err := result.Validate(); err != nil {
-			return fmt.Errorf("file transfer failed: %w", err)
-		}
-		duration := result.Duration
-		if duration == 0 {
-			duration = time.Since(start)
-		}
-		fmt.Printf("  Transfer fallback completed via %s in %s (%d bytes, %d attempt(s))\n",
-			transferer.Name(), duration.Round(time.Millisecond), result.BytesCopied, result.Attempts)
 	}
 
-	var originalPath string
-	originalPath = file.Path
-
-	file.Path = action.NewPath
 	file.NormalizedTitle = action.NewTitle
 	if action.NewYear != nil {
 		file.Year = action.NewYear
@@ -395,11 +422,7 @@ func executeRename(db *database.MediaDB, item AuditItem, action AuditAction, dry
 	}
 
 	if err := db.UpdateMediaFile(file); err != nil {
-		// Attempt rollback on DB failure
-		if rollbackErr := os.Rename(action.NewPath, originalPath); rollbackErr != nil {
-			fmt.Printf("Failed to rollback file move: %v\n", rollbackErr)
-		}
-		return fmt.Errorf("failed to update database: %w", err)
+		return fmt.Errorf("file moved but failed to update audit metadata: %w", err)
 	}
 
 	return nil

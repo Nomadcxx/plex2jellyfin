@@ -31,22 +31,40 @@ func (p *PVTransferer) CanResume() bool {
 }
 
 func (p *PVTransferer) Move(src, dst string, opts TransferOptions) (*TransferResult, error) {
+	opts, err := prepareSourceRemoval(src, opts)
+	if err != nil {
+		return &TransferResult{Error: err}, err
+	}
 	result, err := p.Copy(src, dst, opts)
 	if err != nil {
 		return result, err
 	}
 
 	if result.Success {
-		// Apply configured permissions (chown/chmod)
-		if err := ApplyPermissions(dst, opts); err != nil {
+		publishedInfo, err := recordPublishedDestination(result, src, dst, opts)
+		if err != nil {
 			result.Success = false
-			result.Error = fmt.Errorf("transfer succeeded but permission application failed: %w", err)
+			result.Error = err
 			return result, result.Error
 		}
 
-		if err := RemoveWithTimeout(src, 30*time.Second); err != nil {
+		// Apply configured permissions (chown/chmod)
+		if err := ApplyPermissions(dst, opts); err != nil {
+			result.Success = false
+			result.Error = cleanupPublishedDestinationAfterMoveFailure(src, dst, result.PublishedIdentity, fmt.Errorf("transfer succeeded but permission application failed: %w", err))
+			return result, result.Error
+		}
+
+		pending, removeErr := removeSourceWithTimeout(src, opts.MoveSourceQuarantinePath, opts.MoveSourceIdentity, dst, result.DestinationQuarantinePath, result.PublishedIdentity, 30*time.Second)
+		if removeErr != nil {
 			result.SourceRemoved = false
-			result.Error = fmt.Errorf("transfer succeeded but failed to remove source: %w", err)
+			result.Success = false
+			result.Error = fmt.Errorf("transfer succeeded but failed to remove source: %w", removeErr)
+			if pending != nil {
+				result.PendingSourceRemoval = resolvePendingSourceRemoval(src, dst, publishedInfo, result.PublishedIdentity, pending)
+			} else {
+				result.Error = cleanupPublishedDestinationAfterMoveFailure(src, dst, result.PublishedIdentity, result.Error)
+			}
 			return result, result.Error
 		}
 		result.SourceRemoved = true
@@ -206,7 +224,7 @@ func (p *PVTransferer) runPV(src, dst string, totalSize int64, opts TransferOpti
 			return bytesCopied.Load(), "", err
 		}
 	}
-	if err := os.Rename(tmpPath, dst); err != nil {
+	if err := publishNoReplace(tmpPath, dst); err != nil {
 		return bytesCopied.Load(), "", fmt.Errorf("commit temporary destination: %w", err)
 	}
 	committed = true

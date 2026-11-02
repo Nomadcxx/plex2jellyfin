@@ -43,6 +43,9 @@ func TestOrganizeMovie_IndexesDestinationAndRemovesStaleRows(t *testing.T) {
 		LibraryRoot:     sourceDir,
 		QualityScore:    100,
 	}))
+	sourceRow, err := db.GetMediaFile(testFile)
+	require.NoError(t, err)
+	require.NotNil(t, sourceRow)
 
 	existingDir := filepath.Join(libraryDir, "Inception (2010)")
 	require.NoError(t, os.MkdirAll(existingDir, 0755))
@@ -87,6 +90,7 @@ func TestOrganizeMovie_IndexesDestinationAndRemovesStaleRows(t *testing.T) {
 	require.NotNil(t, indexed, "destination must be indexed via ScanPath")
 	assert.Equal(t, "movie", indexed.MediaType)
 	assert.Equal(t, libraryDir, indexed.LibraryRoot)
+	assert.Equal(t, sourceRow.ID, indexed.ID, "a tracked move must preserve the media row identity")
 }
 
 // A post-move indexing failure must be reported without demoting the organize:
@@ -129,11 +133,13 @@ func TestOrganizeMovie_IndexFailureReportsConsistencyErrorButKeepsSuccess(t *tes
 	assert.NotEmpty(t, result.TargetPath, "target path must survive an indexing failure")
 	assert.FileExists(t, result.TargetPath, "file move should still have completed")
 
-	// The stale source row is the only remaining record of the file, so it
-	// must not be deleted when the replacement index never landed.
 	stale, err := db.GetMediaFile(testFile)
 	require.NoError(t, err)
-	assert.NotNil(t, stale, "source row must be retained when indexing failed")
+	assert.Nil(t, stale, "tracked move updates the row to the destination before indexing")
+	moved, err := db.GetMediaFile(result.TargetPath)
+	require.NoError(t, err)
+	require.NotNil(t, moved, "the moved row must remain available when indexing failed")
+	assert.Equal(t, int64(2*1024*1024), moved.Size)
 }
 
 func TestOrganizeMovie_DryRunSkipsInventoryRefresh(t *testing.T) {
@@ -184,6 +190,9 @@ func TestOrganizeTVEpisode_IndexesDestination(t *testing.T) {
 		Episode:         intPtr(2),
 		LibraryRoot:     sourceDir,
 	}))
+	sourceRow, err := db.GetMediaFile(testFile)
+	require.NoError(t, err)
+	require.NotNil(t, sourceRow)
 
 	fileScanner := scanner.NewFileScanner(db)
 	org, err := NewOrganizer([]string{libraryDir},
@@ -208,6 +217,7 @@ func TestOrganizeTVEpisode_IndexesDestination(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, indexed)
 	assert.Equal(t, "episode", indexed.MediaType)
+	assert.Equal(t, sourceRow.ID, indexed.ID, "a tracked episode move must preserve the media row identity")
 }
 
 func TestOrganizeTVRangeIndexesTargetBeforeRemovingReplacedRows(t *testing.T) {
@@ -292,7 +302,7 @@ func TestRefreshInventoryWithoutIndexerKeepsReplacedRowsUntilTargetIsIndexed(t *
 	org, err := NewOrganizer(nil, WithDatabase(db))
 	require.NoError(t, err)
 
-	err = org.refreshInventoryAfterTransfer("/missing/source.mkv", "/library/new-range.mkv", []string{replacedPath}, "/library", "episode", false)
+	err = org.refreshInventoryAfterTransfer("/missing/source.mkv", "/library/new-range.mkv", []string{replacedPath}, "/library", "/library/Series", "episode", false)
 	require.ErrorContains(t, err, "destination was not indexed")
 	row, err := db.GetMediaFile(replacedPath)
 	require.NoError(t, err)

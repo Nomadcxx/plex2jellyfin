@@ -32,6 +32,7 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/daemon/ipc"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/fileidentity"
 	"github.com/Nomadcxx/plex2jellyfin/internal/jellyfin"
 	"github.com/Nomadcxx/plex2jellyfin/internal/logging"
 	"github.com/Nomadcxx/plex2jellyfin/internal/naming"
@@ -110,33 +111,104 @@ func (e *Engine) SetOpRegistry(r *ipc.OpRegistry) { e.registry = r }
 func (e *Engine) SetMediaRescanner(r MediaRescanner)           { e.rescanner = r }
 func (e *Engine) SetPathTranslator(t *jellyfin.PathTranslator) { e.translator = t }
 func (e *Engine) renameWithFallback(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
-		return nil
-	} else if !errors.Is(err, syscall.EXDEV) {
-		return err
-	}
-	srcInfo, err := os.Stat(src)
+	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return fmt.Errorf("stat source for cross-device move %s: %w", src, err)
 	}
 	if srcInfo.IsDir() {
+		if err := fileidentity.RenameNoReplace(src, dst); err == nil {
+			return nil
+		} else if !errors.Is(err, syscall.EXDEV) && !errors.Is(err, fileidentity.ErrRenameNoReplaceUnsupported) {
+			return err
+		}
 		return e.moveDirWithFallback(src, dst)
 	}
-	// Cross-device: fall back to transfer.Move
-	if e.transferer == nil {
-		return fmt.Errorf("EXDEV and no transferer available for %s -> %s", src, dst)
-	}
-	result, err := e.transferer.Move(src, dst, transfer.TransferOptions{})
+	result, err := e.moveTrackedFile(src, dst, "", "", transfer.TransferOptions{})
 	if err != nil {
-		return fmt.Errorf("cross-device move %s -> %s: %w", src, dst, err)
+		return fmt.Errorf("move %s -> %s: %w", src, dst, err)
 	}
 	if err := result.Validate(); err != nil {
-		return fmt.Errorf("cross-device move failed: %w", err)
+		return fmt.Errorf("move failed: %w", err)
 	}
 	if !result.SourceRemoved {
-		return fmt.Errorf("cross-device move did not remove source: %s", src)
+		return fmt.Errorf("move did not remove source: %s", src)
 	}
 	return nil
+}
+
+func (e *Engine) moveTrackedFile(src, dst, canonicalPath, libraryRoot string, opts transfer.TransferOptions) (*transfer.TransferResult, error) {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return nil, fmt.Errorf("create destination directory: %w", err)
+	}
+	var file *database.MediaFile
+	if e.db != nil {
+		var err error
+		file, err = e.db.GetMediaFile(src)
+		if err != nil {
+			return nil, fmt.Errorf("read tracked source %s: %w", src, err)
+		}
+	}
+	if file == nil {
+		if err := fileidentity.RenameNoReplace(src, dst); err == nil {
+			return &transfer.TransferResult{Success: true, SourceRemoved: true, Published: true}, nil
+		} else if !errors.Is(err, syscall.EXDEV) && !errors.Is(err, fileidentity.ErrRenameNoReplaceUnsupported) {
+			return nil, err
+		}
+		if e.transferer == nil {
+			return nil, fmt.Errorf("no transferer configured for %s -> %s", src, dst)
+		}
+		result, err := e.transferer.Move(src, dst, opts)
+		if err == nil {
+			err = result.Validate()
+		}
+		return result, err
+	}
+
+	targetFile := *file
+	targetFile.Path = dst
+	if libraryRoot != "" {
+		targetFile.LibraryRoot = libraryRoot
+	}
+	var result *transfer.TransferResult
+	err := e.db.MoveMediaFileWith(&targetFile, src, canonicalPath, false,
+		func(sourceIdentity, sourceQuarantinePath string, recordPublished func(string, string) error) (database.MediaFileMoveAttempt, error) {
+			atomicOpts := opts
+			atomicOpts.MoveSourceIdentity = sourceIdentity
+			atomicOpts.MoveSourceQuarantinePath = sourceQuarantinePath
+			atomicOpts.OnPublished = recordPublished
+			var moveErr error
+			result, moveErr = transfer.RenameMove(src, dst, atomicOpts)
+			if moveErr != nil && (errors.Is(moveErr, syscall.EXDEV) || errors.Is(moveErr, fileidentity.ErrRenameNoReplaceUnsupported)) &&
+				fileidentity.MatchesLstat(src, sourceIdentity) {
+				if e.transferer == nil {
+					return database.MediaFileMoveAttempt{}, fmt.Errorf("no transferer configured for %s -> %s", src, dst)
+				}
+				result, moveErr = e.transferer.Move(src, dst, atomicOpts)
+			}
+
+			attempt := database.MediaFileMoveAttempt{}
+			if result != nil {
+				attempt = database.MediaFileMoveAttempt{
+					Published:                 result.Published,
+					SourceRemoved:             result.SourceRemoved,
+					PublishedIdentity:         result.PublishedIdentity,
+					DestinationQuarantinePath: result.DestinationQuarantinePath,
+					PendingSourceRemoval:      result.PendingSourceRemoval,
+				}
+			}
+			if moveErr == nil {
+				moveErr = result.Validate()
+			}
+			return attempt, moveErr
+		})
+	if err != nil {
+		if result == nil {
+			result = &transfer.TransferResult{}
+		}
+		result.Error = err
+		return result, err
+	}
+	return result, nil
 }
 
 func (e *Engine) moveDirWithFallback(srcDir, dstDir string) error {
@@ -167,7 +239,7 @@ func (e *Engine) moveDirWithFallback(srcDir, dstDir string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		result, err := e.transferer.Move(path, target, transfer.TransferOptions{})
+		result, err := e.moveTrackedFile(path, target, "", "", transfer.TransferOptions{})
 		if err != nil {
 			return fmt.Errorf("cross-device move %s -> %s: %w", path, target, err)
 		}
@@ -1214,74 +1286,123 @@ func (e *Engine) moveOrganizedFolder(src, dst string) error {
 		return fmt.Errorf("rename requires folder rename: %s", srcDir)
 	}
 	srcExists := false
-	if _, err := os.Stat(src); err == nil {
+	if _, err := os.Lstat(src); err == nil {
 		srcExists = true
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("stat src: %w", err)
 	}
 	dstExists := false
-	if _, err := os.Stat(dst); err == nil {
+	if _, err := os.Lstat(dst); err == nil {
 		dstExists = true
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("stat dst: %w", err)
 	}
 	if srcExists && dstExists {
 		return fmt.Errorf("source and destination both exist: %s -> %s", src, dst)
 	}
-	if !srcExists && !dstExists {
-		// Self-heal a partial move: a previous run renamed the folder but
-		// failed the inner-file rename, leaving the file at the old basename
-		// inside dstDir. Complete that rename instead of erroring out.
+	srcDirInfo, srcDirErr := os.Stat(srcDir)
+	if srcDirErr != nil && !errors.Is(srcDirErr, os.ErrNotExist) {
+		return fmt.Errorf("stat source directory %s: %w", srcDir, srcDirErr)
+	}
+	dstDirInfo, dstDirErr := os.Stat(dstDir)
+	if dstDirErr != nil && !errors.Is(dstDirErr, os.ErrNotExist) {
+		return fmt.Errorf("stat destination directory %s: %w", dstDir, dstDirErr)
+	}
+	srcDirExists := srcDirErr == nil && srcDirInfo.IsDir()
+	dstDirExists := dstDirErr == nil && dstDirInfo.IsDir()
+
+	switch {
+	case srcDirExists && dstDirExists:
+		if err := e.moveDirectoryContents(srcDir, dstDir, src, dst); err != nil {
+			return fmt.Errorf("finish partial folder move %s -> %s: %w", srcDir, dstDir, err)
+		}
+	case srcDirExists:
+		if !srcExists {
+			return fmt.Errorf("source file is missing from folder %s", srcDir)
+		}
+		if err := e.renameWithFallback(srcDir, dstDir); err != nil {
+			return fmt.Errorf("rename folder %s -> %s: %w", srcDir, dstDir, err)
+		}
 		movedPath := filepath.Join(dstDir, filepath.Base(src))
 		if filepath.Base(src) != filepath.Base(dst) {
-			if _, err := os.Stat(movedPath); err == nil {
-				if err := e.renameWithFallback(movedPath, dst); err != nil {
-					return fmt.Errorf("rename file %s -> %s: %w", movedPath, dst, err)
-				}
-				dstExists = true
+			if err := e.renameWithFallback(movedPath, dst); err != nil {
+				return fmt.Errorf("rename file %s -> %s: %w", movedPath, dst, err)
 			}
 		}
-		if !dstExists {
+	case !dstExists:
+		// Retry after the folder rename succeeded but its inner file rename did not.
+		movedPath := filepath.Join(dstDir, filepath.Base(src))
+		if _, err := os.Lstat(movedPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("inspect partially moved file %s: %w", movedPath, err)
+			}
 			return fmt.Errorf("source and destination both missing: %s -> %s", src, dst)
 		}
+		if err := e.renameWithFallback(movedPath, dst); err != nil {
+			return fmt.Errorf("rename file %s -> %s: %w", movedPath, dst, err)
+		}
 	}
-	if srcExists {
-		dstDirExists := false
-		if _, err := os.Stat(dstDir); err == nil {
-			dstDirExists = true
-			if !isEmptyDir(dstDir) {
-				return fmt.Errorf("destination directory already exists: %s", dstDir)
-			}
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("stat dst dir: %w", err)
-		}
-		if dstDirExists {
-			if err := e.renameWithFallback(src, dst); err != nil {
-				return fmt.Errorf("rename file %s -> %s: %w", src, dst, err)
-			}
-			if err := os.Remove(srcDir); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove source dir %s: %w", srcDir, err)
-			}
-		} else {
-			if err := e.renameWithFallback(srcDir, dstDir); err != nil {
-				return fmt.Errorf("rename folder %s -> %s: %w", srcDir, dstDir, err)
-			}
-			movedPath := filepath.Join(dstDir, filepath.Base(src))
-			if filepath.Base(src) != filepath.Base(dst) {
-				if err := e.renameWithFallback(movedPath, dst); err != nil {
-					return fmt.Errorf("rename file %s -> %s: %w", movedPath, dst, err)
-				}
-			}
-		}
+	if _, err := os.Lstat(dst); err != nil {
+		return fmt.Errorf("destination file missing after folder move %s -> %s: %w", src, dst, err)
 	}
 
-	if file, err := e.db.GetMediaFile(src); err == nil && file != nil {
-		_ = e.db.DeleteMediaFile(src)
-		file.Path = dst
-		file.LibraryRoot = containingLibrary(dst, e.cfg.MovieLibraries)
-		_ = e.db.UpsertMediaFile(file)
+	if err := e.db.RepointMediaFilesUnderFolder(srcDir, dstDir); err != nil {
+		return fmt.Errorf("repoint media file paths after folder move: %w", err)
+	}
+	if filepath.Base(src) != filepath.Base(dst) {
+		intermediatePath := filepath.Join(dstDir, filepath.Base(src))
+		file, err := e.db.GetMediaFile(intermediatePath)
+		if err != nil {
+			return fmt.Errorf("read media row after folder move: %w", err)
+		}
+		if file != nil {
+			file.Path = dst
+			file.LibraryRoot = containingLibrary(dst, e.cfg.MovieLibraries)
+			if err := e.db.UpdateMediaFile(file); err != nil {
+				return fmt.Errorf("update renamed media row: %w", err)
+			}
+		}
 	}
 	return nil
+}
+
+func (e *Engine) moveDirectoryContents(srcDir, dstDir, primarySrc, primaryDst string) error {
+	if err := filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == srcDir {
+			return os.MkdirAll(dstDir, info.Mode().Perm())
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dstDir, rel)
+		if filepath.Clean(path) == filepath.Clean(primarySrc) {
+			target = primaryDst
+		}
+		if info.IsDir() {
+			if targetInfo, err := os.Lstat(target); err == nil {
+				if !targetInfo.IsDir() {
+					return fmt.Errorf("destination entry is not a directory: %s", target)
+				}
+				return nil
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("inspect destination directory %s: %w", target, err)
+			}
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		if _, err := os.Lstat(target); err == nil {
+			return fmt.Errorf("destination file already exists: %s", target)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect destination file %s: %w", target, err)
+		}
+		return e.renameWithFallback(path, target)
+	}); err != nil {
+		return err
+	}
+	return removeIfEmptyTree(srcDir)
 }
 
 func (e *Engine) execParserDriftRename(t *database.HousekeepingTask) (err error) {
@@ -1368,15 +1489,6 @@ func (e *Engine) execVerifierRename(t *database.HousekeepingTask) (err error) {
 
 	srcDir := filepath.Dir(filepath.Clean(src))
 	dstDir := filepath.Dir(filepath.Clean(dst))
-
-	// DB-first ordering: a DB failure prevents the filesystem move, and a
-	// failed move after DB updates leaves rows pointing at the destination,
-	// which the metadata reconciler surfaces as target_file_missing.
-	// Retries are safe: already-repointed rows no longer match the srcDir
-	// prefix, and moveOrganizedFolder treats "src gone, dst present" as done.
-	if err := e.db.RepointMediaFilesUnderFolder(srcDir, dstDir); err != nil {
-		return fmt.Errorf("repoint media_files: %w", err)
-	}
 
 	rows, err := e.db.QueryDecisionsUnderFolder(srcDir)
 	if err != nil {
@@ -1499,11 +1611,14 @@ func (e *Engine) execParserDriftTVRename(t *database.HousekeepingTask) (err erro
 		removeDirIfEmpty(filepath.Dir(filepath.Dir(src)))
 	}
 
-	if file, err := e.db.GetMediaFile(src); err == nil && file != nil {
-		_ = e.db.DeleteMediaFile(src)
+	if file, err := e.db.GetMediaFile(src); err != nil {
+		return fmt.Errorf("read episode media row after rename: %w", err)
+	} else if file != nil {
 		file.Path = dst
 		file.LibraryRoot = containingLibrary(dst, e.cfg.TVLibraries)
-		_ = e.db.UpsertMediaFile(file)
+		if err := e.db.UpdateMediaFile(file); err != nil {
+			return fmt.Errorf("update episode media row after rename: %w", err)
+		}
 	}
 
 	if id, ok := payloadInt64(t.Payload, "parse_decision_id"); ok && id > 0 {
@@ -1821,7 +1936,7 @@ func (e *Engine) execMergeMove(ctx context.Context, t *database.HousekeepingTask
 
 		prog.fileStarted(rel, info.Size(), doneBytes, totalBytes)
 		fileSize := info.Size()
-		res, err := e.transferer.Move(path, target, transfer.TransferOptions{
+		res, err := e.moveTrackedFile(path, target, dst, dstLib, transfer.TransferOptions{
 			Timeout:   30 * time.Minute,
 			TargetUID: -1,
 			TargetGID: -1,
@@ -1838,14 +1953,6 @@ func (e *Engine) execMergeMove(ctx context.Context, t *database.HousekeepingTask
 			return fmt.Errorf("move %s -> %s: %w", path, target, err)
 		}
 
-		if file, gerr := e.db.GetMediaFile(path); gerr == nil && file != nil {
-			_ = e.db.DeleteMediaFile(path)
-			file.Path = target
-			if dstLib != "" {
-				file.LibraryRoot = dstLib
-			}
-			_ = e.db.UpsertMediaFile(file)
-		}
 		e.updateParseDecisionTargetPath(path, target)
 
 		moved++

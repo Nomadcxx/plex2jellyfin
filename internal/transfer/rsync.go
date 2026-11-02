@@ -41,6 +41,14 @@ func (r *RsyncTransferer) Copy(src, dst string, opts TransferOptions) (*Transfer
 func (r *RsyncTransferer) transfer(src, dst string, opts TransferOptions, removeSource bool) (*TransferResult, error) {
 	result := &TransferResult{Attempts: 0}
 	startTime := time.Now()
+	if removeSource {
+		prepared, err := prepareSourceRemoval(src, opts)
+		if err != nil {
+			result.Error = err
+			return result, err
+		}
+		opts = prepared
+	}
 
 	srcInfo, err := StatWithTimeout(src, 10*time.Second)
 	if err != nil {
@@ -78,12 +86,25 @@ func (r *RsyncTransferer) transfer(src, dst string, opts TransferOptions, remove
 			checksum, err = verifyChecksum(src, stagedDst)
 		}
 		if err == nil {
-			if err := os.Rename(stagedDst, dst); err != nil {
+			if err := publishNoReplace(stagedDst, dst); err != nil {
 				lastErr = fmt.Errorf("publishing completed transfer: %w", err)
 			} else {
+				result.Published = true
 				if removeSource {
-					if err := RemoveWithTimeout(src, 30*time.Second); err != nil {
-						result.Error = fmt.Errorf("transfer published but failed to remove source: %w", err)
+					publishedInfo, err := recordPublishedDestination(result, src, dst, opts)
+					if err != nil {
+						result.Error = err
+						result.Duration = time.Since(startTime)
+						return result, result.Error
+					}
+					pending, removeErr := removeSourceWithTimeout(src, opts.MoveSourceQuarantinePath, opts.MoveSourceIdentity, dst, result.DestinationQuarantinePath, result.PublishedIdentity, 30*time.Second)
+					if removeErr != nil {
+						result.Error = fmt.Errorf("transfer published but failed to remove source: %w", removeErr)
+						if pending != nil {
+							result.PendingSourceRemoval = resolvePendingSourceRemoval(src, dst, publishedInfo, result.PublishedIdentity, pending)
+						} else {
+							result.Error = cleanupPublishedDestinationAfterMoveFailure(src, dst, result.PublishedIdentity, result.Error)
+						}
 						result.Duration = time.Since(startTime)
 						return result, result.Error
 					}

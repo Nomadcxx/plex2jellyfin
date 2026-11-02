@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/config"
+	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 )
 
@@ -17,6 +19,13 @@ func (c *Consolidator) ExecutePlan(plan *Plan, dryRun bool) error {
 	}
 	if issues := SafetyIssues(plan); len(issues) > 0 {
 		return fmt.Errorf("unsafe consolidation plan: %v", issues)
+	}
+	if c.db != nil {
+		for _, op := range plan.Operations {
+			if err := c.db.CheckMediaFileMoveDestination(op.SourcePath, op.DestinationPath); err != nil {
+				return fmt.Errorf("cannot move %s: %w", op.SourcePath, err)
+			}
+		}
 	}
 	if len(plan.Operations) > 0 {
 		required, err := bytesForCurrentSources(plan.Operations)
@@ -43,16 +52,9 @@ func (c *Consolidator) ExecutePlan(plan *Plan, dryRun bool) error {
 
 	// Execute each operation
 	for _, op := range plan.Operations {
-		if err := c.executeOperation(op, dryRun); err != nil {
+		if err := c.executeOperation(op, plan.TargetPath, dryRun); err != nil {
 			failures = append(failures, fmt.Sprintf("%s -> %s: %v", op.SourcePath, op.DestinationPath, err))
 			continue
-		}
-
-		if !dryRun {
-			if err := c.recordMovedMediaFile(op, plan.TargetPath); err != nil {
-				failures = append(failures, fmt.Sprintf("%s -> %s: failed to update database: %v", op.SourcePath, op.DestinationPath, err))
-				continue
-			}
 		}
 
 		if !dryRun {
@@ -116,9 +118,10 @@ func ensureTargetWritable(targetPath string) error {
 	return nil
 }
 
-func (c *Consolidator) recordMovedMediaFile(op *Operation, targetSeriesPath string) error {
+func (c *Consolidator) recordMovedMediaFile(op *Operation, targetCanonicalPath string, move func(string, string, func(string, string) error) (database.MediaFileMoveAttempt, error)) error {
 	if c.db == nil {
-		return nil
+		_, err := move("", "", nil)
+		return err
 	}
 
 	file, err := c.db.GetMediaFile(op.SourcePath)
@@ -126,47 +129,52 @@ func (c *Consolidator) recordMovedMediaFile(op *Operation, targetSeriesPath stri
 		return err
 	}
 	if file == nil {
-		return nil
-	}
-
-	if err := c.db.DeleteMediaFile(op.SourcePath); err != nil {
+		_, err := move("", "", nil)
 		return err
 	}
 
-	file.Path = op.DestinationPath
-	if info, err := os.Stat(op.DestinationPath); err == nil {
-		file.Size = info.Size()
-		file.ModifiedAt = info.ModTime()
+	info, err := os.Stat(op.SourcePath)
+	if err != nil {
+		return fmt.Errorf("inspect source media file: %w", err)
 	}
+	file.Path = op.DestinationPath
+	file.Size = info.Size()
+	file.ModifiedAt = info.ModTime()
 	file.LibraryRoot = c.libraryRootForPath(op.DestinationPath, op.Type, file.LibraryRoot)
 
-	if err := c.db.UpsertMediaFile(file); err != nil {
-		return err
-	}
-
-	if file.ParentSeriesID != nil && targetSeriesPath != "" {
-		if err := c.db.UpdateSeriesCanonicalPath(*file.ParentSeriesID, targetSeriesPath, file.LibraryRoot); err != nil {
-			return err
+	return c.db.MoveMediaFileWith(file, op.SourcePath, targetCanonicalPath, false, func(sourceIdentity, sourceQuarantinePath string, recordPublished func(string, string) error) (database.MediaFileMoveAttempt, error) {
+		attempt, err := move(sourceIdentity, sourceQuarantinePath, recordPublished)
+		if err != nil {
+			return attempt, err
 		}
-	}
-
-	return nil
+		info, err := os.Stat(op.DestinationPath)
+		if err != nil {
+			return attempt, fmt.Errorf("inspect moved media file: %w", err)
+		}
+		file.Size = info.Size()
+		file.ModifiedAt = info.ModTime()
+		return attempt, nil
+	})
 }
 
 func (c *Consolidator) libraryRootForPath(path, mediaType, fallback string) string {
-	if c.cfg == nil {
+	return libraryRootForPath(path, mediaType, c.cfg, fallback)
+}
+
+func libraryRootForPath(path, mediaType string, cfg *config.Config, fallback string) string {
+	if cfg == nil {
 		return fallback
 	}
 
 	var roots []string
 	switch mediaType {
 	case "series", "episode":
-		roots = append(roots, c.cfg.Libraries.TV...)
+		roots = append(roots, cfg.Libraries.TV...)
 	case "movie":
-		roots = append(roots, c.cfg.Libraries.Movies...)
+		roots = append(roots, cfg.Libraries.Movies...)
 	default:
-		roots = append(roots, c.cfg.Libraries.TV...)
-		roots = append(roots, c.cfg.Libraries.Movies...)
+		roots = append(roots, cfg.Libraries.TV...)
+		roots = append(roots, cfg.Libraries.Movies...)
 	}
 
 	cleanPath := filepath.Clean(path)
@@ -188,7 +196,7 @@ func (c *Consolidator) libraryRootForPath(path, mediaType, fallback string) stri
 }
 
 // executeOperation executes a single move operation
-func (c *Consolidator) executeOperation(op *Operation, dryRun bool) error {
+func (c *Consolidator) executeOperation(op *Operation, targetCanonicalPath string, dryRun bool) error {
 	// Ensure destination directory exists
 	destDir := filepath.Dir(op.DestinationPath)
 	if !dryRun {
@@ -202,9 +210,8 @@ func (c *Consolidator) executeOperation(op *Operation, dryRun bool) error {
 		return fmt.Errorf("source file does not exist")
 	}
 
-	// Check if destination already exists (should have been already filtered, but double-check)
-	if _, err := os.Stat(op.DestinationPath); err == nil {
-		return fmt.Errorf("destination file already exists")
+	if err := CheckDestinationAvailable(op.DestinationPath); err != nil {
+		return err
 	}
 
 	if dryRun {
@@ -222,14 +229,51 @@ func (c *Consolidator) executeOperation(op *Operation, dryRun bool) error {
 	opts := transfer.OptionsFromConfig(c.cfg)
 	opts.Checksum = c.cfg.Options.VerifyChecksums
 
-	// Move file (rsync backend handles failing disks)
-	result, err := transf.Move(op.SourcePath, op.DestinationPath, opts)
-	if err != nil {
-		return fmt.Errorf("transfer failed: %w", err)
+	moved := false
+	movedIdentity := ""
+	move := func(sourceIdentity, sourceQuarantinePath string, recordPublished func(string, string) error) (database.MediaFileMoveAttempt, error) {
+		opts.MoveSourceIdentity = sourceIdentity
+		opts.MoveSourceQuarantinePath = sourceQuarantinePath
+		opts.OnPublished = recordPublished
+		result, err := transf.Move(op.SourcePath, op.DestinationPath, opts)
+		attempt := database.MediaFileMoveAttempt{}
+		if result != nil {
+			attempt.Published = result.Published
+			attempt.SourceRemoved = result.SourceRemoved
+			attempt.PublishedIdentity = result.PublishedIdentity
+			attempt.PendingSourceRemoval = result.PendingSourceRemoval
+		}
+		if err != nil {
+			return attempt, fmt.Errorf("transfer failed: %w", err)
+		}
+		if err := result.Validate(); err != nil {
+			return attempt, fmt.Errorf("transfer failed: %w", err)
+		}
+		if !result.SourceRemoved {
+			return attempt, fmt.Errorf("transfer completed without removing source: %s", op.SourcePath)
+		}
+		moved = true
+		movedIdentity = result.PublishedIdentity
+		return attempt, nil
 	}
-
-	if err := result.Validate(); err != nil {
-		return fmt.Errorf("transfer failed: %w", err)
+	if c.db != nil {
+		err = c.recordMovedMediaFile(op, targetCanonicalPath, move)
+	} else {
+		_, err = move("", "", nil)
+	}
+	if err != nil {
+		if moved {
+			if rollbackErr := transfer.RollbackMove(transf, op.SourcePath, op.DestinationPath, opts, movedIdentity); rollbackErr != nil {
+				return fmt.Errorf("update database after move: %v; filesystem rollback failed: %w", err, rollbackErr)
+			}
+			if c.db != nil {
+				if cancelErr := c.db.CancelMediaFileMove(op.SourcePath); cancelErr != nil {
+					return fmt.Errorf("update database after move: %v; file restored but reservation cleanup failed: %w", err, cancelErr)
+				}
+			}
+			return fmt.Errorf("update database after move; file restored to source: %w", err)
+		}
+		return err
 	}
 
 	return nil
