@@ -10,6 +10,7 @@ import (
 	"github.com/Nomadcxx/plex2jellyfin/internal/config"
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/identity"
+	"github.com/Nomadcxx/plex2jellyfin/internal/library"
 	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
@@ -19,9 +20,33 @@ const (
 
 // Consolidator handles consolidation operations
 type Consolidator struct {
-	db    *database.MediaDB
-	cfg   *config.Config
-	stats Stats
+	db             *database.MediaDB
+	cfg            *config.Config
+	stats          Stats
+	spaceAvailable func(string) (int64, error)
+}
+
+func (c *Consolidator) availableSpace(path string) (int64, error) {
+	if c.spaceAvailable != nil {
+		return c.spaceAvailable(path)
+	}
+
+	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
+		info, err := os.Stat(current)
+		if err == nil {
+			if !info.IsDir() {
+				return 0, fmt.Errorf("target space path is not a directory: %s", current)
+			}
+			return library.AvailableSpace(current)
+		}
+		if !os.IsNotExist(err) {
+			return 0, err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return 0, fmt.Errorf("no existing directory for target path %s", path)
+		}
+	}
 }
 
 // Stats tracks consolidation statistics
@@ -282,29 +307,75 @@ func (c *Consolidator) chooseTargetPath(conflict *database.Conflict) (string, er
 		return "", fmt.Errorf("no locations found for conflict")
 	}
 
-	// Simple heuristic: choose location with most files
 	var bestPath string
-	maxEpisodes := -1
+	bestCount := -1
+	var reasons []string
 
-	for _, path := range conflict.Locations {
-		// Count files in this location
-		count, err := countFilesInPath(path, conflict)
+	for _, targetPath := range conflict.Locations {
+		count, err := countFilesInPath(targetPath, conflict)
 		if err != nil {
+			reasons = append(reasons, fmt.Sprintf("%s: cannot inspect files: %v", targetPath, err))
 			continue
 		}
 
-		if count > maxEpisodes {
-			maxEpisodes = count
-			bestPath = path
+		required, err := c.bytesToMoveToTarget(targetPath, conflict)
+		if err != nil {
+			reasons = append(reasons, fmt.Sprintf("%s: cannot calculate required space: %v", targetPath, err))
+			continue
+		}
+		available, err := c.availableSpace(targetPath)
+		if err != nil {
+			reasons = append(reasons, fmt.Sprintf("%s: cannot read available space: %v", targetPath, err))
+			continue
+		}
+		if available < required {
+			reasons = append(reasons, fmt.Sprintf("%s: needs %d bytes, has %d", targetPath, required, available))
+			continue
+		}
+
+		if count > bestCount {
+			bestCount = count
+			bestPath = targetPath
 		}
 	}
 
 	if bestPath == "" {
-		// Fallback: first location
-		bestPath = conflict.Locations[0]
+		return "", fmt.Errorf("no consolidation target has enough space: %s", strings.Join(reasons, "; "))
 	}
 
 	return bestPath, nil
+}
+
+func (c *Consolidator) bytesToMoveToTarget(targetPath string, conflict *database.Conflict) (int64, error) {
+	var required int64
+	for _, sourcePath := range conflict.Locations {
+		if sourcePath == targetPath || pathIsWithin(targetPath, sourcePath) {
+			continue
+		}
+		operations, _, err := c.getFilesToMove(sourcePath, targetPath, conflict)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return 0, err
+		}
+		for _, operation := range operations {
+			var err error
+			required, err = addByteCount(required, operation.Size)
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
+	return required, nil
+}
+
+func addByteCount(total, size int64) (int64, error) {
+	const maxInt64 = int64(1<<63 - 1)
+	if size < 0 || total > maxInt64-size {
+		return 0, fmt.Errorf("media byte total exceeds supported range")
+	}
+	return total + size, nil
 }
 
 // getFilesToMove finds all files to move from source to target
