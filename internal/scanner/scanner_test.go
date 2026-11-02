@@ -61,6 +61,31 @@ func TestIsVideoFile(t *testing.T) {
 	}
 }
 
+func TestDeriveSeriesPathFromNestedReleaseFolder(t *testing.T) {
+	libraryRoot := t.TempDir()
+	seriesPath := filepath.Join(libraryRoot, "Last Week Tonight with John Oliver (2014)")
+	filePath := filepath.Join(
+		seriesPath,
+		"Season 08",
+		"last.week.tonight.with.john.oliver.s08e19.1080p.web.h264-cakes",
+		"2c5ffbc81d7a4dad9bbf284d4aba6854.mkv",
+	)
+
+	if got := deriveSeriesPath(filePath, libraryRoot); got != seriesPath {
+		t.Fatalf("deriveSeriesPath() = %q, want %q", got, seriesPath)
+	}
+}
+
+func TestDeriveSeriesPathDoesNotCrossLibraryRoot(t *testing.T) {
+	libraryRoot := filepath.Join(t.TempDir(), "Season 08")
+	filePath := filepath.Join(libraryRoot, "release", "episode.mkv")
+	want := filepath.Dir(filePath)
+
+	if got := deriveSeriesPath(filePath, libraryRoot); got != want {
+		t.Fatalf("deriveSeriesPath() = %q, want %q within library root", got, want)
+	}
+}
+
 func TestIsExtraContent(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

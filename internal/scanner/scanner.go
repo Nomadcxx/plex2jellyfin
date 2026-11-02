@@ -801,11 +801,24 @@ func parseSeasonFolder(name string) (int, bool) {
 }
 
 func deriveSeriesPath(filePath, libraryRoot string) string {
-	seasonDir := filepath.Dir(filePath)
-	if strings.HasPrefix(strings.ToLower(filepath.Base(seasonDir)), "season ") {
-		return filepath.Dir(seasonDir)
+	start := filepath.Dir(filePath)
+	root := filepath.Clean(libraryRoot)
+	for dir := start; ; dir = filepath.Dir(dir) {
+		if libraryRoot != "" {
+			rel, err := filepath.Rel(root, dir)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				break
+			}
+		}
+		if dir == root || filepath.Dir(dir) == dir {
+			break
+		}
+		if strings.HasPrefix(strings.ToLower(filepath.Base(dir)), "season ") {
+			return filepath.Dir(dir)
+		}
 	}
-	return filepath.Dir(filePath)
+	// ponytail: nested release folders are common; keep the existing parent-folder fallback when no season is found.
+	return start
 }
 
 func seriesIdentityFromPath(seriesPath, fallbackTitle string, fallbackYear *int) (string, int) {
