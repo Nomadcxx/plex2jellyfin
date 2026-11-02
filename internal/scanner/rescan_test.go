@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/quality"
 )
 
 func TestFullRescanEmitsProgressAndHonorsCancel(t *testing.T) {
@@ -64,7 +65,9 @@ func TestFullRescanReportsIndexErrors(t *testing.T) {
 
 	progress := make(chan database.ProgressEvent, 64)
 	done := make(chan error, 1)
-	go func() { done <- s.FullRescan(context.Background(), []RescanRoot{{Path: dir, MediaType: "movie"}}, false, progress) }()
+	go func() {
+		done <- s.FullRescan(context.Background(), []RescanRoot{{Path: dir, MediaType: "movie"}}, false, progress)
+	}()
 	for ev := range progress {
 		if ev.Phase == "complete" {
 			break
@@ -85,7 +88,15 @@ func TestFullRescanTypedRootPreventsObfuscatedTVAsMovie(t *testing.T) {
 		t.Fatal(err)
 	}
 	obfuscated := filepath.Join(seriesDir, "1eec0cfe1a2645608b09c8b99ccf2960.mkv")
-	if err := os.WriteFile(obfuscated, []byte("x"), 0644); err != nil {
+	f, err := os.Create(obfuscated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(quality.MinEpisodeSize + 1); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,4 +131,64 @@ func TestFullRescanTypedRootPreventsObfuscatedTVAsMovie(t *testing.T) {
 		return
 	}
 	t.Error("obfuscated TV file not indexed at all")
+}
+
+func TestFullRescanRecordsFilteredFilesAsSkipped(t *testing.T) {
+	root := t.TempDir()
+	showRoot := filepath.Join(root, "Show (2020)", "Season 01")
+	if err := os.MkdirAll(filepath.Join(showRoot, "Sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	zeroByte := filepath.Join(showRoot, "Show S01E01.mkv")
+	if err := os.WriteFile(zeroByte, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sample := filepath.Join(showRoot, "Sample", "Show.S01E02.sample.mkv")
+	f, err := os.Create(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(quality.MinEpisodeSize + 1); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "rescan.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	progress := make(chan database.ProgressEvent, 32)
+	if err := NewFileScanner(db).FullRescan(context.Background(), []RescanRoot{{Path: root, MediaType: "episode"}}, false, progress); err != nil {
+		t.Fatal(err)
+	}
+	skipped := make(map[string]bool)
+	for len(progress) > 0 {
+		event := <-progress
+		if event.Phase == "skipped" {
+			skipped[event.Msg] = true
+		}
+	}
+	for _, path := range []string{zeroByte, sample} {
+		if !skipped[path] {
+			t.Errorf("filtered path %s was not recorded as skipped", path)
+		}
+		file, err := db.GetMediaFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if file != nil {
+			t.Errorf("filtered path %s was indexed", path)
+		}
+	}
+	if info, err := os.Stat(zeroByte); err != nil || info.Size() != 0 {
+		t.Errorf("zero-byte source changed or disappeared: info=%v err=%v", info, err)
+	}
+	if info, err := os.Stat(sample); err != nil || info.Size() != quality.MinEpisodeSize+1 {
+		t.Errorf("sample source changed or disappeared: info=%v err=%v", info, err)
+	}
 }

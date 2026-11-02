@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"time"
 
@@ -14,15 +15,16 @@ import (
 )
 
 // relayProgress forwards database.ProgressEvents from the channel to the
-// FrameWriter. Phase transitions and the final frame of each phase are
-// always sent; otherwise emissions are throttled to ~4 Hz to avoid
-// flooding the IPC channel and SSE relay on large libraries (100k+ files).
+// FrameWriter. Phase transitions and the final frame of each phase are always
+// sent; other emissions, including skipped paths, are throttled to ~4 Hz.
 func relayProgress(progress <-chan database.ProgressEvent, w ipc.FrameWriter, opID string, doneCh chan<- struct{}) {
 	const minInterval = 250 * time.Millisecond
 	var (
-		lastPhase string
-		lastSent  time.Time
-		pending   *database.ProgressEvent
+		lastPhase       string
+		lastSent        time.Time
+		pending         *database.ProgressEvent
+		skippedCount    int
+		lastSkippedPath string
 	)
 	flush := func() {
 		if pending == nil {
@@ -33,8 +35,31 @@ func relayProgress(progress <-chan database.ProgressEvent, w ipc.FrameWriter, op
 		lastPhase = pending.Phase
 		pending = nil
 	}
+	// ponytail: sample skip paths at the relay rate; report the exact total and
+	// final path once at completion, avoiding one IPC/UI entry per excluded file.
+	reportSkipped := func() {
+		if skippedCount == 0 {
+			return
+		}
+		w.Progress(opID, "skipped", fmt.Sprintf("%d files skipped by media filters; last: %s", skippedCount, lastSkippedPath), 0, 0)
+		lastSent = time.Now()
+		skippedCount = 0
+	}
 	for ev := range progress {
 		ev := ev
+		if ev.Phase == "skipped" {
+			skippedCount++
+			lastSkippedPath = ev.Msg
+			if time.Since(lastSent) >= minInterval {
+				w.Progress(opID, ev.Phase, ev.Msg, ev.Current, ev.Total)
+				lastSent = time.Now()
+			}
+			continue
+		}
+		if ev.Phase == "complete" {
+			flush()
+			reportSkipped()
+		}
 		if ev.Phase != lastPhase || time.Since(lastSent) >= minInterval {
 			pending = &ev
 			flush()
@@ -43,6 +68,7 @@ func relayProgress(progress <-chan database.ProgressEvent, w ipc.FrameWriter, op
 		pending = &ev
 	}
 	flush()
+	reportSkipped()
 	close(doneCh)
 }
 
