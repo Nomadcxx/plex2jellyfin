@@ -46,6 +46,31 @@ func newTestAIMatcher(t *testing.T, handler http.HandlerFunc) (*ai.Matcher, *htt
 	return matcher, server, &calls
 }
 
+func TestSeasonPackOrganizationResultMatchesTriggeringSource(t *testing.T) {
+	const releaseDir = "/downloads/Show.S01"
+	first := &organizer.OrganizationResult{
+		Success:    true,
+		SourcePath: filepath.Join(releaseDir, "Show.S01E01.mkv"),
+		TargetPath: "/tv/Show/Season 01/Show - S01E01.mkv",
+	}
+	second := &organizer.OrganizationResult{
+		Success:    true,
+		SourcePath: filepath.Join(releaseDir, "Show.S01E02.mkv"),
+		TargetPath: "/tv/Show/Season 01/Show - S01E02.mkv",
+	}
+	packResult := &organizer.SeasonPackResult{
+		Success:  true,
+		Imported: []*organizer.OrganizationResult{first, second},
+	}
+	handler := &MediaHandler{}
+
+	matched := handler.seasonPackOrganizationResult(second.SourcePath, releaseDir, packResult, nil)
+	require.Equal(t, second.TargetPath, matched.TargetPath)
+
+	unmatched := handler.seasonPackOrganizationResult(filepath.Join(releaseDir, "unresolved.mkv"), releaseDir, packResult, nil)
+	require.Empty(t, unmatched.TargetPath)
+}
+
 type fixedNotifyResult struct {
 	service string
 	success bool

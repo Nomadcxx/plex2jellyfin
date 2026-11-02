@@ -1375,7 +1375,14 @@ func (h *MediaHandler) processTVSeasonPackIfApplicable(path string, decisionID i
 		return info.Size(), nil
 	}, func(packResult *organizer.SeasonPackResult, err error) {
 		result := h.seasonPackOrganizationResult(path, releaseDir, packResult, err)
-		h.updateDecisionOrganize(decisionID, result, err)
+		decisionResult := result
+		if packResult != nil && packResult.FailedEpisode != nil && packResult.FailedEpisode.SourcePath != "" &&
+			filepath.Clean(packResult.FailedEpisode.SourcePath) != filepath.Clean(path) {
+			// The parse decision belongs to the triggering file, but retry capacity
+			// must reflect the sibling that actually failed the atomic pack import.
+			decisionResult = packResult.FailedEpisode
+		}
+		h.updateDecisionOrganize(decisionID, decisionResult, err)
 	})
 
 	result := h.seasonPackOrganizationResult(path, releaseDir, packResult, err)
@@ -1458,23 +1465,20 @@ func (h *MediaHandler) seasonPackOrganizationResult(path, releaseDir string, pac
 			Error:      fmt.Errorf("%s: %s", packResult.SkipReason, releaseDir),
 		}
 	}
-	targetPath := ""
-	sourcePath := releaseDir
-	if packResult.FailedEpisode != nil {
-		sourcePath = packResult.FailedEpisode.SourcePath
-		targetPath = packResult.FailedEpisode.TargetPath
-	} else {
-		for _, imported := range packResult.Imported {
-			if imported != nil && imported.TargetPath != "" {
-				targetPath = imported.TargetPath
-				break
+	for _, imported := range packResult.Imported {
+		if imported != nil && filepath.Clean(imported.SourcePath) == filepath.Clean(path) {
+			if packResult.Success && imported.Success {
+				return imported
 			}
+			break
 		}
+	}
+	if failed := packResult.FailedEpisode; failed != nil && filepath.Clean(failed.SourcePath) == filepath.Clean(path) {
+		return failed
 	}
 	return &organizer.OrganizationResult{
 		Success:     packResult.Success,
-		SourcePath:  sourcePath,
-		TargetPath:  targetPath,
+		SourcePath:  releaseDir,
 		BytesCopied: packResult.BytesCopied,
 		Error:       packResult.Error,
 	}
