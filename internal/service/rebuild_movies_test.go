@@ -74,3 +74,53 @@ func TestRebuildMoviesFromMediaFilesUsesMovieLibrariesOnly(t *testing.T) {
 		t.Fatalf("TV library artefact should not be rebuilt as a movie")
 	}
 }
+
+func TestRebuildMoviesFromMediaFilesIgnoresZeroByteCanonicalCandidates(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	root := t.TempDir()
+	year := 2026
+	empty := &database.MediaFile{
+		Path:            filepath.Join(root, "Empty Film (2026)", "Empty Film (2026).mkv"),
+		Size:            0,
+		MediaType:       "movie",
+		NormalizedTitle: "empty film",
+		Year:            &year,
+		QualityScore:    1000,
+		LibraryRoot:     root,
+	}
+	good := &database.MediaFile{
+		Path:            filepath.Join(root, "Empty Film (2026)", "copy.mkv"),
+		Size:            100,
+		MediaType:       "movie",
+		NormalizedTitle: "empty film",
+		Year:            &year,
+		QualityScore:    10,
+		LibraryRoot:     root,
+	}
+	for _, file := range []*database.MediaFile{empty, good} {
+		if err := db.UpsertMediaFile(file); err != nil {
+			t.Fatalf("UpsertMediaFile: %v", err)
+		}
+	}
+
+	result, err := NewCleanupService(db).RebuildMoviesFromMediaFiles([]string{root})
+	if err != nil {
+		t.Fatalf("RebuildMoviesFromMediaFiles: %v", err)
+	}
+	if result.FilesConsidered != 1 || result.MoviesRebuilt != 1 {
+		t.Fatalf("rebuild result = %+v, want one usable file considered", result)
+	}
+	movie, err := db.GetMovieByTitle("Empty Film", year)
+	if err != nil || movie == nil {
+		t.Fatalf("GetMovieByTitle = %+v, %v", movie, err)
+	}
+	var bestFileID int64
+	if err := db.DB().QueryRow(`SELECT best_file_id FROM movies WHERE id = ?`, movie.ID).Scan(&bestFileID); err != nil {
+		t.Fatalf("read best_file_id: %v", err)
+	}
+	if bestFileID != good.ID {
+		t.Fatalf("best_file_id = %d, want nonempty file id %d", bestFileID, good.ID)
+	}
+}
