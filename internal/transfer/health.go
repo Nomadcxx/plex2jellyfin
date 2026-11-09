@@ -83,7 +83,7 @@ func CheckDiskHealthDetailed(path string, statTimeout, statfsTimeout, writeTimeo
 		if err != nil {
 			health.Error = fmt.Errorf("statfs failed: %w", err)
 		} else {
-			health.SpaceFree = int64(statfs.Bavail) * int64(statfs.Bsize)
+			health.SpaceFree = UsableFreeBytes(statfs)
 			health.SpaceTotal = int64(statfs.Blocks) * int64(statfs.Bsize)
 		}
 	case <-statfsCtx.Done():
