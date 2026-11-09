@@ -12,6 +12,7 @@ import (
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
@@ -514,7 +515,7 @@ func AvailableSpace(path string) (int64, error) {
 		return 0, fmt.Errorf("unable to get disk space for %s: %w", path, err)
 	}
 
-	return int64(stat.Bavail) * int64(stat.Bsize), nil
+	return transfer.UsableFreeBytes(stat), nil
 }
 
 // findExistingShowDir searches for an existing show directory in the library

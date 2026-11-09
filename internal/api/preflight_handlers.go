@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"syscall"
+
+	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 )
 
 type PreflightHandler struct{}
@@ -74,7 +76,7 @@ func PreflightPath(path string) PreflightResult {
 	}
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err == nil {
-		res.FreeSpaceBytes = int64(stat.Bavail) * stat.Bsize
+		res.FreeSpaceBytes = transfer.UsableFreeBytes(stat)
 	}
 	return res
 }
