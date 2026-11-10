@@ -2,6 +2,8 @@ package transfer
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"testing"
 )
 
@@ -104,5 +106,46 @@ func TestFallbackTransferer_CanResume(t *testing.T) {
 	ft2 := NewFallbackTransferer(first, second)
 	if ft2.CanResume() {
 		t.Error("Expected CanResume=false when no backend can resume")
+	}
+}
+
+type eexistTransferer struct {
+	name  string
+	calls int
+	err   error
+}
+
+func (m *eexistTransferer) Name() string    { return m.name }
+func (m *eexistTransferer) CanResume() bool { return false }
+
+func (m *eexistTransferer) Move(string, string, TransferOptions) (*TransferResult, error) {
+	m.calls++
+	if m.err != nil {
+		return &TransferResult{Error: m.err, Attempts: 1}, m.err
+	}
+	return &TransferResult{Success: true, Attempts: 1}, nil
+}
+
+func (m *eexistTransferer) Copy(src, dst string, opts TransferOptions) (*TransferResult, error) {
+	return m.Move(src, dst, opts)
+}
+
+func TestFallbackTransfererDoesNotRetryPublishEEXIST(t *testing.T) {
+	publishErr := fmt.Errorf("commit temporary destination: %w", fmt.Errorf("publish without replacing destination: %w", os.ErrExist))
+	first := &eexistTransferer{name: "rsync", err: publishErr}
+	second := &eexistTransferer{name: "native"}
+	ft := NewFallbackTransferer(first, second)
+	opts := DefaultOptions()
+	opts.SkipHealthCheck = true
+
+	_, err := ft.Move("/src/movie.mkv", "/library/Movie.mkv", opts)
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("Move error = %v, want EEXIST", err)
+	}
+	if first.calls != 1 {
+		t.Fatalf("first backend calls = %d, want 1", first.calls)
+	}
+	if second.calls != 0 {
+		t.Fatalf("fallback retried EEXIST on %s (%d calls)", second.name, second.calls)
 	}
 }

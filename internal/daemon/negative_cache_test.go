@@ -219,4 +219,10 @@ func TestIsFailureWorthBackoff(t *testing.T) {
 	if !IsFailureWorthBackoff("movie exists in canonical library /movies but free space is unavailable") {
 		t.Fatal("unavailable canonical-library capacity should enter backoff")
 	}
+	if !IsFailureWorthBackoff("transfer failed: all backends failed: rsync: publishing completed transfer: publish without replacing destination: file exists") {
+		t.Fatal("publish EEXIST should enter backoff")
+	}
+	if IsFailureWorthBackoff("transfer failed: all backends failed: rsync: connection reset by peer") {
+		t.Fatal("transient transfer errors should stay out of backoff")
+	}
 }

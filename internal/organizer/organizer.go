@@ -575,7 +575,7 @@ func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
 	}
 }
 
-func (o *Organizer) transferSource(sourcePath, targetPath string, opts transfer.TransferOptions, canonicalPath, libraryRoot string, replaceDestination bool) (*transfer.TransferResult, bool, error) {
+func (o *Organizer) transferSource(sourcePath, targetPath string, opts transfer.TransferOptions, canonicalPath, libraryRoot string, replaceDestination bool, mediaType string) (*transfer.TransferResult, bool, error) {
 	if err := o.waitIfScanning(o.timeout); err != nil {
 		return &transfer.TransferResult{Error: err}, false, err
 	}
@@ -591,7 +591,7 @@ func (o *Organizer) transferSource(sourcePath, targetPath string, opts transfer.
 	var err error
 	switch mode {
 	case TransferMove:
-		result, err = o.moveTrackedSource(sourcePath, targetPath, opts, canonicalPath, libraryRoot, libraryRoot != "", "", replaceDestination)
+		result, err = o.moveTrackedSource(sourcePath, targetPath, opts, canonicalPath, libraryRoot, libraryRoot != "", "", replaceDestination, mediaType)
 	case TransferCopy:
 		if replaceDestination {
 			result, err = o.replaceWithRetainedCopy(sourcePath, targetPath, opts, o.transferer.Copy)
@@ -618,6 +618,20 @@ func (o *Organizer) transferSource(sourcePath, targetPath string, opts transfer.
 }
 
 func (o *Organizer) replaceWithRetainedCopy(sourcePath, targetPath string, opts transfer.TransferOptions, copyFile func(string, string, transfer.TransferOptions) (*transfer.TransferResult, error)) (result *transfer.TransferResult, err error) {
+	if matches, matchErr := transfer.DestinationMatches(sourcePath, targetPath); matchErr != nil {
+		return nil, matchErr
+	} else if matches {
+		info, statErr := os.Stat(targetPath)
+		if statErr != nil {
+			return nil, fmt.Errorf("inspect identical destination %s: %w", targetPath, statErr)
+		}
+		return &transfer.TransferResult{
+			Success:     true,
+			BytesTotal:  info.Size(),
+			BytesCopied: info.Size(),
+			Attempts:    1,
+		}, nil
+	}
 	sourceIdentity, ok := fileidentity.FromLstat(sourcePath)
 	if !ok {
 		return nil, fmt.Errorf("source has no stable identity: %s", sourcePath)
@@ -707,7 +721,7 @@ func replaceStagedFile(stagePath, targetPath, stageIdentity, targetIdentity stri
 	return nil
 }
 
-func (o *Organizer) moveTrackedSource(sourcePath, targetPath string, opts transfer.TransferOptions, canonicalPath, libraryRoot string, setLibraryRoot bool, expectedIdentity string, replaceDestination bool) (*transfer.TransferResult, error) {
+func (o *Organizer) moveTrackedSource(sourcePath, targetPath string, opts transfer.TransferOptions, canonicalPath, libraryRoot string, setLibraryRoot bool, expectedIdentity string, replaceDestination bool, mediaType string) (*transfer.TransferResult, error) {
 	var file *database.MediaFile
 	if o.db != nil {
 		var err error
@@ -715,6 +729,26 @@ func (o *Organizer) moveTrackedSource(sourcePath, targetPath string, opts transf
 		if err != nil {
 			return &transfer.TransferResult{Error: err}, err
 		}
+	}
+	// A fresh download has no media_files row, so the tracked replacement path
+	// never sees replaceDestination. An identical destination is already done.
+	// Otherwise track the source and reuse the reserved quarantine, or quarantine
+	// the destination around the transfer when there is no database.
+	if file == nil && replaceDestination {
+		matches, err := transfer.DestinationMatches(sourcePath, targetPath)
+		if err != nil {
+			return &transfer.TransferResult{Error: err}, err
+		}
+		if matches {
+			replaceDestination = false
+		}
+	}
+	if file == nil && replaceDestination && o.db != nil {
+		tracked, err := o.trackUntrackedReplacement(sourcePath, targetPath, libraryRoot, mediaType)
+		if err != nil {
+			return &transfer.TransferResult{Error: err}, err
+		}
+		file = tracked
 	}
 	if file != nil {
 		targetFile := *file
@@ -761,6 +795,10 @@ func (o *Organizer) moveTrackedSource(sourcePath, targetPath string, opts transf
 			return result, err
 		}
 		return result, nil
+	}
+
+	if replaceDestination {
+		return o.replaceUntrackedDestination(sourcePath, targetPath, opts)
 	}
 
 	if expectedIdentity != "" {
@@ -1098,7 +1136,7 @@ func (o *Organizer) organizeMovieWithParsed(sourcePath, libraryPath string, movi
 
 	opts := o.buildTransferOptions()
 
-	result, sourceRetained, err := o.transferSource(sourcePath, targetPath, opts, movieDir, libraryPath, existingFile == targetPath)
+	result, sourceRetained, err := o.transferSource(sourcePath, targetPath, opts, movieDir, libraryPath, existingFile == targetPath, "movie")
 
 	if err != nil {
 		if skipped := alreadyOrganizedResult(sourcePath, targetPath); skipped != nil {
@@ -1487,7 +1525,7 @@ func (o *Organizer) organizeTVWithParsed(sourcePath, libraryPath string, tv nami
 
 	opts := o.buildTransferOptions()
 
-	result, sourceRetained, err := o.transferSource(sourcePath, targetPath, opts, showDir, libraryPath, existingFile == targetPath)
+	result, sourceRetained, err := o.transferSource(sourcePath, targetPath, opts, showDir, libraryPath, existingFile == targetPath, "episode")
 
 	if err != nil {
 		if skipped := alreadyOrganizedResult(sourcePath, targetPath); skipped != nil {
@@ -1831,7 +1869,7 @@ func (o *Organizer) organizeExtrasRelease(releaseDir string, packInfo *naming.TV
 			result.Imported = append(result.Imported, item)
 			continue
 		}
-		transferResult, sourceRetained, err := o.transferSource(path, targetPath, opts, showDir, libraryRoot, false)
+		transferResult, sourceRetained, err := o.transferSource(path, targetPath, opts, showDir, libraryRoot, false, "")
 		if err != nil {
 			result.Unresolved = append(result.Unresolved, videos[i:]...)
 			result.Error = fmt.Errorf("extras transfer failed: %w", err)
@@ -1922,7 +1960,7 @@ func (o *Organizer) rollbackSeasonPackImports(imported []*OrganizationResult) er
 				libraryRoot = root
 			}
 		}
-		result, err := o.moveTrackedSource(item.TargetPath, item.SourcePath, o.buildTransferOptions(), "", libraryRoot, true, item.publishedIdentity, false)
+		result, err := o.moveTrackedSource(item.TargetPath, item.SourcePath, o.buildTransferOptions(), "", libraryRoot, true, item.publishedIdentity, false, "")
 		if err == nil && result != nil {
 			err = result.Validate()
 			if err == nil && !result.SourceRemoved {

@@ -30,6 +30,9 @@ func (n *NativeTransferer) CanResume() bool {
 }
 
 func (n *NativeTransferer) Move(src, dst string, opts TransferOptions) (*TransferResult, error) {
+	if existing, existErr, handled := takeExistingDestination(src, dst, opts, true, time.Now()); handled {
+		return existing, existErr
+	}
 	opts, err := prepareSourceRemoval(src, opts)
 	if err != nil {
 		return &TransferResult{Error: err}, err
@@ -95,6 +98,9 @@ func (n *NativeTransferer) Copy(src, dst string, opts TransferOptions) (*Transfe
 			return result, result.Error
 		}
 	}
+	if existing, existErr, handled := takeExistingDestination(src, dst, opts, false, startTime); handled {
+		return existing, existErr
+	}
 
 	maxAttempts := opts.RetryAttempts + 1
 	if maxAttempts < 1 {
@@ -115,13 +121,13 @@ func (n *NativeTransferer) Copy(src, dst string, opts TransferOptions) (*Transfe
 		}
 
 		lastErr = err
-
-		if attempt < maxAttempts {
-			time.Sleep(opts.RetryDelay)
+		if publishConflict(lastErr) || attempt == maxAttempts {
+			break
 		}
+		time.Sleep(opts.RetryDelay)
 	}
 
-	result.Error = fmt.Errorf("%w: %w", ErrRetryExhausted, lastErr)
+	result.Error = finishTransferAttempts(lastErr)
 	result.Duration = time.Since(startTime)
 	return result, result.Error
 }
