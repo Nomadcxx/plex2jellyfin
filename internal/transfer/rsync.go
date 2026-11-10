@@ -41,6 +41,9 @@ func (r *RsyncTransferer) Copy(src, dst string, opts TransferOptions) (*Transfer
 func (r *RsyncTransferer) transfer(src, dst string, opts TransferOptions, removeSource bool) (*TransferResult, error) {
 	result := &TransferResult{Attempts: 0}
 	startTime := time.Now()
+	if existing, existErr, handled := takeExistingDestination(src, dst, opts, removeSource, startTime); handled {
+		return existing, existErr
+	}
 	if removeSource {
 		prepared, err := prepareSourceRemoval(src, opts)
 		if err != nil {
@@ -120,12 +123,16 @@ func (r *RsyncTransferer) transfer(src, dst string, opts TransferOptions, remove
 			lastErr = err
 		}
 
-		if attempt < maxAttempts {
-			time.Sleep(opts.RetryDelay)
+		if publishConflict(lastErr) || attempt == maxAttempts {
+			break
 		}
+		time.Sleep(opts.RetryDelay)
 	}
 
-	result.Error = fmt.Errorf("%w: %w", ErrRetryExhausted, lastErr)
+	if publishConflict(lastErr) {
+		_ = os.Remove(stagedDst)
+	}
+	result.Error = finishTransferAttempts(lastErr)
 	result.Duration = time.Since(startTime)
 	return result, result.Error
 }

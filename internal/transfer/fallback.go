@@ -85,6 +85,12 @@ func (f *FallbackTransferer) tryAll(src, dst string, opts TransferOptions, isMov
 		if result != nil && (result.PendingSourceRemoval != nil || result.Published) {
 			return result, err
 		}
+		if publishConflict(err) {
+			if result == nil {
+				result = &TransferResult{Success: false, Error: err}
+			}
+			return result, err
+		}
 
 		lastResult = result
 		lastErr = err

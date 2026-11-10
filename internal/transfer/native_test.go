@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Nomadcxx/plex2jellyfin/internal/fileidentity"
 )
 
 func TestNativeCopyReportsVerifiedChecksum(t *testing.T) {
@@ -212,4 +214,91 @@ func TestNativeMoveKeepsSourceWhenPermissionsFail(t *testing.T) {
 	if _, err := os.Stat(src); err != nil {
 		t.Fatalf("source was not preserved: %v", err)
 	}
+}
+
+func TestNativePublishEEXISTDoesNotRetry(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "incoming.mkv")
+	dst := filepath.Join(dir, "library", "Movie (2026).mkv")
+	if err := os.WriteFile(src, []byte("incoming-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("library-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultOptions()
+	opts.SkipHealthCheck = true
+	opts.RetryAttempts = 3
+	opts.RetryDelay = 0
+	result, err := NewNativeTransferer(1024).Copy(src, dst, opts)
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("Copy error = %v, want EEXIST", err)
+	}
+	if result == nil || result.Attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (EEXIST must not be retried)", resultAttempts(result))
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "library-bytes" {
+		t.Fatalf("destination = %q, want the original file", got)
+	}
+}
+
+func TestNativeMoveKeepsIdenticalDestination(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "incoming.mkv")
+	dst := filepath.Join(dir, "library", "Movie (2026).mkv")
+	content := []byte("same-bytes")
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, ok := fileidentity.FromLstat(dst)
+	if !ok {
+		t.Fatal("destination has no identity")
+	}
+
+	opts := DefaultOptions()
+	opts.SkipHealthCheck = true
+	opts.RetryAttempts = 3
+	opts.RetryDelay = 0
+	result, err := NewNativeTransferer(1024).Move(src, dst, opts)
+	if err != nil {
+		t.Fatalf("Move: %v", err)
+	}
+	if result == nil || !result.Success || !result.SourceRemoved || result.Attempts != 1 {
+		t.Fatalf("Move result = %+v, want one successful attempt that removed the source", result)
+	}
+	if _, err := os.Lstat(src); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("identical source still present: %v", err)
+	}
+	after, ok := fileidentity.FromLstat(dst)
+	if !ok || after != before {
+		t.Fatalf("destination identity = %q, want unchanged %q", after, before)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(content) {
+		t.Fatalf("destination = %q", got)
+	}
+}
+
+func resultAttempts(result *TransferResult) int {
+	if result == nil {
+		return 0
+	}
+	return result.Attempts
 }

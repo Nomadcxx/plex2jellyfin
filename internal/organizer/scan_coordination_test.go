@@ -34,7 +34,7 @@ func TestTransferSourceStopsWhenJellyfinScanDoesNotFinish(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	result, sourceRetained, err := org.transferSource(source, filepath.Join(t.TempDir(), "target.mkv"), transfer.TransferOptions{}, "", "", false)
+	result, sourceRetained, err := org.transferSource(source, filepath.Join(t.TempDir(), "target.mkv"), transfer.TransferOptions{}, "", "", false, "")
 	require.ErrorContains(t, err, "timeout waiting for Jellyfin scan to complete")
 	require.NotNil(t, result)
 	require.ErrorIs(t, result.Error, err)
@@ -59,7 +59,7 @@ func TestTransferSourceStopsWhenScanStatusCheckFails(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	result, _, err := org.transferSource(source, filepath.Join(t.TempDir(), "target.mkv"), transfer.TransferOptions{}, "", "", false)
+	result, _, err := org.transferSource(source, filepath.Join(t.TempDir(), "target.mkv"), transfer.TransferOptions{}, "", "", false, "")
 	require.ErrorContains(t, err, "checking Jellyfin scan status")
 	require.ErrorContains(t, err, "API error (status 401")
 	require.NotNil(t, result)

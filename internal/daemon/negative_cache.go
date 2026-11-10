@@ -347,8 +347,10 @@ func IsKnownCapacityShortfall(errMsg string) bool {
 }
 
 func IsFailureWorthBackoff(errMsg string) bool {
+	msg := strings.ToLower(errMsg)
 	return IsDeterministicUnparseable(errMsg) ||
-		strings.Contains(strings.ToLower(errMsg), "source is not a regular file") ||
+		strings.Contains(msg, "source is not a regular file") ||
+		strings.Contains(msg, "file exists") ||
 		IsRetryableResourceFailure(errMsg)
 }
 
