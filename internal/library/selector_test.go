@@ -105,6 +105,51 @@ func TestSelectTVShowLibraryUsesReadableMatchWhenAnotherRootIsMissing(t *testing
 	}
 }
 
+func TestSelectTVShowLibraryUsesCanonicalSeriesFolderWhenNameDiffers(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		missing bool
+	}{
+		{name: "all roots readable"},
+		{name: "another root missing", missing: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			otherRoot := filepath.Join(base, "STORAGE1", "TVSHOWS")
+			canonicalRoot := filepath.Join(base, "STORAGE10", "TVSHOWS")
+			if !tc.missing {
+				requireDir(t, otherRoot)
+			}
+			canonicalDir := filepath.Join(canonicalRoot, "Lingo (UK) (2021)")
+			requireDir(t, filepath.Join(canonicalDir, "Season 05"))
+
+			db := openSelectorTestDB(t)
+			if _, err := db.UpsertSeries(&database.Series{
+				Title:          "Lingo UK",
+				Year:           2021,
+				CanonicalPath:  canonicalDir,
+				LibraryRoot:    canonicalRoot,
+				Source:         "plex2jellyfin",
+				SourcePriority: 100,
+			}); err != nil {
+				t.Fatalf("UpsertSeries: %v", err)
+			}
+
+			selector := NewSelectorWithConfig(SelectorConfig{
+				Libraries: []string{otherRoot, canonicalRoot},
+				DB:        db,
+			})
+			selection, err := selector.SelectTVShowLibrary("Lingo UK", "", 1)
+			if err != nil {
+				t.Fatalf("SelectTVShowLibrary: %v", err)
+			}
+			if selection.Library != canonicalRoot {
+				t.Fatalf("selected %q, want canonical root %q", selection.Library, canonicalRoot)
+			}
+		})
+	}
+}
+
 func TestSelectTVShowLibraryBlocksWhenCanonicalRootIsMissing(t *testing.T) {
 	base := t.TempDir()
 	missingRoot := filepath.Join(base, "STORAGE1", "TVSHOWS")

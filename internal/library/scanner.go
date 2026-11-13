@@ -52,26 +52,38 @@ func (s *Selector) findAllShowLocations(showName, year string) ([]ShowLocation, 
 		})
 	}
 
-	if len(readErrs) == 0 {
-		return locations, nil
-	}
-	if len(locations) == 0 {
-		return nil, errors.Join(readErrs...)
-	}
+	// The canonical series folder can be named differently from the release
+	// title, e.g. "Lingo (UK) (2021)" for "Lingo UK", so folder matching alone
+	// would treat a known show as new.
 	if s.db != nil {
 		yearInt := 0
 		fmt.Sscanf(year, "%d", &yearInt)
 		series, err := s.db.GetSeriesByTitle(showName, yearInt)
-		if err != nil {
+		if err != nil && len(readErrs) > 0 {
 			return nil, errors.Join(append(readErrs, fmt.Errorf("lookup canonical series: %w", err))...)
 		}
-		if series != nil && series.CanonicalPath != "" {
-			if lib := libraryContainingPath(series.CanonicalPath, s.libraries); slices.Contains(unreadable, lib) {
+		if err == nil && series != nil && series.CanonicalPath != "" {
+			lib := libraryContainingPath(series.CanonicalPath, s.libraries)
+			if slices.Contains(unreadable, lib) {
 				return nil, errors.Join(append(readErrs, fmt.Errorf("canonical series path %s is on an unreadable root", series.CanonicalPath))...)
+			}
+			if lib != "" && !slices.ContainsFunc(locations, func(l ShowLocation) bool { return l.Library == lib }) {
+				if info, err := os.Stat(series.CanonicalPath); err == nil && info.IsDir() {
+					available, _ := AvailableSpace(lib)
+					locations = append(locations, ShowLocation{
+						Library:      lib,
+						ShowDir:      series.CanonicalPath,
+						EpisodeCount: countEpisodesInShow(series.CanonicalPath),
+						Available:    available,
+					})
+				}
 			}
 		}
 	}
 
+	if len(readErrs) > 0 && len(locations) == 0 {
+		return nil, errors.Join(readErrs...)
+	}
 	return locations, nil
 }
 
