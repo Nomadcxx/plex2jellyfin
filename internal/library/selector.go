@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/database"
+	"github.com/Nomadcxx/plex2jellyfin/internal/mounts"
 	"github.com/Nomadcxx/plex2jellyfin/internal/sonarr"
 	"github.com/Nomadcxx/plex2jellyfin/internal/transfer"
 	"github.com/Nomadcxx/plex2jellyfin/internal/video"
@@ -510,6 +511,9 @@ func (s *Selector) countMediaItems(library string, isMovie bool) int {
 
 // AvailableSpace reports the free space in bytes at a library directory.
 func AvailableSpace(path string) (int64, error) {
+	if err := mounts.Check(path); err != nil {
+		return 0, fmt.Errorf("unable to get disk space for %s: %w", path, err)
+	}
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return 0, fmt.Errorf("unable to get disk space for %s: %w", path, err)

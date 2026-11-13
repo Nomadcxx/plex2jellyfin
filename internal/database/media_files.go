@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/Nomadcxx/plex2jellyfin/internal/mounts"
 )
 
 // MediaFile represents a single media file (movie or episode)
@@ -58,11 +60,14 @@ type MediaFile struct {
 
 // ConfirmedMissing reports whether the file is gone from an available
 // library. A missing path proves deletion only while its library root is
-// present: an unmounted disk leaves an empty mountpoint, which would otherwise
-// make every file on it look deleted. Rows without a library root have only
-// the path to go on.
+// present on its own filesystem: an unmounted disk leaves an empty mountpoint,
+// which would otherwise make every file on it look deleted. Rows without a
+// library root have only the path to go on.
 func (f *MediaFile) ConfirmedMissing() bool {
 	if _, err := os.Stat(f.Path); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	if mounts.Check(f.Path) != nil {
 		return false
 	}
 	if f.LibraryRoot == "" {

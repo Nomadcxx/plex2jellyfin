@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Nomadcxx/plex2jellyfin/internal/mounts"
 	"github.com/Nomadcxx/plex2jellyfin/internal/video"
 )
 
@@ -91,6 +92,9 @@ var yearParenRegex = regexp.MustCompile(`\((\d{4})\)`)
 
 // findShowDirInLibrary finds a show directory in a single library
 func (s *Selector) findShowDirInLibrary(library, normalizedTitle, year string) (string, error) {
+	if err := mounts.Check(library); err != nil {
+		return "", err
+	}
 	entries, err := os.ReadDir(library)
 	if err != nil {
 		return "", err
