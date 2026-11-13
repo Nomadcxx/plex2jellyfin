@@ -1,10 +1,12 @@
 package library
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Nomadcxx/plex2jellyfin/internal/video"
@@ -18,15 +20,22 @@ type ShowLocation struct {
 	Available    int64  // Available space in bytes
 }
 
-// findAllShowLocations scans all libraries for directories matching the show name
+// findAllShowLocations scans all libraries for directories matching the show name.
+// An unreadable root may hold the show, so placement proceeds only when the show
+// already exists on a readable root and its canonical record does not point at
+// an unreadable one. Otherwise a new episode could start a second show folder.
 func (s *Selector) findAllShowLocations(showName, year string) ([]ShowLocation, error) {
 	var locations []ShowLocation
+	var unreadable []string
+	var readErrs []error
 	normalizedTitle := normalizeTitle(showName)
 
 	for _, lib := range s.libraries {
 		showDir, err := s.findShowDirInLibrary(lib, normalizedTitle, year)
 		if err != nil {
-			return nil, fmt.Errorf("read TV library root %s: %w", lib, err)
+			unreadable = append(unreadable, lib)
+			readErrs = append(readErrs, fmt.Errorf("read TV library root %s: %w", lib, err))
+			continue
 		}
 		if showDir == "" {
 			continue
@@ -41,6 +50,26 @@ func (s *Selector) findAllShowLocations(showName, year string) ([]ShowLocation, 
 			EpisodeCount: episodeCount,
 			Available:    available,
 		})
+	}
+
+	if len(readErrs) == 0 {
+		return locations, nil
+	}
+	if len(locations) == 0 {
+		return nil, errors.Join(readErrs...)
+	}
+	if s.db != nil {
+		yearInt := 0
+		fmt.Sscanf(year, "%d", &yearInt)
+		series, err := s.db.GetSeriesByTitle(showName, yearInt)
+		if err != nil {
+			return nil, errors.Join(append(readErrs, fmt.Errorf("lookup canonical series: %w", err))...)
+		}
+		if series != nil && series.CanonicalPath != "" {
+			if lib := libraryContainingPath(series.CanonicalPath, s.libraries); slices.Contains(unreadable, lib) {
+				return nil, errors.Join(append(readErrs, fmt.Errorf("canonical series path %s is on an unreadable root", series.CanonicalPath))...)
+			}
+		}
 	}
 
 	return locations, nil

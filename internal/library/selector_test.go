@@ -89,6 +89,50 @@ func TestSelectTVShowLibraryReturnsErrorWhenRootCannotBeRead(t *testing.T) {
 	}
 }
 
+func TestSelectTVShowLibraryUsesReadableMatchWhenAnotherRootIsMissing(t *testing.T) {
+	base := t.TempDir()
+	missingRoot := filepath.Join(base, "STORAGE1", "TVSHOWS")
+	readableRoot := filepath.Join(base, "STORAGE3", "TVSHOWS")
+	requireDir(t, filepath.Join(readableRoot, "The Simpsons (1989)", "Season 38"))
+
+	selector := NewSelector([]string{missingRoot, readableRoot})
+	selection, err := selector.SelectTVShowLibrary("The Simpsons", "", 1)
+	if err != nil {
+		t.Fatalf("SelectTVShowLibrary: %v", err)
+	}
+	if selection.Library != readableRoot {
+		t.Fatalf("selected %q, want readable root %q", selection.Library, readableRoot)
+	}
+}
+
+func TestSelectTVShowLibraryBlocksWhenCanonicalRootIsMissing(t *testing.T) {
+	base := t.TempDir()
+	missingRoot := filepath.Join(base, "STORAGE1", "TVSHOWS")
+	readableRoot := filepath.Join(base, "STORAGE2", "TVSHOWS")
+	requireDir(t, filepath.Join(readableRoot, "Stray Show (2024)"))
+
+	db := openSelectorTestDB(t)
+	if _, err := db.UpsertSeries(&database.Series{
+		Title:          "Stray Show",
+		Year:           2024,
+		CanonicalPath:  filepath.Join(missingRoot, "Stray Show (2024)"),
+		LibraryRoot:    missingRoot,
+		Source:         "plex2jellyfin",
+		SourcePriority: 100,
+	}); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+
+	selector := NewSelectorWithConfig(SelectorConfig{
+		Libraries: []string{missingRoot, readableRoot},
+		DB:        db,
+	})
+	selection, err := selector.SelectTVShowLibrary("Stray Show", "2024", 1)
+	if err == nil {
+		t.Fatalf("selected %q while the canonical root was unreadable", selection.Library)
+	}
+}
+
 func TestSelectTVShowLibraryCanonicalPathMustBeWithinLibraryRoot(t *testing.T) {
 	base := t.TempDir()
 	prefixRoot := filepath.Join(base, "tv")
