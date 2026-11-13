@@ -718,6 +718,30 @@ func TestExecuteDelete_WithPermissionFix(t *testing.T) {
 	}
 }
 
+func TestExecuteDeleteKeepsRowWhenLibraryRootIsOffline(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	offlineRoot := filepath.Join(t.TempDir(), "STORAGE1", "MOVIES")
+	file := &database.MediaFile{
+		Path:        filepath.Join(offlineRoot, "Buddy (2026)", "Buddy (2026).mkv"),
+		MediaType:   "movie",
+		Size:        100,
+		LibraryRoot: offlineRoot,
+	}
+	if err := db.UpsertMediaFile(file); err != nil {
+		t.Fatalf("Failed to insert: %v", err)
+	}
+
+	item := AuditItem{ID: file.ID, Path: file.Path}
+	if err := ExecuteAuditAction(db, item, AuditAction{Action: "delete"}, false, nil); err == nil {
+		t.Fatal("expected an error for a file on an offline library root")
+	}
+	if dbFile, _ := db.GetMediaFileByID(file.ID); dbFile == nil {
+		t.Error("row on an offline library root was removed")
+	}
+}
+
 func TestExecuteDelete_DatabaseCleanupOnFailure(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

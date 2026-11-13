@@ -276,6 +276,9 @@ func executeDelete(db *database.MediaDB, item AuditItem, action AuditAction, dry
 
 	// Check if file exists before attempting deletion
 	if _, err := os.Stat(file.Path); os.IsNotExist(err) {
+		if !file.ConfirmedMissing() {
+			return fmt.Errorf("library root for %s is unavailable; refusing to record it as deleted", file.Path)
+		}
 		// File already gone - clean up database and return success
 		_ = db.DeleteMediaFileByID(file.ID)
 		return nil

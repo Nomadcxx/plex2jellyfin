@@ -94,6 +94,43 @@ func TestPruneMissingMediaFilesRemovesOnlyMissingRows(t *testing.T) {
 	}
 }
 
+func TestPruneMissingMediaFilesKeepsRowsOnOfflineLibraryRoot(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	// An unmounted disk leaves an empty mountpoint, so its library root is absent.
+	offlineRoot := filepath.Join(t.TempDir(), "STORAGE1", "MOVIES")
+	year := 2026
+	offline := &database.MediaFile{
+		Path:            filepath.Join(offlineRoot, "Buddy (2026)", "Buddy (2026).mkv"),
+		NormalizedTitle: "buddy",
+		Year:            &year,
+		MediaType:       "movie",
+		Size:            5,
+		LibraryRoot:     offlineRoot,
+	}
+	if err := db.UpsertMediaFile(offline); err != nil {
+		t.Fatalf("insert offline row: %v", err)
+	}
+
+	svc := NewCleanupService(db)
+	result, err := svc.PruneMissingMediaFiles()
+	if err != nil {
+		t.Fatalf("PruneMissingMediaFiles failed: %v", err)
+	}
+	if result.Pruned != 0 {
+		t.Fatalf("Pruned = %d, want 0 for a file on an offline library root", result.Pruned)
+	}
+	if _, err := svc.AnalyzeDuplicates(); err != nil {
+		t.Fatalf("AnalyzeDuplicates failed: %v", err)
+	}
+	if got, err := db.GetMediaFileByID(offline.ID); err != nil {
+		t.Fatalf("GetMediaFileByID failed: %v", err)
+	} else if got == nil {
+		t.Fatalf("row on an offline library root was pruned")
+	}
+}
+
 func TestReconcileMissingMediaFileRemovesStaleRow(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

@@ -191,10 +191,15 @@ func (s *CleanupService) pruneMissingMediaFiles(files []*database.MediaFile) ([]
 		if err == nil {
 			continue
 		}
-		if os.IsNotExist(err) {
+		if file.ConfirmedMissing() {
 			if err := s.db.DeleteMediaFileByID(file.ID); err != nil {
 				return nil, fmt.Errorf("pruning missing media file %d: %w", file.ID, err)
 			}
+			continue
+		}
+		if os.IsNotExist(err) {
+			// Its library root is offline: keep the row, but never offer an
+			// unreachable copy in a duplicate plan.
 			continue
 		}
 		existing = append(existing, file)
@@ -213,14 +218,7 @@ func (s *CleanupService) PruneMissingMediaFiles() (*MissingMediaPruneResult, err
 		if file == nil {
 			continue
 		}
-		info, err := os.Stat(file.Path)
-		if err == nil && !info.IsDir() {
-			continue
-		}
-		if err == nil {
-			continue
-		}
-		if !os.IsNotExist(err) {
+		if !file.ConfirmedMissing() {
 			continue
 		}
 		if err := s.db.DeleteMediaFileByID(file.ID); err != nil {
